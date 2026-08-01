@@ -1,0 +1,73 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["node_modules/", "dist/", ".husky/", "coverage/"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "plugins": ["typescript", "oxc", "unicorn", "import", "promise", "vitest", "jsdoc"],
+  "env": {
+    "node": true,
+    "es2024": true
+  },
+  "rules": {
+    "no-console": "off",
+    "no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-explicit-any": "warn",
+    "typescript/no-non-null-assertion": "warn",
+    "oxc/no-map-spread": [
+      "warn",
+      {
+        "ignoreArgs": false
+      }
+    ],
+    "unicorn/filename-case": "error",
+    "unicorn/prefer-node-protocol": "error",
+    "import/consistent-type-specifier-style": "off",
+    "import/no-cycle": "error",
+    "import/no-duplicates": "error",
+    "import/newline-after-import": "error",
+    "promise/no-multiple-resolved": "error",
+    "promise/no-return-in-finally": "error",
+    "promise/param-names": "error",
+    "promise/valid-params": "error",
+    "jsdoc/check-tag-names": "error",
+    "jsdoc/require-param": "warn",
+    "jsdoc/require-param-description": "warn",
+    "jsdoc/require-returns": "warn",
+    "jsdoc/require-returns-description": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.{test,spec}.{ts,tsx,js,mjs,cjs}"],
+      "env": {
+        "vitest": true
+      },
+      "rules": {
+        "no-unused-vars": "off",
+        "typescript/no-explicit-any": "off",
+        "typescript/no-non-null-assertion": "off",
+        "vitest/no-focused-tests": "error",
+        "vitest/no-disabled-tests": "error",
+        "vitest/no-conditional-expect": "error",
+        "vitest/no-test-return-statement": "error",
+        "vitest/valid-describe-callback": "error",
+        "vitest/valid-expect": "error"
+      }
+    },
+    {
+      "files": ["**/scripts/**/*.{ts,tsx,js,mjs,cjs}"],
+      "rules": {
+        "typescript/no-explicit-any": "off",
+        "typescript/no-non-null-assertion": "off"
+      }
+    }
+  ]
+}

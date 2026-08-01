@@ -1,0 +1,31 @@
+{
+  "name": "pi-mono",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PI Agent extensions and other monorepo packages",
+  "type": "module",
+  "scripts": {
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "fmt": "oxfmt --write .",
+    "fmt:check": "oxfmt --check .",
+    "check": "pnpm -r --if-present run check",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.31.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "oxfmt": "^0.61.0",
+    "oxlint": "^1.77.0",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.34.5"
+}

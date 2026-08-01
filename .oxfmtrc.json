@@ -1,0 +1,8 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": ["node_modules/", "dist/", ".husky/", "coverage/"],
+  "sortImports": true,
+  "jsdoc": {
+    "lineWrappingStyle": "balance"
+  }
+}
