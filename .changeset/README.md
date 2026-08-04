@@ -38,7 +38,9 @@ The workflow has three jobs, gated by `select-mode`:
    provenance. `id-token: write` is scoped to this job only.
 
 This design ensures `pnpm publish` only runs when `select-mode` detects a
-publish state, never on every push to `master`.
+publish state. Note that for an initial unpublished package,
+`select-mode` routes to `publish` on every push to `master` until the first
+release lands — this is expected, not a bug.
 
 ## Independent per-package versions
 

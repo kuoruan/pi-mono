@@ -1,6 +1,6 @@
 # pi-permission-ai-guard
 
-A [Pi](https://github.com/earendil-works/pi) extension that reviews permission asks with a light model, using a **token-optimized stripped transcript** (inspired by Claude Code auto mode).
+A [Pi](https://github.com/earendil-works/pi) extension that reviews permission asks with a light model, using a **token-optimized stripped transcript**.
 
 It is a consumer of [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-packages): it registers an `"ai-guard"` chain link that reviews `ask`-level permission requests across all configured surfaces (bash, mcp, skill).
 
@@ -133,15 +133,19 @@ denials (no double-counting).
 
 ### Verdict cache
 
-`cache.maxEntries` enables a session-level LRU keyed by command + trusted-intent
+`cache.maxEntries` enables a session-level LRU keyed by an action identity
+(surface, review target, and working directory) plus a trusted-intent
 fingerprint, so a repeated identical ask in a stable conversation skips the
-model call. The cache only applies to commands that reached the model
-(policy `ask`); a rule change to `allow`/`deny` defers before the cache, so
-stale entries can't override rule changes. **Caveat:** the context hash is
-built from trusted user messages, so conversations that interject frequently
-invalidate entries often — the cache benefits "high-frequency repeated
-commands, low-chatter" sessions most. Cache hits carry a `gate: "cache-hit"`
-log entry for debugging.
+model call. Working directory is part of the action identity — the same
+command in a different directory is a different authorization (e.g.
+`rm -rf build` resolves differently per cwd). The cache only applies to
+commands that reached the model (policy `ask`); a rule change to
+`allow`/`deny` defers before the cache, so stale entries can't override
+rule changes. **Caveat:** the context hash is built from trusted user
+messages, so conversations that interject frequently invalidate entries
+often — the cache benefits "high-frequency repeated commands, low-chatter"
+sessions most. Cache hits carry a `gate: "cache-hit"` log entry for
+debugging.
 
 ## Provider compatibility
 
@@ -153,25 +157,35 @@ log entry for debugging.
 ## Observability
 
 Each decision writes an `ai_guard.decision` record to pi-permission-system's
-review log at `~/.pi/agent/extensions/pi-permission-system/logs/permission-review.jsonl`.
+review log at
+`~/.pi/agent/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl`.
 Fields on the `model` gate record:
 
-| Field         | Meaning                                                                                                                                                                                                                                                |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `gate`        | Which decision gate produced the record (see How it works)                                                                                                                                                                                             |
-| `verdict`     | `allow` / `deny` / `defer`                                                                                                                                                                                                                             |
-| `deferReason` | Why it deferred. Model-gate: `empty-reply`, `no-json`, `timeout`, `call-failed`, `model-defer`, `invalid-verdict-value`. Other gates: `circuit-breaker`, `model-unresolved`, `auth-failed`, `policy-allow`, `policy-deny`. `null` for clean allow/deny |
-| `latencyMs`   | End-to-end model-call latency                                                                                                                                                                                                                          |
-| `modelId`     | `provider/model` of the reviewer                                                                                                                                                                                                                       |
-| `rawReply`    | The model's raw text for any defer path that has one; `null` otherwise                                                                                                                                                                                 |
-| `riskLevel`   | Model-assessed risk (`low`/`medium`/`high`/`critical`), or `null`                                                                                                                                                                                      |
+| Field         | Meaning                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gate`        | Which decision gate produced the record (see How it works)                                                                                                                                                                                                                                                                                                                 |
+| `verdict`     | `allow` / `deny` / `defer`                                                                                                                                                                                                                                                                                                                                                 |
+| `deferReason` | Why it deferred. Model-gate: `empty-reply` (completed non-aborted reply without text), `no-json` (text present but no JSON found), `timeout` (per-call timeout elapsed), `call-failed` (call threw), `model-defer`, `invalid-verdict-value`. Other gates: `circuit-breaker`, `model-unresolved`, `auth-failed`, `policy-allow`, `policy-deny`. `null` for clean allow/deny |
+| `latencyMs`   | End-to-end model-call latency                                                                                                                                                                                                                                                                                                                                              |
+| `modelId`     | `provider/model` of the reviewer                                                                                                                                                                                                                                                                                                                                           |
+| `rawReply`    | Three states: the raw model text for defer paths that produced one (`no-json` / `invalid-verdict-value` / `model-defer`); `null` for `timeout` / `call-failed` / `empty-reply` (no text was produced); `"(clean verdict, rawReply omitted)"` for allow/deny where the parsed JSON is already in structured fields                                                          |
+| `riskLevel`   | Model-assessed risk (`low`/`medium`/`high`/`critical`), or `null`                                                                                                                                                                                                                                                                                                          |
 
-An `ai_guard.model_reply` debug record carries the raw model text whenever
-the review produces one (clean verdicts and defers-with-text). It also fires
-with a `diagnostic: true` flag on empty model responses, capturing
-`stopReason`, `contentTypes`, and `errorMessage` to distinguish provider
-errors from genuine empty content — useful for diagnosing providers that
-emit non-JSON or empty replies.
+Supplementary debug records (written via `log.debug`, gated by the
+upstream log level):
+
+- `ai_guard.model_reply` — the raw model text whenever the review produces
+  one (clean verdicts and defers-with-text). Also fires with a
+  `diagnostic: true` flag on empty model responses, capturing `stopReason`,
+  `rawStopReason`, `contentTypes`, `errorMessage`, and `latencyMs`. A
+  `stopReason: "aborted"` indicates the per-call timeout elapsed (the
+  provider resolves an empty message rather than throwing) — these are
+  classified as `deferReason: "timeout"`, not `empty-reply`.
+- `ai_guard.cache_lookup` — emitted on cache misses with a `missReason`
+  (`disabled` / `no-entry` / `context-changed`). Cache hits are covered by
+  the `cache-hit` decision record and do not emit a duplicate debug event.
+- `ai_guard.model_call_error` — emitted when a model call throws, recording
+  the `reason` (`timeout` / `call-failed`) and error message.
 
 ## License
 

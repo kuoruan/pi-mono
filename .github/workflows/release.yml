@@ -6,6 +6,11 @@ name: Release
 #   - If a Version PR was merged (no changesets left, packages to publish) →
 #     publishes to npm via Trusted Publishing (OIDC).
 #
+# Note: select-mode routes to publish whenever `changeset publish-plan` finds
+# packages not yet on npm. For an initial unpublished package (e.g.
+# pi-permission-ai-guard@0.1.0), this means publish runs on every push to
+# master until the first release lands. This is expected, not a bug.
+#
 # Uses changesets/action@v2 sub-actions (select-mode → version | publish) so
 # `id-token: write` is scoped to the publish job only.
 on:
