@@ -1,7 +1,7 @@
 import type { PromptPermissionDetails } from "@gotgenes/pi-permission-system";
 import { describe, expect, it } from "vitest";
 
-import { resolveReviewTarget } from "#src/ask-eligibility.ts";
+import { buildActionText, resolveReviewTarget } from "#src/ask-eligibility.ts";
 
 /**
  * Build a PromptPermissionDetails-shaped object for tests.
@@ -269,5 +269,131 @@ describe("resolveReviewTarget — target extraction", () => {
         surfaces: ["bash"],
       }),
     ).toEqual({ surface: "bash", target: "git status" });
+  });
+});
+
+describe("buildActionText", () => {
+  // --- bash surface ---
+
+  it("extracts the full command from a bash permission prompt message", () => {
+    const details = makeDetails({
+      command: "python3",
+      message:
+        "Current agent requested bash command 'python3' (matched '*') (full command: 'python3 << PYEOF\nwith open(\"f\") as fh: pass\nPYEOF'). Allow this command?",
+    });
+    expect(buildActionText(details, "bash")).toBe(
+      'python3 << PYEOF\nwith open("f") as fh: pass\nPYEOF',
+    );
+  });
+
+  it("extracts a chained command with && and pipes", () => {
+    const details = makeDetails({
+      command: "xargs",
+      message:
+        "Current agent requested bash command 'xargs' (matched '*') (full command: 'cd /repo && echo hi; find . | head -3 | xargs grep foo 2>/dev/null'). Allow this command?",
+    });
+    expect(buildActionText(details, "bash")).toBe(
+      "cd /repo && echo hi; find . | head -3 | xargs grep foo 2>/dev/null",
+    );
+  });
+
+  it("handles a command that itself contains single quotes", () => {
+    const details = makeDetails({
+      command: "python3",
+      message:
+        "Current agent requested bash command 'python3' (matched '*') (full command: 'python3 << 'PYEOF'\nprint(1)\nPYEOF'). Allow this command?",
+    });
+    // The command contains 'PYEOF' with single quotes, but the suffix
+    // marker `'). Allow this command?` is at the end, so extraction is safe.
+    expect(buildActionText(details, "bash")).toBe("python3 << 'PYEOF'\nprint(1)\nPYEOF");
+  });
+
+  it("falls back to details.command when full command is absent (simple command)", () => {
+    // formatAskPrompt omits (full command: '...') when fullCommand === subCommand
+    const details = makeDetails({
+      command: "ls -la",
+      message: "Current agent requested bash command 'ls -la' (matched '*'). Allow this command?",
+    });
+    expect(buildActionText(details, "bash")).toBe("ls -la");
+  });
+
+  it("falls back to details.command when the suffix is not at the end", () => {
+    // Message format changed upstream — suffix not terminal, don't parse.
+    const details = makeDetails({
+      command: "ls -la",
+      message: "Some new format without the expected suffix at the end",
+    });
+    expect(buildActionText(details, "bash")).toBe("ls -la");
+  });
+
+  it("returns undefined for bash when command is absent and no full command", () => {
+    const details = makeDetails({
+      command: undefined,
+      message: "Current agent requested bash command 'ls' (matched '*'). Allow this command?",
+    });
+    expect(buildActionText(details, "bash")).toBeUndefined();
+  });
+
+  // --- non-bash surfaces ---
+
+  it("never parses full command: for non-bash surfaces (even if message contains it)", () => {
+    // A non-bash message that happens to contain `full command:` must not be
+    // misparsed as a bash command.
+    const details = makeDetails({
+      command: undefined,
+      toolInputPreview: undefined,
+      message: "Current agent requested tool 'evil' (full command: 'rm -rf /'). Allow this call?",
+    });
+    expect(buildActionText(details, "extension")).toBeUndefined();
+  });
+
+  it("returns toolInputPreview for extension tools (e.g. web_fetch)", () => {
+    const details = makeDetails({
+      command: undefined,
+      toolInputPreview: 'input {"url":"https://example.com"}',
+      message:
+        'Current agent requested tool \'web_fetch\' with input {"url":"https://example.com"}. Allow this call?',
+    });
+    expect(buildActionText(details, "extension")).toBe('input {"url":"https://example.com"}');
+  });
+
+  it("returns toolInputPreview for path-bearing tools", () => {
+    const details = makeDetails({
+      command: undefined,
+      toolInputPreview: "for path '/etc/passwd'",
+      message:
+        "Current agent requested tool 'read' for path '/etc/passwd'. Allow this path access?",
+    });
+    expect(buildActionText(details, "read")).toBe("for path '/etc/passwd'");
+  });
+
+  it("returns undefined for MCP (no toolInputPreview, target carries the value)", () => {
+    const details = makeDetails({
+      command: undefined,
+      toolInputPreview: undefined,
+      message: "Current agent requested MCP target 'server:tool' (matched '*'). Allow this call?",
+    });
+    expect(buildActionText(details, "mcp")).toBeUndefined();
+  });
+
+  it("returns undefined for external_directory surface (target carries the value)", () => {
+    const details = makeDetails({
+      command: "python3 script.py",
+      toolInputPreview: undefined,
+      message:
+        "Current agent requested bash command 'python3 script.py' which references path(s) outside working directory '/repo': /etc. Allow this external directory access?",
+    });
+    // external_directory is not bash — no full command extraction. target
+    // already carries the command via extractTarget's fallback chain.
+    expect(buildActionText(details, "external_directory")).toBeUndefined();
+  });
+
+  it("returns undefined when toolInputPreview is empty string", () => {
+    const details = makeDetails({
+      command: undefined,
+      toolInputPreview: "",
+      message: "Current agent requested tool 'read' for path '/tmp'. Allow this path access?",
+    });
+    expect(buildActionText(details, "read")).toBeUndefined();
   });
 });

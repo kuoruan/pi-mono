@@ -15,7 +15,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { Authorizer } from "@gotgenes/pi-permission-system";
 
-import { resolveReviewTarget } from "./ask-eligibility.ts";
+import { buildActionText, resolveReviewTarget } from "./ask-eligibility.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
 import {
   CACHE_LOOKUP_EVENT,
@@ -180,7 +180,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const userPrompt = buildReviewPrompt(transcript, {
       surface,
       target,
-      details: details.message,
+      actionText: buildActionText(details, surface),
       cwd: deps.cwd,
     });
 
