@@ -50,7 +50,7 @@ jobs:
 
       - name: Select Changesets mode
         id: select-mode
-        uses: changesets/action/select-mode@v2
+        uses: changesets/action/select-mode@v2.0.0-next.4
 
   version:
     name: Create or update Version PR
@@ -83,7 +83,7 @@ jobs:
 
       - name: Version packages
         id: version
-        uses: changesets/action/version@v2
+        uses: changesets/action/version@v2.0.0-next.4
         with:
           pr-title: Version Packages
           commit-message: Version Packages
@@ -119,7 +119,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Publish packages
-        uses: changesets/action/publish@v2
+        uses: changesets/action/publish@v2.0.0-next.4
         with:
           publish-plan-artifact-id: ${{ needs.select-mode.outputs.publish-plan-artifact-id }}
         env:
