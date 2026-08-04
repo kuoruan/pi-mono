@@ -9,7 +9,7 @@ A pnpm monorepo for PI Agent extension packages.
 ├── extensions/             # Extension packages (one per directory)
 │   └── pi-permission-ai-guard/   # AI model-based permission reviewer
 ├── .changeset/             # Release change records (Changesets)
-├── .github/workflows/      # CI (lint/type-check/test) + release (changesets → npm)
+├── .github/workflows/      # CI (lint/type-check/test) + publish (changesets v2: version PR + npm publish)
 ├── .husky/                 # Git hooks (pre-commit: lint-staged)
 ├── .lintstagedrc.json      # lint-staged config (oxlint --fix on staged files)
 ├── .oxfmtrc.json           # oxfmt formatter config

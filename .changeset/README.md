@@ -4,7 +4,7 @@ This repo uses [Changesets](https://github.com/changesets/changesets) to manage 
 
 ## Adding a change record
 
-When you make a change under `extensions/*` or `skills/*` that should be released, run:
+When you make a change under `extensions/*` that should be released, run:
 
 ```bash
 pnpm changeset
@@ -20,11 +20,25 @@ This generates a Markdown file under `.changeset/` (e.g. `spicy-pandas-jump.md`)
 
 ## Release flow
 
-1. On a feature branch, commit your code and the changeset file, then open a PR.
-2. CI runs lint checks automatically.
-3. After the PR merges to `master`, the release workflow on GitHub Actions:
-   - If there are unconsumed changesets, it automatically opens a **"Version Packages"** PR that bumps package versions and updates CHANGELOGs.
-   - When that Version PR merges, the workflow runs `pnpm publish -r` to publish the new versions to npm.
+This repo uses the [Changesets GitHub Action v2](https://github.com/changesets/action)
+with the **sub-action pattern** (`select-mode` → `version` | `publish`), which
+is the official 2026 best practice for Trusted Publishing.
+
+### `.github/workflows/release.yml` (triggered on `push: master`)
+
+The workflow has three jobs, gated by `select-mode`:
+
+1. **`select-mode`** — inspects the changeset state and outputs `mode`:
+   `"version"` (pending changesets exist) or `"publish"` (Version PR merged,
+   packages ready to publish).
+2. **`version`** (when `mode == "version"`) — runs `changeset version` and
+   opens/updates a **"Version Packages"** PR. Does NOT publish.
+3. **`publish`** (when `mode == "publish"`) — runs `changeset publish` via
+   `changesets/action/publish@v2` with npm Trusted Publishing (OIDC) and
+   provenance. `id-token: write` is scoped to this job only.
+
+This design ensures `pnpm publish` only runs when `select-mode` detects a
+publish state, never on every push to `master`.
 
 ## Independent per-package versions
 
@@ -41,7 +55,7 @@ Create a changeset (`pnpm changeset`) when a change modifies the **public releas
 - `extensions/*/src/**` — runtime behavior of an extension
 - `extensions/*/package.json` — `exports`, `dependencies`, `peerDependencies`, `files`, new/removed scripts that affect consumers
 - `extensions/*/schemas/**`, `extensions/*/config/**` — shipped config or schema files
-- Any `skills/*` publishable surface
+- Any other publishable surface
 
 Write the change summary as a **user-facing English sentence** describing what changed for consumers, not an implementation detail. Example: `Add cache size config option for the AI guard.` — not `refactored VerdictCache constructor`.
 
@@ -68,8 +82,8 @@ An agent's release-related scope is limited to: creating `.changeset/*.md` files
 
 ### Release flow recap (agent perspective)
 
-1. Agent edits code under `extensions/*` or `skills/*` and, if the public surface changed, runs `pnpm changeset` and commits the generated file in the same PR.
-2. PR CI runs `pnpm lint`, `pnpm format:check`, `pnpm check`, `pnpm test`.
-3. PR merges to `master`. Changesets Action opens/updates the single **Version Packages** PR.
+1. Agent edits code under `extensions/*` and, if the public surface changed, runs `pnpm changeset` and commits the generated file in the same PR.
+2. PR CI runs `pnpm lint`, `pnpm fmt:check`, `pnpm check`, `pnpm test`.
+3. PR merges to `master`. `release.yml` runs `select-mode` → `version` and opens/updates the single **Version Packages** PR.
 4. A human reviews the Version PR (versions, CHANGELOGs, affected packages) and merges it.
-5. CI publishes the new versions to npm with provenance.
+5. `release.yml` runs `select-mode` → `publish` and publishes the new versions to npm with Trusted Publishing (OIDC) + provenance.

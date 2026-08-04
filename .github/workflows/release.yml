@@ -1,28 +1,108 @@
 name: Release
 
+# Automates versioning and publishing with Changesets.
+# On every push to master:
+#   - If there are pending changesets → opens/updates a "Version Packages" PR.
+#   - If a Version PR was merged (no changesets left, packages to publish) →
+#     publishes to npm via Trusted Publishing (OIDC).
+#
+# Uses changesets/action@v2 sub-actions (select-mode → version | publish) so
+# `id-token: write` is scoped to the publish job only.
 on:
   push:
     branches: [master]
+
+# Reset permissions at workflow level; each job declares what it needs.
+permissions: {}
 
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Version & Publish
+  select-mode:
+    name: Select mode
     runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.select-mode.outputs.mode }}
+      publish-plan-artifact-id: ${{ steps.select-mode.outputs.publish-plan-artifact-id }}
     permissions:
-      contents: write
-      pull-requests: write
-      # Required for npm Trusted Publishing (OIDC) + provenance
-      id-token: write
+      contents: read # to check out repo (actions/checkout)
     steps:
-      - name: Checkout
+      - name: Check out repo
         uses: actions/checkout@v4
         with:
           # changesets needs full history to compare versions
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Select Changesets mode
+        id: select-mode
+        uses: changesets/action/select-mode@v2
+
+  version:
+    name: Create or update Version PR
+    if: needs.select-mode.outputs.mode == 'version'
+    needs: select-mode
+    runs-on: ubuntu-latest
+    outputs:
+      version-dir-artifact-id: ${{ steps.version.outputs.version-dir-artifact-id }}
+    permissions:
+      contents: write # to commit version changes (changesets/action/version)
+      pull-requests: write # to create pull request (changesets/action/version)
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Version packages
+        id: version
+        uses: changesets/action/version@v2
+        with:
+          pr-title: Version Packages
+          commit-message: Version Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish to npm
+    if: needs.select-mode.outputs.mode == 'publish'
+    needs: select-mode
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to create releases (changesets/action/publish)
+      id-token: write # for Trusted Publishing (OIDC)
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -38,22 +118,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build and publish
-        id: changesets
-        uses: changesets/action@v1
+      - name: Publish packages
+        uses: changesets/action/publish@v2
         with:
-          # publish command: recursively publish every package with a new version
-          # --provenance omitted: Trusted Publishing generates provenance automatically
-          publish: pnpm publish -r --access public
-          title: Version Packages
-          commit: Version Packages
+          publish-plan-artifact-id: ${{ needs.select-mode.outputs.publish-plan-artifact-id }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # npm Trusted Publishing via OIDC: no NPM_TOKEN / NODE_AUTH_TOKEN.
-          # provenance attestations are auto-generated when publishing via trusted publisher.
+          # Provenance attestations are auto-generated when publishing via
+          # trusted publisher.
           NPM_CONFIG_PROVENANCE: "true"
-
-      - name: Published packages
-        if: steps.changesets.outputs.published == 'true'
-        run: |
-          echo "Published: ${{ steps.changesets.outputs.published-packages }}"
