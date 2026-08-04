@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kuoruan/pi-mono/master/extensions/pi-permission-ai-guard/schemas/ai-guard.schema.json",
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reasoning": {
+      "type": "string",
+      "enum": ["off", "low", "medium", "high"],
+      "default": "off"
+    },
+    "timeoutMs": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 300000,
+      "default": 15000
+    },
+    "transcript": {
+      "type": "object",
+      "properties": {
+        "maxUserMessages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 5
+        },
+        "maxToolCalls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 10
+        },
+        "maxCharsPerEntry": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 20000,
+          "default": 1000
+        }
+      },
+      "default": {
+        "maxUserMessages": 5,
+        "maxToolCalls": 10,
+        "maxCharsPerEntry": 1000
+      }
+    },
+    "surfaces": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": ["bash", "mcp", "skill"],
+      "description": "Surfaces to review. Glob patterns (*, ns:*, *:bar). Prefix with ! to exclude (takes priority over inclusions)."
+    },
+    "instructions": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "default": null,
+      "description": "Custom safety rules that replace the built-in defaults. The verdict output format is always appended. null = use built-in rules."
+    },
+    "circuitBreaker": {
+      "type": "object",
+      "properties": {
+        "consecutive": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 3,
+          "description": "Recoverable deny-streak threshold; resets on trip."
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 20,
+          "description": "Hard session cap on denials; permanent once reached."
+        },
+        "verdict": {
+          "type": "string",
+          "enum": ["deny", "defer"],
+          "default": "deny",
+          "description": "Verdict returned when the breaker trips."
+        }
+      },
+      "default": {
+        "consecutive": 3,
+        "total": 20,
+        "verdict": "deny"
+      }
+    },
+    "cache": {
+      "type": "object",
+      "properties": {
+        "maxEntries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 128,
+          "description": "Verdict cache capacity (0 disables)."
+        }
+      },
+      "default": {
+        "maxEntries": 128
+      }
+    }
+  },
+  "required": ["provider", "model"]
+}

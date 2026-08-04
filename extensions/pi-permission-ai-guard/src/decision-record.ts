@@ -1,0 +1,282 @@
+/**
+ * Decision record: the audit-log entry emitted at each decision gate in the
+ * review pipeline.
+ *
+ * Previously each of the six gates (policy-decided, circuit-breaker,
+ * model-unresolved, auth-failed, cache-hit, model) hand-built its own
+ * `log.review(DECISION_EVENT, {...})` payload with a different ad-hoc shape.
+ * The audit schema — which fields every decision record must carry — existed
+ * only implicitly, duplicated across six literals. This module is the single
+ * source of truth: the shared fields are captured once in `DecisionBase`,
+ * and each gate's constructor adds only what's specific to it.
+ *
+ * The event constants live here so callers don't redeclare them.
+ */
+
+import type {
+  AuthorizerVerdict,
+  PermissionCheckResult,
+  PermissionState,
+} from "@gotgenes/pi-permission-system";
+
+import type { ReviewOutcome } from "./verdict.ts";
+
+/** Shared context captured once for every decision record. */
+export interface DecisionBase {
+  /** The ask's request id (correlates with the gate's permission-review entry). */
+  requestId: string;
+  /** The tool surface being reviewed. */
+  surface: string;
+  /** The value being authorized (command, tool name, path, etc.). */
+  target: string;
+}
+
+/**
+ * A complete audit record. The shared fields are always present; each
+ * gate adds its specifics. The index signature admits gate-specific fields
+ * without a per-gate type explosion.
+ */
+export interface DecisionRecord extends DecisionBase {
+  /** Which decision gate produced this record. */
+  gate: string;
+  /** Whether the model was called for this decision. */
+  modelCalled: boolean;
+  /** The verdict kind (allow / deny / defer). */
+  verdict: AuthorizerVerdict["kind"];
+  /** Gate-specific fields (policyState, modelId, latencyMs, etc.). */
+  [k: string]: unknown;
+}
+
+/** Fields available on a policy gate result, narrowed for the record. */
+export interface PolicyGateFacts {
+  /** The policy's decision state (allow / deny / ask). */
+  state: PermissionState;
+  /** Which rule source contributed the winning rule. */
+  origin: PermissionCheckResult["origin"];
+  /** The matched rule pattern, or null if none. */
+  matchedPattern: string | null;
+}
+
+/** A short-circuit debug record (supplementary to the decision gates). */
+export interface ShortCircuitRecord {
+  /** The ask's request id. */
+  requestId: string;
+  /** The tool surface, or undefined if not yet resolved. */
+  surface: string | undefined;
+  /** Why the ask short-circuited (e.g. "no-target", "transcript-error"). */
+  reason: string;
+  /** Extra context (e.g. the transcript error message). */
+  [k: string]: unknown;
+}
+
+/** A model-reply debug record (the raw model text, for debugging). */
+export interface ModelReplyRecord {
+  /** The ask's request id. */
+  requestId: string;
+  /** The reviewer model id ("provider/model"). */
+  modelId: string;
+  /** The raw model reply text. */
+  rawReply: string;
+  /** Admits the record to be passed as an AuthorizerLog details payload. */
+  [k: string]: unknown;
+}
+
+/** The event constants live here so callers don't redeclare them. */
+export const DECISION_EVENT = "ai_guard.decision";
+export const SHORT_CIRCUIT_EVENT = "ai_guard.short_circuit";
+export const MODEL_REPLY_EVENT = "ai_guard.model_reply";
+export const CACHE_LOOKUP_EVENT = "ai_guard.cache_lookup";
+export const MODEL_CALL_ERROR_EVENT = "ai_guard.model_call_error";
+
+/**
+ * Sentinel for the `rawReply` audit field when no verbatim reply is recorded.
+ * The model call produced a parseable clean verdict (allow/deny); the JSON is
+ * already captured in the structured verdict fields, so the raw text is
+ * omitted. Distinct from null so it can't be confused with the throw-based
+ * absence (timeout / call-failed / empty-reply).
+ */
+export const CLEAN_VERDICT_OMITTED = "(clean verdict, rawReply omitted)";
+
+export const DecisionRecord = {
+  /**
+   * Policy already decided (allow/deny) — the link defers.
+   *
+   * @param base - Shared decision-record context.
+   * @param policy - The policy gate's resolved facts.
+   * @returns A decision record for the policy-decided gate.
+   */
+  policyDecided(base: DecisionBase, policy: PolicyGateFacts): DecisionRecord {
+    return {
+      ...base,
+      gate: "policy-decided",
+      modelCalled: false,
+      verdict: "defer",
+      policyState: policy.state,
+      policyOrigin: policy.origin,
+      matchedPattern: policy.matchedPattern,
+      deferReason: `policy-${policy.state}`,
+    };
+  },
+
+  /**
+   * Circuit breaker tripped — short-circuits to the breaker's verdict.
+   *
+   * @param base - Shared decision-record context.
+   * @param cbVerdict - The verdict the circuit breaker forces (deny or defer).
+   * @returns A decision record for the circuit-breaker gate.
+   */
+  breaker(base: DecisionBase, cbVerdict: "deny" | "defer"): DecisionRecord {
+    return {
+      ...base,
+      gate: "circuit-breaker",
+      modelCalled: false,
+      verdict: cbVerdict,
+      deferReason: cbVerdict === "defer" ? "circuit-breaker" : null,
+    };
+  },
+
+  /**
+   * Model could not be resolved from the registry — defer.
+   *
+   * @param base - Shared decision-record context.
+   * @param modelId - The model id that failed to resolve.
+   * @returns A decision record for the model-unresolved gate.
+   */
+  modelUnresolved(base: DecisionBase, modelId: string): DecisionRecord {
+    return {
+      ...base,
+      gate: "model-unresolved",
+      modelCalled: false,
+      verdict: "defer",
+      modelId,
+      deferReason: "model-unresolved",
+    };
+  },
+
+  /**
+   * Auth resolution failed — defer.
+   *
+   * @param base - Shared decision-record context.
+   * @param modelId - The model id whose auth failed.
+   * @param error - The auth error message.
+   * @returns A decision record for the auth-failed gate.
+   */
+  authFailed(base: DecisionBase, modelId: string, error: string): DecisionRecord {
+    return {
+      ...base,
+      gate: "auth-failed",
+      modelCalled: false,
+      verdict: "defer",
+      modelId,
+      deferReason: "auth-failed",
+      error,
+    };
+  },
+
+  /**
+   * Verdict cache hit — returns the cached verdict without a model call.
+   *
+   * @param base - Shared decision-record context.
+   * @param cachedVerdict - The previously cached verdict kind.
+   * @returns A decision record for the cache-hit gate.
+   */
+  cacheHit(base: DecisionBase, cachedVerdict: AuthorizerVerdict["kind"]): DecisionRecord {
+    return {
+      ...base,
+      gate: "cache-hit",
+      modelCalled: false,
+      verdict: cachedVerdict,
+      cachedVerdict,
+    };
+  },
+
+  /**
+   * The model was called and returned a verdict.
+   *
+   * @param base - Shared decision-record context.
+   * @param modelId - The reviewer model id that was called.
+   * @param strippedCount - Number of transcript lines stripped before the call.
+   * @param reviewOutcome - The full-review call outcome (verdict, latency, raw reply, etc.).
+   * @returns A decision record for the model gate.
+   */
+  model(
+    base: DecisionBase,
+    modelId: string,
+    strippedCount: number,
+    reviewOutcome: ReviewOutcome,
+  ): DecisionRecord {
+    return {
+      ...base,
+      gate: "model",
+      modelCalled: true,
+      modelId,
+      latencyMs: reviewOutcome.latencyMs,
+      strippedCount,
+      verdict: reviewOutcome.verdict.kind,
+      deferReason: reviewOutcome.deferReason ?? null,
+      riskLevel: reviewOutcome.riskLevel ?? null,
+      // rawReply distinguishes three states so audit readers can tell them apart:
+      //  - defer with a reply (no-json / invalid-verdict-value / model-defer):
+      //    keep the raw text — it's the operator's clue to why parsing failed.
+      //  - defer without a reply (timeout / call-failed): the call threw before
+      //    any text was produced, so null marks a genuine absence.
+      //  - clean allow/deny: the JSON was parsed successfully; the verdict is
+      //    already in the structured fields, so the raw text is omitted via a
+      //    sentinel (NOT null, so it can't be confused with the throw case).
+      rawReply: rawReplyForRecord(reviewOutcome),
+    };
+  },
+};
+
+/**
+ * Pick the rawReply value for the decision record, distinguishing the
+ * three reply states (defer-with-text / defer-threw / clean verdict). See
+ * the field comment in {@link DecisionRecord.model} for the rationale.
+ *
+ * @param reviewOutcome - The full-review call outcome.
+ * @returns The rawReply value for the audit record: a sentinel for a clean verdict, the raw text
+ *   for defer-with-reply, or null when the call threw.
+ */
+function rawReplyForRecord(reviewOutcome: ReviewOutcome): string | null {
+  if (reviewOutcome.verdict.kind === "defer") {
+    // defer: keep the raw text when the call produced any (no-json / invalid-
+    // verdict-value / model-defer); null when it threw before replying
+    // (timeout / call-failed) or returned an empty body (empty-reply), so the
+    // absence of text stays a genuine null.
+    return reviewOutcome.rawReply !== undefined ? reviewOutcome.rawReply : null;
+  }
+  // Clean allow/deny: the JSON parsed; verdict/reason/riskLevel are already in
+  // structured fields. A sentinel (not null) keeps this distinct from the
+  // throw-based defer absence above.
+  return CLEAN_VERDICT_OMITTED;
+}
+
+/**
+ * Build a short-circuit debug record.
+ *
+ * @param requestId - The ask's request id.
+ * @param surface - The tool surface, or undefined if not yet resolved.
+ * @param reason - Why the ask short-circuited.
+ * @param extra - Additional context fields to merge into the record.
+ * @returns A short-circuit debug record.
+ */
+export function shortCircuit(
+  requestId: string,
+  surface: string | undefined,
+  reason: string,
+  extra?: Record<string, unknown>,
+): ShortCircuitRecord {
+  return { requestId, surface, reason, ...extra };
+}
+
+/**
+ * Build a model-reply debug record.
+ *
+ * @param requestId - The ask's request id.
+ * @param modelId - The reviewer model id ("provider/model").
+ * @param rawReply - The raw model reply text.
+ * @returns A model-reply debug record.
+ */
+export function modelReply(requestId: string, modelId: string, rawReply: string): ModelReplyRecord {
+  return { requestId, modelId, rawReply };
+}

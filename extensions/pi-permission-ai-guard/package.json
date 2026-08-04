@@ -1,0 +1,74 @@
+{
+  "name": "pi-permission-ai-guard",
+  "version": "0.1.0",
+  "description": "Token-optimized LLM permission reviewer — a pi-permission-system Authorizer chain link",
+  "keywords": [
+    "access-control",
+    "ai-guard",
+    "authorizer",
+    "permissions",
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "policy"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuoruan/pi-mono.git",
+    "directory": "extensions/pi-permission-ai-guard"
+  },
+  "files": [
+    "src",
+    "schemas",
+    "config/config.example.json"
+  ],
+  "type": "module",
+  "imports": {
+    "#src/*": "./src/*",
+    "#test/*": "./test/*"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@gotgenes/pi-permission-system": "^24.0.0",
+    "@tsconfig/node22": "catalog:",
+    "@types/node": "catalog:",
+    "memfs": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.81.0",
+    "@earendil-works/pi-coding-agent": ">=0.81.0",
+    "@gotgenes/pi-permission-system": ">=20.10.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}

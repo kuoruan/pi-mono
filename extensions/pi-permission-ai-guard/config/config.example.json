@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5",
+  "reasoning": "off",
+  "timeoutMs": 15000,
+  "surfaces": ["bash", "mcp", "skill"],
+  "instructions": null,
+  "circuitBreaker": {
+    "consecutive": 3,
+    "total": 20,
+    "verdict": "deny"
+  },
+  "cache": {
+    "maxEntries": 128
+  },
+  "transcript": {
+    "maxUserMessages": 5,
+    "maxToolCalls": 10,
+    "maxCharsPerEntry": 1000
+  }
+}
