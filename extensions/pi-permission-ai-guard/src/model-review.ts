@@ -150,13 +150,20 @@ export async function reviewModel(
     return parseTextFallback(text, result.latencyMs);
   }
   // Empty-response diagnostic: log stopReason/contentTypes/errorMessage to
-  // distinguish provider errors from genuine empty content. Temporary —
-  // remove once the intermittent empty-response root cause is identified.
+  // distinguish provider errors from genuine empty content.
+  //
+  // AbortSignal.timeout() does NOT throw — the Anthropic provider catches
+  // the abort, resolves the stream with an empty AssistantMessage whose
+  // stopReason is "aborted". Detect that here and classify as "timeout"
+  // instead of "empty-reply" so the two root causes are distinguishable in
+  // telemetry.
+  const stopReason = result.reply.stopReason ?? null;
+  const isTimeout = stopReason === "aborted";
 
   ctx.log?.debug(MODEL_REPLY_EVENT, {
     requestId: ctx.requestId,
     diagnostic: true,
-    stopReason: result.reply.stopReason ?? null,
+    stopReason,
     rawStopReason: result.reply.rawStopReason ?? null,
     errorMessage: result.reply.errorMessage ?? null,
     contentTypes: Array.isArray(result.reply.content)
@@ -171,7 +178,7 @@ export async function reviewModel(
 
   return {
     verdict: { kind: "defer" },
-    deferReason: "empty-reply",
+    deferReason: isTimeout ? "timeout" : "empty-reply",
     latencyMs: result.latencyMs,
   };
 }

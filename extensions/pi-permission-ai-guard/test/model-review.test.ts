@@ -124,6 +124,17 @@ describe("reviewModel", () => {
     expect(result.deferReason).toBe("empty-reply");
   });
 
+  it("classifies abort-resolved empty reply as timeout, not empty-reply", async () => {
+    // AbortSignal.timeout() does not throw — the Anthropic provider catches
+    // the abort and resolves with an empty AssistantMessage whose stopReason
+    // is "aborted". This must be classified as "timeout" for telemetry.
+    const completeSimple = async (): Promise<AssistantMessage> => makeReply([], "aborted");
+    const ctx = makeContext(completeSimple);
+    const result = await reviewModel(ctx, "test", "test", 15000);
+    expect(result.verdict).toEqual({ kind: "defer" });
+    expect(result.deferReason).toBe("timeout");
+  });
+
   it("defers on timeout", async () => {
     const ctx = makeContext(timeoutCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 50);
