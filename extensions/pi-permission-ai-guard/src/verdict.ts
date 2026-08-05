@@ -116,8 +116,17 @@ export function parseVerdictObject(
     };
   }
   if (verdict === "deny") {
-    const rawReason = typeof args.reason === "string" && args.reason.length > 0 ? args.reason : "";
-    const reason = rawReason ? sanitizeForPrompt(rawReason) : GENERIC_DENY_REASON;
+    // The deny reason is model-generated text. It is structurally sanitized
+    // (sanitizeForPrompt: strips zero-width chars, collapses whitespace,
+    // redacts secrets) but NOT semantically filtered. It is passed back as
+    // AuthorizerVerdict.reason (a "teaching reason" the invoking agent sees)
+    // and persisted in the audit log. This is safe under the trust
+    // assumption that the reviewer model is operator-configured and
+    // trusted — it is not adversarial. If that assumption ever breaks (e.g.
+    // untrusted reviewer, cross-tenant reviewer), semantic filtering would
+    // be needed to prevent prompt-injection via the reason text.
+    const rawReason = typeof args.reason === "string" ? args.reason : "";
+    const reason = sanitizeForPrompt(rawReason) || GENERIC_DENY_REASON;
     return { verdict: { kind: "deny", reason }, latencyMs, riskLevel, rawReply: raw };
   }
   return { verdict: { kind: "allow" }, latencyMs, riskLevel, rawReply: raw };

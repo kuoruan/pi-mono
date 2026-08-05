@@ -19,6 +19,16 @@ describe("parseVerdictObject", () => {
     expect(result.verdict).toEqual({ kind: "deny", reason: GENERIC_DENY_REASON });
   });
 
+  it("falls back to generic reason for deny with whitespace-only reason", () => {
+    const result = parseVerdictObject({ verdict: "deny", reason: "   " }, 100);
+    expect(result.verdict).toEqual({ kind: "deny", reason: GENERIC_DENY_REASON });
+  });
+
+  it("falls back to generic reason for deny with zero-width-only reason", () => {
+    const result = parseVerdictObject({ verdict: "deny", reason: "\u200B\u200B" }, 100);
+    expect(result.verdict).toEqual({ kind: "deny", reason: GENERIC_DENY_REASON });
+  });
+
   it("parses defer verdict", () => {
     const result = parseVerdictObject({ verdict: "defer" }, 100);
     expect(result.verdict).toEqual({ kind: "defer" });
