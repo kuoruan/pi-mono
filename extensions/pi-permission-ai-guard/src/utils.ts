@@ -17,18 +17,48 @@
  * value (e.g. `password=AKIA...`) is caught first.
  */
 const SECRET_PATTERNS: RegExp[] = [
-  // AWS access key id (20 chars, starts AKIA)
-  /AKIA[0-9A-Z]{16}/g,
-  // Anthropic API key (sk-ant-...)
-  /sk-ant-[a-zA-Z0-9_-]+/g,
-  // Generic OpenAI / "sk-" keys (require ≥20 chars after sk- to avoid matching "skip")
+  // AWS access key id (base32, 16 chars after prefix). Prefixes per gitleaks:
+  // A3T/AKIA/AGPA/AIDA/AROA/AIPA/ANPA/ANVA/ABIA/ACCA/ASIA.
+  /\b(?:A3T|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ABIA|ACCA|ASIA)[A-Z2-7]{16}\b/g,
+  // Anthropic API key (sk-ant-api03- or sk-ant-admin01- + ≥40 chars).
+  // Min 40 chars after sk-ant- per Quell (real keys are 93+AA, but partial
+  // keys still warrant redaction).
+  /sk-ant-[a-zA-Z0-9_-]{40,}/g,
+  // Generic OpenAI / "sk-" keys (require ≥20 chars after sk- to avoid matching "skip").
+  // Must come AFTER the sk-ant- pattern so Anthropic keys are caught first.
   /sk-[a-zA-Z0-9]{20,}/g,
+  // GitHub tokens: ghp_/gho_/ghu_/ghs_/ghr_ (exactly 36 chars per GitHub spec).
+  /gh[pousr]_[A-Za-z0-9]{36}/g,
+  // GitHub fine-grained PAT (github_pat_ + ≥60 chars, per Quell).
+  /github_pat_[A-Za-z0-9_]{60,}/g,
+  // GitLab personal access token (glpat- + ≥20 chars, optional .{9} CRC suffix).
+  /glpat-[A-Za-z0-9_-]{20,}(?:\.[0-9a-z]{9})?/g,
+  // Slack tokens (xox[bpoa]- + ≥12 chars, or xapp- structured).
+  /xox[bpoa]-[A-Za-z0-9-]{12,}/g,
+  // Google API key (AIza + 35 chars).
+  /AIza[0-9A-Za-z_-]{35}/g,
+  // Stripe secret/restricted keys (sk/rk + live/test/prod + ≥24 chars).
+  /[sr]k_(?:live|test|prod)_[A-Za-z0-9]{24,}/g,
+  // DigitalOcean tokens (dop_v1_/doo_v1_/dor_v1_ + 64 hex).
+  /do[pr]_v1_[a-f0-9]{64}/g,
+  // Databricks personal access token (dapi + 32 hex, optional -N suffix).
+  /dapi[a-f0-9]{32}(?:-\d)?/g,
+  // SendGrid API key (SG. + 22 base64 + optional .suffix).
+  /SG\.[A-Za-z0-9_-]{22}(?:\.[A-Za-z0-9_-]+)?/g,
+  // Atlassian API token (ATATT3 + ~186 chars).
+  /ATATT3[A-Za-z0-9_\-=]{186}/g,
+  // Alibaba Cloud access key id (LTAI + 20 alnum).
+  /LTAI[A-Za-z0-9]{20}/g,
+  // npm publish token (npm_ + 36 chars).
+  /npm_[A-Za-z0-9]{36}/g,
+  // PyPI upload token (pypi-AgEI + ≥100 chars).
+  /pypi-AgEI[A-Za-z0-9_-]{100,}/g,
   // Bearer tokens (require ≥8 chars after; \s or : separator to cover
-  // both "Bearer <token>" and "Bearer:<token>" forms)
-  /bearer[\s:]+[a-zA-Z0-9._-]{8,}/gi,
-  // PEM private key blocks. sanitize() runs first and collapses newlines to
-  // spaces, so the block arrives as a single line — `.*?` suffices.
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  // both "Bearer <token>" and "Bearer:<token>" forms).
+  /bearer[\s:]+[A-Za-z0-9._~+/-]{8,}/gi,
+  // PEM private key blocks. [\s\S]*? matches across newlines so redactSecrets
+  // works even without sanitize() having collapsed whitespace first.
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
 ];
 
 /**
@@ -38,7 +68,7 @@ const SECRET_PATTERNS: RegExp[] = [
  * is redacted whole instead of leaving residue after the opening quote.
  */
 const GENERIC_ASSIGNMENT_PATTERN =
-  /(password|passwd|passphrase|token|secret|api_key|apikey|credential|private_key|privatekey|aws_secret_access_key|aws_access_key_id)(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
+  /(password|passwd|passphrase|token|secret|api_key|apikey|credential|authorization|private_key|privatekey|aws_secret_access_key|aws_access_key_id)(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
 
 /**
  * Sanitize untrusted text before embedding it in prompts.
@@ -68,6 +98,10 @@ export function sanitize(text: string): string {
  *
  * @param text - Text to redact secrets from.
  * @returns Text with credential patterns replaced by `[REDACTED]`.
+ *   Safe to call on multi-line input: PEM patterns use `[\s\S]*?` to match
+ *   across newlines. When used via {@link sanitizeForPrompt}, sanitize() runs
+ *   first (strips zero-width chars, collapses whitespace) — but
+ *   `redactSecrets` alone also handles multi-line PEM blocks.
  */
 export function redactSecrets(text: string): string {
   let out = text;

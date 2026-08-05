@@ -173,16 +173,17 @@ describe("redactSecrets", () => {
   });
 
   it("redacts Anthropic API keys", () => {
-    const input = "export ANTHROPIC_API_KEY=sk-ant-api03-1234567890abcdefABCDEF";
+    const input =
+      "export ANTHROPIC_API_KEY=sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF";
     const out = redactSecrets(input);
-    expect(out).not.toContain("sk-ant-api03-1234567890abcdefABCDEF");
+    expect(out).not.toContain("sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF");
     expect(out).toContain("[REDACTED]");
   });
 
   it("redacts a bare sk-ant- key without assignment", () => {
-    const input = "Authorization: sk-ant-api03-1234567890abcdefABCDEF";
+    const input = "Authorization: sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF";
     const out = redactSecrets(input);
-    expect(out).not.toContain("sk-ant-api03-1234567890abcdefABCDEF");
+    expect(out).not.toContain("sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF");
     expect(out).toContain("[REDACTED]");
   });
 
@@ -195,6 +196,11 @@ describe("redactSecrets", () => {
   it("does NOT redact short sk- prefixes like 'skip'", () => {
     const input = "skip the tests for now";
     expect(redactSecrets(input)).toBe("skip the tests for now");
+  });
+
+  it("does NOT redact short sk-ant- fragments", () => {
+    // Real Anthropic keys have 40+ chars after sk-ant-; a 5-char suffix is too short.
+    expect(redactSecrets("see sk-ant-abcde here")).toBe("see sk-ant-abcde here");
   });
 
   it("redacts Bearer tokens with >=8 chars", () => {
@@ -240,10 +246,11 @@ describe("redactSecrets", () => {
   });
 
   it("handles multiple secrets in one string", () => {
-    const input = "AKIAIOSFODNN7EXAMPLE and sk-ant-api03-abcdef123456";
+    const input =
+      "AKIAIOSFODNN7EXAMPLE and sk-ant-api03-abcdef1234567890abcdefABCDEF1234567890ABCD";
     const out = redactSecrets(input);
     expect(out).not.toContain("AKIAIOSFODNN7EXAMPLE");
-    expect(out).not.toContain("sk-ant-api03-abcdef123456");
+    expect(out).not.toContain("sk-ant-api03-abcdef1234567890abcdefABCDEF1234567890ABCD");
     expect(out).toMatch(/\[REDACTED\].*\[REDACTED\]/);
   });
 
@@ -303,5 +310,115 @@ describe("redactSecrets", () => {
       "-----BEGIN OPENSSH PRIVATE KEY----- b3BlbnNz...secret... -----END OPENSSH PRIVATE KEY-----";
     expect(redactSecrets(ec)).not.toContain("...secret...");
     expect(redactSecrets(openssh)).not.toContain("...secret...");
+  });
+
+  it("redacts PEM private key blocks spanning multiple lines (without sanitize)", () => {
+    const pem = [
+      "-----BEGIN RSA PRIVATE KEY-----",
+      "MIIEpAIBAAKCAQEA...secret...",
+      "-----END RSA PRIVATE KEY-----",
+    ].join("\n");
+    const out = redactSecrets(pem);
+    expect(out).not.toContain("...secret...");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts GitHub classic tokens (ghp_)", () => {
+    const input = "export GH_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwxyz";
+    const out = redactSecrets(input);
+    expect(out).not.toContain("ghp_0123456789abcdefghijklmnopqrstuvwxyz");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts GitHub fine-grained tokens (github_pat_)", () => {
+    const input =
+      "export GH_TOKEN=github_pat_0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz";
+    const out = redactSecrets(input);
+    expect(out).not.toContain("github_pat_");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts GitLab personal access tokens (glpat-)", () => {
+    const input = "export GITLAB_TOKEN=glpat-0123456789abcdefghij";
+    const out = redactSecrets(input);
+    expect(out).not.toContain("glpat-0123456789abcdefghij");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts Slack tokens (xox[bp]-)", () => {
+    const input = "export SLACK_TOKEN=xoxb-0123456789abcdef";
+    const out = redactSecrets(input);
+    expect(out).not.toContain("xoxb-0123456789abcdef");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts Google API keys (AIza)", () => {
+    const input = "export GOOGLE_API_KEY=AIzaSyA0123456789abcdefghijklmnopqrstuvwxyz";
+    const out = redactSecrets(input);
+    expect(out).not.toContain("AIzaSyA0123456789abcdefghijklmnopqrstuvwxyz");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts authorization assignments", () => {
+    expect(redactSecrets("authorization=Bearer abcdefgh1234")).toBe("authorization=[REDACTED]");
+    expect(redactSecrets('authorization: "raw-token-value"')).toBe("authorization: [REDACTED]");
+  });
+
+  it("redacts Stripe secret keys (sk_live_/rk_live_)", () => {
+    // Use variable concatenation so the full token never appears as a literal
+    // (GitHub push protection flags realistic-looking Stripe keys).
+    const prefix = "sk_";
+    const live = `export STRIPE_KEY=${prefix}live_${"X".repeat(24)}`;
+    const out = redactSecrets(live);
+    expect(out).not.toContain(`${prefix}live_`);
+    expect(out).toContain("[REDACTED]");
+    const test = `export STRIPE_KEY=${prefix}test_${"X".repeat(24)}`;
+    expect(redactSecrets(test)).not.toContain(`${prefix}test_`);
+  });
+
+  it("redacts DigitalOcean tokens (dop_v1_/doo_v1_)", () => {
+    const input = `export DO_TOKEN=dop_v1_${"0".repeat(64)}`;
+    const out = redactSecrets(input);
+    expect(out).not.toContain("dop_v1_");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts Databricks tokens (dapi + 32 hex)", () => {
+    // Assemble at runtime: GitHub push protection flags realistic-looking
+    // Databricks tokens even in test fixtures.
+    const dapiPrefix = `da${"p"}i`;
+    const hex = "0".repeat(32);
+    const input = `export DATABRICKS_TOKEN=${dapiPrefix}${hex}`;
+    const out = redactSecrets(input);
+    expect(out).not.toContain(dapiPrefix);
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts SendGrid API keys (SG.)", () => {
+    const input = "export SENDGRID_KEY=SG.0123456789abcdef0123456789.suffix";
+    const out = redactSecrets(input);
+    expect(out).not.toContain("SG.0123456789abcdef0123456789");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts Atlassian API tokens (ATATT3)", () => {
+    const input = `export ATLASSIAN_TOKEN=ATATT3${"A".repeat(186)}`;
+    const out = redactSecrets(input);
+    expect(out).not.toContain("ATATT3");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts Alibaba Cloud access key ids (LTAI)", () => {
+    const input = "export ALIYUN_KEY=LTAI0123456789abcdef0123";
+    const out = redactSecrets(input);
+    expect(out).not.toContain("LTAI0123456789abcdef0123");
+    expect(out).toContain("[REDACTED]");
+  });
+
+  it("redacts npm publish tokens (npm_)", () => {
+    const input = "export NPM_TOKEN=npm_0123456789abcdef0123456789abcdef0123";
+    const out = redactSecrets(input);
+    expect(out).not.toContain("npm_0123456789abcdef0123456789abcdef0123");
+    expect(out).toContain("[REDACTED]");
   });
 });
