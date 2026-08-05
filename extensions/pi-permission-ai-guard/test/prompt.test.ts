@@ -201,13 +201,15 @@ describe("buildReviewPrompt", () => {
   it("redacts secrets in trusted intent messages", () => {
     const prompt = buildReviewPrompt(
       {
-        trustedIntent: ["use my key sk-ant-api03-abcdef1234567890 to call the API"],
+        trustedIntent: [
+          "use my key sk-ant-api03-abcdef1234567890abcdefABCDEF1234567890 to call the API",
+        ],
         toolCalls: [],
         strippedCount: 0,
       },
       { surface: "bash", target: "curl https://api", cwd: "/test" },
     );
-    expect(prompt).not.toContain("sk-ant-api03-abcdef1234567890");
+    expect(prompt).not.toContain("sk-ant-api03-abcdef1234567890abcdefABCDEF1234567890");
     expect(prompt).toContain("[REDACTED]");
   });
 

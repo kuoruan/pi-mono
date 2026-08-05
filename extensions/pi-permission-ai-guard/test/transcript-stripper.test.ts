@@ -368,7 +368,10 @@ describe("stripTranscript", () => {
     // StrippedTranscript object is safe to log and the contextHash is based
     // on redacted text. Covers all three trustedIntent sources.
     const entries = [
-      makeMessage("user", "deploy with sk-ant-abc123def456ghi789jkl012mno345"),
+      makeMessage(
+        "user",
+        "deploy with sk-ant-api03-abc123def456ghi789jkl012mno345pqr678stu901vwx234",
+      ),
       makeToolResult("ask_user_question", "chose AKIAABCDEFGHIJKLMNOP"),
       makeCompaction("summary with password=hunter2supersecretvalue"),
     ];
