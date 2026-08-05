@@ -41,17 +41,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
+      - name: Setup pnpm + Node
+        uses: pnpm/setup@v2
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          runtime: node@22
+          cache: true
 
       - name: Select Changesets mode
         id: select-mode
@@ -74,17 +68,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
+      - name: Setup pnpm + Node
+        uses: pnpm/setup@v2
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          runtime: node@22
+          cache: true
 
       - name: Version packages
         id: version
@@ -110,17 +98,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
+      - name: Setup pnpm + Node
+        uses: pnpm/setup@v2
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          runtime: node@22
+          cache: true
 
       - name: Pack packages
         id: pack
@@ -142,19 +124,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
+      - name: Setup pnpm + Node
+        uses: pnpm/setup@v2
         with:
-          node-version: 22
-          cache: pnpm
-          # npm Trusted Publishing authenticates via OIDC; no token needed
-          registry-url: https://registry.npmjs.org
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          runtime: node@22
+          cache: true
 
       - name: Publish packages
         uses: changesets/action/publish@v2.0.0-next.4

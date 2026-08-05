@@ -1,6 +1,11 @@
 packages:
   - "extensions/*"
 
+allowBuilds:
+  "@google/genai": false
+  protobufjs: false
+  tree-sitter-bash: false
+
 catalog:
   "@tsconfig/node22": ^22.0.5
   "@types/node": ^22.20.1

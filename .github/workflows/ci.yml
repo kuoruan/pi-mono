@@ -19,17 +19,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
+      - name: Setup pnpm + Node
+        uses: pnpm/setup@v2
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          runtime: node@22
+          cache: true
 
       - name: Lint
         run: pnpm lint
