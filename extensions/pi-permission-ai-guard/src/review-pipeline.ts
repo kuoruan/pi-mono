@@ -18,11 +18,13 @@ import type { Authorizer } from "@gotgenes/pi-permission-system";
 import { buildActionText, resolveReviewTarget } from "./ask-eligibility.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
 import {
+  BREAKER_DENY_REASON,
   CACHE_LOOKUP_EVENT,
   DECISION_EVENT,
   DecisionRecord,
   MODEL_REPLY_EVENT,
   SHORT_CIRCUIT_EVENT,
+  cacheLookup,
   modelReply,
   shortCircuit,
 } from "./decision-record.ts";
@@ -36,6 +38,7 @@ import {
 import { buildReviewPrompt, buildReviewSystemPrompt } from "./prompt.ts";
 import type { CircuitBreaker, VerdictCache } from "./session-state.ts";
 import { type SessionManagerLike, stripTranscript } from "./transcript-stripper.ts";
+import { sanitizeForPrompt } from "./utils.ts";
 
 /**
  * Resolved session state, captured once at construction. Not a lazy
@@ -111,7 +114,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         config.circuitBreaker.verdict === "deny"
           ? {
               kind: "deny" as const,
-              reason: "Circuit breaker tripped: too many denials this session",
+              reason: BREAKER_DENY_REASON,
             }
           : { kind: "defer" as const };
       log.review(DECISION_EVENT, DecisionRecord.breaker(base, config.circuitBreaker.verdict));
@@ -130,7 +133,10 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // { ok: false } result both collapse to one auth-failed defer path.
     const auth = await resolveAuth(deps.registry, model);
     if (!auth.ok) {
-      log.review(DECISION_EVENT, DecisionRecord.authFailed(base, modelId, auth.error));
+      log.review(
+        DECISION_EVENT,
+        DecisionRecord.authFailed(base, modelId, sanitizeForPrompt(auth.error)),
+      );
       return { kind: "defer" };
     }
 
@@ -146,7 +152,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       log.debug(
         SHORT_CIRCUIT_EVENT,
         shortCircuit(requestId, surface, "transcript-error", {
-          error: e instanceof Error ? e.message : String(e),
+          error: sanitizeForPrompt(e instanceof Error ? e.message : String(e)),
         }),
       );
       return { kind: "defer" };
@@ -163,17 +169,13 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const cc = config.cache;
     const lookup = deps.verdictCache.lookup(commandHash, contextHash, cc);
     if (lookup.hit) {
-      log.review(DECISION_EVENT, DecisionRecord.cacheHit(base, lookup.verdict.kind));
+      log.review(DECISION_EVENT, DecisionRecord.cacheHit(base, lookup.verdict));
       return lookup.verdict;
     }
     // Cache miss: record the miss reason for telemetry. Cache hits are
     // already covered by the cache-hit decision record above — no duplicate
     // debug event.
-    log.debug(CACHE_LOOKUP_EVENT, {
-      requestId,
-      surface,
-      missReason: lookup.missReason,
-    });
+    log.debug(CACHE_LOOKUP_EVENT, cacheLookup(requestId, surface, lookup.missReason));
 
     // 8. Build prompt (redaction happens inside buildReviewPrompt).
     const systemPrompt = buildReviewSystemPrompt(config.instructions);

@@ -4,6 +4,7 @@ import type { PermissionCheckResult, PermissionQuery } from "@gotgenes/pi-permis
 import { describe, expect, it } from "vitest";
 
 import { type AiGuardConfig, configSchema } from "#src/config-schema.ts";
+import { CACHE_LOOKUP_EVENT, DECISION_EVENT, MODEL_REPLY_EVENT } from "#src/decision-record.ts";
 import { type ReviewPipelineDeps, createReviewPipeline } from "#src/review-pipeline.ts";
 import { CircuitBreaker, VerdictCache } from "#src/session-state.ts";
 
@@ -248,6 +249,36 @@ describe("createReviewPipeline — guard clauses", () => {
     const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
     expect(verdict).toEqual({ kind: "defer" });
   });
+
+  it("sanitizes auth error in the audit record", async () => {
+    const reviewCalls: { event: string; data: Record<string, unknown> }[] = [];
+    const log = {
+      review: (event: string, data: Record<string, unknown>) => reviewCalls.push({ event, data }),
+      debug: () => {},
+    } as never;
+    const authorize = createReviewPipeline(
+      makePipeline({
+        registry: {
+          find: () => fakeModel,
+          getProvider: () => undefined,
+          getApiKeyAndHeaders: async () => {
+            throw new Error(
+              "Invalid API key: sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF",
+            );
+          },
+        },
+      }),
+    );
+    await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
+    const authFailed = reviewCalls.find(
+      (c) => c.event === DECISION_EVENT && c.data.gate === "auth-failed",
+    );
+    expect(authFailed).toBeDefined();
+    expect(authFailed!.data.error).not.toContain(
+      "sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF",
+    );
+    expect(authFailed!.data.error).toContain("[REDACTED]");
+  });
 });
 
 describe("createReviewPipeline — verdicts", () => {
@@ -267,6 +298,26 @@ describe("createReviewPipeline — verdicts", () => {
     );
     const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
     expect(verdict).toEqual({ kind: "deny", reason: "unsafe" });
+  });
+
+  it("persists deny reason in the ai_guard.decision audit record", async () => {
+    const reviewCalls: { event: string; data: Record<string, unknown> }[] = [];
+    const log = {
+      review: (event: string, data: Record<string, unknown>) => reviewCalls.push({ event, data }),
+      debug: () => {},
+    } as never;
+    const authorize = createReviewPipeline(
+      makePipeline({
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe command"}' },
+        ]),
+      }),
+    );
+    await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), log);
+    const decision = reviewCalls.find((c) => c.event === DECISION_EVENT);
+    expect(decision).toBeDefined();
+    expect(decision!.data.verdict).toBe("deny");
+    expect(decision!.data.reason).toBe("unsafe command");
   });
 
   it("defers on model defer verdict", async () => {
@@ -308,7 +359,7 @@ describe("createReviewPipeline — verdicts", () => {
     const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
     expect(verdict).toEqual({ kind: "defer" });
     // Empty content → diagnostic event is logged via MODEL_REPLY_EVENT
-    expect(debugCalls.some((c) => c.event === "ai_guard.model_reply")).toBe(true);
+    expect(debugCalls.some((c) => c.event === MODEL_REPLY_EVENT)).toBe(true);
   });
 
   it("falls back to text parsing when model emits prose", async () => {
@@ -336,7 +387,7 @@ describe("createReviewPipeline — verdicts", () => {
       }),
     );
     await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
-    const replyLog = debugCalls.find((c) => c.event === "ai_guard.model_reply");
+    const replyLog = debugCalls.find((c) => c.event === MODEL_REPLY_EVENT);
     expect(replyLog).toBeDefined();
     const raw = replyLog!.data.rawReply as string;
     expect(raw).toBe(longText);
@@ -473,13 +524,13 @@ describe("createReviewPipeline — verdict cache", () => {
     );
     // First call: miss → cache_lookup event with missReason
     await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), log);
-    const missEvent = debugCalls.find((c) => c.event === "ai_guard.cache_lookup");
+    const missEvent = debugCalls.find((c) => c.event === CACHE_LOOKUP_EVENT);
     expect(missEvent).toBeDefined();
     expect(missEvent!.data.missReason).toBe("no-entry");
     // Second call: hit → no cache_lookup event (cache-hit decision record covers it)
     debugCalls.length = 0;
     await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), log);
-    const hitEvent = debugCalls.find((c) => c.event === "ai_guard.cache_lookup");
+    const hitEvent = debugCalls.find((c) => c.event === CACHE_LOOKUP_EVENT);
     expect(hitEvent).toBeUndefined();
   });
 
@@ -492,7 +543,7 @@ describe("createReviewPipeline — verdict cache", () => {
     // cache disabled → always disabled miss
     const authorize = createReviewPipeline(makePipeline());
     await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), log);
-    const missEvent = debugCalls.find((c) => c.event === "ai_guard.cache_lookup");
+    const missEvent = debugCalls.find((c) => c.event === CACHE_LOOKUP_EVENT);
     expect(missEvent).toBeDefined();
     expect(missEvent!.data.missReason).toBe("disabled");
   });
