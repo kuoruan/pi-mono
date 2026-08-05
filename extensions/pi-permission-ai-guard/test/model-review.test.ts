@@ -41,8 +41,8 @@ function makeContext(
     completeSimple,
     auth: { apiKey: overrides.apiKey, headers: overrides.headers },
     reasoning: overrides.reasoning ?? baseConfig.reasoning,
-    log: overrides.log,
-    requestId: overrides.requestId,
+    log: overrides.log ?? { review: () => {}, debug: () => {} },
+    requestId: overrides.requestId ?? "test-req",
   };
 }
 
@@ -142,31 +142,16 @@ describe("reviewModel", () => {
     expect(result.deferReason).toBe("timeout");
   });
 
-  it("warns on model call error when no log is provided", async () => {
-    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const ctx = makeContext(errorCompleteSimple);
-    const result = await reviewModel(ctx, "test", "test", 15000);
-    expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("call-failed");
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining("review call failed"));
-    spy.mockRestore();
-  });
-
-  it("emits an audit-log debug record (keyed by requestId) when a log is provided", async () => {
+  it("emits a model_call_error debug record on model call failure", async () => {
     const debugCalls: { event: string; data: Record<string, unknown> }[] = [];
     const log = {
       review: () => {},
       debug: (event: string, data: Record<string, unknown>) => debugCalls.push({ event, data }),
     } as never;
-    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ctx = makeContext(errorCompleteSimple, { log, requestId: "req-42" });
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferReason).toBe("call-failed");
-    // console.warn is NOT used when a log is provided
-    expect(spy).not.toHaveBeenCalled();
-    spy.mockRestore();
-    // The failure lands in the audit log, keyed by requestId
     const failure = debugCalls.find((c) => c.event === MODEL_CALL_ERROR_EVENT);
     expect(failure).toBeDefined();
     expect(failure!.data.requestId).toBe("req-42");
@@ -174,13 +159,18 @@ describe("reviewModel", () => {
   });
 
   it("handles a non-Error throw (String(e) branch)", async () => {
-    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const ctx = makeContext(nonErrorCompleteSimple);
+    const debugCalls: { event: string; data: Record<string, unknown> }[] = [];
+    const log = {
+      review: () => {},
+      debug: (event: string, data: Record<string, unknown>) => debugCalls.push({ event, data }),
+    } as never;
+    const ctx = makeContext(nonErrorCompleteSimple, { log });
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferReason).toBe("call-failed");
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining("plain string error"));
-    spy.mockRestore();
+    const failure = debugCalls.find((c) => c.event === MODEL_CALL_ERROR_EVENT);
+    expect(failure).toBeDefined();
+    expect(failure!.data.error).toBe("plain string error");
   });
 
   it("passes reasoning level when not off", async () => {

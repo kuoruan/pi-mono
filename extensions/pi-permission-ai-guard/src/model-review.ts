@@ -9,9 +9,8 @@
  *
  * Fail-safe — all errors (timeout, unparseable reply, thrown) resolve to
  * defer. Verdict is extracted from the model's JSON text reply; the prompt is
- * the primary enforcement mechanism. When an `AuthorizerLog` is passed, call
- * failures land in the same audit log as the decision record (keyed by
- * `requestId`); otherwise they fall back to `console.warn`.
+ * the primary enforcement mechanism. Call failures and diagnostics land in
+ * the same audit log as the decision record (keyed by `requestId`).
  */
 
 import {
@@ -26,8 +25,8 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 
 import type { AiGuardConfig } from "./config-schema.ts";
-import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT } from "./decision-record.ts";
-import { warn } from "./logger.ts";
+import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT, modelCallError } from "./decision-record.ts";
+import { sanitizeForPrompt } from "./utils.ts";
 import { type ModelCallDeferReason, type ReviewOutcome, parseTextFallback } from "./verdict.ts";
 
 /**
@@ -114,10 +113,10 @@ export interface ModelCallContext {
   auth: ModelCallAuth;
   /** Reasoning level ("off" omits the option). */
   reasoning: AiGuardConfig["reasoning"];
-  /** Audit log for call-failure records (optional — falls back to console.warn). */
-  log: AuthorizerLog | undefined;
+  /** Audit log for call-failure and diagnostic records. */
+  log: AuthorizerLog;
   /** Request id for audit-log correlation. */
-  requestId: string | undefined;
+  requestId: string;
 }
 
 /**
@@ -160,12 +159,12 @@ export async function reviewModel(
   const stopReason = result.reply.stopReason ?? null;
   const isTimeout = stopReason === "aborted";
 
-  ctx.log?.debug(MODEL_REPLY_EVENT, {
+  ctx.log.debug(MODEL_REPLY_EVENT, {
     requestId: ctx.requestId,
     diagnostic: true,
     stopReason,
     rawStopReason: result.reply.rawStopReason ?? null,
-    errorMessage: result.reply.errorMessage ?? null,
+    errorMessage: result.reply.errorMessage ? sanitizeForPrompt(result.reply.errorMessage) : null,
     contentTypes: Array.isArray(result.reply.content)
       ? result.reply.content.map((b) =>
           typeof b === "object" && b !== null && "type" in b
@@ -238,22 +237,16 @@ async function executeCall(
 }
 
 /**
- * Emit a call-failure record: to the audit log when present (keyed by
- * requestId), otherwise console.warn.
+ * Emit a call-failure record to the audit log (keyed by requestId).
  *
  * @param ctx - The resolved model-call context (for log + requestId).
  * @param reason - The classified defer reason.
  * @param error - The thrown error.
  */
 function reportCallFailure(ctx: ModelCallContext, reason: string, error: unknown): void {
-  const message = `review call failed (${reason}): ${error instanceof Error ? error.message : String(error)}`;
-  if (ctx.log) {
-    ctx.log.debug(MODEL_CALL_ERROR_EVENT, {
-      requestId: ctx.requestId,
-      reason,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return;
-  }
-  warn(message);
+  const rawError = error instanceof Error ? error.message : String(error);
+  ctx.log.debug(
+    MODEL_CALL_ERROR_EVENT,
+    modelCallError(ctx.requestId, reason, sanitizeForPrompt(rawError)),
+  );
 }
