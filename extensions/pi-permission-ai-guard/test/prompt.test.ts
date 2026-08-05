@@ -7,7 +7,7 @@ describe("buildReviewSystemPrompt", () => {
   it("uses default system prompt when no custom rules", () => {
     const prompt = buildReviewSystemPrompt();
     expect(prompt).toContain("AI Guard");
-    expect(prompt).toContain("ONLY a JSON object");
+    expect(prompt).toContain("ONLY one JSON object");
     expect(prompt).toContain("DENY — Always");
     expect(prompt).toContain("## Rules");
   });
@@ -20,14 +20,56 @@ describe("buildReviewSystemPrompt", () => {
   it("replaces default rules when custom rules provided, keeps verdict footer", () => {
     const prompt = buildReviewSystemPrompt("Custom safety rules.");
     expect(prompt).toContain("Custom safety rules.");
-    expect(prompt).toContain("ONLY a JSON object");
+    expect(prompt).toContain("ONLY one JSON object");
     // Default rules are NOT present when custom rules are provided
     expect(prompt).not.toContain("AI Guard");
     expect(prompt).not.toContain("DENY — Always");
     // Verdict footer is always appended
     expect(prompt).toContain("safer alternative");
     expect(prompt).toContain("riskLevel");
-    expect(prompt).toContain("let the human decide");
+  });
+
+  it("includes three verdict JSON examples (allow/deny/defer)", () => {
+    const prompt = buildReviewSystemPrompt();
+    expect(prompt).toContain('{"verdict":"allow"}');
+    expect(prompt).toContain('{"verdict":"deny"');
+    expect(prompt).toContain('{"verdict":"defer"');
+  });
+
+  it("states riskLevel is required for deny and optional for defer", () => {
+    const prompt = buildReviewSystemPrompt();
+    expect(prompt).toContain("riskLevel is required for deny and optional for defer");
+  });
+
+  it("deny example includes reason with safer alternative placeholder", () => {
+    const prompt = buildReviewSystemPrompt();
+    const denyExample = prompt.split("\n").find((l) => l.includes('"verdict":"deny"'));
+    expect(denyExample).toBeDefined();
+    expect(denyExample).toContain("reason");
+    expect(denyExample).toContain("safer alternative");
+    expect(denyExample).toContain("riskLevel");
+  });
+
+  it("defer example includes reason but omits riskLevel", () => {
+    const prompt = buildReviewSystemPrompt();
+    const deferExample = prompt.split("\n").find((l) => l.includes('"verdict":"defer"'));
+    expect(deferExample).toBeDefined();
+    expect(deferExample).toContain("reason");
+    expect(deferExample).not.toContain("riskLevel");
+  });
+
+  it("allow example omits reason and riskLevel", () => {
+    const prompt = buildReviewSystemPrompt();
+    const allowExample = prompt.split("\n").find((l) => l.includes('"verdict":"allow"'));
+    expect(allowExample).toBeDefined();
+    expect(allowExample).not.toContain("reason");
+    expect(allowExample).not.toContain("riskLevel");
+  });
+
+  it("says to omit fields that do not apply and never use empty strings", () => {
+    const prompt = buildReviewSystemPrompt();
+    expect(prompt).toContain("Omit fields that do not apply");
+    expect(prompt).toContain("never use empty strings");
   });
 
   it("appends verdict section exactly once (no duplication)", () => {

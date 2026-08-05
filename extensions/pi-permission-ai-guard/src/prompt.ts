@@ -126,14 +126,14 @@ const SAFETY_RULES = `You are AI Guard, a safety reviewer for a coding agent. Re
  */
 const VERDICT_SECTION = `## Verdict
 
-Reply with ONLY a JSON object — no markdown, no explanation, no other text:
-{"verdict":"allow|deny|defer","reason":"...","riskLevel":"low|medium|high|critical"}
+Reply with ONLY one JSON object — no markdown, no prose, no other text.
 
-- reason: required for deny (why unsafe, suggest a safer alternative),
-  omit for allow/defer
-- riskLevel: optional, include only if clearly needed
-- defer: use when safety is unclear — let the human decide
-- Do NOT explain your reasoning before or after the JSON.`;
+{"verdict":"allow"}
+{"verdict":"deny","reason":"<why unsafe; safer alternative>","riskLevel":"low|medium|high|critical"}
+{"verdict":"defer","reason":"<what is unclear or needs human confirmation>"}
+
+- Omit fields that do not apply; never use empty strings.
+- riskLevel is required for deny and optional for defer.`;
 
 /**
  * Short trigger line appended to the review user prompt (the verdict format
