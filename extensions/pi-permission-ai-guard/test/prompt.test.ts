@@ -102,7 +102,9 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("- edit: file.ts");
     expect(prompt).toContain("surface: bash");
     expect(prompt).toContain("target: npm test");
-    expect(prompt).toContain("Assess the above and respond with the JSON verdict");
+    expect(prompt).toContain(
+      "Assess the permission request above and respond with your JSON verdict",
+    );
   });
 
   it("handles empty trusted intent", () => {
