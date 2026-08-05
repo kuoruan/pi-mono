@@ -81,6 +81,33 @@ export interface ModelReplyRecord {
   [k: string]: unknown;
 }
 
+/**
+ * A cache-lookup debug record (emitted on miss only; hits are covered by the cache-hit decision
+ * record).
+ */
+export interface CacheLookupRecord {
+  /** The ask's request id. */
+  requestId: string;
+  /** The tool surface being reviewed. */
+  surface: string;
+  /** Why the cache missed (disabled / no-entry / context-changed). */
+  missReason: string;
+  /** Admits the record to be passed as an AuthorizerLog details payload. */
+  [k: string]: unknown;
+}
+
+/** A model-call-error debug record (emitted when the model call throws). */
+export interface ModelCallErrorRecord {
+  /** The ask's request id. */
+  requestId: string;
+  /** The classified defer reason (timeout / call-failed). */
+  reason: string;
+  /** The sanitized error message. */
+  error: string;
+  /** Admits the record to be passed as an AuthorizerLog details payload. */
+  [k: string]: unknown;
+}
+
 /** The event constants live here so callers don't redeclare them. */
 export const DECISION_EVENT = "ai_guard.decision";
 export const SHORT_CIRCUIT_EVENT = "ai_guard.short_circuit";
@@ -96,6 +123,13 @@ export const MODEL_CALL_ERROR_EVENT = "ai_guard.model_call_error";
  * absence (timeout / call-failed / empty-reply).
  */
 export const CLEAN_VERDICT_OMITTED = "(clean verdict, rawReply omitted)";
+
+/**
+ * The deny reason emitted when the circuit breaker trips. Shared by the
+ * pipeline (which returns it to the caller) and {@link DecisionRecord.breaker}
+ * (which records it in the audit log) so the string cannot drift.
+ */
+export const BREAKER_DENY_REASON = "Circuit breaker tripped: too many denials this session";
 
 export const DecisionRecord = {
   /**
@@ -131,6 +165,7 @@ export const DecisionRecord = {
       gate: "circuit-breaker",
       modelCalled: false,
       verdict: cbVerdict,
+      reason: cbVerdict === "deny" ? BREAKER_DENY_REASON : undefined,
       deferReason: cbVerdict === "defer" ? "circuit-breaker" : null,
     };
   },
@@ -177,16 +212,19 @@ export const DecisionRecord = {
    * Verdict cache hit — returns the cached verdict without a model call.
    *
    * @param base - Shared decision-record context.
-   * @param cachedVerdict - The previously cached verdict kind.
+   * @param verdict - The cached verdict (full, so a deny reason can be persisted).
    * @returns A decision record for the cache-hit gate.
    */
-  cacheHit(base: DecisionBase, cachedVerdict: AuthorizerVerdict["kind"]): DecisionRecord {
+  cacheHit(base: DecisionBase, verdict: AuthorizerVerdict): DecisionRecord {
     return {
       ...base,
       gate: "cache-hit",
       modelCalled: false,
-      verdict: cachedVerdict,
-      cachedVerdict,
+      verdict: verdict.kind,
+      // Persist the deny reason from the original model call so audit readers
+      // can see why a cached deny was returned without looking up the earlier
+      // model-gate record.
+      reason: verdict.kind === "deny" ? verdict.reason : undefined,
     };
   },
 
@@ -213,16 +251,23 @@ export const DecisionRecord = {
       latencyMs: reviewOutcome.latencyMs,
       strippedCount,
       verdict: reviewOutcome.verdict.kind,
+      // Persist the sanitized deny reason so audit readers can see why a
+      // command was denied without re-running the review. Only deny carries
+      // a reason (verdict.ts:119 already ran it through sanitizeForPrompt);
+      // allow/defer get undefined, which JSON.stringify omits.
+      reason: reviewOutcome.verdict.kind === "deny" ? reviewOutcome.verdict.reason : undefined,
       deferReason: reviewOutcome.deferReason ?? null,
       riskLevel: reviewOutcome.riskLevel ?? null,
       // rawReply distinguishes three states so audit readers can tell them apart:
       //  - defer with a reply (no-json / invalid-verdict-value / model-defer):
       //    keep the raw text — it's the operator's clue to why parsing failed.
-      //  - defer without a reply (timeout / call-failed): the call threw before
-      //    any text was produced, so null marks a genuine absence.
-      //  - clean allow/deny: the JSON was parsed successfully; the verdict is
-      //    already in the structured fields, so the raw text is omitted via a
-      //    sentinel (NOT null, so it can't be confused with the throw case).
+      //  - defer without a reply (timeout / call-failed / empty-reply): the
+      //    call threw before producing text or returned an empty body, so null
+      //    marks a genuine absence.
+      //  - clean allow/deny: the JSON parsed; the verdict, reason (deny only),
+      //    and riskLevel are already in the structured fields above, so the
+      //    raw text is omitted via a sentinel (NOT null, so it can't be
+      //    confused with the throw-based defer absence above).
       rawReply: rawReplyForRecord(reviewOutcome),
     };
   },
@@ -245,9 +290,10 @@ function rawReplyForRecord(reviewOutcome: ReviewOutcome): string | null {
     // absence of text stays a genuine null.
     return reviewOutcome.rawReply !== undefined ? reviewOutcome.rawReply : null;
   }
-  // Clean allow/deny: the JSON parsed; verdict/reason/riskLevel are already in
-  // structured fields. A sentinel (not null) keeps this distinct from the
-  // throw-based defer absence above.
+  // Clean allow/deny: the JSON parsed; verdict, reason (deny only), and
+  // riskLevel are already in the structured record fields, so the raw text is
+  // omitted via a sentinel (not null, to stay distinct from the throw-based
+  // defer absence above).
   return CLEAN_VERDICT_OMITTED;
 }
 
@@ -279,4 +325,36 @@ export function shortCircuit(
  */
 export function modelReply(requestId: string, modelId: string, rawReply: string): ModelReplyRecord {
   return { requestId, modelId, rawReply };
+}
+
+/**
+ * Build a cache-lookup debug record (miss only).
+ *
+ * @param requestId - The ask's request id.
+ * @param surface - The tool surface being reviewed.
+ * @param missReason - Why the cache missed (disabled / no-entry / context-changed).
+ * @returns A cache-lookup debug record.
+ */
+export function cacheLookup(
+  requestId: string,
+  surface: string,
+  missReason: string,
+): CacheLookupRecord {
+  return { requestId, surface, missReason };
+}
+
+/**
+ * Build a model-call-error debug record.
+ *
+ * @param requestId - The ask's request id.
+ * @param reason - The classified defer reason (timeout / call-failed).
+ * @param error - The sanitized error message.
+ * @returns A model-call-error debug record.
+ */
+export function modelCallError(
+  requestId: string,
+  reason: string,
+  error: string,
+): ModelCallErrorRecord {
+  return { requestId, reason, error };
 }

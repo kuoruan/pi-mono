@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   type DecisionBase,
   type DecisionRecord as DecisionRecordType,
+  BREAKER_DENY_REASON,
   DecisionRecord,
   modelReply,
   shortCircuit,
@@ -30,7 +31,7 @@ const allGates: Array<{ name: string; record: DecisionRecordType }> = [
   { name: "breaker", record: DecisionRecord.breaker(base, "deny") },
   { name: "modelUnresolved", record: DecisionRecord.modelUnresolved(base, "anthropic/test") },
   { name: "authFailed", record: DecisionRecord.authFailed(base, "anthropic/test", "no key") },
-  { name: "cacheHit", record: DecisionRecord.cacheHit(base, "allow") },
+  { name: "cacheHit", record: DecisionRecord.cacheHit(base, { kind: "allow" }) },
   {
     name: "model",
     record: DecisionRecord.model(base, "anthropic/test", 3, {
@@ -80,6 +81,8 @@ describe("DecisionRecord — per-gate shape", () => {
     expect(DecisionRecord.breaker(base, "defer").verdict).toBe("defer");
     expect(DecisionRecord.breaker(base, "deny").gate).toBe("circuit-breaker");
     expect(DecisionRecord.breaker(base, "deny").modelCalled).toBe(false);
+    expect(DecisionRecord.breaker(base, "deny").reason).toBe(BREAKER_DENY_REASON);
+    expect(DecisionRecord.breaker(base, "defer").reason).toBeUndefined();
   });
 
   it("modelUnresolved carries modelId + deferReason", () => {
@@ -98,11 +101,16 @@ describe("DecisionRecord — per-gate shape", () => {
   });
 
   it("cacheHit records the cached verdict kind", () => {
-    const r = DecisionRecord.cacheHit(base, "deny");
+    const r = DecisionRecord.cacheHit(base, { kind: "deny", reason: "unsafe command" });
     expect(r.gate).toBe("cache-hit");
     expect(r.verdict).toBe("deny");
-    expect(r.cachedVerdict).toBe("deny");
     expect(r.modelCalled).toBe(false);
+    expect(r.reason).toBe("unsafe command");
+  });
+
+  it("cacheHit omits reason for allow/defer verdicts", () => {
+    expect(DecisionRecord.cacheHit(base, { kind: "allow" }).reason).toBeUndefined();
+    expect(DecisionRecord.cacheHit(base, { kind: "defer" }).reason).toBeUndefined();
   });
 
   it("model attaches rawReply for any defer path that has one", () => {
@@ -137,13 +145,15 @@ describe("DecisionRecord — per-gate shape", () => {
     expect(clean.riskLevel).toBe(null);
     expect(clean.deferReason).toBe(null);
 
-    // clean deny → same sentinel as clean allow
+    // clean deny → same sentinel as clean allow, but the deny reason is
+    // persisted in the structured `reason` field
     const cleanDeny = DecisionRecord.model(base, "anthropic/haiku", 2, {
       verdict: { kind: "deny", reason: "unsafe" },
       latencyMs: 10,
       rawReply: '{"verdict":"deny"}',
     });
     expect(cleanDeny.rawReply).toBe("(clean verdict, rawReply omitted)");
+    expect(cleanDeny.reason).toBe("unsafe");
 
     // throw-based defer (timeout) → no rawReply on outcome → null (genuine
     // absence, distinct from the clean-verdict sentinel)
@@ -166,7 +176,25 @@ describe("DecisionRecord — per-gate shape", () => {
     expect(r.strippedCount).toBe(5);
     expect(r.riskLevel).toBe("critical");
     expect(r.verdict).toBe("deny");
+    expect(r.reason).toBe("unsafe");
     expect(r.deferReason).toBe(null); // undefined → null
+  });
+
+  it("model omits reason for allow and defer verdicts", () => {
+    const allow = DecisionRecord.model(base, "anthropic/haiku", 1, {
+      verdict: { kind: "allow" },
+      latencyMs: 10,
+      rawReply: '{"verdict":"allow"}',
+    });
+    expect(allow.reason).toBeUndefined();
+
+    const defer = DecisionRecord.model(base, "anthropic/haiku", 1, {
+      verdict: { kind: "defer" },
+      latencyMs: 10,
+      deferReason: "no-json",
+      rawReply: "garbage",
+    });
+    expect(defer.reason).toBeUndefined();
   });
 });
 
