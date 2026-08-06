@@ -1,11 +1,11 @@
 /**
  * Shared prompt-sanitization and small helpers used across modules.
  *
- * - Sanitize: strip zero-width chars + collapse whitespace (anti-injection)
- * - SanitizeForPrompt: sanitize + redact secrets (for model context / logs)
+ * - NormalizeText: strip zero-width chars + collapse whitespace (anti-injection)
+ * - NormalizeAndRedactText: normalize + redact secrets (for model context / logs)
  * - RedactSecrets: scrub common credential patterns
- * - Truncate: head+tail string truncation
- * - IsRecord: type guard for plain objects
+ * - TruncateMiddle: head+tail string truncation
+ * - IsObjectRecord: type guard for non-array objects
  *
  * Single-consumer helpers (extractFirstJsonObject, safeStringify, shortHash)
  * have been inlined into their consumers (verdict.ts, review-pipeline.ts).
@@ -57,7 +57,7 @@ const SECRET_PATTERNS: RegExp[] = [
   // both "Bearer <token>" and "Bearer:<token>" forms).
   /bearer[\s:]+[A-Za-z0-9._~+/-]{8,}/gi,
   // PEM private key blocks. [\s\S]*? matches across newlines so redactSecrets
-  // works even without sanitize() having collapsed whitespace first.
+  // works even without normalizeText() having collapsed whitespace first.
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
 ];
 
@@ -71,6 +71,16 @@ const GENERIC_ASSIGNMENT_PATTERN =
   /(password|passwd|passphrase|token|secret|api_key|apikey|credential|authorization|private_key|privatekey|aws_secret_access_key|aws_access_key_id)(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
 
 /**
+ * Remove invisible characters that can obscure prompt-injection payloads.
+ *
+ * @param text - Text from which to remove zero-width characters.
+ * @returns The text without zero-width characters.
+ */
+function stripZeroWidthChars(text: string): string {
+  return text.replace(/[\u200B-\u200D\u2060\uFEFF]+/gu, "");
+}
+
+/**
  * Sanitize untrusted text before embedding it in prompts.
  *
  * Strips zero-width characters (ZWSP, ZWNJ, ZWJ, WJ, BOM) that bypass
@@ -78,14 +88,11 @@ const GENERIC_ASSIGNMENT_PATTERN =
  * all whitespace to single spaces and trims — preventing section header
  * injection via newlines.
  *
- * @param text - Untrusted text to sanitize.
+ * @param text - Untrusted text to normalize.
  * @returns Sanitized text with zero-width chars removed and whitespace collapsed.
  */
-export function sanitize(text: string): string {
-  return text
-    .replace(/[\u200B-\u200D\u2060\uFEFF]+/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
+export function normalizeText(text: string): string {
+  return stripZeroWidthChars(text).replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -93,13 +100,14 @@ export function sanitize(text: string): string {
  * `[REDACTED]`. Idempotent: redacting an already-redacted string is a no-op
  * (the placeholder contains no credential-shaped value).
  *
- * Applied AFTER sanitize() in prompt building, so whitespace is already
+ * Applied AFTER normalizeText() in prompt building, so whitespace is already
  * collapsed and zero-width chars stripped.
  *
  * @param text - Text to redact secrets from.
  * @returns Text with credential patterns replaced by `[REDACTED]`.
  *   Safe to call on multi-line input: PEM patterns use `[\s\S]*?` to match
- *   across newlines. When used via {@link sanitizeForPrompt}, sanitize() runs
+ *   across newlines. When used via {@link normalizeAndRedactText},
+ *   normalizeText() runs
  *   first (strips zero-width chars, collapses whitespace) — but
  *   `redactSecrets` alone also handles multi-line PEM blocks.
  */
@@ -113,25 +121,37 @@ export function redactSecrets(text: string): string {
 }
 
 /**
- * Sanitize (strip zero-width chars + collapse whitespace) then redact secrets.
+ * Normalize (strip zero-width chars + collapse whitespace) then redact secrets.
  * Used for all untrusted text before it enters the model context or review logs.
  *
- * @param text - Untrusted text to sanitize and redact.
- * @returns Sanitized text with secrets redacted.
+ * @param text - Untrusted text to normalize and redact.
+ * @returns Normalized text with secrets redacted.
  */
-export function sanitizeForPrompt(text: string): string {
-  return redactSecrets(sanitize(text));
+export function normalizeAndRedactText(text: string): string {
+  return redactSecrets(normalizeText(text));
+}
+
+/**
+ * Serialize untrusted action text for an inline prompt field without losing
+ * shell-significant whitespace. JSON escaping prevents the value from
+ * creating prompt sections while preserving newlines, heredocs, and quoting.
+ *
+ * @param text - Untrusted action text to redact and serialize.
+ * @returns A redacted JSON string literal safe to embed in one prompt field.
+ */
+export function encodeActionTextForPrompt(text: string): string {
+  return JSON.stringify(redactSecrets(stripZeroWidthChars(text)));
 }
 
 /**
  * Truncate text to maxChars, preserving head and tail.
  *
- * @param text - Text to truncate.
+ * @param text - Text to truncate in the middle.
  * @param maxChars - Maximum character count of the result.
  * @returns Truncated text with a `[...truncated...]` marker if shortened, or the original text if
  *   within the limit.
  */
-export function truncate(text: string, maxChars: number): string {
+export function truncateMiddle(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   const tag = "\n[...truncated...]\n";
   const available = Math.max(0, maxChars - tag.length);
@@ -143,11 +163,11 @@ export function truncate(text: string, maxChars: number): string {
 }
 
 /**
- * Type guard: is this value a plain object (not array, not null)?
+ * Type guard: is this value an object record (not array, not null)?
  *
  * @param value - Value to test.
- * @returns True if `value` is a plain object (type-narrowed to `Record<string, unknown>`).
+ * @returns True if `value` is a non-array object (type-narrowed to `Record<string, unknown>`).
  */
-export function isRecord(value: unknown): value is Record<string, unknown> {
+export function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

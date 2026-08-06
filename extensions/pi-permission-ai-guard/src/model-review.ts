@@ -26,7 +26,7 @@ import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 
 import type { AiGuardConfig } from "./config-schema.ts";
 import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT, modelCallError } from "./decision-record.ts";
-import { sanitizeForPrompt } from "./utils.ts";
+import { normalizeAndRedactText } from "./utils.ts";
 import { type ModelCallDeferReason, type ReviewOutcome, parseTextFallback } from "./verdict.ts";
 
 /**
@@ -164,7 +164,9 @@ export async function reviewModel(
     diagnostic: true,
     stopReason,
     rawStopReason: result.reply.rawStopReason ?? null,
-    errorMessage: result.reply.errorMessage ? sanitizeForPrompt(result.reply.errorMessage) : null,
+    errorMessage: result.reply.errorMessage
+      ? normalizeAndRedactText(result.reply.errorMessage)
+      : null,
     contentTypes: Array.isArray(result.reply.content)
       ? result.reply.content.map((b) =>
           typeof b === "object" && b !== null && "type" in b
@@ -247,6 +249,6 @@ function reportCallFailure(ctx: ModelCallContext, reason: string, error: unknown
   const rawError = error instanceof Error ? error.message : String(error);
   ctx.log.debug(
     MODEL_CALL_ERROR_EVENT,
-    modelCallError(ctx.requestId, reason, sanitizeForPrompt(rawError)),
+    modelCallError(ctx.requestId, reason, normalizeAndRedactText(rawError)),
   );
 }

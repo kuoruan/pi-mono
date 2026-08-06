@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import { type AiGuardConfig, EXTENSION_ID, configSchema } from "./config-schema.ts";
-import { isRecord } from "./utils.ts";
+import { isObjectRecord } from "./utils.ts";
 
 /** A single validation or read error from config loading. */
 export interface ConfigIssue {
@@ -71,7 +71,7 @@ function readLayer(path: string, issues: ConfigIssue[]): Record<string, unknown>
   }
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
-    if (!isRecord(parsed)) {
+    if (!isObjectRecord(parsed)) {
       issues.push({ path: "$", message: "Expected a JSON object.", sourcePath: path });
       return undefined;
     }
@@ -101,7 +101,7 @@ function deepMerge(
   for (const key of Object.keys(source)) {
     const sv = source[key];
     const tv = result[key];
-    if (isRecord(tv) && isRecord(sv)) {
+    if (isObjectRecord(tv) && isObjectRecord(sv)) {
       result[key] = deepMerge(tv, sv);
     } else {
       result[key] = sv;

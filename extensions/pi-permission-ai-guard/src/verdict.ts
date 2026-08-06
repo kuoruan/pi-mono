@@ -1,7 +1,7 @@
 import { parseJsonWithRepair } from "@earendil-works/pi-ai";
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
-import { isRecord, sanitizeForPrompt } from "./utils.ts";
+import { isObjectRecord, normalizeAndRedactText } from "./utils.ts";
 
 /** Why a model call deferred (for logging/debugging). */
 export type ModelCallDeferReason =
@@ -117,7 +117,7 @@ export function parseVerdictObject(
   }
   if (verdict === "deny") {
     // The deny reason is model-generated text. It is structurally sanitized
-    // (sanitizeForPrompt: strips zero-width chars, collapses whitespace,
+    // (normalizeAndRedactText: strips zero-width chars, collapses whitespace,
     // redacts secrets) but NOT semantically filtered. It is passed back as
     // AuthorizerVerdict.reason (a "teaching reason" the invoking agent sees)
     // and persisted in the audit log. This is safe under the trust
@@ -126,7 +126,7 @@ export function parseVerdictObject(
     // untrusted reviewer, cross-tenant reviewer), semantic filtering would
     // be needed to prevent prompt-injection via the reason text.
     const rawReason = typeof args.reason === "string" ? args.reason : "";
-    const reason = sanitizeForPrompt(rawReason) || GENERIC_DENY_REASON;
+    const reason = normalizeAndRedactText(rawReason) || GENERIC_DENY_REASON;
     return { verdict: { kind: "deny", reason }, latencyMs, riskLevel, rawReply: raw };
   }
   return { verdict: { kind: "allow" }, latencyMs, riskLevel, rawReply: raw };
@@ -147,7 +147,7 @@ function parseRiskLevel(value: unknown): RiskLevel | undefined {
  */
 export function parseTextFallback(text: string, latencyMs: number): ReviewOutcome {
   const parsed = extractFirstJsonObject(text);
-  if (isRecord(parsed)) {
+  if (isObjectRecord(parsed)) {
     return parseVerdictObject(parsed, latencyMs);
   }
   return { verdict: { kind: "defer" }, deferReason: "no-json", latencyMs, rawReply: text };

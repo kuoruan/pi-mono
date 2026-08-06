@@ -253,7 +253,7 @@ export const DecisionRecord = {
       verdict: reviewOutcome.verdict.kind,
       // Persist the sanitized deny reason so audit readers can see why a
       // command was denied without re-running the review. Only deny carries
-      // a reason (verdict.ts:119 already ran it through sanitizeForPrompt);
+      // a reason (verdict.ts:119 already normalized and redacted it);
       // allow/defer get undefined, which JSON.stringify omits.
       reason: reviewOutcome.verdict.kind === "deny" ? reviewOutcome.verdict.reason : undefined,
       deferReason: reviewOutcome.deferReason ?? null,

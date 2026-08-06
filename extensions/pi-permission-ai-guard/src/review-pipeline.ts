@@ -15,7 +15,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { Authorizer } from "@gotgenes/pi-permission-system";
 
-import { buildActionText, resolveReviewTarget } from "./ask-eligibility.ts";
+import { resolveReviewTarget } from "./ask-eligibility.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
 import {
   BREAKER_DENY_REASON,
@@ -36,9 +36,10 @@ import {
   reviewModel,
 } from "./model-review.ts";
 import { buildReviewPrompt, buildReviewSystemPrompt } from "./prompt.ts";
+import { buildReviewRequestContext, reviewRequestCacheMaterial } from "./review-request.ts";
 import type { CircuitBreaker, VerdictCache } from "./session-state.ts";
 import { type SessionManagerLike, stripTranscript } from "./transcript-stripper.ts";
-import { sanitizeForPrompt } from "./utils.ts";
+import { normalizeAndRedactText } from "./utils.ts";
 
 /**
  * Resolved session state, captured once at construction. Not a lazy
@@ -51,7 +52,7 @@ export interface ReviewPipelineDeps {
   registry: ModelRegistryLike;
   /** Session manager for transcript stripping (trusted intent + tool calls). */
   sessionManager: SessionManagerLike;
-  /** Session working directory (from session_start). */
+  /** Session working directory (from session_start); the policy boundary. */
   cwd: string;
   /** Per-session circuit breaker — trips on consecutive denials. */
   circuitBreaker: CircuitBreaker;
@@ -90,6 +91,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
 
     const { requestId } = details;
     const base = { requestId, surface, target };
+    const request = buildReviewRequestContext(details, surface, target, deps.cwd);
 
     // 3. Policy gate: defer when the deterministic engine already decided —
     //    this link only adds value when the policy is undecided ("ask").
@@ -135,7 +137,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     if (!auth.ok) {
       log.review(
         DECISION_EVENT,
-        DecisionRecord.authFailed(base, modelId, sanitizeForPrompt(auth.error)),
+        DecisionRecord.authFailed(base, modelId, normalizeAndRedactText(auth.error)),
       );
       return { kind: "defer" };
     }
@@ -152,19 +154,16 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       log.debug(
         SHORT_CIRCUIT_EVENT,
         shortCircuit(requestId, surface, "transcript-error", {
-          error: sanitizeForPrompt(e instanceof Error ? e.message : String(e)),
+          error: normalizeAndRedactText(e instanceof Error ? e.message : String(e)),
         }),
       );
       return { kind: "defer" };
     }
 
-    // 7. Cache lookup (only commands that reached the model, i.e. policy "ask").
-    //    cwd is part of the command key (not the context key): the same command
-    //    in a different working directory is a different authorization (e.g.
-    //    `rm -rf build` resolves differently per cwd, and the prompt feeds cwd
-    //    to the model). Putting cwd in commandHash gives each cwd its own LRU
-    //    slot instead of letting a new cwd overwrite another's cached verdict.
-    const commandHash = shortHash(`${surface}\0${target}\0${deps.cwd}`);
+    // 7. Cache lookup. The request snapshot contains the action context,
+    // working directory, and policy-derived path boundary, so a verdict
+    // cannot cross those contexts.
+    const commandHash = shortHash(reviewRequestCacheMaterial(request));
     const contextHash = shortHash(transcript.trustedIntent.join("\0"));
     const cc = config.cache;
     const lookup = deps.verdictCache.lookup(commandHash, contextHash, cc);
@@ -180,10 +179,11 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // 8. Build prompt (redaction happens inside buildReviewPrompt).
     const systemPrompt = buildReviewSystemPrompt(config.instructions);
     const userPrompt = buildReviewPrompt(transcript, {
-      surface,
-      target,
-      actionText: buildActionText(details, surface),
-      cwd: deps.cwd,
+      surface: request.surface,
+      target: request.target,
+      actionText: request.actionText,
+      cwd: request.cwd,
+      canonicalBoundary: request.canonicalBoundary,
     });
 
     // 9. Model review.

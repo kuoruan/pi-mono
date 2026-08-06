@@ -117,8 +117,8 @@ const FULL_COMMAND_PREFIX = "full command: '";
  *   is never misparsed). When `full command:` is absent (simple command where full === sub-command)
  *   or the message format changed, fall back to `details.command` (the sub-command). Never fall
  *   back to the raw `message`.
- * - **mcp** — `toolInputPreview` is always absent; `target` already carries the qualified
- *   `server:tool` name. Return `undefined`.
+ * - **mcp** — `toolInputPreview` is always absent. Return `undefined`; the model receives the
+ *   qualified target and decides whether that context is sufficient.
  * - **other surfaces (path tools, extension tools like `web_fetch`, etc.)** — `toolInputPreview` is
  *   populated by pi-permission-system’s `ToolPreviewFormatter` and carries the tool input (e.g.
  *   `input {"url":"…"}`). Return it when non-empty.
@@ -162,8 +162,10 @@ export function buildActionText(
 
   // Non-bash surfaces: use toolInputPreview when present. The upstream
   // ToolPreviewFormatter populates it for all non-bash, non-MCP tools (path
-  // tools + extension tools like web_fetch). MCP and surfaces without a
-  // tool input have no preview — target already carries the value.
+  // tools + extension tools like web_fetch). MCP and surfaces without a tool
+  // input remain opaque; the review pipeline sends them to the model with the
+  // qualified target, and the SAFETY_RULES instruct the model to defer when
+  // missing context could change the outcome.
   const preview =
     typeof details.toolInputPreview === "string" ? details.toolInputPreview : undefined;
   return preview && preview.length > 0 ? preview : undefined;

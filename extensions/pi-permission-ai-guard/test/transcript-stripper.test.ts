@@ -100,15 +100,16 @@ describe("stripTranscript", () => {
     expect(result.trustedIntent).toContain("User chose option A");
   });
 
-  it("keeps compaction summary as trusted intent", () => {
+  it("strips compaction summaries so they cannot authorize actions", () => {
     const entries = [
       makeCompaction("Summary of previous work: fixed auth module"),
       makeMessage("user", "now fix the tests"),
     ];
     const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
     const result = stripTranscript(sm, opts);
-    expect(result.trustedIntent.some((s) => s.includes("Summary of previous work"))).toBe(true);
+    expect(result.trustedIntent.some((s) => s.includes("Summary of previous work"))).toBe(false);
     expect(result.trustedIntent).toContain("now fix the tests");
+    expect(result.strippedCount).toBeGreaterThan(0);
   });
 
   it("respects maxUserMessages limit", () => {
