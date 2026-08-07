@@ -155,7 +155,7 @@ describe("reviewModel", () => {
     const failure = debugCalls.find((c) => c.event === MODEL_CALL_ERROR_EVENT);
     expect(failure).toBeDefined();
     expect(failure!.data.requestId).toBe("req-42");
-    expect(failure!.data.reason).toBe("call-failed");
+    expect(failure!.data.deferKind).toBe("call-failed");
   });
 
   it("handles a non-Error throw (String(e) branch)", async () => {

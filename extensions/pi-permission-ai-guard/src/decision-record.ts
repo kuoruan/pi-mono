@@ -19,7 +19,7 @@ import type {
   PermissionState,
 } from "@gotgenes/pi-permission-system";
 
-import type { ReviewOutcome } from "./verdict.ts";
+import type { ModelCallDeferKind, ReviewOutcome } from "./verdict.ts";
 
 /** Shared context captured once for every decision record. */
 export interface DecisionBase {
@@ -100,8 +100,8 @@ export interface CacheLookupRecord {
 export interface ModelCallErrorRecord {
   /** The ask's request id. */
   requestId: string;
-  /** The classified defer reason (timeout / call-failed). */
-  reason: string;
+  /** The classified defer kind (timeout / call-failed). */
+  deferKind: ModelCallDeferKind;
   /** The sanitized error message. */
   error: string;
   /** Admits the record to be passed as an AuthorizerLog details payload. */
@@ -251,9 +251,10 @@ export const DecisionRecord = {
       latencyMs: reviewOutcome.latencyMs,
       strippedCount,
       verdict: reviewOutcome.verdict.kind,
-      // Persist the bounded, sanitized model explanation for deny or defer.
-      // A defer's classification remains in `deferKind`; `reason` explains
-      // what the model found unclear for audit readers.
+      // Persist the sanitized model explanation for deny or defer. For
+      // defer, `deferKind` carries the classification (timeout / model-defer
+      // / etc.) and `reason` carries the model's natural-language
+      // explanation of what is unclear.
       reason:
         reviewOutcome.verdict.kind === "deny"
           ? reviewOutcome.verdict.reason
@@ -349,14 +350,14 @@ export function cacheLookup(
  * Build a model-call-error debug record.
  *
  * @param requestId - The ask's request id.
- * @param reason - The classified defer reason (timeout / call-failed).
+ * @param deferKind - The classified defer kind (timeout / call-failed).
  * @param error - The sanitized error message.
  * @returns A model-call-error debug record.
  */
 export function modelCallError(
   requestId: string,
-  reason: string,
+  deferKind: ModelCallDeferKind,
   error: string,
 ): ModelCallErrorRecord {
-  return { requestId, reason, error };
+  return { requestId, deferKind, error };
 }

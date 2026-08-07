@@ -189,7 +189,7 @@ upstream log level):
   (`disabled` / `no-entry` / `context-changed`). Cache hits are covered by
   the `cache-hit` decision record and do not emit a duplicate debug event.
 - `ai_guard.model_call_error` — emitted when a model call throws, recording
-  the `reason` (`timeout` / `call-failed`) and error message.
+  the `deferKind` (`timeout` / `call-failed`) and error message.
 
 ## License
 

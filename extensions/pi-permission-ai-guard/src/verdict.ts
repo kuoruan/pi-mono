@@ -4,7 +4,7 @@ import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 import { isObjectRecord, normalizeAndRedactText } from "./utils.ts";
 
 /** Why a model call deferred (for logging/debugging). */
-export type ModelCallDeferReason =
+export type ModelCallDeferKind =
   | "empty-reply"
   | "no-json"
   | "invalid-verdict-value"
@@ -16,8 +16,8 @@ export type ModelCallDeferReason =
 export interface ReviewOutcome {
   /** The verdict (allow / deny / defer). */
   verdict: AuthorizerVerdict;
-  /** Why the call deferred, when verdict is defer. */
-  deferKind?: ModelCallDeferReason;
+  /** Classified defer reason (timeout / empty-reply / no-json / model-defer / etc.). */
+  deferKind?: ModelCallDeferKind;
   /** Model explanation for a defer verdict, retained for audit logging. */
   deferReason?: string;
   /** Model call latency in milliseconds. */

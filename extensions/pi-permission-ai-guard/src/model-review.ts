@@ -27,7 +27,7 @@ import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 import type { AiGuardConfig } from "./config-schema.ts";
 import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT, modelCallError } from "./decision-record.ts";
 import { normalizeAndRedactText } from "./utils.ts";
-import { type ModelCallDeferReason, type ReviewOutcome, parseTextFallback } from "./verdict.ts";
+import { type ModelCallDeferKind, type ReviewOutcome, parseTextFallback } from "./verdict.ts";
 
 /**
  * Auth result from `ModelRegistry.getApiKeyAndHeaders`, derived from the
@@ -53,12 +53,12 @@ export type ModelRegistryLike = Pick<ModelRegistry, "find" | "getApiKeyAndHeader
 /**
  * Result of the shared call scaffolding in {@link executeCall}.
  * Success carries the raw assistant reply; failure carries the classified
- * defer reason. Both carry latency so the public methods can populate their
+ * defer kind. Both carry latency so the public methods can populate their
  * outcome shapes without re-timing.
  */
 export type CallResult =
   | { ok: true; reply: AssistantMessage; latencyMs: number }
-  | { ok: false; reason: ModelCallDeferReason; latencyMs: number };
+  | { ok: false; deferKind: ModelCallDeferKind; latencyMs: number };
 
 /** Enough for a JSON verdict with a short reason. */
 const REVIEW_MAX_TOKENS = 512;
@@ -139,7 +139,7 @@ export async function reviewModel(
   if (!result.ok) {
     return {
       verdict: { kind: "defer" },
-      deferKind: result.reason,
+      deferKind: result.deferKind,
       latencyMs: result.latencyMs,
     };
   }
@@ -229,12 +229,12 @@ async function executeCall(
     const reply = await ctx.completeSimple(ctx.model, context, options);
     return { ok: true, reply, latencyMs: Date.now() - startedAt };
   } catch (e) {
-    const reason: ModelCallDeferReason =
+    const deferKind: ModelCallDeferKind =
       e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")
         ? "timeout"
         : "call-failed";
-    reportCallFailure(ctx, reason, e);
-    return { ok: false, reason, latencyMs: Date.now() - startedAt };
+    reportCallFailure(ctx, deferKind, e);
+    return { ok: false, deferKind, latencyMs: Date.now() - startedAt };
   }
 }
 
@@ -242,13 +242,17 @@ async function executeCall(
  * Emit a call-failure record to the audit log (keyed by requestId).
  *
  * @param ctx - The resolved model-call context (for log + requestId).
- * @param reason - The classified defer reason.
+ * @param deferKind - The classified defer kind.
  * @param error - The thrown error.
  */
-function reportCallFailure(ctx: ModelCallContext, reason: string, error: unknown): void {
+function reportCallFailure(
+  ctx: ModelCallContext,
+  deferKind: ModelCallDeferKind,
+  error: unknown,
+): void {
   const rawError = error instanceof Error ? error.message : String(error);
   ctx.log.debug(
     MODEL_CALL_ERROR_EVENT,
-    modelCallError(ctx.requestId, reason, normalizeAndRedactText(rawError)),
+    modelCallError(ctx.requestId, deferKind, normalizeAndRedactText(rawError)),
   );
 }
