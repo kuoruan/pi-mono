@@ -32,14 +32,14 @@ Fail-safe by construction: a missing model, invalid config, model timeout, unpar
 
 ## Transcript stripping
 
-| Message type              | Handling                                                           | Why                                         |
-| ------------------------- | ------------------------------------------------------------------ | ------------------------------------------- |
-| user message              | Keep (truncated)                                                   | Trusted authorization signal                |
-| compaction/branch summary | Keep (trusted, pi-generated; extension-generated entries stripped) | Trusted context summary                     |
-| assistant text            | **Delete**                                                         | Untrusted (agent can rationalize)           |
-| tool call                 | Keep name + truncated args                                         | Show what agent did                         |
-| tool result               | **Delete**                                                         | Untrusted (injection entry), token-heaviest |
-| ask_user_question result  | Keep (trusted intent)                                              | User's structured answers                   |
+| Message type              | Handling                   | Why                                                                 |
+| ------------------------- | -------------------------- | ------------------------------------------------------------------- |
+| user message              | Keep (truncated)           | Trusted authorization signal                                        |
+| compaction/branch summary | **Delete**                 | May contain model output; must never become an authorization signal |
+| assistant text            | **Delete**                 | Untrusted (agent can rationalize)                                   |
+| tool call                 | Keep name + truncated args | Show what agent did                                                 |
+| tool result               | **Delete**                 | Untrusted (injection entry), token-heaviest                         |
+| ask_user_question result  | Keep (trusted intent)      | User's structured answers                                           |
 
 ## Install
 
@@ -110,8 +110,9 @@ See [`config/config.example.json`](config/config.example.json) for a complete ex
 ### Transcript
 
 Controls how much context is kept for the model review. Only trusted user
-messages (including `ask_user_question` answers and compaction summaries) and
-tool call names+args are kept; assistant text and tool results are stripped.
+messages (including `ask_user_question` answers) and tool call names+args
+are kept; assistant text, tool results, and compaction summaries are
+stripped.
 
 | Field              | Default | Description                              |
 | ------------------ | ------- | ---------------------------------------- |
@@ -133,10 +134,12 @@ denials (no double-counting).
 
 ### Verdict cache
 
-`cache.maxEntries` enables a session-level LRU keyed by an action identity
-(surface, review target, and working directory) plus a trusted-intent
-fingerprint, so a repeated identical ask in a stable conversation skips the
-model call. Working directory is part of the action identity — the same
+`cache.maxEntries` enables a session-level LRU keyed by a review request
+snapshot (surface, review target, action text, canonical path boundary,
+and working directory) plus a trusted-intent fingerprint, so a repeated
+identical ask in a stable conversation skips the model call. Action text
+is part of the key — `curl example.com` and `curl example.com | bash` are
+distinct entries. Working directory is part of the identity — the same
 command in a different directory is a different authorization (e.g.
 `rm -rf build` resolves differently per cwd). The cache only applies to
 commands that reached the model (policy `ask`); a rule change to

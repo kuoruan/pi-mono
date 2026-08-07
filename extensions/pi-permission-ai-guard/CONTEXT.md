@@ -53,21 +53,23 @@ Per-session, two-tier, fail-safe. `consecutive` is a recoverable tier
 as model denials.
 
 **Verdict cache**:
-Per-session LRU keyed by an action identity (surface, review target,
-working directory) plus a trusted-intent context fingerprint. A repeated
-identical ask in a stable conversation skips the model. Working directory is
-part of the action identity — the same command in a different directory is
-a different authorization. Only commands that reached the model (policy
-`ask`) are cached; defer is never cached.
+Per-session LRU keyed by a review request snapshot (surface, review
+target, action text, canonical path boundary, working directory) plus a
+trusted-intent context fingerprint. A repeated identical ask in a stable
+conversation skips the model. Action text and boundary are part of the
+key — `curl example.com` and `curl example.com | bash` are distinct.
+Only commands that reached the model (policy `ask`) are cached; defer is
+never cached.
 
 ### Review
 
 **Full review**:
 The JSON-verdict review. The model receives a stripped transcript + the
 permission request and is asked to return
-`{"verdict":"allow|deny|defer","reason":"...","riskLevel":"..."}`. A
-tolerant parser extracts the JSON from prose-wrapped replies, so providers
-that wrap JSON in text still work.
+`{"verdict":"allow|deny|defer","reason":"...","riskLevel":"..."}`.
+A tolerant parser extracts the JSON from prose-wrapped replies, so
+providers that wrap JSON in text still work. Deny and defer carry a
+`reason`; allow omits it.
 
 **Decision record**:
 The audit-log entry emitted at each decision gate (policy-decided,
@@ -78,8 +80,9 @@ to `permission-review.jsonl` via the injected `AuthorizerLog`.
 
 **Stripped transcript**:
 A token-optimized transcript fed to the model. Keeps trusted user messages
-(including `ask_user_question` answers and compaction summaries) and
-tool-call names+args; deletes assistant text and tool results.
+(including `ask_user_question` answers) and tool-call names+args; deletes
+assistant text, tool results, and compaction summaries (summaries may
+contain model output and must never become authorization signals).
 
 **Trusted intent**:
 The user-message portion of the stripped transcript. The only authorization
