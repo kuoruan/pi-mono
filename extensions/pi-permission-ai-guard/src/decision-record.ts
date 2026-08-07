@@ -148,7 +148,7 @@ export const DecisionRecord = {
       policyState: policy.state,
       policyOrigin: policy.origin,
       matchedPattern: policy.matchedPattern,
-      deferReason: `policy-${policy.state}`,
+      deferKind: `policy-${policy.state}`,
     };
   },
 
@@ -166,7 +166,7 @@ export const DecisionRecord = {
       modelCalled: false,
       verdict: cbVerdict,
       reason: cbVerdict === "deny" ? BREAKER_DENY_REASON : undefined,
-      deferReason: cbVerdict === "defer" ? "circuit-breaker" : null,
+      deferKind: cbVerdict === "defer" ? "circuit-breaker" : null,
     };
   },
 
@@ -184,7 +184,7 @@ export const DecisionRecord = {
       modelCalled: false,
       verdict: "defer",
       modelId,
-      deferReason: "model-unresolved",
+      deferKind: "model-unresolved",
     };
   },
 
@@ -203,7 +203,7 @@ export const DecisionRecord = {
       modelCalled: false,
       verdict: "defer",
       modelId,
-      deferReason: "auth-failed",
+      deferKind: "auth-failed",
       error,
     };
   },
@@ -251,12 +251,14 @@ export const DecisionRecord = {
       latencyMs: reviewOutcome.latencyMs,
       strippedCount,
       verdict: reviewOutcome.verdict.kind,
-      // Persist the sanitized deny reason so audit readers can see why a
-      // command was denied without re-running the review. Only deny carries
-      // a reason (verdict.ts:119 already normalized and redacted it);
-      // allow/defer get undefined, which JSON.stringify omits.
-      reason: reviewOutcome.verdict.kind === "deny" ? reviewOutcome.verdict.reason : undefined,
-      deferReason: reviewOutcome.deferReason ?? null,
+      // Persist the bounded, sanitized model explanation for deny or defer.
+      // A defer's classification remains in `deferKind`; `reason` explains
+      // what the model found unclear for audit readers.
+      reason:
+        reviewOutcome.verdict.kind === "deny"
+          ? reviewOutcome.verdict.reason
+          : reviewOutcome.deferReason,
+      deferKind: reviewOutcome.deferKind ?? null,
       riskLevel: reviewOutcome.riskLevel ?? null,
       // rawReply distinguishes three states so audit readers can tell them apart:
       //  - defer with a reply (no-json / invalid-verdict-value / model-defer):

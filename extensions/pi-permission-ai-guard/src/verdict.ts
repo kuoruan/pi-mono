@@ -17,7 +17,9 @@ export interface ReviewOutcome {
   /** The verdict (allow / deny / defer). */
   verdict: AuthorizerVerdict;
   /** Why the call deferred, when verdict is defer. */
-  deferReason?: ModelCallDeferReason;
+  deferKind?: ModelCallDeferReason;
+  /** Model explanation for a defer verdict, retained for audit logging. */
+  deferReason?: string;
   /** Model call latency in milliseconds. */
   latencyMs: number;
   /** Raw model reply (for debug logging). */
@@ -83,6 +85,18 @@ function safeStringify(value: unknown): string {
 }
 
 /**
+ * Normalize a model-provided explanation for the permission UI or audit log.
+ *
+ * @param value - Model-provided reason value.
+ * @returns A safe explanation, or undefined when it has no text content.
+ */
+function normalizeReason(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const reason = normalizeAndRedactText(value);
+  return reason || undefined;
+}
+
+/**
  * Parse a verdict object (extracted from the model's JSON text reply) into a
  * ReviewOutcome. Anything other than a clean verdict defers (fail-safe).
  *
@@ -100,7 +114,7 @@ export function parseVerdictObject(
   if (typeof verdict !== "string" || !VERDICT_VALUES.has(verdict as VerdictKind)) {
     return {
       verdict: { kind: "defer" },
-      deferReason: "invalid-verdict-value",
+      deferKind: "invalid-verdict-value",
       latencyMs,
       rawReply: raw,
     };
@@ -109,7 +123,8 @@ export function parseVerdictObject(
   if (verdict === "defer") {
     return {
       verdict: { kind: "defer" },
-      deferReason: "model-defer",
+      deferKind: "model-defer",
+      deferReason: normalizeReason(args.reason),
       latencyMs,
       riskLevel,
       rawReply: raw,
@@ -125,8 +140,7 @@ export function parseVerdictObject(
     // trusted — it is not adversarial. If that assumption ever breaks (e.g.
     // untrusted reviewer, cross-tenant reviewer), semantic filtering would
     // be needed to prevent prompt-injection via the reason text.
-    const rawReason = typeof args.reason === "string" ? args.reason : "";
-    const reason = normalizeAndRedactText(rawReason) || GENERIC_DENY_REASON;
+    const reason = normalizeReason(args.reason) ?? GENERIC_DENY_REASON;
     return { verdict: { kind: "deny", reason }, latencyMs, riskLevel, rawReply: raw };
   }
   return { verdict: { kind: "allow" }, latencyMs, riskLevel, rawReply: raw };
@@ -150,7 +164,7 @@ export function parseTextFallback(text: string, latencyMs: number): ReviewOutcom
   if (isObjectRecord(parsed)) {
     return parseVerdictObject(parsed, latencyMs);
   }
-  return { verdict: { kind: "defer" }, deferReason: "no-json", latencyMs, rawReply: text };
+  return { verdict: { kind: "defer" }, deferKind: "no-json", latencyMs, rawReply: text };
 }
 
 /**

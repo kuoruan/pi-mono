@@ -139,7 +139,7 @@ export async function reviewModel(
   if (!result.ok) {
     return {
       verdict: { kind: "defer" },
-      deferReason: result.reason,
+      deferKind: result.reason,
       latencyMs: result.latencyMs,
     };
   }
@@ -179,7 +179,7 @@ export async function reviewModel(
 
   return {
     verdict: { kind: "defer" },
-    deferReason: isTimeout ? "timeout" : "empty-reply",
+    deferKind: isTimeout ? "timeout" : "empty-reply",
     latencyMs: result.latencyMs,
   };
 }

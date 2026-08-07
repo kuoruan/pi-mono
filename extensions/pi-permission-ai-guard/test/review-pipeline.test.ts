@@ -346,7 +346,7 @@ describe("createReviewPipeline — verdicts", () => {
   });
 
   it("defers when model returns empty content, logs diagnostic event", async () => {
-    // Empty content → reviewModel returns a defer with deferReason
+    // Empty content → reviewModel returns a defer with deferKind
     // "empty-reply". A diagnostic event (stopReason/contentTypes) is logged
     // via MODEL_REPLY_EVENT so the operator can investigate the cause.
     const debugCalls: { event: string }[] = [];

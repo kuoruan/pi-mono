@@ -121,7 +121,7 @@ describe("reviewModel", () => {
     const ctx = makeContext(completeSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("empty-reply");
+    expect(result.deferKind).toBe("empty-reply");
   });
 
   it("classifies abort-resolved empty reply as timeout, not empty-reply", async () => {
@@ -132,14 +132,14 @@ describe("reviewModel", () => {
     const ctx = makeContext(completeSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("timeout");
+    expect(result.deferKind).toBe("timeout");
   });
 
   it("defers on timeout", async () => {
     const ctx = makeContext(timeoutCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 50);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("timeout");
+    expect(result.deferKind).toBe("timeout");
   });
 
   it("emits a model_call_error debug record on model call failure", async () => {
@@ -151,7 +151,7 @@ describe("reviewModel", () => {
     const ctx = makeContext(errorCompleteSimple, { log, requestId: "req-42" });
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("call-failed");
+    expect(result.deferKind).toBe("call-failed");
     const failure = debugCalls.find((c) => c.event === MODEL_CALL_ERROR_EVENT);
     expect(failure).toBeDefined();
     expect(failure!.data.requestId).toBe("req-42");
@@ -167,7 +167,7 @@ describe("reviewModel", () => {
     const ctx = makeContext(nonErrorCompleteSimple, { log });
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("call-failed");
+    expect(result.deferKind).toBe("call-failed");
     const failure = debugCalls.find((c) => c.event === MODEL_CALL_ERROR_EVENT);
     expect(failure).toBeDefined();
     expect(failure!.data.error).toBe("plain string error");

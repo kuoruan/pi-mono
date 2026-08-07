@@ -32,19 +32,49 @@ describe("parseVerdictObject", () => {
   it("parses defer verdict", () => {
     const result = parseVerdictObject({ verdict: "defer" }, 100);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("model-defer");
+    expect(result.deferKind).toBe("model-defer");
+  });
+
+  it("retains a defer reason for audit logging", () => {
+    const result = parseVerdictObject(
+      { verdict: "defer", reason: "The action target is not visible." },
+      100,
+    );
+    expect(result.deferReason).toBe("The action target is not visible.");
+  });
+
+  it("omits defer reason when empty, whitespace, or non-string", () => {
+    const empty = parseVerdictObject({ verdict: "defer", reason: "" }, 100);
+    expect(empty.deferReason).toBeUndefined();
+
+    const whitespace = parseVerdictObject({ verdict: "defer", reason: "   " }, 100);
+    expect(whitespace.deferReason).toBeUndefined();
+
+    const nonString = parseVerdictObject({ verdict: "defer", reason: null }, 100);
+    expect(nonString.deferReason).toBeUndefined();
+
+    const missing = parseVerdictObject({ verdict: "defer" }, 100);
+    expect(missing.deferReason).toBeUndefined();
+  });
+
+  it("preserves complete model explanations for deny and defer", () => {
+    const longReason = "x".repeat(201);
+    const deny = parseVerdictObject({ verdict: "deny", reason: longReason }, 100);
+    const defer = parseVerdictObject({ verdict: "defer", reason: longReason }, 100);
+    expect(deny.verdict).toEqual({ kind: "deny", reason: longReason });
+    expect(defer.deferReason).toBe(longReason);
   });
 
   it("defers on unknown verdict value", () => {
     const result = parseVerdictObject({ verdict: "maybe" }, 100);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("invalid-verdict-value");
+    expect(result.deferKind).toBe("invalid-verdict-value");
   });
 
   it("handles missing verdict field", () => {
     const result = parseVerdictObject({ reason: "no verdict" }, 100);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("invalid-verdict-value");
+    expect(result.deferKind).toBe("invalid-verdict-value");
   });
 
   it("parses riskLevel", () => {
@@ -74,7 +104,7 @@ describe("parseTextFallback", () => {
   it("defers on non-JSON text", () => {
     const result = parseTextFallback("I cannot decide", 100);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("no-json");
+    expect(result.deferKind).toBe("no-json");
   });
 
   it("defers on invalid JSON verdict", () => {
@@ -87,7 +117,7 @@ describe("parseTextFallback", () => {
     const text = "{ broken json, no closing";
     const result = parseTextFallback(text, 100);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("no-json");
+    expect(result.deferKind).toBe("no-json");
     expect(result.rawReply).toBe(text);
   });
 
@@ -97,7 +127,7 @@ describe("parseTextFallback", () => {
     const text = "{verdict: allow}";
     const result = parseTextFallback(text, 100);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("no-json");
+    expect(result.deferKind).toBe("no-json");
   });
 
   it("parses JSON with raw control chars in strings (parseJsonWithRepair)", () => {
@@ -112,7 +142,7 @@ describe("parseTextFallback", () => {
   it("defers on text without JSON braces", () => {
     const result = parseTextFallback("no json here", 100);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("no-json");
+    expect(result.deferKind).toBe("no-json");
   });
 
   it("parses embedded JSON with surrounding text", () => {
@@ -126,7 +156,7 @@ describe("parseTextFallback", () => {
     // but test the edge case of an empty object.
     const result = parseVerdictObject({}, 100);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("invalid-verdict-value");
+    expect(result.deferKind).toBe("invalid-verdict-value");
   });
 });
 
@@ -154,7 +184,7 @@ describe("parseTextFallback — balanced JSON extraction", () => {
     const text = '{"verdict":"allow"'; // no closing brace
     const result = parseTextFallback(text, 100);
     expect(result.verdict).toEqual({ kind: "defer" });
-    expect(result.deferReason).toBe("no-json");
+    expect(result.deferKind).toBe("no-json");
   });
 
   it("extracts JSON after string-internal braces", () => {
