@@ -363,7 +363,7 @@ describe("createAiGuardExtension lifecycle", () => {
     warnSpy.mockRestore();
   });
 
-  it("downgrades 'already registered' to debug (subagent re-registration)", () => {
+  it("silently skips 'already registered' (subagent re-registration)", () => {
     const pi = makeMockPi();
     const { createPipeline } = makeStubPipeline();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -379,11 +379,9 @@ describe("createAiGuardExtension lifecycle", () => {
 
     pi.fire("session_start", {}, makeSessionCtx());
 
-    // Benign duplicate (subagent) → debug, not warn.
-    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("Failed to register"));
-    expect(debugSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Authorizer link already registered"),
-    );
+    // Benign duplicate (subagent) → silently skipped, no log output.
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(debugSpy).not.toHaveBeenCalled();
 
     warnSpy.mockRestore();
     debugSpy.mockRestore();

@@ -25,7 +25,7 @@ import {
 
 import { type LoadConfigResult, loadAiGuardConfig } from "./config-loader.ts";
 import { LINK_NAME } from "./config-schema.ts";
-import { debug, warn } from "./logger.ts";
+import { warn } from "./logger.ts";
 import {
   type CompleteSimpleFn,
   type ModelRegistryLike,
@@ -150,9 +150,14 @@ export function createAiGuardExtension(
       // `An authorizer is already registered for '<name>'.` — see
       // AuthorizerRegistry.register in @gotgenes/pi-permission-system.
       if (isDuplicateAuthorizerError(e, LINK_NAME)) {
-        debug(
-          `Authorizer link already registered (likely subagent): ${e instanceof Error ? e.message : String(e)}`,
-        );
+        // Benign: every in-process subagent startup re-registers the link
+        // name the parent already owns. The child reuses the parent's
+        // authorizer, so this is a no-op. Silently skip — no log output,
+        // since this fires per-subagent and carries no actionable info.
+        // Stale-registration failures (/reload dispose glitch) look
+        // identical and are rare; if one occurs, the missing-authorizer
+        // symptom (all asks defer to the prompt) is the diagnostic signal.
+        return;
       } else {
         warn(`Failed to register authorizer: ${e instanceof Error ? e.message : String(e)}`);
       }
