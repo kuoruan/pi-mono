@@ -27,7 +27,7 @@ A pnpm monorepo for PI Agent extension packages.
 
 | Tool                | Role                                                                    | Config                                              |
 | ------------------- | ----------------------------------------------------------------------- | --------------------------------------------------- |
-| pnpm 10             | Workspace + dependency management                                       | `pnpm-workspace.yaml`, `packageManager` field       |
+| pnpm 11             | Workspace + dependency management                                       | `pnpm-workspace.yaml`, `packageManager` field       |
 | TypeScript 7        | Type-checking (per-package `tsconfig.json`, extends `@tsconfig/node22`) | `catalog:` version                                  |
 | oxlint              | Linting                                                                 | `.oxlintrc.json`                                    |
 | oxfmt               | Code formatting                                                         | `.oxfmtrc.json`                                     |
