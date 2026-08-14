@@ -92,12 +92,7 @@ export function createCompleteSimple(
  * Resolved auth fields needed to make a model call. Extracted from
  * {@link ResolvedRequestAuth} after the pipeline's auth gate has passed.
  */
-export interface ModelCallAuth {
-  /** The API key for the model provider. */
-  apiKey: string | undefined;
-  /** Extra HTTP headers for the model call. */
-  headers: Record<string, string> | undefined;
-}
+export type ModelCallAuth = Pick<SimpleStreamOptions, "apiKey" | "headers">;
 
 /**
  * Everything a model review call needs, captured once. The pipeline builds

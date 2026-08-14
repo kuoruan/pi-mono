@@ -9,6 +9,6 @@ allowBuilds:
 catalog:
   "@tsconfig/node22": ^22.0.5
   "@types/node": ^22.20.1
-  memfs: ^4.66.1
+  memfs: ^4.68.1
   typescript: ^7.0.2
   vitest: ^4.1.10
