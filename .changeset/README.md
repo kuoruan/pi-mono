@@ -61,6 +61,8 @@ Create a changeset (`pnpm changeset`) when a change modifies the **public releas
 
 Write the change summary as a **user-facing English sentence** describing what changed for consumers, not an implementation detail. Example: `Add cache size config option for the AI guard.` — not `refactored VerdictCache constructor`.
 
+Keep the summary to a **single line/paragraph with no hard line breaks**. Changesets render verbatim into `CHANGELOG.md`, and wrapped multi-line summaries balloon every published entry. Prefer one terse sentence; link a PR or commit for detail. Do not paste bullet lists or multi-paragraph explanations into a changeset.
+
 ### When a changeset is NOT required
 
 Do not create a changeset for changes that don't affect a published package's public surface:
