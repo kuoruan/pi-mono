@@ -135,20 +135,24 @@ denials (no double-counting).
 ### Verdict cache
 
 `cache.maxEntries` enables a session-level LRU keyed by a review request
-snapshot (surface, review target, action text, canonical path boundary,
-and working directory) plus a trusted-intent fingerprint, so a repeated
-identical ask in a stable conversation skips the model call. Action text
-is part of the key — `curl example.com` and `curl example.com | bash` are
-distinct entries. Working directory is part of the identity — the same
-command in a different directory is a different authorization (e.g.
-`rm -rf build` resolves differently per cwd). The cache only applies to
-commands that reached the model (policy `ask`); a rule change to
-`allow`/`deny` defers before the cache, so stale entries can't override
-rule changes. **Caveat:** the context hash is built from trusted user
-messages, so conversations that interject frequently invalidate entries
-often — the cache benefits "high-frequency repeated commands, low-chatter"
-sessions most. Cache hits carry a `gate: "cache-hit"` log entry for
-debugging.
+snapshot (a decision-relevant projection of the ask — kind, review target,
+full command, flagged elements, command context, executed unit, canonical
+boundary, working directory, and the tool-input/read-path/resolved-alias
+slots) plus a trusted-intent fingerprint, so a repeated identical ask in a
+stable conversation skips the model call. `curl example.com` and `curl
+example.com | bash` are distinct entries (different `executed unit`).
+Working directory is part of the identity — the same command in a
+different directory is a different authorization (e.g. `rm -rf build` resolves
+differently per cwd). The gate label `surface` is **not** part of the key —
+it is an administrative label the model is told to ignore, so two asks
+sharing kind + content but differing only in surface reach the same verdict
+and intentionally collide. The cache only applies to commands that reached
+the model (policy `ask`); a rule change to `allow`/`deny` defers before the
+cache, so stale entries can't override rule changes. **Caveat:** the context
+hash is built from trusted user messages, so conversations that interject
+frequently invalidate entries often — the cache benefits "high-frequency
+repeated commands, low-chatter" sessions most. Cache hits carry a `gate:
+"cache-hit"` log entry for debugging.
 
 ## Provider compatibility
 
