@@ -17,8 +17,6 @@
  * 3. Permission request (the exact ask being reviewed)
  */
 
-import type { PromptRequestFacts } from "@gotgenes/pi-permission-system";
-
 import type { ReviewRequestContext } from "./review-request.ts";
 import type { StrippedTranscript } from "./transcript-stripper.ts";
 import { encodeActionTextForPrompt, normalizeAndRedactText } from "./utils.ts";
@@ -252,7 +250,7 @@ function buildPermissionRequestSection(request: ReviewRequestContext): string {
     lines.push(`- matched rule: ${normalizeAndRedactText(ask.request.matchedPattern)}`);
   }
   if (ask.request.commandContext) {
-    lines.push(`- command context: ${describeCommandContext(ask.request.commandContext)}`);
+    lines.push(`- command context: ${ask.request.commandContext.replace(/_/g, " ")}`);
   }
 
   if (ask.canonicalBoundary) {
@@ -269,29 +267,6 @@ function buildPermissionRequestSection(request: ReviewRequestContext): string {
   lines.push(`- working directory: ${ask.workingDirectory}`);
 
   return lines.join("\n");
-}
-
-/**
- * Human-readable label for a nested bash execution context.
- *
- * @param context - The bash command context (null for a top-level command).
- * @returns The human-readable label.
- */
-function describeCommandContext(
-  context: NonNullable<PromptRequestFacts["commandContext"]>,
-): string {
-  switch (context) {
-    case "command_substitution":
-      return "command substitution";
-    case "process_substitution":
-      return "process substitution";
-    case "subshell":
-      return "subshell";
-    case null:
-      return "top-level";
-    default:
-      return String(context);
-  }
 }
 
 /**
