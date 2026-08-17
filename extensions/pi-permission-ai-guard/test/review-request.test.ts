@@ -1,16 +1,46 @@
-import type { PromptPermissionDetails } from "@gotgenes/pi-permission-system";
+import type { PromptPayload, PromptPermissionDetails } from "@gotgenes/pi-permission-system";
 import { describe, expect, it } from "vitest";
 
 import { buildReviewRequestContext, reviewRequestCacheMaterial } from "#src/review-request.ts";
 
+/**
+ * Minimal bash PromptPayload for a fixture (pi-permission-system 26.0+).
+ *
+ * @param sub - The policy-selected sub-command (rides in `request.value`).
+ * @param full - Optional full command; when it differs from `sub`, a
+ *   `full command` evidence entry is added, matching the 26.0 runtime shape.
+ * @returns A minimal `PromptPayload` with `kind: "bash"`.
+ */
+function bashPayload(sub: string, full?: string): PromptPayload {
+  const evidence =
+    full && full !== sub ? [{ label: "full command", text: full, detail: null }] : [];
+  return {
+    kind: "bash",
+    request: {
+      requester: { agentName: null, forwarded: false, sessionId: null },
+      surface: "bash",
+      toolName: null,
+      invokedToolName: null,
+      value: sub,
+      matchedPattern: null,
+      commandContext: null,
+      executedUnit: null,
+    },
+    evidence,
+    annotations: [],
+  } as PromptPayload;
+}
+
 function makeDetails(overrides: Record<string, unknown> = {}): PromptPermissionDetails {
+  const value = typeof overrides.value === "string" ? overrides.value : "python3";
   return {
     requestId: "test-1",
     source: "tool_call",
     agentName: null,
     surface: "bash",
-    value: "python3",
-    command: "python3",
+    value,
+    command: value,
+    payload: bashPayload(value),
     message: "Run command",
     ...overrides,
   } as unknown as PromptPermissionDetails;
@@ -64,7 +94,7 @@ describe("buildReviewRequestContext", () => {
   it("keeps an arbitrarily long bash command intact", () => {
     const command = "x".repeat(8_001);
     const request = buildReviewRequestContext(
-      makeDetails({ command }),
+      makeDetails({ value: command, command }),
       "bash",
       "python3",
       "/project",
@@ -74,13 +104,13 @@ describe("buildReviewRequestContext", () => {
 
   it("makes action and boundary changes cache-distinct", () => {
     const base = buildReviewRequestContext(
-      makeDetails({ command: "git status" }),
+      makeDetails({ value: "git status", command: "git status" }),
       "bash",
       "git",
       "/p",
     );
     const differentAction = buildReviewRequestContext(
-      makeDetails({ command: "git clean -fd" }),
+      makeDetails({ value: "git clean -fd", command: "git clean -fd" }),
       "bash",
       "git",
       "/p",

@@ -29,6 +29,8 @@ import type {
   AuthorizerLog,
   AuthorizerVerdict,
   PermissionQuery,
+  PromptPayload,
+  PromptPermissionDetails,
 } from "@gotgenes/pi-permission-system";
 
 import { type AiGuardConfig, configSchema } from "../src/config-schema.ts";
@@ -279,15 +281,40 @@ function buildHarness(
   return { authorize, log };
 }
 
-function makeDetails(command: string, surface = "bash") {
+function makeDetails(command: string, surface = "bash"): PromptPermissionDetails {
   return {
     requestId: `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     source: "tool_call" as const,
     agentName: null,
-    message: `Execute ${command}`,
+    payload: bashPayload(command, surface),
     surface,
     value: command,
   };
+}
+
+/**
+ * Minimal PromptPayload for a fixture (pi-permission-system 26.0+).
+ *
+ * @param value - The decision-relevant command.
+ * @param surface - The gate surface; defaults to `"bash"`.
+ * @returns A minimal `PromptPayload` (`kind: "bash"` or `"tool"`).
+ */
+function bashPayload(value: string, surface = "bash"): PromptPayload {
+  return {
+    kind: surface === "bash" ? "bash" : "tool",
+    request: {
+      requester: { agentName: null, forwarded: false, sessionId: null },
+      surface,
+      toolName: null,
+      invokedToolName: null,
+      value,
+      matchedPattern: null,
+      commandContext: null,
+      executedUnit: null,
+    },
+    evidence: [],
+    annotations: [],
+  } as PromptPayload;
 }
 
 async function runCase(

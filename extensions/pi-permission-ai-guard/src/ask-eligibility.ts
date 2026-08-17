@@ -12,7 +12,7 @@
  * are all private implementation behind that one return.
  */
 
-import type { PromptPermissionDetails } from "@gotgenes/pi-permission-system";
+import type { PromptPermissionDetails, PromptPayload } from "@gotgenes/pi-permission-system";
 
 /** A resolved review target: the surface and value being authorized. */
 export interface ReviewTarget {
@@ -20,6 +20,41 @@ export interface ReviewTarget {
   surface: string;
   /** The value being authorized (command, tool name, path, etc.). */
   target: string;
+}
+
+/**
+ * The `payload` field landed in pi-permission-system 26.0.0, superseding the
+ * prose `message` string ai-guard used to parse for bash full-command context.
+ * ai-guard keeps a peer range (`>=20.10.0`) that spans both, so `buildActionText`
+ * reads `payload` when the host version provides it and falls back to the
+ * legacy `message` framing otherwise. The two shapes are an exclusive union:
+ * a 26.0+ ask carries a structured `payload`; a pre-26.0 ask carries a
+ * `message`. {@link hasStructuredPayload} narrows which one is in hand.
+ */
+interface StructuredDetails {
+  payload: PromptPayload;
+  message?: never;
+}
+interface LegacyDetails {
+  payload?: never;
+  message?: string;
+}
+export type StructuredOrLegacyDetails = StructuredDetails | LegacyDetails;
+
+/**
+ * Whether `details` carries pi-permission-system 26.0+’s structured `payload`.
+ *
+ * The 26.0 contract is “payload is present and complete”, so this asserts
+ * that one positive fact rather than inferring a legacy shape (which would
+ * misclassify a malformed object lacking both fields). Callers treat the
+ * `false` branch as “fall back to the legacy `message` framing”.
+ *
+ * @param details - The ask details, widened to the cross-version union.
+ * @returns True when `details` is the {@link StructuredDetails} arm.
+ */
+function hasStructuredPayload(details: StructuredOrLegacyDetails): details is StructuredDetails {
+  const payload = details.payload;
+  return payload !== undefined && payload !== null && typeof payload.request?.value === "string";
 }
 
 /**
@@ -99,6 +134,9 @@ const BASH_PROMPT_SUFFIX = "'). Allow this command?";
 /** Prefix introducing the full command inside a bash prompt message. */
 const FULL_COMMAND_PREFIX = "full command: '";
 
+/** Evidence label that carries the full command in a 26.0+ structured payload. */
+const FULL_COMMAND_EVIDENCE_LABEL = "full command";
+
 /**
  * Build the action-text supplement for the model prompt, if the surface has
  * one.
@@ -137,8 +175,23 @@ export function buildActionText(
   details: PromptPermissionDetails,
   surface: string,
 ): string | undefined {
+  // Widen to the cross-version union; see StructuredOrLegacyDetails above.
+  const compat = details as StructuredOrLegacyDetails;
   if (surface === "bash") {
-    const msg = typeof details.message === "string" ? details.message : "";
+    // pi-permission-system 26.0+ carries the structured payload. The
+    // policy-selected sub-command is `payload.request.value` (=
+    // `details.command`); the full command, present only when it differs
+    // from the sub, rides in a `full command` evidence entry.
+    if (hasStructuredPayload(compat)) {
+      const sub = typeof details.command === "string" ? details.command : "";
+      const full = compat.payload.evidence.find(
+        (e) => e.label === FULL_COMMAND_EVIDENCE_LABEL,
+      )?.text;
+      return full && full !== sub ? full : sub || undefined;
+    }
+    // Legacy (<26.0): parse the `message` prose for a `full command: '…'`
+    // segment, present when the full command differs from the sub-command.
+    const msg = typeof compat.message === "string" ? compat.message : "";
     // Require the suffix at the END of the message — the bash framing is
     // always terminal (`formatAskPrompt` appends nothing after it). A
     // non-bash message that embeds `full command:` mid-string won’t match.
