@@ -60,7 +60,7 @@
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.81.0",
     "@earendil-works/pi-coding-agent": ">=0.81.0",
-    "@gotgenes/pi-permission-system": ">=20.10.0"
+    "@gotgenes/pi-permission-system": "^26.0.0"
   },
   "engines": {
     "node": ">=22"

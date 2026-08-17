@@ -1,21 +1,15 @@
 /**
  * ReviewPipeline: the deep module behind the AI Guard chain link.
  *
- * Replaces the 7-getter `AskReviewerDeps` dependency bag. Session state is
- * captured by closure at construction time — no lazy getters, no test-only
- * micro-seams. The interface is `Authorizer["authorize"]` (the upstream
- * seam); `ReviewPipelineDeps` is a construction parameter, not the interface.
- *
- * The 10-step decision flow (eligibility → policy gate → circuit breaker →
- * model resolve → auth → transcript strip → cache lookup → prompt build →
- * model review → record) is the module's private implementation. Every
- * failure path defers.
+ * The interface is `Authorizer["authorize"]` (the upstream seam);
+ * `ReviewPipelineDeps` is a construction parameter, not the interface. Session
+ * state is captured by closure at construction time.
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { Authorizer } from "@gotgenes/pi-permission-system";
 
-import { resolveReviewTarget } from "./ask-eligibility.ts";
+import { buildAskContext, resolveReviewTarget } from "./ask-eligibility.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
 import {
   BREAKER_DENY_REASON,
@@ -36,7 +30,7 @@ import {
   reviewModel,
 } from "./model-review.ts";
 import { buildReviewPrompt, buildReviewSystemPrompt } from "./prompt.ts";
-import { buildReviewRequestContext, reviewRequestCacheMaterial } from "./review-request.ts";
+import { reviewRequestCacheMaterial, type ReviewRequestContext } from "./review-request.ts";
 import type { CircuitBreaker, VerdictCache } from "./session-state.ts";
 import { type SessionManagerLike, stripTranscript } from "./transcript-stripper.ts";
 import { normalizeAndRedactText } from "./utils.ts";
@@ -63,27 +57,26 @@ export interface ReviewPipelineDeps {
 }
 
 /**
- * Build the AI Guard authorizer from resolved session state.
- *
- * The returned `authorize` function is the upstream `Authorizer["authorize"]`
- * seam — the only interface callers (extension.ts) and tests cross. The
- * 10-step pipeline is private to this closure.
+ * Build the AI Guard authorizer from resolved session state. The returned
+ * `authorize` function is the upstream `Authorizer["authorize"]` seam — the
+ * only interface callers (extension.ts) and tests cross.
  *
  * @param deps - The resolved session-state dependencies for the pipeline.
- * @returns The `authorize` function implementing the 10-step review pipeline.
+ * @returns The `authorize` function implementing the review pipeline.
  */
 export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["authorize"] {
   return async (details, query, log) => {
     const { config } = deps;
 
-    // 1-2. Resolve the review target (surface match + target extraction).
-    //    surface-unmatched is expected config behavior (silent defer);
-    //    no-target is an unexpected ask (logged, then defer).
+    // surface-unmatched is expected config behavior (silent defer); no-target
+    // is an unexpected ask (logged, then defer).
     const resolved = resolveReviewTarget(details, config);
     if ("reason" in resolved) {
       if (resolved.reason === "no-target") {
-        const surface = details.accessIntent?.surface ?? details.surface ?? undefined;
-        log.debug(SHORT_CIRCUIT_EVENT, shortCircuit(details.requestId, surface, "no-target"));
+        log.debug(
+          SHORT_CIRCUIT_EVENT,
+          shortCircuit(details.requestId, resolved.surface, "no-target"),
+        );
       }
       return { kind: "defer" };
     }
@@ -91,10 +84,11 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
 
     const { requestId } = details;
     const base = { requestId, surface, target };
-    const request = buildReviewRequestContext(details, surface, target, deps.cwd);
+    const ask = buildAskContext(details, deps.cwd);
+    const request: ReviewRequestContext = { ask, target };
 
-    // 3. Policy gate: defer when the deterministic engine already decided —
-    //    this link only adds value when the policy is undecided ("ask").
+    // Policy gate: defer when the deterministic engine already decided —
+    // this link only adds value when the policy is undecided ("ask").
     const policyResult = query.checkPermission(surface, target, details.agentName ?? undefined);
     if (policyResult.state === "allow" || policyResult.state === "deny") {
       log.review(
@@ -108,9 +102,9 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       return { kind: "defer" };
     }
 
-    // 4. Circuit breaker: a tripped breaker short-circuits without a model
-    //    call. Breaker trips are not recorded as model verdicts (no
-    //    recordVerdict) — only real model verdicts move the counters.
+    // Circuit breaker: a tripped breaker short-circuits without a model
+    // call. Breaker trips are not recorded as model verdicts (no
+    // recordVerdict) — only real model verdicts move the counters.
     if (deps.circuitBreaker.checkAndResetIfTripped(config.circuitBreaker)) {
       const verdict =
         config.circuitBreaker.verdict === "deny"
@@ -171,22 +165,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       log.review(DECISION_EVENT, DecisionRecord.cacheHit(base, lookup.verdict));
       return lookup.verdict;
     }
-    // Cache miss: record the miss reason for telemetry. Cache hits are
-    // already covered by the cache-hit decision record above — no duplicate
-    // debug event.
+    // Cache miss: record the miss reason for telemetry.
     log.debug(CACHE_LOOKUP_EVENT, cacheLookup(requestId, surface, lookup.missReason));
 
-    // 8. Build prompt (redaction happens inside buildReviewPrompt).
+    // Build prompt (redaction happens inside buildReviewPrompt).
     const systemPrompt = buildReviewSystemPrompt(config.instructions);
-    const userPrompt = buildReviewPrompt(transcript, {
-      surface: request.surface,
-      target: request.target,
-      actionText: request.actionText,
-      cwd: request.cwd,
-      canonicalBoundary: request.canonicalBoundary,
-    });
+    const userPrompt = buildReviewPrompt(transcript, request);
 
-    // 9. Model review.
+    // Model review.
     const callCtx: ModelCallContext = {
       model,
       completeSimple: deps.completeSimple,
@@ -206,8 +192,8 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome),
     );
 
-    // 10. Record the model verdict into the breaker counters and cache.
-    //     Defer isn't cached (cache hits and breaker trips short-circuited above).
+    // Record the model verdict into the breaker counters and cache.
+    // Defer isn't cached (cache hits and breaker trips short-circuited above).
     deps.circuitBreaker.recordVerdict(reviewOutcome.verdict.kind);
     if (reviewOutcome.verdict.kind !== "defer") {
       deps.verdictCache.store(
@@ -245,9 +231,8 @@ async function resolveAuth(
  * Fast deterministic hash to shorten long strings for cache/identity keys.
  *
  * Copied from pi-ai's internal `utils/hash.ts` (not re-exported from the
- * package root, so inlined here to avoid a private subpath import that could
- * break on upstream refactors). Two independent 32-bit Math.imul hashes
- * (cypherCB), finalized and combined as base36.
+ * package root). Two independent 32-bit Math.imul hashes (cypherCB),
+ * finalized and combined as base36.
  *
  * @param str - The string to hash.
  * @returns A short base36 hash of the input string.

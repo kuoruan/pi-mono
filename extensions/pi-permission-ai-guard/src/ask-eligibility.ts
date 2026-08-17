@@ -1,18 +1,28 @@
 /**
- * Ask eligibility & review-target resolution.
+ * Ask eligibility, review-target resolution, and structured ask projection.
  *
- * Decides whether a permission ask qualifies for AI review (the surface matches
- * the configured list) and, if so, what value to review (the review target).
- * Both concerns are pure functions of the ask details + config — no session
- * state, no model, no I/O — so they are testable directly through this seam.
+ * Three pure functions of (ask details + config) — no session state, no model,
+ * no I/O — testable directly through this seam:
  *
- * `resolveReviewTarget` is the deep interface: one call returns either the
- * resolved `{ surface, target }` or `null` (not eligible). The surface-match
- * glob logic, the exclude-priority rule, and the 6-field target fallback chain
- * are all private implementation behind that one return.
+ * - `resolveReviewTarget` — does the ask's surface match the configured list, and if so, what value
+ *   is being authorized?
+ * - `buildAskContext` — project the 26.0+ structured `payload` into a typed `AskContext` that the
+ *   prompt renderer and cache key both consume.
+ *
+ * The upstream `fact-vocabulary.ts` / `prompt-payload.ts` helpers live in `#src/`
+ * internal modules that are NOT re-exported from the package root, so equivalent
+ * projections are re-implemented here as private pure functions, mirroring the
+ * upstream sources so ai-guard's vocabulary cannot drift from the host's.
  */
 
-import type { PromptPermissionDetails, PromptPayload } from "@gotgenes/pi-permission-system";
+import type {
+  PromptAnnotation,
+  PromptEvidence,
+  PromptPayload,
+  PromptPayloadKind,
+  PromptPermissionDetails,
+  PromptRequestFacts,
+} from "@gotgenes/pi-permission-system";
 
 /** A resolved review target: the surface and value being authorized. */
 export interface ReviewTarget {
@@ -22,39 +32,64 @@ export interface ReviewTarget {
   target: string;
 }
 
-/**
- * The `payload` field landed in pi-permission-system 26.0.0, superseding the
- * prose `message` string ai-guard used to parse for bash full-command context.
- * ai-guard keeps a peer range (`>=20.10.0`) that spans both, so `buildActionText`
- * reads `payload` when the host version provides it and falls back to the
- * legacy `message` framing otherwise. The two shapes are an exclusive union:
- * a 26.0+ ask carries a structured `payload`; a pre-26.0 ask carries a
- * `message`. {@link hasStructuredPayload} narrows which one is in hand.
- */
-interface StructuredDetails {
-  payload: PromptPayload;
-  message?: never;
+/** The ask's surface is missing or not in the configured list (silent defer). */
+export interface SurfaceUnmatchedReason {
+  reason: "surface-unmatched";
 }
-interface LegacyDetails {
-  payload?: never;
-  message?: string;
+
+/** The surface matched but no review target could be extracted (logged defer). */
+export interface NoTargetReason {
+  reason: "no-target";
+  /** The resolved surface, so the caller need not recompute it for logging. */
+  surface: string | undefined;
 }
-export type StructuredOrLegacyDetails = StructuredDetails | LegacyDetails;
 
 /**
- * Whether `details` carries pi-permission-system 26.0+’s structured `payload`.
- *
- * The 26.0 contract is “payload is present and complete”, so this asserts
- * that one positive fact rather than inferring a legacy shape (which would
- * misclassify a malformed object lacking both fields). Callers treat the
- * `false` branch as “fall back to the legacy `message` framing”.
- *
- * @param details - The ask details, widened to the cross-version union.
- * @returns True when `details` is the {@link StructuredDetails} arm.
+ * The result of {@link resolveReviewTarget}: either the resolved
+ * `{ surface, target }`, or a tagged reason the ask did not qualify.
  */
-function hasStructuredPayload(details: StructuredOrLegacyDetails): details is StructuredDetails {
-  const payload = details.payload;
-  return payload !== undefined && payload !== null && typeof payload.request?.value === "string";
+export type ReviewTargetResolution = ReviewTarget | SurfaceUnmatchedReason | NoTargetReason;
+
+/**
+ * The structured projection of an ask that the prompt renderer and cache key
+ * both consume. `kind`, `request`, and `annotations` are listed flat so each
+ * is visible and the renderer reads them directly.
+ *
+ * Evidence is deliberately absent: it is pre-resolved into the named
+ * projection fields below rather than exposed raw. No `ask.*evidence*` access
+ * exists; the only exit for evidence is those named fields.
+ *
+ * Field presence is `kind`-dispatched (see {@link buildAskContext}); fields
+ * absent for a given `kind` are `undefined`, and the renderer and cache key
+ * treat `undefined` and the empty string uniformly as null.
+ */
+export interface AskContext {
+  /** The renderers' dispatch discriminant. */
+  readonly kind: PromptPayloadKind;
+  /** The ask's invariant core, reused verbatim from the upstream payload's `request`. */
+  readonly request: PromptRequestFacts;
+  /** Evidence `full command` text — the complete bash command (bash kinds only). */
+  readonly fullCommand?: string;
+  /**
+   * What the ask flags: for `bash_external_directory`, the escaped external
+   * paths; for every other kind, the `value` (or empty when `value` is empty).
+   */
+  readonly flaggedElements: readonly string[];
+  /** Evidence `input` text — the tool-input preview (tool kind). */
+  readonly toolInputPreview?: string;
+  /** Evidence `read path` text — the path a skill read reached its skill through. */
+  readonly readPath?: string;
+  /**
+   * Evidence `resolves to` text, or an `external path` entry's `detail` — the
+   * canonical alias of a flagged path.
+   */
+  readonly resolvedAlias?: string;
+  /** Canonical boundary from `details.accessIntent.boundaryValue` (path surfaces). */
+  readonly canonicalBoundary?: string;
+  /** The session working directory — the policy containment boundary. */
+  readonly workingDirectory: string;
+  /** Model-generated advisories (ADR 0011 §8); currently always empty (no annotator registered). */
+  readonly annotations: readonly PromptAnnotation[];
 }
 
 /**
@@ -63,31 +98,65 @@ function hasStructuredPayload(details: StructuredOrLegacyDetails): details is St
  * Returns `{ surface, target }` when the ask's surface matches the configured
  * `surfaces` list AND a non-empty target can be extracted. Otherwise returns
  * a tagged reason: `"surface-unmatched"` (surface missing or not configured)
- * or `"no-target"` (surface matched but no review target could be extracted).
- * The caller uses the reason to decide observability — surface-unmatched is
- * expected config behavior (silent), no-target is an unexpected ask (logged).
+ * is expected config behavior (silent); `"no-target"` (surface matched but
+ * no target extractable) is an unexpected ask (logged).
+ *
+ * Target extraction mirrors the 26.0 `payload.request.value` as the primary
+ * value, with the legacy `details` field fallback chain preserved as a
+ * fail-safe. The `"no-target"` reason stays reachable: a `forwarded`
+ * (degraded) ask whose `value` is `""` and whose fallback chain is entirely
+ * empty still yields `no-target` rather than a silent review of an empty
+ * string.
  *
  * @param details The permission ask details from the Authorizer chain.
  * @param config The surfaces list to match against (glob patterns).
  * @returns The resolved `{ surface, target }` when eligible, or a tagged reason
- *   (`surface-unmatched` / `no-target`) when not.
+ *   (`surface-unmatched` / `no-target`, carrying the resolved surface for logging)
+ *   when not.
  */
 export function resolveReviewTarget(
   details: PromptPermissionDetails,
   config: { surfaces: readonly string[] },
-): ReviewTarget | { reason: "surface-unmatched" } | { reason: "no-target" } {
+): ReviewTargetResolution {
   const surface = surfaceOf(details);
   if (!surface) return { reason: "surface-unmatched" };
   if (!matchSurface(config.surfaces, surface)) return { reason: "surface-unmatched" };
 
   const target = extractTarget(details);
-  if (!target) return { reason: "no-target" };
+  if (!target) return { reason: "no-target", surface };
 
   return { surface, target };
 }
 
 /**
- * Extract the surface, preferring the forwarded intent.
+ * Build the structured {@link AskContext} for an ask.
+ *
+ * Projects the 26.0+ `payload` into named, typed fields by `payload.kind`
+ * dispatch (the renderers' discriminant). Evidence is pre-parsed into named
+ * slots; the raw `evidence` array is never exposed. `surface` is a display
+ * field only.
+ *
+ * @param details - The permission ask details (the 26.0+ `payload` is read directly).
+ * @param cwd - The session working directory (policy containment boundary).
+ * @returns The structured {@link AskContext} with evidence pre-parsed into named fields.
+ */
+export function buildAskContext(details: PromptPermissionDetails, cwd: string): AskContext {
+  const payload = details.payload;
+  const boundaryValue = details.accessIntent?.boundaryValue;
+
+  return {
+    kind: payload.kind,
+    request: payload.request,
+    ...flaggedFields(payload),
+    canonicalBoundary:
+      typeof boundaryValue === "string" && boundaryValue ? boundaryValue : undefined,
+    workingDirectory: cwd,
+    annotations: payload.annotations,
+  };
+}
+
+/**
+ * Extract the display surface, preferring the forwarded intent.
  *
  * @param details - The permission ask details.
  * @returns The surface string, or undefined if none is present.
@@ -123,117 +192,21 @@ function matchSurface(configured: readonly string[], surface: string): boolean {
 }
 
 /**
- * Suffix that terminates a bash permission prompt message. Built by
- * `formatAskPrompt()` in pi-permission-system: the message always ends with
- * `... (full command: '...'). Allow this command?`. Checking that the message
- * *ends* with this suffix (not just contains it) prevents misparsing a
- * non-bash message that happens to embed the same framing.
- */
-const BASH_PROMPT_SUFFIX = "'). Allow this command?";
-
-/** Prefix introducing the full command inside a bash prompt message. */
-const FULL_COMMAND_PREFIX = "full command: '";
-
-/** Evidence label that carries the full command in a 26.0+ structured payload. */
-const FULL_COMMAND_EVIDENCE_LABEL = "full command";
-
-/**
- * Build the action-text supplement for the model prompt, if the surface has
- * one.
- *
- * `PromptPermissionDetails` carries the action to review across several
- * fields, but none is a clean, structured “full command” for every surface.
- * This function projects the right field into a single prompt-only string,
- * stripping the UI noise from `message` and avoiding the raw `message` as a
- * fallback.
- *
- * Surface dispatch:
- *
- * - **bash** — `details.message` embeds the full command inside `(full command: '...'). Allow this
- *   command?` when it differs from the policy-selected sub-command. Extract it by requiring the
- *   suffix at the _end_ of the message (so a non-bash message that happens to contain the framing
- *   is never misparsed). When `full command:` is absent (simple command where full === sub-command)
- *   or the message format changed, fall back to `details.command` (the sub-command). Never fall
- *   back to the raw `message`.
- * - **mcp** — `toolInputPreview` is always absent. Return `undefined`; the model receives the
- *   qualified target and decides whether that context is sufficient.
- * - **other surfaces (path tools, extension tools like `web_fetch`, etc.)** — `toolInputPreview` is
- *   populated by pi-permission-system’s `ToolPreviewFormatter` and carries the tool input (e.g.
- *   `input {"url":"…"}`). Return it when non-empty.
- *
- * This is **prompt-only** — it does not affect `checkPermission`, cache keys,
- * or `DecisionRecord`. The authoritative identity for those is `target`
- * (from {@link resolveReviewTarget}).
- *
- * @param details - The permission ask details.
- * @param surface - The resolved permission surface (matches the pipeline’s
- *   authoritative surface, from `accessIntent.surface ?? details.surface`).
- * @returns The action text for the prompt, or `undefined` when the surface
- *   has no supplement beyond `target`.
- */
-export function buildActionText(
-  details: PromptPermissionDetails,
-  surface: string,
-): string | undefined {
-  // Widen to the cross-version union; see StructuredOrLegacyDetails above.
-  const compat = details as StructuredOrLegacyDetails;
-  if (surface === "bash") {
-    // pi-permission-system 26.0+ carries the structured payload. The
-    // policy-selected sub-command is `payload.request.value` (=
-    // `details.command`); the full command, present only when it differs
-    // from the sub, rides in a `full command` evidence entry.
-    if (hasStructuredPayload(compat)) {
-      const sub = typeof details.command === "string" ? details.command : "";
-      const full = compat.payload.evidence.find(
-        (e) => e.label === FULL_COMMAND_EVIDENCE_LABEL,
-      )?.text;
-      return full && full !== sub ? full : sub || undefined;
-    }
-    // Legacy (<26.0): parse the `message` prose for a `full command: '…'`
-    // segment, present when the full command differs from the sub-command.
-    const msg = typeof compat.message === "string" ? compat.message : "";
-    // Require the suffix at the END of the message — the bash framing is
-    // always terminal (`formatAskPrompt` appends nothing after it). A
-    // non-bash message that embeds `full command:` mid-string won’t match.
-    if (msg.endsWith(BASH_PROMPT_SUFFIX)) {
-      const prefixStart = msg.indexOf(FULL_COMMAND_PREFIX);
-      if (prefixStart >= 0) {
-        const contentStart = prefixStart + FULL_COMMAND_PREFIX.length;
-        const contentEnd = msg.length - BASH_PROMPT_SUFFIX.length;
-        // Defense-in-depth: the prefix (`full command: '`) is not a substring
-        // of the suffix, so contentStart <= contentEnd always holds when both
-        // match. Guard against a future suffix change that breaks this.
-        if (contentStart < contentEnd) {
-          return msg.slice(contentStart, contentEnd);
-        }
-      }
-    }
-    // No `full command:` segment (simple command) or message format changed —
-    // fall back to the policy-selected sub-command. Never return raw message.
-    return typeof details.command === "string" && details.command ? details.command : undefined;
-  }
-
-  // Non-bash surfaces: use toolInputPreview when present. The upstream
-  // ToolPreviewFormatter populates it for all non-bash, non-MCP tools (path
-  // tools + extension tools like web_fetch). MCP and surfaces without a tool
-  // input remain opaque; the review pipeline sends them to the model with the
-  // qualified target, and the SAFETY_RULES instruct the model to defer when
-  // missing context could change the outcome.
-  const preview =
-    typeof details.toolInputPreview === "string" ? details.toolInputPreview : undefined;
-  return preview && preview.length > 0 ? preview : undefined;
-}
-/**
  * Extract the review target (the value being authorized).
- * Fallback chain: accessIntent.matchValues → value → command → path → target → toolName/skillName
  *
- * MatchValues are joined with " | " so the model sees all forms. For non-path
- * surfaces (bash/mcp/skill) matchValues is a single-element array, so joining
- * is a no-op. For the path surface, matchValues is [absolute, cwd-relative,
- * canonical]; the joined form gives the model both the absolute and symlink-
- * resolved paths, eliminating the symlink-blindness of taking only [0].
- * Path is excluded from AI review by default (bounded-delegation checkpoint
- * downgrades it to defer); this only matters when an operator opts path in.
+ * Primary source is the 26.0 `payload.request.value`; the legacy `details`
+ * field fallback chain is preserved as a fail-safe for a `forwarded`
+ * (degraded) ask whose `value` is empty.
+ *
+ * `accessIntent.matchValues` (when present, for the path surface) are joined
+ * with " | " so the model sees every form — `[absolute, cwd-relative,
+ * canonical]` gives both the absolute and symlink-resolved paths, avoiding
+ * the symlink-blindness of taking only the first.
+ *
+ * Note: `external_directory`/`path` allows are capped to `defer` by the host's
+ * bounded-delegation checkpoint regardless of target correctness (see
+ * CONTEXT.md "Ask eligibility") — the link's value there is limited to a
+ * confident `deny`.
  *
  * @param details - The permission ask details.
  * @returns The extracted review target string, or undefined if no field yielded a value.
@@ -244,31 +217,26 @@ function extractTarget(details: PromptPermissionDetails): string | undefined {
     return matchValues.join(" | ");
   }
 
-  if (typeof details.value === "string" && details.value) {
-    return details.value;
-  }
-  if (typeof details.command === "string" && details.command) {
-    return details.command;
-  }
-  if (typeof details.path === "string" && details.path) {
-    return details.path;
-  }
-  if (typeof details.target === "string" && details.target) {
-    return details.target;
-  }
-  if (typeof details.toolName === "string" && details.toolName) {
-    return details.toolName;
-  }
-  if (typeof details.skillName === "string" && details.skillName) {
-    return details.skillName;
+  // 26.0: payload.request.value is the authoritative decision-relevant value.
+  const payloadValue = details.payload.request.value;
+  if (payloadValue) {
+    return payloadValue;
   }
 
-  return undefined;
+  // Fail-safe fallback chain for a degraded forwarded ask (empty payload
+  // value) or any future shape that leaves value empty: skip empty strings.
+  return [
+    details.value,
+    details.command,
+    details.path,
+    details.target,
+    details.toolName,
+    details.skillName,
+  ].find((field): field is string => typeof field === "string" && field.length > 0);
 }
 
 /**
  * Glob match: `*` matches any character sequence, other chars match literally.
- * Used for surface patterns like `"ns:*"`, `"*:bar"`, `"*:*"`.
  *
  * @param pattern - The glob pattern (with `*` wildcards).
  * @param text - The text to test against.
@@ -285,4 +253,99 @@ function globMatch(pattern: string, text: string): boolean {
       "$",
   );
   return re.test(text);
+}
+
+// ── Evidence projection (re-implemented; upstream helpers are not exported) ──
+
+/**
+ * Find the first evidence entry carrying `label`, in payload order.
+ *
+ * @param payload - The ask's payload.
+ * @param label - The evidence label to find.
+ * @returns The first matching evidence entry, or `undefined`.
+ */
+function findEvidence(payload: PromptPayload, label: string): PromptEvidence | undefined {
+  return payload.evidence.find((entry) => entry.label === label);
+}
+
+/**
+ * Every evidence entry carrying `label`, in payload order.
+ *
+ * @param payload - The ask's payload.
+ * @param label - The evidence label to collect.
+ * @returns All matching evidence entries in payload order.
+ */
+function allEvidence(payload: PromptPayload, label: string): readonly PromptEvidence[] {
+  return payload.evidence.filter((entry) => entry.label === label);
+}
+
+/**
+ * What the ask flags (mirrors upstream `flaggedElements`).
+ *
+ * `bash_external_directory` flags the paths it referenced (the command is the
+ * context, the paths are what the operator rules on); every other kind flags
+ * the `value`. An empty `value` flags nothing.
+ *
+ * @param payload - The ask's payload.
+ * @returns The flagged values: external paths for `bash_external_directory`, else the `value` (or
+ *   empty).
+ */
+function flaggedElements(payload: PromptPayload): readonly string[] {
+  if (payload.kind === "bash_external_directory") {
+    return allEvidence(payload, "external path").map((entry) => entry.text);
+  }
+  return payload.request.value === "" ? [] : [payload.request.value];
+}
+
+/**
+ * The `kind`-dispatched evidence slots for an {@link AskContext}.
+ *
+ * `fullCommand` falls back to `request.value` when the upstream omits the
+ * evidence entry (the full command equals the sub). For
+ * `bash_external_directory` the command rides in `request.value` directly, so
+ * `fullCommand` is that value and `flaggedElements` are the escaped paths.
+ *
+ * @param payload - The ask's payload.
+ * @returns The `kind`-dispatched evidence slots ({fullCommand, flaggedElements, toolInputPreview,
+ *   readPath, resolvedAlias}).
+ */
+function flaggedFields(payload: PromptPayload): {
+  fullCommand?: string;
+  flaggedElements: readonly string[];
+  toolInputPreview?: string;
+  readPath?: string;
+  resolvedAlias?: string;
+} {
+  const flagged = flaggedElements(payload);
+  const fullCommandEvidence = findEvidence(payload, "full command")?.text;
+  const toolInputPreview = findEvidence(payload, "input")?.text;
+  const readPath = findEvidence(payload, "read path")?.text;
+
+  // resolvedAlias: "resolves to" evidence, else the detail of the first
+  // external-path entry that carries one (mirrors upstream agent-renderer).
+  const resolvesTo = findEvidence(payload, "resolves to")?.text;
+  const resolvedAlias: string | undefined =
+    resolvesTo ??
+    allEvidence(payload, "external path").find((entry) => entry.detail)?.detail ??
+    undefined;
+
+  // fullCommand: for bash kinds, the evidence text (or request.value when the
+  // full command equals the sub and the upstream omits the entry). For
+  // bash_external_directory the command is request.value (no "full command"
+  // evidence is emitted); use it directly.
+  let fullCommand: string | undefined;
+  if (payload.kind === "bash" || payload.kind === "bash_external_directory") {
+    fullCommand =
+      payload.kind === "bash_external_directory"
+        ? payload.request.value || undefined
+        : (fullCommandEvidence ?? (payload.request.value || undefined));
+  }
+
+  return {
+    ...(fullCommand !== undefined ? { fullCommand } : {}),
+    flaggedElements: flagged,
+    ...(toolInputPreview !== undefined ? { toolInputPreview } : {}),
+    ...(readPath !== undefined ? { readPath } : {}),
+    ...(resolvedAlias !== undefined ? { resolvedAlias } : {}),
+  };
 }

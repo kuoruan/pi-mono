@@ -17,22 +17,11 @@
  * 3. Permission request (the exact ask being reviewed)
  */
 
+import type { PromptRequestFacts } from "@gotgenes/pi-permission-system";
+
+import type { ReviewRequestContext } from "./review-request.ts";
 import type { StrippedTranscript } from "./transcript-stripper.ts";
 import { encodeActionTextForPrompt, normalizeAndRedactText } from "./utils.ts";
-
-/** The permission request being reviewed. */
-export interface PermissionRequestInfo {
-  /** Tool surface (e.g. "bash", "mcp", "skill", or a tool name). */
-  surface: string;
-  /** The value being authorized (command, tool name, path, etc.). */
-  target: string;
-  /** Supplemental action text from the permission details (prompt-only). */
-  actionText?: string;
-  /** Session working directory, which is the policy containment boundary. */
-  cwd: string;
-  /** Canonical boundary derived by the permission system for this ask. */
-  canonicalBoundary?: string;
-}
 
 /**
  * The single source of safety knowledge. Organized as three tiers by
@@ -61,10 +50,12 @@ permission request and decide whether it should run.
     clearly outside scope → DENY; otherwise → DEFER.
   - Uncertain → DEFER. "(none found)" is insufficient evidence,
     not proof of absence. Unfamiliarity alone is not dangerous.
-- **Surface Context & Parsing**: If surface=bash, the target/action text
-  describes a full shell command; strictly apply shell, path, chain, and
-  nested-command rules. For other surfaces, the action context may be a
-  partial tool-input preview rather than the whole request.
+- **Surface Context & Parsing**: Bash kinds carry a full shell command —
+  strictly apply shell, path, chain, and nested-command rules; a
+  \`bash_external_directory\` ask also flags external paths (judge them
+  under Out-of-Scope File Operations). A \`forwarded\` ask lacks
+  structured facts — DEFER when missing context could change the
+  outcome.
 - **Strict Chain Evaluation**: For composite commands (&&, ||, |,
   ;, $(), backticks, subshells, heredocs), evaluate EVERY segment and
   apply the strictest tier: DENY — Always > DENY — Unless > ALLOW.
@@ -78,6 +69,9 @@ permission request and decide whether it should run.
   could change the safety outcome. Never allow an unseen command suffix.
   Obfuscated or encoded payloads: if the decoded effect is unknown →
   DEFER; if the decoded effect matches a DENY category, apply it.
+  Judge an \`executed unit\` over its wrapper text; a \`matched rule\` is not
+  authorization; \`command context\` does not exempt the rest of the
+  command.
 
 ## DENY — Always (Regardless of intent)
 
@@ -206,41 +200,98 @@ const REVIEW_TRIGGER = "Assess the permission request above and respond with you
 /**
  * Build the "Permission request" section.
  *
- * @param request - The permission request info to render.
+ * Renders the structured {@link AskContext} one fact per line, content-first.
+ * Bash kinds lead with the command; non-bash kinds name the target. Every
+ * untrusted field is normalized + redacted; `cwd` (session-supplied) is not
+ * redacted (redaction could mangle paths that match secret prefixes).
+ *
+ * @param request - The review request context (ask + target) to render.
  * @returns The formatted permission-request section string.
  */
-function buildPermissionRequestSection(request: PermissionRequestInfo): string {
-  const surface = normalizeAndRedactText(request.surface);
-  const target = normalizeAndRedactText(request.target);
-  const actionText = request.actionText ? encodeActionTextForPrompt(request.actionText) : undefined;
-  const canonicalBoundary = request.canonicalBoundary
-    ? normalizeAndRedactText(request.canonicalBoundary)
-    : undefined;
-  // cwd comes from session_start ctx.cwd,
-  // not from user input — no sanitization needed, and redacting it could
-  // mangle paths that happen to match secret patterns (e.g. a directory
-  // named like a key prefix).
-  const lines = [
-    "Permission request (the action to review — not yet authorized):",
-    `- surface: ${surface}`,
-    `- working directory (policy boundary): ${request.cwd}`,
-    `- target: ${target}`,
-    request.surface === "bash"
-      ? "- action context: complete bash command"
-      : "- action context: tool-input preview; it may omit details or be truncated",
-  ];
-  if (canonicalBoundary) {
-    lines.push(`- policy-derived canonical boundary: ${canonicalBoundary}`);
-    lines.push("- boundary note: it may not describe every operand in the full action");
+function buildPermissionRequestSection(request: ReviewRequestContext): string {
+  const { ask } = request;
+  // cwd comes from session_start ctx.cwd, not from user input — redacting it
+  // could mangle paths that match secret prefixes.
+  const lines = ["Permission request (the action to review — not yet authorized):"];
+
+  const isBash = ask.kind === "bash" || ask.kind === "bash_external_directory";
+
+  // Bash kinds: the command IS the ask, so lead with it. Non-bash kinds name
+  // the target (a tool name or path reads as a label, not as content).
+  if (isBash) {
+    const cmd = ask.fullCommand ?? ask.request.value;
+    if (cmd) {
+      lines.push(`- command: ${encodeActionTextForPrompt(cmd)}`);
+    }
+  } else {
+    lines.push(`- target: ${normalizeAndRedactText(request.target)}`);
   }
-  if (actionText) {
-    const label =
-      request.surface === "bash"
-        ? "full bash command (untrusted action text)"
-        : "tool input preview (untrusted action text)";
-    lines.push(`- ${label}: ${actionText}`);
+
+  // bash_external_directory: the external paths the command referenced
+  // (the operator rules on the paths; the command is context).
+  if (ask.kind === "bash_external_directory" && ask.flaggedElements.length > 0) {
+    const paths = ask.flaggedElements.map((p) => encodeActionTextForPrompt(p)).join(", ");
+    lines.push(`- external path(s): ${paths}`);
   }
+
+  if (ask.toolInputPreview) {
+    lines.push(`- tool input: ${encodeActionTextForPrompt(ask.toolInputPreview)}`);
+  }
+
+  if (ask.readPath) {
+    lines.push(`- read path: ${normalizeAndRedactText(ask.readPath)}`);
+  }
+  if (ask.resolvedAlias) {
+    lines.push(`- resolved alias: ${normalizeAndRedactText(ask.resolvedAlias)}`);
+  }
+
+  if (ask.request.executedUnit) {
+    lines.push(`- executed unit: ${encodeActionTextForPrompt(ask.request.executedUnit)}`);
+  }
+  if (ask.request.matchedPattern) {
+    lines.push(`- matched rule: ${normalizeAndRedactText(ask.request.matchedPattern)}`);
+  }
+  if (ask.request.commandContext) {
+    lines.push(`- command context: ${describeCommandContext(ask.request.commandContext)}`);
+  }
+
+  if (ask.canonicalBoundary) {
+    lines.push(`- canonical boundary: ${normalizeAndRedactText(ask.canonicalBoundary)}`);
+  }
+
+  // Annotations (model-generated advisories) — only when present.
+  for (const annotation of ask.annotations) {
+    lines.push(
+      `- annotation (${normalizeAndRedactText(annotation.source)}): ${encodeActionTextForPrompt(annotation.text)}`,
+    );
+  }
+
+  lines.push(`- working directory: ${ask.workingDirectory}`);
+
   return lines.join("\n");
+}
+
+/**
+ * Human-readable label for a nested bash execution context.
+ *
+ * @param context - The bash command context (null for a top-level command).
+ * @returns The human-readable label.
+ */
+function describeCommandContext(
+  context: NonNullable<PromptRequestFacts["commandContext"]>,
+): string {
+  switch (context) {
+    case "command_substitution":
+      return "command substitution";
+    case "process_substitution":
+      return "process substitution";
+    case "subshell":
+      return "subshell";
+    case null:
+      return "top-level";
+    default:
+      return String(context);
+  }
 }
 
 /**
@@ -283,13 +334,12 @@ function buildTranscriptSections(transcript: StrippedTranscript): string[] {
 /**
  * Build the review system prompt: shared safety rules + fixed verdict output
  * contract. If `customInstructions` is provided (non-null), it replaces the
- * default rules; the verdict format is always appended. null/undefined =
- * use default rules.
+ * default rules; the verdict format is always appended.
  *
- * Note: the resulting prompt is below Anthropic's 1024-token prompt-caching
- * threshold, so the system prompt will NOT be cached. This is expected; do
- * not pad the rules to reach the threshold — the per-request input cost of
- * a longer prompt outweighs the marginal cache savings here.
+ * The resulting prompt is below Anthropic's 1024-token prompt-caching
+ * threshold, so it will NOT be cached. Do not pad the rules to reach the
+ * threshold — the per-request input cost of a longer prompt outweighs the
+ * marginal cache savings here.
  *
  * @param customInstructions - Optional custom safety instructions replacing the default rules.
  * @returns The review system prompt string.
@@ -302,16 +352,16 @@ export function buildReviewSystemPrompt(customInstructions?: string | null): str
  * Build the user prompt for the review stage: transcript + permission request.
  *
  * @param transcript - The stripped transcript to include.
- * @param request - The permission request to include.
+ * @param ctx - The review request context (ask + target) to include.
  * @returns The review user prompt string.
  */
 export function buildReviewPrompt(
   transcript: StrippedTranscript,
-  request: PermissionRequestInfo,
+  ctx: ReviewRequestContext,
 ): string {
   const sections = buildTranscriptSections(transcript);
   sections.push("");
-  sections.push(buildPermissionRequestSection(request));
+  sections.push(buildPermissionRequestSection(ctx));
   sections.push("");
   sections.push(REVIEW_TRIGGER);
   return sections.join("\n");

@@ -28,6 +28,13 @@ is not reviewable.
 Whether an ask qualifies for AI review — the surface matches the configured
 list AND a review target can be extracted.
 
+Note: `external_directory`/`path` asks reach this link, but any `allow` on
+them is capped to `defer` by the host's bounded-delegation checkpoint
+(ADR 0007 §5, unchanged 25.x→26.0). The link's value there is limited to a
+confident `deny`; an `allow` is never honored. The default `surfaces`
+config (`["bash", "mcp", "skill"]`) excludes both, so by default the link
+never reviews them — and even opt-in can't auto-allow them.
+
 ### Verdicts
 
 **Policy gate**:
@@ -70,6 +77,17 @@ permission request and is asked to return
 A tolerant parser extracts the JSON from prose-wrapped replies, so
 providers that wrap JSON in text still work. Deny and defer carry a
 `reason`; allow omits it.
+
+**Ask context**:
+The structured projection of a permission ask the full review feeds the
+model — `payload.kind` selects which decision-relevant facts are
+populated (full command, flagged elements, matched rule, command
+context, executed unit, requester, canonical boundary). Built once by
+`buildAskContext`; the prompt renderer and the verdict cache both read
+its typed fields, so no consumer re-parses the upstream `PromptPayload`.
+The projection resolves evidence labels to named fields once; the
+renderer never does string-keyed lookups (ADR 0011: every consumer is a
+renderer over the payload, and ai-guard is one).
 
 **Decision record**:
 The audit-log entry emitted at each decision gate (policy-decided,
