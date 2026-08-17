@@ -21,7 +21,16 @@ export interface ReviewRequestContext {
  *
  * Excluded by design (do not affect the verdict the model can reach):
  * `matchedPattern`, `invokedToolName`, `requester`, `annotations`, `toolName`,
- * and `surface` (display fields; `kind` + `value` already capture identity).
+ * and `surface`.
+ *
+ * `surface` is a gate label, not a decision input: the verdict is driven by
+ * the command content, `executedUnit`, and `commandContext` (all in the key),
+ * and the SAFETY_RULES instruct the model to treat administrative labels as
+ * noise. Two asks that share `kind` + content but differ only in `surface`
+ * (e.g. a `bash` kind reached via a shell-alias re-exposure, where `surface`
+ * holds the alias name) reach the same verdict and so intentionally collide.
+ * The old key's `surface` partition was over-conservative (missed cache hits);
+ * dropping it is a correctness gain, not a regression.
  *
  * **Never log this value** — it contains raw, unredacted action text (needed
  * for cache-key distinction). The caller must pass it directly to a hash

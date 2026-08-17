@@ -203,4 +203,42 @@ describe("reviewRequestCacheMaterial", () => {
     };
     expect(reviewRequestCacheMaterial(emptyValue)).toBe(reviewRequestCacheMaterial(nullBoundary));
   });
+
+  it("collides intentionally for asks differing only in surface (gate label)", () => {
+    // `surface` is a gate label, not a decision input: a `bash` kind reached
+    // via a shell-alias re-exposure carries the alias name in `surface` but
+    // the same command content. The verdict is identical, so the cache key
+    // must collide (dropping the old `surface` partition is a gain, not a
+    // regression). See review-request.ts cache-material comment.
+    const direct = {
+      ask: buildAskContext(
+        makeDetails({
+          surface: "bash",
+          value: "ls -la",
+          command: "ls -la",
+          payload: payload("bash", { surface: "bash", value: "ls -la" }),
+        }),
+        "/p",
+      ),
+      target: "ls -la",
+    };
+    const viaAlias = {
+      ask: buildAskContext(
+        makeDetails({
+          surface: "exec_command", // shell-alias name, same bash kind + content
+          value: "ls -la",
+          command: "ls -la",
+          payload: payload("bash", { surface: "exec_command", value: "ls -la" }),
+        }),
+        "/p",
+      ),
+      target: "ls -la",
+    };
+    expect(direct.ask.kind).toBe("bash");
+    expect(viaAlias.ask.kind).toBe("bash");
+    expect(viaAlias.ask.request.surface).toBe("exec_command");
+    expect(direct.ask.request.surface).toBe("bash");
+    // Same verdict → same key (intentional collision).
+    expect(reviewRequestCacheMaterial(direct)).toBe(reviewRequestCacheMaterial(viaAlias));
+  });
 });

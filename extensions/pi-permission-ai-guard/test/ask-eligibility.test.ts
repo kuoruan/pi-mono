@@ -388,6 +388,37 @@ describe("buildAskContext — 9-kind dispatch", () => {
     expect(ask.resolvedAlias).toBe("/etc");
   });
 
+  it("bash_external_directory: resolvedAlias skips a null-detail path (known multi-path limitation)", () => {
+    // Bounded limitation (see AskContext.resolvedAlias JSDoc): for many
+    // flagged paths the alias is the first entry that carries a detail, not
+    // per-path attribution. Here the first path's detail is null and the
+    // second's is set; resolvedAlias takes the second's alias with no
+    // per-path attribution. Safe because bash_external_directory allows are
+    // capped to defer (ADR 0007 §5); this locks the behavior so a future
+    // refactor cannot silently change it.
+    const details = makeDetails({
+      surface: "external_directory",
+      value: "cat /etc/passwd /var/log/syslog",
+      payload: payload(
+        "bash_external_directory",
+        {
+          surface: "external_directory",
+          value: "cat /etc/passwd /var/log/syslog",
+        },
+        [
+          ev("working directory", "/repo"),
+          ev("external path", "/etc/passwd", null),
+          ev("external path", "/var/log/syslog", "/run/systemd/journal"),
+        ],
+      ),
+    });
+    const ask = buildAskContext(details, cwd);
+    expect(ask.flaggedElements).toEqual(["/etc/passwd", "/var/log/syslog"]);
+    // Takes the first non-null detail — the second path's alias — with no
+    // attribution to that path.
+    expect(ask.resolvedAlias).toBe("/run/systemd/journal");
+  });
+
   it("mcp: flaggedElements = [value], no fullCommand", () => {
     const details = makeDetails({
       surface: "mcp",

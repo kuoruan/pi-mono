@@ -83,6 +83,14 @@ export interface AskContext {
    * Evidence `resolves to` text, or an `external path` entry's `detail` — the
    * canonical alias of a flagged path.
    */
+  /**
+   * Evidence `resolves to` text, or an `external path` entry's `detail` — the
+   * canonical alias of a flagged path. For `path`/`external_directory` (one
+   * path) this is exact. For `bash_external_directory` (possibly many flagged
+   * paths) this is the alias of the first external-path entry that carries
+   * one, not per-path attribution — a known, bounded limitation (see ADR 0007
+   * §5 / CONTEXT.md: `allow` is capped to `defer` on this surface regardless).
+   */
   readonly resolvedAlias?: string;
   /** Canonical boundary from `details.accessIntent.boundaryValue` (path surfaces). */
   readonly canonicalBoundary?: string;
