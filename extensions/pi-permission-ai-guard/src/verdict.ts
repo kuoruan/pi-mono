@@ -170,11 +170,23 @@ export function parseTextFallback(text: string, latencyMs: number): ReviewOutcom
 /**
  * Extract the first balanced JSON object from a string and return it parsed.
  * Tracks brace depth and respects string literals (including escaped quotes).
- * If the first balanced object fails to parse, continues searching.
- * Returns null if no parseable object is found.
+ *
+ * If the first balanced object fails to parse, the recovery depends on whether
+ * it looks like a verdict attempt:
+ * - A malformed verdict-shaped candidate (e.g. `{verdict: "deny", reason: "x"}`
+ * with unquoted keys, which `parseJsonWithRepair` does not fix) stops the
+ * search and returns `null` — so a broken verdict is never overridden by an
+ * unrelated later object (prevents a deny→allow flip when the model wraps a
+ * malformed deny and then includes an allow example in its reasoning).
+ * - Non-verdict-shaped brace noise (e.g. `{var}`, `{bad}`, template/markdown
+ * fragments) keeps scanning — preserving recovery when the model mentions
+ * config syntax before the real verdict JSON.
+ *
+ * Returns `null` if no parseable object is found.
  *
  * @param text - The text to search.
- * @returns The first parseable JSON object, or null if none is found.
+ * @returns The first parseable JSON object, or `null` if none is found (or a
+ *   malformed verdict attempt short-circuits the search).
  */
 function extractFirstJsonObject(text: string): unknown | null {
   let start = 0;
@@ -186,12 +198,28 @@ function extractFirstJsonObject(text: string): unknown | null {
       try {
         return parseJsonWithRepair(candidate);
       } catch {
-        // not parseable, continue searching
+        // A malformed verdict attempt defers rather than being overridden by
+        // an unrelated later object; other brace noise keeps scanning.
+        if (looksLikeVerdictAttempt(candidate)) return null;
       }
     }
     start = nextBrace + 1;
   }
   return null;
+}
+
+/**
+ * Does a failed JSON fragment look like an attempted verdict object?
+ *
+ * Matches an unquoted-or-quoted `verdict` key (e.g. `{verdict:`, `{"verdict":`).
+ * Used to distinguish a malformed verdict (stop, defer) from non-verdict
+ * brace noise like `{var}` or `{bad}` (skip, keep scanning).
+ *
+ * @param fragment - The balanced-but-unparseable candidate substring.
+ * @returns True if the fragment carries a `verdict:` key.
+ */
+function looksLikeVerdictAttempt(fragment: string): boolean {
+  return /["']?verdict["']?\s*:/i.test(fragment);
 }
 
 /**

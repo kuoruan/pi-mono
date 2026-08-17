@@ -212,4 +212,16 @@ describe("parseTextFallback — balanced JSON extraction", () => {
     const result = parseTextFallback(text, 100);
     expect(result.verdict).toEqual({ kind: "allow" });
   });
+
+  it("defers on a malformed verdict attempt rather than scanning forward to a later object", () => {
+    // A verdict-shaped-but-unparseable first candidate (unquoted keys, which
+    // parseJsonWithRepair does not fix) must defer — not be overridden by an
+    // unrelated later object. This prevents a deny→allow flip when the model
+    // wraps a malformed deny and then includes an allow example in reasoning.
+    const text = '{verdict: "deny", reason: "x"} {"verdict":"allow"}';
+    const result = parseTextFallback(text, 100);
+    expect(result.verdict).toEqual({ kind: "defer" });
+    expect(result.deferKind).toBe("no-json");
+    expect(result.rawReply).toBe(text);
+  });
 });
