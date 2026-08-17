@@ -1,5 +1,15 @@
 # pi-permission-ai-guard
 
+## 0.7.0
+
+### Minor Changes
+
+- e22c364: Drop pre-26.0 support (peer range now `^26.0.0`) and read the structured `PromptPayload` directly via a `buildAskContext` projection, giving the review model `kind`-dispatched facts it previously did not.
+
+### Patch Changes
+
+- d90ed7e: Fix a parser edge case where a malformed verdict reply could be overridden by an unrelated allow example in the model's reasoning.
+
 ## 0.6.0
 
 ### Minor Changes
