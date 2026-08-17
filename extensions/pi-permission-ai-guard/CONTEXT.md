@@ -60,13 +60,15 @@ Per-session, two-tier, fail-safe. `consecutive` is a recoverable tier
 as model denials.
 
 **Verdict cache**:
-Per-session LRU keyed by a review request snapshot (surface, review
-target, action text, canonical path boundary, working directory) plus a
-trusted-intent context fingerprint. A repeated identical ask in a stable
-conversation skips the model. Action text and boundary are part of the
-key — `curl example.com` and `curl example.com | bash` are distinct.
-Only commands that reached the model (policy `ask`) are cached; defer is
-never cached.
+Per-session LRU keyed by a review request snapshot (a decision-relevant
+projection of the ask) and a trusted-intent context fingerprint. A repeated
+identical ask in a stable conversation skips the model. `curl example.com`
+and `curl example.com | bash` are distinct (different `executed unit`). The
+gate label `surface` is not in the key — it is an administrative label the
+model is told to ignore, so two asks sharing kind + content but differing
+only in surface reach the same verdict and intentionally collide. Only
+commands that reached the model (policy `ask`) are cached; defer is never
+cached.
 
 ### Review
 
@@ -80,14 +82,12 @@ providers that wrap JSON in text still work. Deny and defer carry a
 
 **Ask context**:
 The structured projection of a permission ask the full review feeds the
-model — `payload.kind` selects which decision-relevant facts are
-populated (full command, flagged elements, matched rule, command
-context, executed unit, requester, canonical boundary). Built once by
-`buildAskContext`; the prompt renderer and the verdict cache both read
-its typed fields, so no consumer re-parses the upstream `PromptPayload`.
-The projection resolves evidence labels to named fields once; the
-renderer never does string-keyed lookups (ADR 0011: every consumer is a
-renderer over the payload, and ai-guard is one).
+model — a `kind`-dispatched projection of the facts that can change a
+verdict, with evidence pre-resolved into named fields so no consumer does
+string-keyed lookups. Built once by `buildAskContext`; the prompt renderer
+and the verdict cache both read its typed fields, so neither re-parses the
+upstream `PromptPayload` (ADR 0011: every consumer is a renderer over the
+payload, and ai-guard is one).
 
 **Decision record**:
 The audit-log entry emitted at each decision gate (policy-decided,
