@@ -19,6 +19,7 @@ import type {
   PermissionState,
 } from "@gotgenes/pi-permission-system";
 
+import type { BreakerVerdict } from "./config-schema.ts";
 import type { ModelCallDeferKind, ReviewOutcome } from "./verdict.ts";
 
 /** Shared context captured once for every decision record. */
@@ -159,7 +160,7 @@ export const DecisionRecord = {
    * @param cbVerdict - The verdict the circuit breaker forces (deny or defer).
    * @returns A decision record for the circuit-breaker gate.
    */
-  breaker(base: DecisionBase, cbVerdict: "deny" | "defer"): DecisionRecord {
+  breaker(base: DecisionBase, cbVerdict: BreakerVerdict): DecisionRecord {
     return {
       ...base,
       gate: "circuit-breaker",
@@ -298,6 +299,27 @@ function rawReplyForRecord(reviewOutcome: ReviewOutcome): string | null {
   // omitted via a sentinel (not null, to stay distinct from the throw-based
   // defer absence above).
   return CLEAN_VERDICT_OMITTED;
+}
+
+/**
+ * Annotate a decision record when the mode mapped the model's
+ * verdict to a different emitted kind. The record's `verdict` keeps the
+ * MODEL's judgment (with its reason and riskLevel); `emittedVerdict` names
+ * what the link actually returned, and `mode` names which mode
+ * mapped it (manual tightens denial to human review, auto tightens
+ * uncertainty to denial — the annotation covers both directions).
+ *
+ * @param record - The decision record for the model or cache-hit gate.
+ * @param mode - The effective mode that triggered the mapping.
+ * @param emittedKind - The verdict kind the link emitted after mapping.
+ * @returns The annotated decision record.
+ */
+export function mapped(
+  record: DecisionRecord,
+  mode: string,
+  emittedKind: AuthorizerVerdict["kind"],
+): DecisionRecord {
+  return { ...record, emittedVerdict: emittedKind, mode };
 }
 
 /**

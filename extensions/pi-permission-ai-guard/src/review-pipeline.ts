@@ -7,10 +7,11 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { Authorizer } from "@gotgenes/pi-permission-system";
 
 import { buildAskContext, resolveReviewTarget } from "./ask-eligibility.ts";
-import type { AiGuardConfig } from "./config-schema.ts";
+import type { AiGuardConfig, Mode } from "./config-schema.ts";
 import {
   BREAKER_DENY_REASON,
   CACHE_LOOKUP_EVENT,
@@ -19,6 +20,7 @@ import {
   MODEL_REPLY_EVENT,
   SHORT_CIRCUIT_EVENT,
   cacheLookup,
+  mapped,
   modelReply,
   shortCircuit,
 } from "./decision-record.ts";
@@ -31,9 +33,22 @@ import {
 } from "./model-review.ts";
 import { buildReviewPrompt, buildReviewSystemPrompt } from "./prompt.ts";
 import { reviewRequestCacheMaterial, type ReviewRequestContext } from "./review-request.ts";
-import type { CircuitBreaker, VerdictCache } from "./session-state.ts";
+import type { CircuitBreaker, SessionOverrides, VerdictCache } from "./session-state.ts";
 import { type SessionManagerLike, stripTranscript } from "./transcript-stripper.ts";
 import { normalizeAndRedactText } from "./utils.ts";
+import {
+  applyVerdictMode,
+  type MachineryFailureKind,
+  machineryDeferMessage,
+  manualEscalationMessage,
+} from "./verdict-mode.ts";
+
+/**
+ * Fire-and-forget user notification — the host UI context's own notify
+ * signature (the extension wraps ctx.ui.notify; absent in headless tests
+ * and when no UI context was captured).
+ */
+export type NotifyFn = ExtensionUIContext["notify"];
 
 /**
  * Resolved session state, captured once at construction. Not a lazy
@@ -52,8 +67,12 @@ export interface ReviewPipelineDeps {
   circuitBreaker: CircuitBreaker;
   /** Per-session verdict cache — avoids re-reviewing identical commands. */
   verdictCache: VerdictCache;
+  /** Session-scoped runtime overrides (/ai-guard, ctrl+alt+g); consulted before config. */
+  overrides: SessionOverrides;
   /** Model call function (wrapped provider.streamSimple().result()). */
   completeSimple: CompleteSimpleFn;
+  /** Best-effort human notification for verdicts that escalate to the user. */
+  notify?: NotifyFn;
 }
 
 /**
@@ -64,9 +83,33 @@ export interface ReviewPipelineDeps {
  * @param deps - The resolved session-state dependencies for the pipeline.
  * @returns The `authorize` function implementing the review pipeline.
  */
+/**
+ * Auto mode's machinery-escape contract: the human is about to see an
+ * interruption they didn't opt into (reviewer broken, not uncertain), so
+ * explain it. Pre-call paths (model unresolved, auth failed, transcript
+ * errors) defer before any mode mapping, but the contract is the same —
+ * the notify fires in auto mode only.
+ *
+ * @param deps - The pipeline dependencies (notify is optional).
+ * @param mode - The effective mode (the notify fires in auto mode only).
+ * @param kind - The machinery failure kind for the message.
+ */
+function notifyMachineryEscape(
+  deps: ReviewPipelineDeps,
+  mode: Mode,
+  kind: MachineryFailureKind,
+): void {
+  if (mode === "auto") {
+    deps.notify?.(machineryDeferMessage(kind), "warning");
+  }
+}
+
 export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["authorize"] {
   return async (details, query, log) => {
     const { config } = deps;
+    // Session-scoped override (/ai-guard, ctrl+alt+g) wins over the config
+    // default. Read per-call: the override object is mutable session state.
+    const mode = deps.overrides.mode ?? config.mode;
 
     // surface-unmatched is expected config behavior (silent defer); no-target
     // is an unexpected ask (logged, then defer).
@@ -114,6 +157,15 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
             }
           : { kind: "defer" as const };
       log.review(DECISION_EVENT, DecisionRecord.breaker(base, config.circuitBreaker.verdict));
+      // A forced defer interrupts the human with no dialog context of its
+      // own — surface why (the breaker verdict bypasses the mode mapping
+      // by design: specific config beats the general mode).
+      if (verdict.kind === "defer") {
+        deps.notify?.(
+          "ai-guard: circuit breaker tripped — too many reviewer denials, deferring to you",
+          "warning",
+        );
+      }
       return verdict;
     }
 
@@ -122,6 +174,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const model = deps.registry.find(config.provider, config.model);
     if (!model) {
       log.review(DECISION_EVENT, DecisionRecord.modelUnresolved(base, modelId));
+      notifyMachineryEscape(deps, mode, "model-unresolved");
       return { kind: "defer" };
     }
 
@@ -133,6 +186,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         DECISION_EVENT,
         DecisionRecord.authFailed(base, modelId, normalizeAndRedactText(auth.error)),
       );
+      notifyMachineryEscape(deps, mode, "auth-failed");
       return { kind: "defer" };
     }
 
@@ -151,6 +205,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
           error: normalizeAndRedactText(e instanceof Error ? e.message : String(e)),
         }),
       );
+      notifyMachineryEscape(deps, mode, "transcript-error");
       return { kind: "defer" };
     }
 
@@ -162,8 +217,20 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const cc = config.cache;
     const lookup = deps.verdictCache.lookup(commandHash, contextHash, cc);
     if (lookup.hit) {
-      log.review(DECISION_EVENT, DecisionRecord.cacheHit(base, lookup.verdict));
-      return lookup.verdict;
+      // Cached verdicts are allow/deny only (defers are never stored), so
+      // the defer branch of the mapping is unreachable here.
+      const emitted = applyVerdictMode(mode, lookup.verdict);
+      let record = DecisionRecord.cacheHit(base, lookup.verdict);
+      if (emitted.kind !== lookup.verdict.kind) {
+        record = mapped(record, mode, emitted.kind);
+        // manual: the human now adjudicates a deny they'd otherwise never
+        // see the reasoning for (the dialog renders only the request).
+        if (emitted.kind === "defer") {
+          deps.notify?.(manualEscalationMessage(lookup.verdict, lookup.riskLevel), "warning");
+        }
+      }
+      log.review(DECISION_EVENT, record);
+      return emitted;
     }
     // Cache miss: record the miss reason for telemetry.
     log.debug(CACHE_LOOKUP_EVENT, cacheLookup(requestId, surface, lookup.missReason));
@@ -187,13 +254,33 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       log.debug(MODEL_REPLY_EVENT, modelReply(requestId, modelId, reviewOutcome.rawReply));
     }
 
-    log.review(
-      DECISION_EVENT,
-      DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome),
-    );
+    // The mode maps only what the link EMITS: the breaker still
+    // counts real model denials and the cache still stores the model's
+    // deny, so a cached deny maps identically on a later hit. Defer isn't
+    // cached (cache hits and breaker trips short-circuited above).
+    const emitted = applyVerdictMode(mode, reviewOutcome.verdict, {
+      kind: reviewOutcome.deferKind,
+      reason: reviewOutcome.deferReason,
+    });
+    let record = DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome);
+    if (emitted.kind !== reviewOutcome.verdict.kind) {
+      record = mapped(record, mode, emitted.kind);
+      if (emitted.kind === "defer") {
+        deps.notify?.(
+          manualEscalationMessage(reviewOutcome.verdict, reviewOutcome.riskLevel),
+          "warning",
+        );
+      }
+    }
+    // In auto mode an emitted defer can only be a machinery failure
+    // (timeout, call-failed, empty-reply, no-json, invalid-verdict-value)
+    // that escaped the fail-closed mapping — the human is about to see an
+    // interruption they didn't opt into, so explain it.
+    if (mode === "auto" && emitted.kind === "defer") {
+      deps.notify?.(machineryDeferMessage(reviewOutcome.deferKind), "warning");
+    }
+    log.review(DECISION_EVENT, record);
 
-    // Record the model verdict into the breaker counters and cache.
-    // Defer isn't cached (cache hits and breaker trips short-circuited above).
     deps.circuitBreaker.recordVerdict(reviewOutcome.verdict.kind);
     if (reviewOutcome.verdict.kind !== "defer") {
       deps.verdictCache.store(
@@ -204,7 +291,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       );
     }
 
-    return reviewOutcome.verdict;
+    return emitted;
   };
 }
 

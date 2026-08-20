@@ -13,7 +13,7 @@
     },
     "reasoning": {
       "type": "string",
-      "enum": ["off", "low", "medium", "high"],
+      "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
       "default": "off"
     },
     "timeoutMs": {
@@ -21,6 +21,47 @@
       "exclusiveMinimum": 0,
       "maximum": 300000,
       "default": 15000
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["manual", "default", "auto"],
+      "default": "default",
+      "description": "Who adjudicates model deny/defer verdicts: 'manual' — the human decides everything the model doesn't allow; 'default' — model denies are final, defers ask the human; 'auto' — fully automatic, fail-closed: the model's own uncertainty is denied, while reviewer machinery failures still defer to the human."
+    },
+    "circuitBreaker": {
+      "type": "object",
+      "properties": {
+        "consecutive": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 3
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 20
+        },
+        "verdict": {
+          "type": "string",
+          "enum": ["deny", "defer"],
+          "default": "deny"
+        }
+      },
+      "additionalProperties": false
+    },
+    "cache": {
+      "type": "object",
+      "properties": {
+        "maxEntries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 128
+        }
+      },
+      "additionalProperties": false
     },
     "transcript": {
       "type": "object",
@@ -44,11 +85,7 @@
           "default": 1000
         }
       },
-      "default": {
-        "maxUserMessages": 5,
-        "maxToolCalls": 10,
-        "maxCharsPerEntry": 1000
-      }
+      "additionalProperties": false
     },
     "surfaces": {
       "type": "array",
@@ -56,60 +93,21 @@
         "type": "string",
         "minLength": 1
       },
-      "default": ["bash", "mcp", "skill"],
-      "description": "Surfaces to review. Glob patterns (*, ns:*, *:bar). Prefix with ! to exclude (takes priority over inclusions)."
+      "default": ["bash", "mcp", "skill"]
     },
     "instructions": {
-      "type": ["string", "null"],
-      "minLength": 1,
-      "default": null,
-      "description": "Custom safety rules that replace the built-in defaults. The verdict output format is always appended. null = use built-in rules."
-    },
-    "circuitBreaker": {
-      "type": "object",
-      "properties": {
-        "consecutive": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 50,
-          "default": 3,
-          "description": "Recoverable deny-streak threshold; resets on trip."
-        },
-        "total": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 200,
-          "default": 20,
-          "description": "Hard session cap on denials; permanent once reached."
-        },
-        "verdict": {
+      "anyOf": [
+        {
           "type": "string",
-          "enum": ["deny", "defer"],
-          "default": "deny",
-          "description": "Verdict returned when the breaker trips."
+          "minLength": 1
+        },
+        {
+          "type": "null"
         }
-      },
-      "default": {
-        "consecutive": 3,
-        "total": 20,
-        "verdict": "deny"
-      }
-    },
-    "cache": {
-      "type": "object",
-      "properties": {
-        "maxEntries": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 1000,
-          "default": 128,
-          "description": "Verdict cache capacity (0 disables)."
-        }
-      },
-      "default": {
-        "maxEntries": 128
-      }
+      ],
+      "default": null
     }
   },
-  "required": ["provider", "model"]
+  "required": ["provider", "model"],
+  "additionalProperties": false
 }

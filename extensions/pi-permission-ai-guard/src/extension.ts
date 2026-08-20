@@ -1,59 +1,19 @@
 /**
- * Extension wiring: load config at session_start, register the
- * "ai-guard" chain link, and dispose on shutdown.
- *
- * Registration is attempted from both session_start and permissions:ready
- * behind an idempotency guard (`registered`), because the relative order of
- * the two events is not guaranteed: permissions:ready may fire before or
- * after the session_start handler runs. The guard prevents a double
- * registration within one module instance.
- *
- * /reload reloads the extension module (resetting `registered`), but the
- * reload sequence emits session_shutdown to the old instance first (which
- * disposes the old registration), so the new instance registers cleanly.
- * If a stale registration nonetheless remains (e.g. the dispose didn't
- * take effect), registerAuthorizer throws "already registered" — caught
- * and warned, not fatal.
+ * Extension wiring: load config at session_start, keep the "ai-guard"
+ * chain link registered against the current session ({@link SessionLifecycle}),
+ * and expose the runtime settings surface ({@link RuntimeSettings}).
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  type Authorizer,
-  getPermissionsService,
-  PERMISSIONS_READY_CHANNEL,
-} from "@gotgenes/pi-permission-system";
+import { type Authorizer, PERMISSIONS_READY_CHANNEL } from "@gotgenes/pi-permission-system";
 
 import { type LoadConfigResult, loadAiGuardConfig } from "./config-loader.ts";
-import { LINK_NAME } from "./config-schema.ts";
+import { MODE_VALUES } from "./config-schema.ts";
 import { warn } from "./logger.ts";
-import {
-  type CompleteSimpleFn,
-  type ModelRegistryLike,
-  createCompleteSimple,
-} from "./model-review.ts";
+import { type CompleteSimpleFn, createCompleteSimple } from "./model-review.ts";
 import { type ReviewPipelineDeps, createReviewPipeline } from "./review-pipeline.ts";
-import { CircuitBreaker, VerdictCache } from "./session-state.ts";
-import type { SessionManagerLike } from "./transcript-stripper.ts";
-
-/**
- * Per-session state. Created at session_start, cleared at session_shutdown.
- * KEPT across permissions:ready re-registration (the session itself hasn't
- * changed — only the authorizer link is re-registered).
- */
-interface SessionState {
-  /** Validated extension config, or undefined if loading failed (fail-safe). */
-  config: LoadConfigResult["config"];
-  /** Model registry from the session context — resolves the reviewer model. */
-  registry: ModelRegistryLike;
-  /** Session manager for transcript stripping (trusted intent + tool calls). */
-  sessionManager: SessionManagerLike;
-  /** Session working directory, sourced from session_start ctx.cwd. */
-  cwd: string;
-  /** Per-session circuit breaker — trips on consecutive denials. */
-  circuitBreaker: CircuitBreaker;
-  /** Per-session verdict cache — avoids re-reviewing identical commands. */
-  verdictCache: VerdictCache;
-}
+import { RuntimeSettings, type EnumSettingSpec } from "./runtime-settings.ts";
+import { SessionLifecycle } from "./session-lifecycle.ts";
 
 /**
  * Optional overrides for testing. In production (default export) all
@@ -73,24 +33,15 @@ export interface AiGuardDependencies {
 }
 
 /**
- * Whether `error` is the exact "already registered" rejection from
- * `AuthorizerRegistry.register`. Used to distinguish a benign in-process
- * subagent re-registration (the child resolves the parent's service and
- * tries to re-register the link name) from a genuine registration failure.
- *
- * Exact match on the full message — not substring — so a different error
- * that merely contains "already registered" stays a warning.
- *
- * @param error - The caught error from `service.registerAuthorizer()`.
- * @param linkName - The link name passed to `registerAuthorizer`.
- * @returns True if `error` is the duplicate-registration rejection for `linkName`.
+ * The settings this extension exposes: enum-valued overrides over their
+ * same-named config fields. The whole /ai-guard UX materializes from
+ * this list (see {@link RuntimeSettings}).
  */
-function isDuplicateAuthorizerError(error: unknown, linkName: string): boolean {
-  return (
-    error instanceof Error &&
-    error.message === `An authorizer is already registered for '${linkName}'.`
-  );
-}
+const SETTINGS: readonly EnumSettingSpec[] = [
+  // `default` is the shipped baseline — a footer line saying "default"
+  // permanently would be pure noise, so RuntimeSettings omits it.
+  { name: "mode", values: [...MODE_VALUES], hiddenValue: "default" },
+];
 
 export function createAiGuardExtension(
   pi: ExtensionAPI,
@@ -100,102 +51,63 @@ export function createAiGuardExtension(
     dependencies.loadConfig ??
     ((cwd: string, trustedProject: boolean) => loadAiGuardConfig({ cwd, trustedProject }));
 
-  let session: SessionState | undefined;
-  let registered = false;
-  let dispose: (() => void) | undefined;
+  // The lifecycle owns session identity, the registration, and the stable
+  // overrides object; the settings surface reads/writes overrides through
+  // that same object (the single write path).
+  const lifecycle = new SessionLifecycle({
+    // The authorizer factory defaults to the real ReviewPipeline. Tests
+    // inject a stub to exercise lifecycle timing without the model stack.
+    createPipeline: dependencies.createPipeline ?? createReviewPipeline,
+    // Model calls go through `provider.streamSimple(...).result()` via the
+    // ModelRegistry handed to extensions, avoiding the deprecated
+    // `@earendil-works/pi-ai/compat` entrypoint.
+    completeSimple:
+      dependencies.completeSimple ?? createCompleteSimple(() => lifecycle.session?.registry),
+  });
 
-  // Model calls go through `provider.streamSimple(...).result()` via the
-  // ModelRegistry handed to extensions, avoiding the deprecated
-  // `@earendil-works/pi-ai/compat` entrypoint.
-  const completeSimple: CompleteSimpleFn =
-    dependencies.completeSimple ?? createCompleteSimple(() => session?.registry);
+  const settings = new RuntimeSettings(
+    { session: lifecycle, appendEntry: (type, data) => pi.appendEntry(type, data) },
+    SETTINGS,
+  );
 
-  // The authorizer factory defaults to the real ReviewPipeline. Tests inject
-  // a stub to exercise lifecycle timing without the model stack.
-  const createPipeline = dependencies.createPipeline ?? createReviewPipeline;
-
-  function tryRegister(): void {
-    if (registered || !session?.config) {
-      return;
-    }
-    const service = getPermissionsService();
-    if (!service) {
-      return;
-    }
-    try {
-      const deps: ReviewPipelineDeps = {
-        config: session.config,
-        registry: session.registry,
-        sessionManager: session.sessionManager,
-        cwd: session.cwd,
-        circuitBreaker: session.circuitBreaker,
-        verdictCache: session.verdictCache,
-        completeSimple,
-      };
-      const authorize = createPipeline(deps);
-      dispose = service.registerAuthorizer(LINK_NAME, authorize);
-      registered = true;
-    } catch (e) {
-      // "already registered" fires on every in-process subagent startup: the
-      // child resolves the parent's globally-published service (it never
-      // publishes its own) and tries to re-register the link name the parent
-      // already owns. This is benign — the child reuses the parent's
-      // authorizer — so downgrade to debug to avoid per-subagent warning spam.
-      // Stale-registration failures (/reload dispose glitch) look identical
-      // from this side, but they are rare and still surface here at debug
-      // level for anyone diagnosing a missing authorizer.
-      //
-      // Exact match (not substring) so a different error that happens to
-      // contain "already registered" stays a warning. The message format is
-      // `An authorizer is already registered for '<name>'.` — see
-      // AuthorizerRegistry.register in @gotgenes/pi-permission-system.
-      if (isDuplicateAuthorizerError(e, LINK_NAME)) {
-        // Benign: every in-process subagent startup re-registers the link
-        // name the parent already owns. The child reuses the parent's
-        // authorizer, so this is a no-op. Silently skip — no log output,
-        // since this fires per-subagent and carries no actionable info.
-        // Stale-registration failures (/reload dispose glitch) look
-        // identical and are rare; if one occurs, the missing-authorizer
-        // symptom (all asks defer to the prompt) is the diagnostic signal.
-        return;
-      } else {
-        warn(`Failed to register authorizer: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-  }
+  pi.registerCommand("ai-guard", settings.command);
+  pi.registerShortcut("ctrl+alt+g", settings.shortcut);
 
   pi.on("session_start", (_event, ctx) => {
     const result = loadConfig(ctx.cwd, ctx.isProjectTrusted());
-    session = {
+    lifecycle.onSessionStart({
       config: result.config,
       registry: ctx.modelRegistry,
       sessionManager: ctx.sessionManager,
       cwd: ctx.cwd,
-      circuitBreaker: new CircuitBreaker(),
-      verdictCache: new VerdictCache(),
-    };
+      ctx,
+    });
+    // Restore persisted setting overrides from the session file (a resumed
+    // session picks up where it left off; a fresh one restores nothing),
+    // then sync the footer (it renders only deviations from the default).
+    settings.restore(ctx.sessionManager);
+    settings.syncFooter(ctx);
     for (const issue of result.issues) {
       warn(`config issue at ${issue.sourcePath ?? "(merged)"} — ${issue.path}: ${issue.message}`);
     }
-    tryRegister();
   });
 
   pi.events.on(PERMISSIONS_READY_CHANNEL, () => {
-    // permissions:ready may fire before or after session_start's handler
-    // runs. If we're already registered, dispose first so we re-register
-    // against the fresh service. Otherwise just attempt registration.
-    if (registered) {
-      dispose?.();
-      dispose = undefined;
-      registered = false;
-    }
-    tryRegister();
+    lifecycle.onPermissionsReady();
   });
 
-  pi.on("session_shutdown", () => {
-    dispose?.();
-    dispose = undefined;
-    registered = false;
-    session = undefined;
+  pi.on("session_tree", (_event, ctx) => {
+    // Tree navigation (branch/rewind) can move the active branch past
+    // setting entries — re-derive the overrides from the new branch and
+    // re-sync the footer (the todo.ts pattern: reconstruct on
+    // session_start + session_tree).
+    if (!lifecycle.session) return;
+    lifecycle.onSessionTree(ctx);
+    settings.restore(ctx.sessionManager);
+    settings.syncFooter(ctx);
+  });
+  pi.on("session_shutdown", (_event, ctx) => {
+    lifecycle.onShutdown();
+    settings.clearFooter(ctx);
   });
 }

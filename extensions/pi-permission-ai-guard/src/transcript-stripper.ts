@@ -10,7 +10,7 @@
  * - Compaction summaries are derived context, not user authorization → delete
  */
 
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
 
 import { isObjectRecord, normalizeAndRedactText, truncateMiddle } from "./utils.ts";
 
@@ -37,11 +37,12 @@ export interface StripOptions {
   maxCharsPerEntry: number;
 }
 
-/** Minimal projection of pi's SessionManager needed by the stripper. */
-export type SessionManagerLike = {
-  /** Returns session entries (messages, compactions, etc.) in chronological order. */
-  buildContextEntries(): SessionEntry[];
-};
+/**
+ * Minimal projection of the host's SessionManager needed by the stripper —
+ * derived (not hand-written) so the signature can't drift from the real
+ * manager: the stripper needs only `buildContextEntries`.
+ */
+export type SessionManagerLike = Pick<SessionManager, "buildContextEntries">;
 
 /** Structural projection of a session message entry. */
 type Message = {

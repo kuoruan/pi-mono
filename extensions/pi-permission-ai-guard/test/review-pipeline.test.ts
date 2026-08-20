@@ -9,9 +9,15 @@ import type {
 import { describe, expect, it } from "vitest";
 
 import { type AiGuardConfig, configSchema } from "#src/config-schema.ts";
-import { CACHE_LOOKUP_EVENT, DECISION_EVENT, MODEL_REPLY_EVENT } from "#src/decision-record.ts";
+import {
+  BREAKER_DENY_REASON,
+  CACHE_LOOKUP_EVENT,
+  DECISION_EVENT,
+  MODEL_REPLY_EVENT,
+} from "#src/decision-record.ts";
 import { type ReviewPipelineDeps, createReviewPipeline } from "#src/review-pipeline.ts";
 import { CircuitBreaker, VerdictCache } from "#src/session-state.ts";
+import { AUTO_DEFER_DENY_REASON } from "#src/verdict-mode.ts";
 
 /**
  * Minimal bash PromptPayload for a fixture (pi-permission-system 26.0+).
@@ -164,6 +170,7 @@ function makePipeline(overrides: Partial<ReviewPipelineDeps> = {}): ReviewPipeli
     cwd: "/project",
     circuitBreaker: new CircuitBreaker(),
     verdictCache: new VerdictCache(),
+    overrides: {},
     completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
     ...overrides,
   };
@@ -444,6 +451,208 @@ describe("createReviewPipeline — verdicts", () => {
   });
 });
 
+describe("createReviewPipeline — mode", () => {
+  it("a session-scoped override takes precedence over the config mode", async () => {
+    const authorize = createReviewPipeline(
+      makePipeline({
+        // config stays "default" — only the session override hands denies to the human.
+        overrides: { mode: "manual" },
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
+        ]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "defer" });
+  });
+
+  it("manual maps a model deny to defer and annotates the decision record", async () => {
+    const reviewCalls: { event: string; data: Record<string, unknown> }[] = [];
+    const log = {
+      review: (event: string, data: Record<string, unknown>) => reviewCalls.push({ event, data }),
+      debug: () => {},
+    } as never;
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "manual" },
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
+        ]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), log);
+    expect(verdict).toEqual({ kind: "defer" });
+    const decision = reviewCalls.find((c) => c.event === DECISION_EVENT);
+    expect(decision!.data.verdict).toBe("deny");
+    expect(decision!.data.emittedVerdict).toBe("defer");
+    expect(decision!.data.mode).toBe("manual");
+    expect(decision!.data.reason).toBe("unsafe");
+  });
+
+  it("manual notify surfaces the reviewer's reasoning for the human", async () => {
+    const notifications: [string, string | undefined][] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "manual" },
+        notify: (message, level) => notifications.push([message, level]),
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
+        ]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(notifications).toEqual([
+      ["ai-guard reviewer denied this request (risk: high) — unsafe", "warning"],
+    ]);
+  });
+
+  it("manual maps a cached deny to defer on a cache hit (no model call, notify fires)", async () => {
+    let modelCalls = 0;
+    const completeSimple = async () => {
+      modelCalls++;
+      return makeFakeCompleteSimple([
+        { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
+      ])();
+    };
+    const reviewCalls: { event: string; data: Record<string, unknown> }[] = [];
+    const log = {
+      review: (event: string, data: Record<string, unknown>) => reviewCalls.push({ event, data }),
+      debug: () => {},
+    } as never;
+    const notifications: [string, string | undefined][] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "manual", cache: { maxEntries: 8 } },
+        notify: (message, level) => notifications.push([message, level]),
+        completeSimple,
+      }),
+    );
+    const first = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), log);
+    expect(first).toEqual({ kind: "defer" });
+    expect(modelCalls).toBe(1);
+
+    const second = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), log);
+    expect(second).toEqual({ kind: "defer" });
+    expect(modelCalls).toBe(1); // cache hit — the deny is reused and mapped again
+
+    const cacheHit = reviewCalls.filter((c) => c.event === DECISION_EVENT).at(-1)!;
+    expect(cacheHit.data.gate).toBe("cache-hit");
+    expect(cacheHit.data.verdict).toBe("deny");
+    expect(cacheHit.data.emittedVerdict).toBe("defer");
+    expect(cacheHit.data.mode).toBe("manual");
+    expect(notifications).toHaveLength(2); // fresh + cache hit both notify the human
+  });
+
+  it("default keeps a model defer as a defer", async () => {
+    const authorize = createReviewPipeline(
+      makePipeline({
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"defer","reason":"needs the target path"}' },
+        ]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "defer" });
+  });
+
+  it("auto maps a model defer to deny carrying the clarification request", async () => {
+    const reviewCalls: { event: string; data: Record<string, unknown> }[] = [];
+    const log = {
+      review: (event: string, data: Record<string, unknown>) => reviewCalls.push({ event, data }),
+      debug: () => {},
+    } as never;
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto" },
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"defer","reason":"needs the target path"}' },
+        ]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), log);
+    // The defer's reason becomes the deny's teaching reason — not a silent deny.
+    expect(verdict).toEqual({ kind: "deny", reason: "needs the target path" });
+    const decision = reviewCalls.find((c) => c.event === DECISION_EVENT);
+    expect(decision!.data.verdict).toBe("defer");
+    expect(decision!.data.emittedVerdict).toBe("deny");
+    expect(decision!.data.mode).toBe("auto");
+  });
+
+  it("auto maps a model defer without a reason to a generic deny reason", async () => {
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto" },
+        // Valid JSON defer, but the model omitted the clarification request.
+        completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "deny", reason: AUTO_DEFER_DENY_REASON });
+  });
+
+  it("auto passes machinery failures to the human with an explanatory notify", async () => {
+    const notifications: [string, string | undefined][] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto" },
+        notify: (message, level) => notifications.push([message, level]),
+        // No JSON — a machinery failure (no-json), not the model's uncertainty.
+        completeSimple: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
+    // Machinery failures are not safety verdicts: they defer to the human
+    // escape valve (headless: the denying terminal) instead of being denied.
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(notifications).toEqual([
+      ["ai-guard: reviewer could not complete the review (no-json) — deferring to you", "warning"],
+    ]);
+  });
+
+  it("auto keeps a model deny terminal and does not notify", async () => {
+    const notifications: [string, string | undefined][] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto" },
+        notify: (message, level) => notifications.push([message, level]),
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
+        ]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "deny", reason: "unsafe" });
+    expect(notifications).toHaveLength(0);
+  });
+
+  it("manual denies still count toward the circuit breaker", async () => {
+    let modelCalls = 0;
+    const completeSimple = async () => {
+      modelCalls++;
+      return makeFakeCompleteSimple([
+        { type: "text", text: '{"verdict":"deny","reason":"no","riskLevel":"medium"}' },
+      ])();
+    };
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "manual" },
+        completeSimple,
+      }),
+    );
+    for (let i = 0; i < 3; i++) {
+      const verdict = await authorize(makeDetails({ value: `cmd-${i}` }), makeQuery("ask"), noLog);
+      expect(verdict).toEqual({ kind: "defer" });
+    }
+    expect(modelCalls).toBe(3);
+
+    // 3 consecutive model denies (even though all mapped to defers) trip the breaker.
+    const fourth = await authorize(makeDetails({ value: "cmd-3" }), makeQuery("ask"), noLog);
+    expect(fourth).toEqual({ kind: "deny", reason: BREAKER_DENY_REASON });
+    expect(modelCalls).toBe(3); // breaker short-circuited without a model call
+  });
+});
+
 describe("createReviewPipeline — circuit breaker", () => {
   it("short-circuits to deny after consecutive threshold (default)", async () => {
     let modelCalled = 0;
@@ -537,6 +746,52 @@ describe("createReviewPipeline — circuit breaker", () => {
     const verdict = await authorize(makeDetails({ value: "rm" }), makeQuery("ask"), noLog);
     expect(verdict).toEqual({ kind: "defer" });
     expect(modelCalled).toBe(3);
+  });
+
+  it("a forced defer bypasses the mode mapping (auto still defers) and notifies", async () => {
+    const notifications: [string, string | undefined][] = [];
+    const breaker = new CircuitBreaker();
+    // Prime the breaker: 3 model denies trip it on the next check.
+    breaker.recordVerdict("deny");
+    breaker.recordVerdict("deny");
+    breaker.recordVerdict("deny");
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: {
+          ...baseConfig,
+          mode: "auto",
+          circuitBreaker: { ...baseConfig.circuitBreaker, verdict: "defer" } as const,
+        },
+        circuitBreaker: breaker,
+        notify: (message, level) => notifications.push([message, level]),
+        completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm" }), makeQuery("ask"), noLog);
+    // NOT mapped to deny: the breaker's explicit defer is the human escape
+    // valve — specific config beats the general mode.
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]![1]).toBe("warning");
+  });
+
+  it("a forced deny in auto mode stays a silent deny (agent-mediated, no notify)", async () => {
+    const notifications: [string, string | undefined][] = [];
+    const breaker = new CircuitBreaker();
+    breaker.recordVerdict("deny");
+    breaker.recordVerdict("deny");
+    breaker.recordVerdict("deny");
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto" },
+        circuitBreaker: breaker,
+        notify: (message, level) => notifications.push([message, level]),
+        completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "rm" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "deny", reason: BREAKER_DENY_REASON });
+    expect(notifications).toHaveLength(0);
   });
 });
 
@@ -833,5 +1088,142 @@ describe("createReviewPipeline — transcript stripping", () => {
     );
     const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
     expect(verdict).toEqual({ kind: "allow" });
+  });
+});
+
+describe("createReviewPipeline — mode edges", () => {
+  it("auto keeps a cached deny terminal on a cache hit (no model call, no notify)", async () => {
+    let modelCalls = 0;
+    const completeSimple = async () => {
+      modelCalls++;
+      return makeFakeCompleteSimple([
+        { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
+      ])();
+    };
+    const notifications: [string, string | undefined][] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto", cache: { maxEntries: 8 } },
+        notify: (message, level) => notifications.push([message, level]),
+        completeSimple,
+      }),
+    );
+    const first = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
+    expect(first).toEqual({ kind: "deny", reason: "unsafe" });
+
+    // Cache hit: the stored model deny re-maps through auto (identity for
+    // denies) without a model call — and without a notify (the agent sees
+    // the deny reason itself).
+    const second = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
+    expect(second).toEqual({ kind: "deny", reason: "unsafe" });
+    expect(modelCalls).toBe(1);
+    expect(notifications).toHaveLength(0);
+  });
+
+  it("a policy-decided ask defers regardless of the mode", async () => {
+    let modelCalled = false;
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto" },
+        completeSimple: async () => {
+          modelCalled = true;
+          return {} as AssistantMessage;
+        },
+      }),
+    );
+    // The deterministic engine already allowed this: the link defers before
+    // the model (and before any verdict-mode mapping could apply).
+    const verdict = await authorize(makeDetails({ value: "ls -la" }), makeQuery("allow"), noLog);
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(modelCalled).toBe(false);
+  });
+});
+
+describe("createReviewPipeline — auto machinery-escape notify (pre-call paths)", () => {
+  it("notifies with 'model-unresolved' when the model can't be resolved in auto mode", async () => {
+    const notifications: [string, string | undefined][] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto" },
+        registry: {
+          find: () => undefined,
+          getProvider: () => undefined,
+          getApiKeyAndHeaders: async () => ({ ok: true }),
+        },
+        notify: (message, level) => notifications.push([message, level]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(notifications).toEqual([
+      [
+        "ai-guard: reviewer could not complete the review (model-unresolved) — deferring to you",
+        "warning",
+      ],
+    ]);
+  });
+
+  it("notifies with 'auth-failed' when auth fails in auto mode", async () => {
+    const notifications: [string, string | undefined][] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto" },
+        registry: {
+          find: () => fakeModel,
+          getProvider: () => undefined,
+          getApiKeyAndHeaders: async () => ({ ok: false, error: "no key" }),
+        },
+        notify: (message, level) => notifications.push([message, level]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(notifications).toEqual([
+      [
+        "ai-guard: reviewer could not complete the review (auth-failed) — deferring to you",
+        "warning",
+      ],
+    ]);
+  });
+
+  it("notifies with 'transcript-error' when transcript stripping throws in auto mode", async () => {
+    const notifications: [string, string | undefined][] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "auto" },
+        sessionManager: {
+          buildContextEntries: () => {
+            throw new Error("boom");
+          },
+        },
+        notify: (message, level) => notifications.push([message, level]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(notifications).toEqual([
+      [
+        "ai-guard: reviewer could not complete the review (transcript-error) — deferring to you",
+        "warning",
+      ],
+    ]);
+  });
+
+  it("does not notify on pre-call machinery failures outside auto mode", async () => {
+    const notifications: [string, string | undefined][] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "default" },
+        registry: {
+          find: () => undefined,
+          getProvider: () => undefined,
+          getApiKeyAndHeaders: async () => ({ ok: true }),
+        },
+        notify: (message, level) => notifications.push([message, level]),
+      }),
+    );
+    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(notifications).toEqual([]);
   });
 });

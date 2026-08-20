@@ -142,3 +142,67 @@ describe("loadAiGuardConfig", () => {
     expect(result.config?.transcript.maxCharsPerEntry).toBe(1000); // preserved from global
   });
 });
+
+describe("loadAiGuardConfig — mode", () => {
+  beforeEach(() => {
+    vol.reset();
+  });
+
+  it('defaults mode to "default"', () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+      }),
+    });
+
+    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    expect(result.config?.mode).toBe("default");
+    expect(result.issues).toEqual([]);
+  });
+
+  it("rejects an invalid mode value", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        mode: "yolo",
+      }),
+    });
+
+    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    expect(result.config).toBeUndefined();
+    expect(result.issues.some((i) => i.path === "mode")).toBe(true);
+  });
+
+  it("warns on the auto + breaker-defer combination (legal but interrupts)", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        mode: "auto",
+        circuitBreaker: { verdict: "defer" },
+      }),
+    });
+
+    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    // The config itself is valid — the escape valve is a designed feature.
+    expect(result.config?.mode).toBe("auto");
+    expect(result.config?.circuitBreaker.verdict).toBe("defer");
+    const warning = result.issues.find((i) => i.path === "mode");
+    expect(warning?.message).toContain("circuitBreaker.verdict");
+  });
+
+  it("does not warn on auto with the default breaker deny", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        mode: "auto",
+      }),
+    });
+
+    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    expect(result.issues).toEqual([]);
+  });
+});

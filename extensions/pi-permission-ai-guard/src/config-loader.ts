@@ -147,5 +147,17 @@ export function loadAiGuardConfig(options?: {
     return { issues };
   }
 
+  // A legal but surprising combination: in `auto` mode a breaker configured
+  // to force `defer` will interrupt the human when the reviewer is untrusted
+  // (the designed escape valve — specific config beats the mode). Surface it
+  // as a warning so the interaction is visible without opening the docs.
+  if (parsed.data.mode === "auto" && parsed.data.circuitBreaker.verdict === "defer") {
+    issues.push({
+      path: "mode",
+      message:
+        'mode "auto" + circuitBreaker.verdict "defer": the breaker interrupts the human when it trips (reviewer untrusted escape valve).',
+    });
+  }
+
   return { config: parsed.data, issues };
 }

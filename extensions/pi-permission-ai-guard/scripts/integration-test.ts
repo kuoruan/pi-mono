@@ -276,6 +276,7 @@ function buildHarness(
     cwd: process.cwd(),
     circuitBreaker: new CircuitBreaker(),
     verdictCache: new VerdictCache(),
+    overrides: {},
     completeSimple: createCompleteSimple(() => registry),
   });
   return { authorize, log };

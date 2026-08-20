@@ -1,7 +1,5 @@
 /**
- * Per-session mutable state for the ai-guard chain link.
- *
- * Two independent concerns, each with its own session-scoped state:
+ * Per-session state for the ai-guard chain link.
  *
  * 1. {@link CircuitBreaker} — consecutive/total deny counters. `consecutive` is a recoverable tier
  *    (resets on trip so the model gets another chance); `total` is a hard session cap (never
@@ -9,11 +7,26 @@
  *    permanent trip.
  * 2. {@link VerdictCache} — LRU of recent (command, context) → verdict, so repeated identical asks in
  *    a stable conversation skip the model call.
+ * 3. {@link SessionOverrides} — the runtime-settings contract: a stable overrides object (allocated
+ *    once per extension instance by the SessionLifecycle, reset in place per session) whose
+ *    optional fields shadow their same-named config fields.
  */
 
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
+import type { BreakerVerdict, Mode } from "./config-schema.ts";
 import type { RiskLevel } from "./verdict.ts";
+
+/**
+ * Session-scoped runtime overrides over the config file. Set via the
+ * `/ai-guard` command or the `ctrl+alt+g` shortcut; each change is appended
+ * to the pi session file (custom entry, never LLM context) and restored on
+ * resume. A new session starts from the config values.
+ */
+export interface SessionOverrides {
+  /** Guard mode for this session; undefined = use the config's mode. */
+  mode?: Mode;
+}
 
 /** A cached verdict entry, keyed by commandHash. */
 export interface CacheEntry {
@@ -30,7 +43,7 @@ export interface CircuitBreakerConfig {
   /** Hard session cap: trip after this many total denies (never resets). */
   total: number;
   /** Verdict to return when the breaker trips. */
-  verdict: "deny" | "defer";
+  verdict: BreakerVerdict;
 }
 
 /** Verdict cache configuration. */
@@ -104,7 +117,7 @@ export type CacheMissReason =
 
 /** Result of a cache lookup: either a hit with the verdict, or a miss reason. */
 export type CacheLookupResult =
-  | { hit: true; verdict: AuthorizerVerdict }
+  | { hit: true; verdict: AuthorizerVerdict; riskLevel?: RiskLevel }
   | { hit: false; missReason: CacheMissReason };
 
 /**
@@ -136,7 +149,7 @@ export class VerdictCache {
     // LRU refresh: move to end so the most-recently-used survives eviction.
     this.cache.delete(commandHash);
     this.cache.set(commandHash, entry);
-    return { hit: true, verdict: entry.verdict };
+    return { hit: true, verdict: entry.verdict, riskLevel: entry.riskLevel };
   }
 
   /**

@@ -100,8 +100,7 @@ permission request and decide whether it should run.
   or disabling logs). Security hardening (e.g., restricting
   permissions) is not this category.
 - **Persistent System Changes**: Creating system-level scheduled tasks,
-  startup services, or daemons outside the project scope; also shutdown
-  or reboot of the host.
+  startup services, or daemons outside the project scope.
 - **External Code Execution**: Executing fetched remote code (e.g.,
   curl | bash, npm install from URL, or eval of fetched content) is
   DENY — Always, including in the same composite command.
@@ -128,6 +127,8 @@ permission request and decide whether it should run.
   modules), or sourcing external scripts; otherwise DEFER. Persistent
   privileged entry points (setuid, sudoers, authorized_keys) are DENY —
   Always, not this category.
+- **Host Shutdown/Reboot**: Shutting down or rebooting the host requires
+  explicit matching intent; otherwise DEFER.
 - **Deletions**: Any file deletion requires explicit matching intent;
   otherwise DENY, even for a single file within CWD.
 - **Network & Browser Actions**: Read-only network/browser
@@ -191,7 +192,9 @@ Reply with ONLY one JSON object — no markdown, no prose, no other text.
 - Omit fields that do not apply; never use empty strings.
 - For deny or defer, reason must be one concise sentence grounded in
   visible request context.
-- riskLevel is required for deny and optional for defer.`;
+- riskLevel is required for deny and optional for defer. A deny under a
+  DENY — Always category is critical; denies under DENY — Unless use
+  high, medium, or low by severity.`;
 
 /**
  * Short trigger line appended to the review user prompt (the verdict format

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AskContext } from "#src/ask-eligibility.ts";
 import { configSchema, EXTENSION_ID, LINK_NAME } from "#src/config-schema.ts";
-import { buildReviewPrompt } from "#src/prompt.ts";
+import { buildReviewPrompt, buildReviewSystemPrompt } from "#src/prompt.ts";
 
 // Evidence entry helper for fixtures.
 function ev(label: string, text: string, detail: string | null = null) {
@@ -465,5 +465,28 @@ describe("config-schema", () => {
     expect(result.success).toBe(true);
     expect(result.success && result.data.reasoning).toBe("low");
     expect(result.success && result.data.surfaces).toEqual(["bash"]);
+  });
+});
+
+describe("buildReviewSystemPrompt — safety-rules lock-ins", () => {
+  it("classifies host shutdown/reboot as intent-gated (DENY — Unless), not DENY — Always", () => {
+    const prompt = buildReviewSystemPrompt(null);
+    // The new entry lives in the DENY — Unless section.
+    const unlessIdx = prompt.indexOf("## DENY — Unless");
+    const entryIdx = prompt.indexOf("**Host Shutdown/Reboot**");
+    const allowIdx = prompt.indexOf("## ALLOW");
+    expect(entryIdx).toBeGreaterThan(unlessIdx);
+    expect(entryIdx).toBeLessThan(allowIdx);
+
+    // Its old home (Persistent System Changes, DENY — Always) no longer claims it.
+    const from = prompt.indexOf("**Persistent System Changes**");
+    const to = prompt.indexOf("**External Code Execution**");
+    expect(prompt.slice(from, to)).not.toMatch(/shutdown|reboot/i);
+  });
+
+  it("anchors riskLevel critical to DENY — Always categories in the verdict contract", () => {
+    const prompt = buildReviewSystemPrompt(null);
+    expect(prompt).toContain("A deny under a");
+    expect(prompt).toContain("category is critical");
   });
 });

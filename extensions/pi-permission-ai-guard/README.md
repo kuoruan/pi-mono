@@ -95,17 +95,18 @@ See [`config/config.example.json`](config/config.example.json) for a complete ex
 
 ## Configuration
 
-| Field            | Type                             | Default                                   | Description                                                            |
-| ---------------- | -------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------- |
-| `provider`       | string                           | required                                  | Model provider (e.g. `anthropic`)                                      |
-| `model`          | string                           | required                                  | Model id (e.g. `claude-haiku-4-5`)                                     |
-| `reasoning`      | `"off"\|"low"\|"medium"\|"high"` | `"off"`                                   | Thinking level; `off` = disabled                                       |
-| `timeoutMs`      | integer                          | `15000`                                   | Model-call timeout (ms)                                                |
-| `transcript`     | object                           | see below                                 | Transcript stripping config (see below)                                |
-| `surfaces`       | string[]                         | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes |
-| `instructions`   | string\|null                     | `null`                                    | Custom safety rules (replaces defaults; null = built-in)               |
-| `circuitBreaker` | object                           | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                     |
-| `cache`          | object                           | `{maxEntries:128}`                        | Verdict cache (see below)                                              |
+| Field            | Type                                                                    | Default                                   | Description                                                            |
+| ---------------- | ----------------------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------- |
+| `provider`       | string                                                                  | required                                  | Model provider (e.g. `anthropic`)                                      |
+| `model`          | string                                                                  | required                                  | Model id (e.g. `claude-haiku-4-5`)                                     |
+| `reasoning`      | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"off"`                                   | Thinking level (pi-ai `ModelThinkingLevel`); `off` = disabled          |
+| `timeoutMs`      | integer                                                                 | `15000`                                   | Model-call timeout (ms)                                                |
+| `transcript`     | object                                                                  | see below                                 | Transcript stripping config (see below)                                |
+| `surfaces`       | string[]                                                                | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes |
+| `instructions`   | string\|null                                                            | `null`                                    | Custom safety rules (replaces defaults; null = built-in)               |
+| `mode`           | `"manual"\|"default"\|"auto"`                                           | `"default"`                               | Who adjudicates non-allow verdicts (see below)                         |
+| `circuitBreaker` | object                                                                  | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                     |
+| `cache`          | object                                                                  | `{maxEntries:128}`                        | Verdict cache (see below)                                              |
 
 ### Transcript
 
@@ -120,6 +121,82 @@ stripped.
 | `maxToolCalls`     | `10`    | Max tool calls (most recent)             |
 | `maxCharsPerEntry` | `1000`  | Truncate each entry to this many chars   |
 
+### Mode
+
+The reviewer model answers each permission ask with `allow`, `deny`, or
+`defer` (uncertain). `mode` decides who adjudicates the
+non-allow verdicts — the human-involvement dial:
+
+| Policy                | model `deny`             | model `defer`            | Reading                                                                           |
+| --------------------- | ------------------------ | ------------------------ | --------------------------------------------------------------------------------- |
+| `"default"` (default) | `deny` (final)           | `defer` (next authority) | Decisive verdicts are final; uncertainty asks                                     |
+| `"manual"`            | `defer` (next authority) | `defer` (next authority) | The human adjudicates everything the model doesn't allow                          |
+| `"auto"`              | `deny` (final)           | `deny`                   | Fully automatic, fail-closed: the link never interrupts on a normal model verdict |
+
+Notes:
+
+- A link's `deny` is final — it short-circuits the chain and never
+  reaches a prompt. A link's `defer` falls to the next authority: the
+  interactive permission prompt in a TUI session, the denying terminal
+  in a headless one.
+- `"manual"` lets the human override the model's denies — the reviewer
+  becomes an advisor, not a judge. Its deny reason surfaces as a
+  notification when the request escalates, and lands in the
+  `ai_guard.decision` log (`verdict: "deny"` + `emittedVerdict: "defer"`)
+  either way.
+- `"auto"` denies the model's own uncertainty (fail-closed, matching what
+  a headless session already does). The defer's clarification request
+  becomes the deny's reason, so the agent sees what to clarify instead of
+  a silent block. `"auto"` never interrupts on a normal model verdict, but
+  reviewer machinery failures (model unresolved, auth failed, transcript
+  errors, timeouts, unparseable replies) and a breaker configured to force
+  `defer` still reach the human escape valve — a broken reviewer asks the
+  human instead of issuing silent verdicts it can't stand behind, with a
+  notification explaining the interruption. Headless sessions resolve
+  those defers to deny either way.
+- Headless sessions collapse the modes: a `defer` always resolves to the
+  denying terminal, so `"manual"` and `"auto"` both deny everything the
+  model doesn't allow — the difference lives in the audit trail and the
+  TUI behavior.
+- The mapping never weakens a deny into an allow in any mode. A tripped
+  breaker's forced verdict bypasses the mapping by design (its forced
+  `deny` stays terminal even under `"manual"` — specific config beats the
+  general mode).
+
+Mapped verdicts still count toward the circuit breaker (the breaker
+counts real model denials only) and denies are still stored in the
+verdict cache (the cache holds the model's deny; the mapping re-applies
+on every hit, so a repeated ask maps consistently without a new model
+call). Model defers are never cached — `"auto"` re-reviews them fresh.
+
+### Runtime control
+
+Two session-scoped controls change the effective mode without
+touching the config file:
+
+- `/ai-guard` — opens the settings menu (each entry shows its current
+  value and source); picking an entry opens its value picker. Direct
+  forms: `/ai-guard mode manual|default|auto` and
+  `/ai-guard mode reset` (back to the config default). Argument
+  completion is two-stage: setting names first, then the setting's
+  values.
+- `ctrl+alt+g` — cycle `manual → default → auto → manual` (from the
+  default, one press reaches `auto`).
+
+The footer only shows deviations from the shipped baseline: nothing while
+the effective mode is `default`; `<value>` (e.g. `auto`) from the config;
+`<value> (session)` while an override is active (including after resume).
+The pipeline picks up the change on the next ask without re-registering
+the chain link, and `ai_guard.decision` records carry the effective mode
+at decision time.
+
+Overrides persist **per session**: each change is appended to pi's session
+file as a custom entry (custom entries never enter LLM context), so
+resuming a session restores the last policy set on its active branch — a
+`reset` persists too, a fresh session always starts from the config
+default, and tree navigation (`/tree` rewind/branch) re-derives the
+override from the new active branch.
+
 ### Circuit breaker
 
 Two-tier, fail-safe. `circuitBreaker.consecutive` is a **recoverable** tier:
@@ -130,7 +207,22 @@ tier: once a session accumulates that many model denials, the breaker stays
 tripped permanently (the counter never resets). Together they tighten
 progressively — repeated abuse walks a recoverable trip toward the
 permanent one. Breaker trips and cache hits are not counted as model
-denials (no double-counting).
+denials (no double-counting), and the breaker counts real model denials
+regardless of the mode — mapping never changes what the model
+said.
+
+A tripped breaker's forced verdict **bypasses the verdict-mode mapping**
+(the explicit breaker config is more specific than the general mode):
+
+- `verdict: "deny"` (default): the trip forces a deny (with a breaker
+  reason the agent can act on) — in `auto` mode the session keeps running
+  uninterrupted, fail-closed.
+- `verdict: "defer"`: the trip defers to the human — in `auto` mode this
+  **interrupts on purpose**: the breaker tripping means the reviewer itself
+  is untrusted (a deny storm — miscalibrated or prompt-injected), and this
+  is the designed escape valve. A notification explains the interruption;
+  headless sessions degrade to deny (no human is present). The config
+  loader warns about the `auto` + `defer` combination up front.
 
 ### Verdict cache
 
