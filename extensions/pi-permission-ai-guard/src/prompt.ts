@@ -313,12 +313,10 @@ function buildTranscriptSections(transcript: StrippedTranscript): string[] {
 /**
  * Build the review system prompt: shared safety rules + fixed verdict output
  * contract. If `customInstructions` is provided (non-null), it replaces the
- * default rules; the verdict format is always appended.
- *
- * The resulting prompt is below Anthropic's 1024-token prompt-caching
- * threshold, so it will NOT be cached. Do not pad the rules to reach the
- * threshold — the per-request input cost of a longer prompt outweighs the
- * marginal cache savings here.
+ * default rules; the verdict format is always appended. The prompt is not
+ * cached (pi-ai's `completeSimple` does not set `cache_control`) — do not
+ * add caching here; the per-call sections vary and wiring it is upstream's
+ * job.
  *
  * @param customInstructions - Optional custom safety instructions replacing the default rules.
  * @returns The review system prompt string.

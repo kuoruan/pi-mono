@@ -178,7 +178,10 @@ use "judge by what it does".
   separate when a qualifier applies to only one ("outside the project"
   limits persistent changes, not security weakening).
 - Inline parenthetical content into the main clause where possible.
-- Target ~1300–1450 tokens, accounting for structural heading cost.
+- Minimize token count — the prompt is sent on every model review, and
+  the safety rules block is not cached. But never compress at the cost
+  of principle 8: splitting distinct concepts stays even if it costs
+  tokens, because navigability reduces misclassification.
 - Safety-critical semantics must stay explicit, even when they seem
   implied. Two currently live as literal phrases in the rules — "both
   payload and destination" (Sensitive-Data Egress) and "not unrelated or
@@ -196,10 +199,12 @@ use "judge by what it does".
 
 Bold titles and a tiered layout help the model locate the right entry and
 reduce misclassification. General rules are split into distinct concepts
-(Trust Boundary, Intent-Based Routing, Surface Context, Strict Chain,
-Visible Evidence) rather than fused in one paragraph. Section titles must
-be unambiguous — a heading that asserts a single fallback breaks when
-entries under it have different fallbacks.
+rather than fused in one paragraph — each evidence-handling concern
+(material-effect judgment, obfuscated payloads, structured-fact
+weighting) and each surface-routing concern (loopback binding, chain
+evaluation) stands as its own entry. Section titles must be unambiguous —
+a heading that asserts a single fallback breaks when entries under it
+have different fallbacks.
 
 ### 9. Precise wording, no ambiguity
 
