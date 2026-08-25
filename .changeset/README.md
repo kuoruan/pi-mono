@@ -20,9 +20,7 @@ This generates a Markdown file under `.changeset/` (e.g. `spicy-pandas-jump.md`)
 
 ## Release flow
 
-This repo uses the [Changesets GitHub Action v2](https://github.com/changesets/action)
-with the **sub-action pattern** (`select-mode` → `version` | `publish`), which
-is the official 2026 best practice for Trusted Publishing.
+This repo uses the [Changesets GitHub Action v2](https://github.com/changesets/action) with the **sub-action pattern** (`select-mode` → `version` | `publish`), which is the official 2026 best practice for Trusted Publishing.
 
 ### `.github/workflows/release.yml` (triggered on `push: master`)
 
@@ -37,8 +35,7 @@ The workflow has three jobs, gated by `select-mode`:
    `changesets/action/publish@v2` with npm Trusted Publishing (OIDC) and
    provenance. `id-token: write` is scoped to this job only.
 
-This design ensures `pnpm publish` only runs when `select-mode` detects a
-publish state. Note that for an initial unpublished package,
+This design ensures `pnpm publish` only runs when `select-mode` detects a publish state. Note that for an initial unpublished package,
 `select-mode` routes to `publish` on every push to `master` until the first
 release lands — this is expected, not a bug.
 
@@ -61,7 +58,11 @@ Create a changeset (`pnpm changeset`) when a change modifies the **public releas
 
 Write the change summary as a **user-facing English sentence** describing what changed for consumers, not an implementation detail. Example: `Add cache size config option for the AI guard.` — not `refactored VerdictCache constructor`.
 
-Keep the summary to a **single line/paragraph with no hard line breaks**. Changesets render verbatim into `CHANGELOG.md`, and wrapped multi-line summaries balloon every published entry. Prefer one terse sentence; link a PR or commit for detail. Do not paste bullet lists or multi-paragraph explanations into a changeset.
+Formatting rules — concise and readable, no hard line breaks:
+
+- **Soft-wrapped paragraphs**: never insert hard line breaks mid-sentence in a summary — write each paragraph as one flowing line and let editors soft-wrap. Changesets render verbatim into `CHANGELOG.md`, and wrapped summaries balloon every published entry.
+- **Prefer one terse sentence**; link a PR or commit for detail.
+- **Bullets only when they earn their keep**: a short lead sentence plus a few one-line bullets is welcome for multi-point features (each bullet one terse idea) — it beats one giant run-on. Do NOT paste multi-paragraph essays or implementation narratives into a changeset.
 
 ### When a changeset is NOT required
 
