@@ -14,7 +14,3 @@ const PREFIX = `[${EXTENSION_ID}]`;
 export function warn(message: string): void {
   console.warn(`${PREFIX} ${message}`);
 }
-
-export function debug(message: string): void {
-  console.debug(`${PREFIX} ${message}`);
-}

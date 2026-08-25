@@ -1,64 +1,7 @@
-import type { PromptPayload, PromptPermissionDetails } from "@gotgenes/pi-permission-system";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildAskContext, resolveReviewTarget } from "#src/ask-eligibility.ts";
-
-// Evidence entry helper for fixtures.
-function ev(label: string, text: string, detail: string | null = null) {
-  return { label, text, detail };
-}
-
-// Build a PromptPayload with explicit kind + request facts + evidence.
-function payload(
-  kind: PromptPayload["kind"],
-  request: Partial<PromptPayload["request"]> & { value: string },
-  evidence: PromptPayload["evidence"] = [],
-  annotations: PromptPayload["annotations"] = [],
-): PromptPayload {
-  return {
-    kind,
-    request: {
-      requester: { agentName: null, forwarded: false, sessionId: null },
-      surface: "bash",
-      toolName: null,
-      invokedToolName: null,
-      matchedPattern: null,
-      commandContext: null,
-      executedUnit: null,
-      ...request,
-    },
-    evidence,
-    annotations,
-  } as PromptPayload;
-}
-
-/**
- * Minimal bash payload (26.0+): sub in request.value, full command in evidence.
- *
- * @param sub - The policy-selected sub-command.
- * @param full - Optional full command; adds a `full command` evidence entry.
- * @returns A minimal `PromptPayload` with `kind: "bash"`.
- */
-function bashPayload(sub: string, full?: string): PromptPayload {
-  const evidence = full && full !== sub ? [ev("full command", full)] : [];
-  return payload("bash", { surface: "bash", value: sub }, evidence);
-}
-
-// Build a PromptPermissionDetails-shaped object for tests.
-function makeDetails(overrides: Record<string, unknown> = {}): PromptPermissionDetails {
-  const value = typeof overrides.value === "string" ? overrides.value : "ls -la";
-  const payloadOverride = overrides.payload as PromptPayload | undefined;
-  return {
-    requestId: "test-1",
-    source: "tool_call",
-    agentName: null,
-    payload: payloadOverride ?? bashPayload(value),
-    message: "Run command",
-    surface: "bash",
-    value,
-    ...overrides,
-  } as unknown as PromptPermissionDetails;
-}
+import { bashPayload, ev, makeDetails, payload } from "#test/fixtures.ts";
 
 describe("resolveReviewTarget — surface matching", () => {
   it("returns surface-unmatched when surface is not configured", () => {
@@ -197,7 +140,7 @@ describe("resolveReviewTarget — target extraction", () => {
     });
   });
 
-  it("extracts target from payload.request.value (26.0 primary source)", () => {
+  it("extracts target from payload.request.value (primary source)", () => {
     expect(
       resolveReviewTarget(makeDetails({ surface: "bash", value: "ls -la" }), {
         surfaces: ["bash"],
@@ -556,6 +499,7 @@ describe("buildAskContext — 9-kind dispatch", () => {
   });
 
   it("carries annotations through (slot reserved, currently empty upstream)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const details = makeDetails({
       surface: "bash",
       value: "ls",
@@ -568,5 +512,10 @@ describe("buildAskContext — 9-kind dispatch", () => {
     });
     const ask = buildAskContext(details, cwd);
     expect(ask.annotations).toEqual([{ source: "test-annotator", text: "advisory" }]);
+    // The cache keys without annotations — when they stop being empty the
+    // one-time integrity warning must fire (assumption break is detectable).
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("annotator is registered"));
+    warnSpy.mockRestore();
   });
 });

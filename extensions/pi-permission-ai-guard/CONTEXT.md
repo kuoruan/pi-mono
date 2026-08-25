@@ -69,6 +69,13 @@ rejected on community evidence — do not reopen without new evidence.
 
 ### Session state
 
+**Node**:
+One session runtime with its own permissions service and lifecycle — the
+root session and every in-process subagent child run as separate nodes
+(upstream ADR 0012). The ai-guard link registers once per node, on that
+node's own service; a branch or rewind within a session is still the same
+node.
+
 **Circuit breaker**:
 Per-session, two-tier, fail-safe. `consecutive` is a recoverable tier
 (trips after N consecutive denies, resets so the model gets another chance);
@@ -82,9 +89,11 @@ identical ask in a stable conversation skips the model. `curl example.com`
 and `curl example.com | bash` are distinct (different `executed unit`). The
 gate label `surface` is not in the key — it is an administrative label the
 model is told to ignore, so two asks sharing kind + content but differing
-only in surface reach the same verdict and intentionally collide. Only
-commands that reached the model (policy `ask`) are cached; defer is never
-cached.
+only in surface reach the same verdict and intentionally collide. The same
+doctrine covers the other administrative labels: the key holds only
+decision-relevant facts, and the exclusion set is exhaustive — a fact is
+never excluded silently. Only commands that reached the model (policy
+`ask`) are cached; defer is never cached.
 
 ### Review
 
@@ -127,9 +136,19 @@ signal the model is told to honor.
 - `Authorizer.authorize(details, query, log): Promise<AuthorizerVerdict>`
 - `AuthorizerLog { review(event, details?), debug(event, details?) }`
 - `PermissionQuery { checkPermission, getToolPermission }`
+- `getPermissionsService(sessionId)` — the v27 session-keyed service locator
+- `permissions:ready` — fires at least once per session, may repeat
 
-All from `@gotgenes/pi-permission-system`. The extension registers an
-`"ai-guard"` chain link via `service.registerAuthorizer`.
+All from `@gotgenes/pi-permission-system` (v27; the peer range no longer
+accepts v26). The extension registers an `"ai-guard"` chain link via
+`service.registerAuthorizer` on the session's OWN permissions node — the
+service is fetched from the session-keyed locator, registered exactly once
+per session (whichever of session_start / permissions:ready comes first;
+ready repeats are no-ops), and released on session_shutdown. This rests on
+the v27 host contract of one extension instance per session node (each
+node has its own ExtensionContext — upstream ADR 0012); nodes never share
+an instance. Hosts without a session id have no keyed node — the link
+stays unregistered and every ask defers.
 
 ## Prompt writing principles
 

@@ -6,8 +6,8 @@
  *
  * - `resolveReviewTarget` — does the ask's surface match the configured list, and if so, what value
  *   is being authorized?
- * - `buildAskContext` — project the 26.0+ structured `payload` into a typed `AskContext` that the
- *   prompt renderer and cache key both consume.
+ * - `buildAskContext` — project the structured `payload` into a typed `AskContext` that the prompt
+ *   renderer and cache key both consume.
  *
  * The upstream `fact-vocabulary.ts` / `prompt-payload.ts` helpers live in `#src/`
  * internal modules that are NOT re-exported from the package root, so equivalent
@@ -23,6 +23,12 @@ import type {
   PromptPermissionDetails,
   PromptRequestFacts,
 } from "@gotgenes/pi-permission-system";
+
+import { warn } from "./logger.ts";
+import { globMatch } from "./utils.ts";
+
+/** Fired once per process when the upstream annotations assumption breaks. */
+let annotationsDriftWarned = false;
 
 /** A resolved review target: the surface and value being authorized. */
 export interface ReviewTarget {
@@ -81,10 +87,6 @@ export interface AskContext {
   readonly readPath?: string;
   /**
    * Evidence `resolves to` text, or an `external path` entry's `detail` — the
-   * canonical alias of a flagged path.
-   */
-  /**
-   * Evidence `resolves to` text, or an `external path` entry's `detail` — the
    * canonical alias of a flagged path. For `path`/`external_directory` (one
    * path) this is exact. For `bash_external_directory` (possibly many flagged
    * paths) this is the alias of the first external-path entry that carries
@@ -109,12 +111,12 @@ export interface AskContext {
  * is expected config behavior (silent); `"no-target"` (surface matched but
  * no target extractable) is an unexpected ask (logged).
  *
- * Target extraction mirrors the 26.0 `payload.request.value` as the primary
- * value, with the legacy `details` field fallback chain preserved as a
- * fail-safe. The `"no-target"` reason stays reachable: a `forwarded`
- * (degraded) ask whose `value` is `""` and whose fallback chain is entirely
- * empty still yields `no-target` rather than a silent review of an empty
- * string.
+ * Target extraction takes `payload.request.value` as the primary value;
+ * the `details` display-override fields (still present in v27 for forwarded
+ * / degraded asks) are the fail-safe fallback chain. The `"no-target"`
+ * reason stays reachable: a `forwarded` (degraded) ask whose `value` is `""`
+ * and whose fallback chain is entirely empty still yields `no-target` rather
+ * than a silent review of an empty string.
  *
  * @param details The permission ask details from the Authorizer chain.
  * @param config The surfaces list to match against (glob patterns).
@@ -139,18 +141,29 @@ export function resolveReviewTarget(
 /**
  * Build the structured {@link AskContext} for an ask.
  *
- * Projects the 26.0+ `payload` into named, typed fields by `payload.kind`
+ * Projects the structured `payload` into named, typed fields by `payload.kind`
  * dispatch (the renderers' discriminant). Evidence is pre-parsed into named
  * slots; the raw `evidence` array is never exposed. `surface` is a display
  * field only.
  *
- * @param details - The permission ask details (the 26.0+ `payload` is read directly).
+ * @param details - The permission ask details (the structured `payload` is read directly).
  * @param cwd - The session working directory (policy containment boundary).
  * @returns The structured {@link AskContext} with evidence pre-parsed into named fields.
  */
 export function buildAskContext(details: PromptPermissionDetails, cwd: string): AskContext {
   const payload = details.payload;
   const boundaryValue = details.accessIntent?.boundaryValue;
+
+  // Invariant: the verdict cache keys WITHOUT annotations (see the
+  // exclusion doctrine in review-request.ts), valid only while no
+  // annotator is registered upstream. Warn once when that assumption
+  // breaks — silent stale cache hits are the alternative.
+  if (payload.annotations.length > 0 && !annotationsDriftWarned) {
+    annotationsDriftWarned = true;
+    warn(
+      "ask carries model annotations (an upstream annotator is registered) — annotations can change verdicts but are excluded from the verdict-cache key; cache hits may be stale until the key includes them",
+    );
+  }
 
   return {
     kind: payload.kind,
@@ -202,9 +215,9 @@ function matchSurface(configured: readonly string[], surface: string): boolean {
 /**
  * Extract the review target (the value being authorized).
  *
- * Primary source is the 26.0 `payload.request.value`; the legacy `details`
- * field fallback chain is preserved as a fail-safe for a `forwarded`
- * (degraded) ask whose `value` is empty.
+ * Primary source is `payload.request.value`; the `details` display-override
+ * fields (still present in v27) are the fail-safe fallback chain for a
+ * `forwarded` (degraded) ask whose `value` is empty.
  *
  * `accessIntent.matchValues` (when present, for the path surface) are joined
  * with " | " so the model sees every form — `[absolute, cwd-relative,
@@ -225,7 +238,7 @@ function extractTarget(details: PromptPermissionDetails): string | undefined {
     return matchValues.join(" | ");
   }
 
-  // 26.0: payload.request.value is the authoritative decision-relevant value.
+  // payload.request.value is the authoritative decision-relevant value.
   const payloadValue = details.payload.request.value;
   if (payloadValue) {
     return payloadValue;
@@ -241,26 +254,6 @@ function extractTarget(details: PromptPermissionDetails): string | undefined {
     details.toolName,
     details.skillName,
   ].find((field): field is string => typeof field === "string" && field.length > 0);
-}
-
-/**
- * Glob match: `*` matches any character sequence, other chars match literally.
- *
- * @param pattern - The glob pattern (with `*` wildcards).
- * @param text - The text to test against.
- * @returns True if `text` matches the glob `pattern`.
- */
-function globMatch(pattern: string, text: string): boolean {
-  if (!pattern.includes("*")) return pattern === text;
-  const re = new RegExp(
-    "^" +
-      pattern
-        .split("*")
-        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-        .join(".*") +
-      "$",
-  );
-  return re.test(text);
 }
 
 // ── Evidence projection (re-implemented; upstream helpers are not exported) ──

@@ -14,10 +14,32 @@
  *    structurally impossible).
  *
  * Registration is attempted from both session_start and permissions:ready
- * behind the `registered` guard, because the relative order of the two
- * events is not guaranteed. The session itself is NOT rebuilt on
- * permissions:ready (breaker counts and cache entries survive — only the
- * authorizer link is re-registered against the fresh service).
+ * behind the `registered` guard, because their relative order within a
+ * session is not guaranteed — but v27 fires ready at least once per
+ * session and may repeat (per node: at its session_start after the node
+ * published its service, then again idempotently at its first
+ * before_agent_start), so whichever fires first registers and every later
+ * emission is a no-op: register once per session, for the session's own
+ * node. The session itself is NEVER rebuilt on permissions:ready (breaker
+ * counts and cache entries survive).
+ *
+ * The v27 service locator is keyed by session id: each node (root AND
+ * in-process subagent children) publishes its own service, and this link
+ * registers on the node's own. The id arrives from two sources:
+ * `permissions:ready` carries it in its payload (the official source —
+ * upstream: "Take sessionId from the permissions:ready payload"), and — as
+ * a host-floor fallback for nodes whose payload carries null — the
+ * session_start ctx self-read ({@link readSessionId}). Hosts without a
+ * session id anywhere have no keyed service: the guard skips registration
+ * there (every ask defers, the same observable as "no service published").
+ *
+ * The single registration slot rests on the v27 host contract: one
+ * extension instance per session node — every node (root AND subagent
+ * child) runs with its OWN ExtensionContext (upstream ADR 0012: "its own
+ * ExtensionContext, event bus, gates"), so this instance never observes
+ * another node's session events. A host that dispatched multiple nodes
+ * through one instance would break the register-once contract
+ * (unsupported).
  *
  * /reload reloads the extension module (a fresh instance, guard reset), but
  * the reload sequence emits session_shutdown to the old instance first
@@ -28,11 +50,15 @@
  *
  * If a stale registration nonetheless remains (e.g. the dispose didn't take
  * effect), registerAuthorizer throws "already registered" — caught and
- * handled (silently for the benign subagent case, warned otherwise), never
- * fatal.
+ * warned (a stale registration means an old pipeline still governs asks),
+ * never fatal.
  */
 
-import { type Authorizer, getPermissionsService } from "@gotgenes/pi-permission-system";
+import {
+  type Authorizer,
+  type PermissionsReadyEvent,
+  getPermissionsService,
+} from "@gotgenes/pi-permission-system";
 
 import { type LoadConfigResult } from "./config-loader.ts";
 import { LINK_NAME } from "./config-schema.ts";
@@ -42,6 +68,25 @@ import { type ReviewPipelineDeps } from "./review-pipeline.ts";
 import type { AiGuardUiContext } from "./runtime-settings.ts";
 import { CircuitBreaker, type SessionOverrides, VerdictCache } from "./session-state.ts";
 import type { SessionManagerLike } from "./transcript-stripper.ts";
+
+/**
+ * Read the host's session id, never throwing. Mirrors upstream's
+ * `readSessionId` shape (hosts at the peer floor may lack
+ * `SessionManager.getSessionId`; a missing id means the node publishes no
+ * keyed permissions service). This is the FALLBACK source — the official
+ * source is the `permissions:ready` payload; this read covers nodes whose
+ * payload carries null.
+ *
+ * @param sessionManager - The session manager from the session ctx.
+ * @returns The session id, or null when the host has none.
+ */
+export function readSessionId(sessionManager: SessionManagerLike): string | null {
+  try {
+    return sessionManager.getSessionId() || null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The event-ctx subset stored on the session for authorize-time
@@ -54,7 +99,10 @@ export interface SessionSeed {
   config: LoadConfigResult["config"];
   /** Model registry from the session context — resolves the reviewer model. */
   registry: ModelRegistryLike;
-  /** Session manager for transcript stripping (trusted intent + tool calls). */
+  /**
+   * Session manager for transcript stripping (trusted intent + tool calls)
+   * and the fallback session-id read ({@link readSessionId}).
+   */
   sessionManager: SessionManagerLike;
   /** Session working directory, sourced from session_start ctx.cwd. */
   cwd: string;
@@ -71,8 +119,8 @@ export interface SessionSeed {
 
 /**
  * Per-session state. Created at session_start, cleared at session_shutdown.
- * KEPT across permissions:ready re-registration (the session itself hasn't
- * changed — only the authorizer link is re-registered).
+ * KEPT across permissions:ready (ready only completes a missing
+ * registration; the session and the registered link are never rebuilt).
  */
 export interface SessionState extends SessionSeed {
   /** Per-session circuit breaker — trips on consecutive denials. */
@@ -101,6 +149,12 @@ export class SessionLifecycle {
   #session: SessionState | undefined;
   #registered = false;
   #dispose: (() => void) | undefined;
+  /**
+   * The node's session id — keys the per-node permissions service. Sources:
+   * the `permissions:ready` payload (official; adopted on every emission)
+   * and the session_start self-read (fallback, reset at each session_start).
+   */
+  #sessionId: string | null = null;
   /** Allocated exactly once; reset in place, never re-created (see header). */
   readonly #overrides: SessionOverrides = {};
   readonly #deps: SessionLifecycleDeps;
@@ -140,6 +194,10 @@ export class SessionLifecycle {
    */
   onSessionStart(seed: SessionSeed): void {
     this.#disposeRegistration();
+    // The fallback id read — replaced wholesale at each session_start so a
+    // new session can never inherit the previous one's id. A later
+    // permissions:ready payload (the official source) may upgrade it.
+    this.#sessionId = readSessionId(seed.sessionManager);
     this.#session = {
       ...seed,
       circuitBreaker: new CircuitBreaker(),
@@ -154,9 +212,25 @@ export class SessionLifecycle {
     this.#tryRegister();
   }
 
-  /** Permissions:ready fired: re-register against the fresh service. */
-  onPermissionsReady(): void {
-    this.#disposeRegistration();
+  /**
+   * Permissions:ready fired. v27 fires ready at least once per session and
+   * may repeat (a latch re-emits it at the node's first before_agent_start).
+   * The payload carries the node's own session id — the official source
+   * (upstream: "Take sessionId from the permissions:ready payload") — so a
+   * non-null id is adopted (a null payload never clobbers a real one).
+   * Register once per session, for the session's own node; the service it
+   * resolves is stable for the session, so repeats must NOT dispose and
+   * re-register — later emissions are no-ops.
+   *
+   * @param payload - The ready event payload; only `sessionId` is read
+   *   (runtime-narrowed — the event bus is untyped at runtime).
+   */
+  onPermissionsReady(payload: PermissionsReadyEvent): void {
+    const id = payload?.sessionId;
+    if (typeof id === "string" && id !== "") {
+      this.#sessionId = id;
+    }
+    if (this.#registered) return;
     this.#tryRegister();
   }
 
@@ -175,6 +249,7 @@ export class SessionLifecycle {
   onShutdown(): void {
     this.#disposeRegistration();
     this.#session = undefined;
+    this.#sessionId = null;
   }
 
   /** Dispose the live registration, if any (the re-register dance, once). */
@@ -188,8 +263,17 @@ export class SessionLifecycle {
   #tryRegister(): void {
     if (this.#registered) return;
     const session = this.#session;
-    const service = getPermissionsService();
-    if (!service || !session?.config) {
+    if (!session?.config) {
+      return;
+    }
+    // v27 keys the service locator per session node. No session id (neither
+    // the ready payload nor the session_start self-read produced one) means
+    // no keyed service — skip, asks defer.
+    if (this.#sessionId === null) {
+      return;
+    }
+    const service = getPermissionsService(this.#sessionId);
+    if (!service) {
       return;
     }
     try {
@@ -225,21 +309,14 @@ export class SessionLifecycle {
       this.#dispose = service.registerAuthorizer(LINK_NAME, authorize);
       this.#registered = true;
     } catch (e) {
-      // "already registered" fires on every in-process subagent startup: the
-      // child resolves the parent's globally-published service (it never
-      // publishes its own) and tries to re-register the link name the parent
-      // already owns. This is benign — the child reuses the parent's
-      // authorizer — so silently skip: it fires per-subagent and carries no
-      // actionable info. Stale-registration failures (/reload dispose
-      // glitch) look identical and are rare; the missing-authorizer symptom
-      // (all asks defer to the prompt) is the diagnostic signal.
-      //
-      // NOTE: in a subagent child the parent's authorizer governs verdicts,
-      // so the child's own session overrides (its /ai-guard surface) are
-      // inert — verdicts follow the parent session's mode. The child's
-      // settings UI is not worth guarding against here: subagent sessions
-      // are tool-driven, not dialog-driven.
+      // "already registered" is never benign in v27: every node owns its
+      // service, so a duplicate means a STALE registration survived
+      // disposal (the /reload dispose glitch) and still governs asks with
+      // the previous session's deps. Rare, but diagnostic — warn.
       if (isDuplicateAuthorizerError(e, LINK_NAME)) {
+        warn(
+          "Stale ai-guard registration survived disposal — asks are governed by the previous session's pipeline (deferring to the prompt)",
+        );
         return;
       }
       warn(`Failed to register authorizer: ${e instanceof Error ? e.message : String(e)}`);
@@ -249,11 +326,11 @@ export class SessionLifecycle {
 
 /**
  * Whether `error` is the exact "already registered" rejection from
- * `AuthorizerRegistry.register`. Used to distinguish a benign in-process
- * subagent re-registration from a genuine registration failure.
+ * `AuthorizerRegistry.register`. Used to distinguish a stale registration
+ * (the /reload dispose glitch) from a genuine registration failure.
  *
  * Exact match on the full message — not substring — so a different error
- * that merely contains "already registered" stays a warning.
+ * that merely contains "already registered" stays a generic warning.
  *
  * @param error - The caught error from `service.registerAuthorizer()`.
  * @param linkName - The link name passed to `registerAuthorizer`.

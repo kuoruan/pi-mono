@@ -59,7 +59,19 @@
         "vitest/no-conditional-expect": "error",
         "vitest/no-test-return-statement": "error",
         "vitest/valid-describe-callback": "error",
-        "vitest/valid-expect": "error"
+        "vitest/valid-expect": "error",
+        "vitest/expect-expect": [
+          "error",
+          {
+            "assertFunctionNames": [
+              "expect",
+              "expectTypeOf",
+              "assert",
+              "assertType",
+              "expectVerdict"
+            ]
+          }
+        ]
       }
     },
     {

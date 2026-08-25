@@ -2,63 +2,12 @@ import type { PromptPayload, PromptPermissionDetails } from "@gotgenes/pi-permis
 import { describe, expect, it } from "vitest";
 
 import { buildAskContext } from "#src/ask-eligibility.ts";
-import { reviewRequestCacheMaterial } from "#src/review-request.ts";
-
-// Evidence entry helper for fixtures.
-function ev(label: string, text: string, detail: string | null = null) {
-  return { label, text, detail };
-}
-
-// Build a PromptPayload with explicit kind + request facts + evidence.
-function payload(
-  kind: PromptPayload["kind"],
-  request: Partial<PromptPayload["request"]> & { value: string },
-  evidence: PromptPayload["evidence"] = [],
-): PromptPayload {
-  return {
-    kind,
-    request: {
-      requester: { agentName: null, forwarded: false, sessionId: null },
-      surface: "bash",
-      toolName: null,
-      invokedToolName: null,
-      matchedPattern: null,
-      commandContext: null,
-      executedUnit: null,
-      ...request,
-    },
-    evidence,
-    annotations: [],
-  } as PromptPayload;
-}
-
-/**
- * Minimal bash payload (26.0+): sub in request.value, full command in evidence.
- *
- * @param sub - The policy-selected sub-command.
- * @param full - Optional full command; adds a `full command` evidence entry.
- * @returns A minimal `PromptPayload` with `kind: "bash"`.
- */
-function bashPayload(sub: string, full?: string): PromptPayload {
-  const evidence = full && full !== sub ? [ev("full command", full)] : [];
-  return payload("bash", { surface: "bash", value: sub }, evidence);
-}
-
-function makeDetails(overrides: Record<string, unknown> = {}): PromptPermissionDetails {
-  const value = typeof overrides.value === "string" ? overrides.value : "python3";
-  const payloadOverride = overrides.payload as PromptPayload | undefined;
-  return {
-    requestId: "test-1",
-    source: "tool_call",
-    agentName: null,
-    surface: "bash",
-    value,
-    command: value,
-    payload: payloadOverride ?? bashPayload(value),
-    message: "Run command",
-    ...overrides,
-  } as unknown as PromptPermissionDetails;
-}
+import {
+  EXCLUDED_ASK_FIELDS,
+  EXCLUDED_REQUEST_FACTS,
+  reviewRequestCacheMaterial,
+} from "#src/review-request.ts";
+import { bashPayload, ev, makeDetails, payload } from "#test/fixtures.ts";
 
 describe("reviewRequestCacheMaterial", () => {
   it("keeps the complete bash action and canonical path boundary together", () => {
@@ -240,5 +189,57 @@ describe("reviewRequestCacheMaterial", () => {
     expect(direct.ask.request.surface).toBe("bash");
     // Same verdict → same key (intentional collision).
     expect(reviewRequestCacheMaterial(direct)).toBe(reviewRequestCacheMaterial(viaAlias));
+  });
+});
+
+describe("cache-identity exclusion doctrine (compile-time tripwires)", () => {
+  it("pins the excluded sets at runtime so the doctrine can't drift silently", () => {
+    // These records are exhaustive by construction (see review-request.ts):
+    // any new field on AskContext or upstream's PromptRequestFacts breaks
+    // the compile until it is keyed or documented here. This test pins the
+    // CURRENT sets so a deliberate edit is an explicit, reviewed change.
+    expect(Object.keys(EXCLUDED_ASK_FIELDS).toSorted()).toEqual(["annotations"]);
+    expect(Object.keys(EXCLUDED_REQUEST_FACTS).toSorted()).toEqual([
+      "invokedToolName",
+      "matchedPattern",
+      "requester",
+      "surface",
+      "toolName",
+    ]);
+    for (const [field, reason] of Object.entries(EXCLUDED_ASK_FIELDS)) {
+      // Values are one-line quick-index phrases; the full doctrine lives in
+      // the material doc. Non-trivial length just keeps placeholder junk out.
+      expect(reason.length).toBeGreaterThan(8);
+      void field;
+    }
+  });
+});
+
+describe("cache-identity key set (single source pinned)", () => {
+  it("materializes exactly the twelve decision-relevant facts — no silent additions or drops", () => {
+    // The exclusion doctrine makes tripwires one-way: adding an excluded
+    // field breaks the compile, but DROPPING a keyed field from the
+    // material would compile silently. This pins the key set at runtime:
+    // a deliberate key change updates this test in the same change.
+    const material = JSON.parse(
+      reviewRequestCacheMaterial({
+        ask: buildAskContext(makeDetails({}), "/project"),
+        target: "python3",
+      }),
+    ) as Record<string, unknown>;
+    expect(Object.keys(material).toSorted()).toEqual([
+      "canonicalBoundary",
+      "commandContext",
+      "executedUnit",
+      "flaggedElements",
+      "fullCommand",
+      "kind",
+      "readPath",
+      "resolvedAlias",
+      "target",
+      "toolInputPreview",
+      "value",
+      "workingDirectory",
+    ]);
   });
 });

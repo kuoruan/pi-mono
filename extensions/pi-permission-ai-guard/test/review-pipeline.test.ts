@@ -82,11 +82,14 @@ function makeFakeCompleteSimple(
 }
 
 function makeEmptySessionManager() {
-  return { buildContextEntries: () => [] as unknown as SessionEntry[] };
+  return { getSessionId: () => "s1", buildContextEntries: () => [] as unknown as SessionEntry[] };
 }
 
 function makeSessionManagerWith(entries: unknown[]) {
-  return { buildContextEntries: () => entries as unknown as SessionEntry[] };
+  return {
+    getSessionId: () => "s1",
+    buildContextEntries: () => entries as unknown as SessionEntry[],
+  };
 }
 
 function makeDetails(overrides: Record<string, unknown> = {}) {
@@ -145,14 +148,41 @@ const fakeModel = { provider: "test", id: "test-model" } as unknown as Model<any
 const noLog = { review: () => {}, debug: () => {} } as never;
 
 /**
+ * Authorize a default ask against a policy-ask query and assert the
+ * emitted verdict — the common three-liner collapsed to one call.
+ *
+ * @param authorize - The pipeline's authorize function.
+ * @param details - `makeDetails` overrides for the ask.
+ * @param expected - The expected emitted verdict.
+ * @param state - The policy state the query reports (default "ask").
+ */
+async function expectVerdict(
+  authorize: ReturnType<typeof createReviewPipeline>,
+  details: Record<string, unknown>,
+  expected: { kind: string },
+  state: PermissionCheckResult["state"] = "ask",
+): Promise<void> {
+  const verdict = await authorize(makeDetails(details), makeQuery(state), noLog);
+  expect(verdict).toEqual(expected);
+}
+
+/**
  * Default registry with model + auth resolved.
  *
- * @returns A model registry stub with resolved model and auth.
+ * @param overrides - Optional `find`/`getApiKeyAndHeaders` overrides for
+ *   failure-path fixtures (unresolved model, auth errors, throws).
+ * @returns A model registry stub.
  */
-const defaultRegistry = (): ReviewPipelineDeps["registry"] => ({
+const defaultRegistry = (
+  overrides: Partial<{
+    find: ReviewPipelineDeps["registry"]["find"];
+    getApiKeyAndHeaders: ReviewPipelineDeps["registry"]["getApiKeyAndHeaders"];
+  }> = {},
+): ReviewPipelineDeps["registry"] => ({
   find: () => fakeModel,
   getProvider: () => undefined,
   getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "k" }),
+  ...overrides,
 });
 
 /**
@@ -190,8 +220,7 @@ describe("createReviewPipeline — guard clauses", () => {
         },
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "ls -la" }), makeQuery("allow"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "ls -la" }, { kind: "defer" }, "allow");
     expect(modelCalled).toBe(false);
   });
 
@@ -205,8 +234,7 @@ describe("createReviewPipeline — guard clauses", () => {
         },
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "cat .env" }), makeQuery("deny"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "cat .env" }, { kind: "defer" }, "deny");
     expect(modelCalled).toBe(false);
   });
 
@@ -220,45 +248,34 @@ describe("createReviewPipeline — guard clauses", () => {
   it("defers when model is not found in registry", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: {
-          find: () => undefined,
-          getProvider: () => undefined,
-          getApiKeyAndHeaders: async () => ({ ok: true }),
-        },
+        registry: defaultRegistry({ find: () => undefined }),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
   });
 
   it("defers when auth fails", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: {
-          find: () => fakeModel,
-          getProvider: () => undefined,
+        registry: defaultRegistry({
           getApiKeyAndHeaders: async () => ({ ok: false, error: "no key" }),
-        },
+        }),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
   });
 
   it("defers when getApiKeyAndHeaders throws", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: {
-          find: () => fakeModel,
-          getProvider: () => undefined,
+        registry: defaultRegistry({
           getApiKeyAndHeaders: async () => {
             throw new Error("network error");
           },
-        },
+        }),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
   });
 
   it("defers when getApiKeyAndHeaders throws a non-Error value", async () => {
@@ -266,31 +283,28 @@ describe("createReviewPipeline — guard clauses", () => {
     // to an auth-failed defer via the String(e) branch.
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: {
-          find: () => fakeModel,
-          getProvider: () => undefined,
+        registry: defaultRegistry({
           getApiKeyAndHeaders: async () => {
             throw "string error";
           },
-        },
+        }),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
   });
 
   it("defers when stripTranscript throws", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
         sessionManager: {
+          getSessionId: () => "s1",
           buildContextEntries: () => {
             throw new Error("corrupt session");
           },
         },
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
   });
 
   it("sanitizes auth error in the audit record", async () => {
@@ -301,15 +315,13 @@ describe("createReviewPipeline — guard clauses", () => {
     } as never;
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: {
-          find: () => fakeModel,
-          getProvider: () => undefined,
+        registry: defaultRegistry({
           getApiKeyAndHeaders: async () => {
             throw new Error(
               "Invalid API key: sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF",
             );
           },
-        },
+        }),
       }),
     );
     await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
@@ -369,12 +381,7 @@ describe("createReviewPipeline — verdicts", () => {
         completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
       }),
     );
-    const verdict = await authorize(
-      makeDetails({ value: "ambiguous-cmd" }),
-      makeQuery("ask"),
-      noLog,
-    );
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "ambiguous-cmd" }, { kind: "defer" });
   });
 
   it("defers when model returns no tool call", async () => {
@@ -383,8 +390,7 @@ describe("createReviewPipeline — verdicts", () => {
         completeSimple: makeFakeCompleteSimple([{ type: "text", text: "I cannot decide" }]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
   });
 
   it("defers when model returns empty content, logs diagnostic event", async () => {
@@ -446,8 +452,7 @@ describe("createReviewPipeline — verdicts", () => {
         },
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
   });
 });
 
@@ -462,8 +467,7 @@ describe("createReviewPipeline — mode", () => {
         ]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "defer" });
   });
 
   it("manual maps a model deny to defer and annotates the decision record", async () => {
@@ -500,8 +504,7 @@ describe("createReviewPipeline — mode", () => {
         ]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "defer" });
     expect(notifications).toEqual([
       ["ai-guard reviewer denied this request (risk: high) — unsafe", "warning"],
     ]);
@@ -552,8 +555,7 @@ describe("createReviewPipeline — mode", () => {
         ]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "rm x" }, { kind: "defer" });
   });
 
   it("auto maps a model defer to deny carrying the clarification request", async () => {
@@ -601,10 +603,9 @@ describe("createReviewPipeline — mode", () => {
         completeSimple: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
     // Machinery failures are not safety verdicts: they defer to the human
     // escape valve (headless: the denying terminal) instead of being denied.
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "rm x" }, { kind: "defer" });
     expect(notifications).toEqual([
       ["ai-guard: reviewer could not complete the review (no-json) — deferring to you", "warning"],
     ]);
@@ -641,8 +642,7 @@ describe("createReviewPipeline — mode", () => {
       }),
     );
     for (let i = 0; i < 3; i++) {
-      const verdict = await authorize(makeDetails({ value: `cmd-${i}` }), makeQuery("ask"), noLog);
-      expect(verdict).toEqual({ kind: "defer" });
+      await expectVerdict(authorize, { value: `cmd-${i}` }, { kind: "defer" });
     }
     expect(modelCalls).toBe(3);
 
@@ -743,8 +743,7 @@ describe("createReviewPipeline — circuit breaker", () => {
     );
     for (let i = 0; i < 3; i++)
       await authorize(makeDetails({ value: "rm" }), makeQuery("ask"), noLog);
-    const verdict = await authorize(makeDetails({ value: "rm" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "rm" }, { kind: "defer" });
     expect(modelCalled).toBe(3);
   });
 
@@ -767,10 +766,9 @@ describe("createReviewPipeline — circuit breaker", () => {
         completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "rm" }), makeQuery("ask"), noLog);
     // NOT mapped to deny: the breaker's explicit defer is the human escape
     // valve — specific config beats the general mode.
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "rm" }, { kind: "defer" });
     expect(notifications).toHaveLength(1);
     expect(notifications[0]![1]).toBe("warning");
   });
@@ -1133,8 +1131,7 @@ describe("createReviewPipeline — mode edges", () => {
     );
     // The deterministic engine already allowed this: the link defers before
     // the model (and before any verdict-mode mapping could apply).
-    const verdict = await authorize(makeDetails({ value: "ls -la" }), makeQuery("allow"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "ls -la" }, { kind: "defer" }, "allow");
     expect(modelCalled).toBe(false);
   });
 });
@@ -1145,16 +1142,11 @@ describe("createReviewPipeline — auto machinery-escape notify (pre-call paths)
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, mode: "auto" },
-        registry: {
-          find: () => undefined,
-          getProvider: () => undefined,
-          getApiKeyAndHeaders: async () => ({ ok: true }),
-        },
+        registry: defaultRegistry({ find: () => undefined }),
         notify: (message, level) => notifications.push([message, level]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
     expect(notifications).toEqual([
       [
         "ai-guard: reviewer could not complete the review (model-unresolved) — deferring to you",
@@ -1168,16 +1160,13 @@ describe("createReviewPipeline — auto machinery-escape notify (pre-call paths)
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, mode: "auto" },
-        registry: {
-          find: () => fakeModel,
-          getProvider: () => undefined,
+        registry: defaultRegistry({
           getApiKeyAndHeaders: async () => ({ ok: false, error: "no key" }),
-        },
+        }),
         notify: (message, level) => notifications.push([message, level]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
     expect(notifications).toEqual([
       [
         "ai-guard: reviewer could not complete the review (auth-failed) — deferring to you",
@@ -1192,6 +1181,7 @@ describe("createReviewPipeline — auto machinery-escape notify (pre-call paths)
       makePipeline({
         config: { ...baseConfig, mode: "auto" },
         sessionManager: {
+          getSessionId: () => "s1",
           buildContextEntries: () => {
             throw new Error("boom");
           },
@@ -1199,8 +1189,7 @@ describe("createReviewPipeline — auto machinery-escape notify (pre-call paths)
         notify: (message, level) => notifications.push([message, level]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
     expect(notifications).toEqual([
       [
         "ai-guard: reviewer could not complete the review (transcript-error) — deferring to you",
@@ -1214,16 +1203,11 @@ describe("createReviewPipeline — auto machinery-escape notify (pre-call paths)
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, mode: "default" },
-        registry: {
-          find: () => undefined,
-          getProvider: () => undefined,
-          getApiKeyAndHeaders: async () => ({ ok: true }),
-        },
+        registry: defaultRegistry({ find: () => undefined }),
         notify: (message, level) => notifications.push([message, level]),
       }),
     );
-    const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "defer" });
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
     expect(notifications).toEqual([]);
   });
 });

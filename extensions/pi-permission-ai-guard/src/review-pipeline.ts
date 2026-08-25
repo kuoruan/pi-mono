@@ -8,7 +8,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import type { Authorizer } from "@gotgenes/pi-permission-system";
+import type { Authorizer, AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import { buildAskContext, resolveReviewTarget } from "./ask-eligibility.ts";
 import type { AiGuardConfig, Mode } from "./config-schema.ts";
@@ -16,6 +16,7 @@ import {
   BREAKER_DENY_REASON,
   CACHE_LOOKUP_EVENT,
   DECISION_EVENT,
+  type DecisionRecordEntry,
   DecisionRecord,
   MODEL_REPLY_EVENT,
   SHORT_CIRCUIT_EVENT,
@@ -35,13 +36,14 @@ import { buildReviewPrompt, buildReviewSystemPrompt } from "./prompt.ts";
 import { reviewRequestCacheMaterial, type ReviewRequestContext } from "./review-request.ts";
 import type { CircuitBreaker, SessionOverrides, VerdictCache } from "./session-state.ts";
 import { type SessionManagerLike, stripTranscript } from "./transcript-stripper.ts";
-import { normalizeAndRedactText } from "./utils.ts";
+import { normalizeAndRedactText, shortHash } from "./utils.ts";
 import {
   applyVerdictMode,
   type MachineryFailureKind,
   machineryDeferMessage,
   manualEscalationMessage,
 } from "./verdict-mode.ts";
+import type { RiskLevel } from "./verdict.ts";
 
 /**
  * Fire-and-forget user notification — the host UI context's own notify
@@ -104,6 +106,44 @@ function notifyMachineryEscape(
   }
 }
 
+/**
+ * The mode mapping's shared footwork for a gate that emitted a real
+ * verdict (cache-hit and fresh model — the two paths that can be remapped):
+ * when the mapping changes what the link EMITS, annotate the decision
+ * record with the mapping facts, and when the change escalates to the
+ * human (manual mode's deny→defer) carry the reviewer's reasoning via
+ * notify — the permission dialog renders only the request.
+ *
+ * Only the mapping result belongs here. The call sites keep their own
+ * verdict sources (cache entry vs model outcome) and their extra notify
+ * paths (auto mode's machinery explanation lives only on the fresh path).
+ *
+ * @param record - The gate's decision record (cache-hit or model).
+ * @param mode - The effective mode.
+ * @param original - The verdict before mapping.
+ * @param emitted - The verdict after mapping.
+ * @param riskLevel - The original verdict's risk level.
+ * @param deps - Pipeline deps (notify is optional).
+ * @returns The annotated record, or `record` unchanged when nothing was mapped.
+ */
+function annotateAndEscalate(
+  record: DecisionRecordEntry,
+  mode: Mode,
+  original: AuthorizerVerdict,
+  emitted: AuthorizerVerdict,
+  riskLevel: RiskLevel | undefined,
+  deps: ReviewPipelineDeps,
+): DecisionRecordEntry {
+  if (emitted.kind === original.kind) {
+    return record;
+  }
+  const annotated = mapped(record, mode, emitted.kind);
+  if (emitted.kind === "defer") {
+    deps.notify?.(manualEscalationMessage(original, riskLevel), "warning");
+  }
+  return annotated;
+}
+
 export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["authorize"] {
   return async (details, query, log) => {
     const { config } = deps;
@@ -148,7 +188,10 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // Circuit breaker: a tripped breaker short-circuits without a model
     // call. Breaker trips are not recorded as model verdicts (no
     // recordVerdict) — only real model verdicts move the counters.
-    if (deps.circuitBreaker.checkAndResetIfTripped(config.circuitBreaker)) {
+    if (deps.circuitBreaker.isTripped(config.circuitBreaker)) {
+      // The trip consumes the recoverable tier — reset explicitly, so the
+      // side effect is visible here rather than hidden in a query.
+      deps.circuitBreaker.resetConsecutive();
       const verdict =
         config.circuitBreaker.verdict === "deny"
           ? {
@@ -220,15 +263,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // Cached verdicts are allow/deny only (defers are never stored), so
       // the defer branch of the mapping is unreachable here.
       const emitted = applyVerdictMode(mode, lookup.verdict);
-      let record = DecisionRecord.cacheHit(base, lookup.verdict);
-      if (emitted.kind !== lookup.verdict.kind) {
-        record = mapped(record, mode, emitted.kind);
-        // manual: the human now adjudicates a deny they'd otherwise never
-        // see the reasoning for (the dialog renders only the request).
-        if (emitted.kind === "defer") {
-          deps.notify?.(manualEscalationMessage(lookup.verdict, lookup.riskLevel), "warning");
-        }
-      }
+      const record = annotateAndEscalate(
+        DecisionRecord.cacheHit(base, lookup.verdict),
+        mode,
+        lookup.verdict,
+        emitted,
+        lookup.riskLevel,
+        deps,
+      );
       log.review(DECISION_EVENT, record);
       return emitted;
     }
@@ -262,16 +304,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       kind: reviewOutcome.deferKind,
       reason: reviewOutcome.deferReason,
     });
-    let record = DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome);
-    if (emitted.kind !== reviewOutcome.verdict.kind) {
-      record = mapped(record, mode, emitted.kind);
-      if (emitted.kind === "defer") {
-        deps.notify?.(
-          manualEscalationMessage(reviewOutcome.verdict, reviewOutcome.riskLevel),
-          "warning",
-        );
-      }
-    }
+    const record = annotateAndEscalate(
+      DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome),
+      mode,
+      reviewOutcome.verdict,
+      emitted,
+      reviewOutcome.riskLevel,
+      deps,
+    );
     // In auto mode an emitted defer can only be a machinery failure
     // (timeout, call-failed, empty-reply, no-json, invalid-verdict-value)
     // that escaped the fail-closed mapping — the human is about to see an
@@ -312,27 +352,4 @@ async function resolveAuth(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
-}
-
-/**
- * Fast deterministic hash to shorten long strings for cache/identity keys.
- *
- * Copied from pi-ai's internal `utils/hash.ts` (not re-exported from the
- * package root). Two independent 32-bit Math.imul hashes (cypherCB),
- * finalized and combined as base36.
- *
- * @param str - The string to hash.
- * @returns A short base36 hash of the input string.
- */
-function shortHash(str: string): string {
-  let h1 = 0xdeadbeef;
-  let h2 = 0x41c6ce57;
-  for (let i = 0; i < str.length; i++) {
-    const ch = str.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
 }

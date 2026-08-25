@@ -12,7 +12,12 @@
 
 import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
 
-import { isObjectRecord, normalizeAndRedactText, truncateMiddle } from "./utils.ts";
+import {
+  isObjectRecord,
+  normalizeAndRedactText,
+  textFromContent,
+  truncateMiddle,
+} from "./utils.ts";
 
 export interface StrippedTranscript {
   /**
@@ -38,11 +43,13 @@ export interface StripOptions {
 }
 
 /**
- * Minimal projection of the host's SessionManager needed by the stripper —
- * derived (not hand-written) so the signature can't drift from the real
- * manager: the stripper needs only `buildContextEntries`.
+ * Minimal projection of the host's SessionManager shared by the stripper
+ * and the session lifecycle — derived (not hand-written) so the signature
+ * can't drift from the real manager: the stripper needs
+ * `buildContextEntries`; the lifecycle reads `getSessionId` for the v27
+ * session-keyed permissions service.
  */
-export type SessionManagerLike = Pick<SessionManager, "buildContextEntries">;
+export type SessionManagerLike = Pick<SessionManager, "buildContextEntries" | "getSessionId">;
 
 /** Structural projection of a session message entry. */
 type Message = {
@@ -65,15 +72,17 @@ function isMessageEntry(entry: SessionEntry): entry is Extract<SessionEntry, { t
 }
 
 /**
- * Type guard: is this entry a custom_message entry?
+ * Type guard: is this entry one of the two custom entry kinds — `custom`
+ * (host custom entry) and `custom_message` (the newer shape)? Neither may
+ * become an authorization signal.
  *
  * @param entry - The session entry to test.
- * @returns True if `entry` is a custom_message entry (type-narrowed accordingly).
+ * @returns True if `entry` has either custom type (type-narrowed accordingly).
  */
-function isCustomMessageEntry(
+function isCustomEntry(
   entry: SessionEntry,
-): entry is Extract<SessionEntry, { type: "custom_message" }> {
-  return entry.type === "custom_message";
+): entry is Extract<SessionEntry, { type: "custom" | "custom_message" }> {
+  return entry.type === "custom" || entry.type === "custom_message";
 }
 
 /**
@@ -84,25 +93,6 @@ function isCustomMessageEntry(
  */
 function hasSummary(entry: SessionEntry): entry is Extract<SessionEntry, { summary: string }> {
   return entry.type === "compaction" || entry.type === "branch_summary";
-}
-
-/**
- * Extract text from a message's content (string or array of blocks).
- *
- * @param content - The message content (string or array of blocks).
- * @returns The concatenated text from the content, or an empty string if none.
- */
-function textFromContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((block: unknown) => {
-      if (!isObjectRecord(block)) return "";
-      if (block.type === "text" && typeof block.text === "string") return block.text;
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
 }
 
 /**
@@ -178,6 +168,15 @@ export function stripTranscript(
   const toolCalls: string[] = [];
   let strippedCount = 0;
 
+  // The trusted-intent pipeline: sanitized (injection + secrets) then
+  // truncated before it enters the transcript — the ONLY write path, so a
+  // change to the pipeline happens in one place.
+  const pushTrustedIntent = (text: string): void => {
+    if (text && trustedIntent.length < options.maxUserMessages) {
+      trustedIntent.push(truncateMiddle(normalizeAndRedactText(text), options.maxCharsPerEntry));
+    }
+  };
+
   // Walk entries in reverse (most recent first) to prioritize recent context
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
@@ -190,7 +189,7 @@ export function stripTranscript(
       continue;
     }
 
-    if (isCustomMessageEntry(entry) || entry.type === "custom") {
+    if (isCustomEntry(entry)) {
       strippedCount++;
       continue;
     }
@@ -212,10 +211,7 @@ export function stripTranscript(
       // UserMessage carries no toolName (ask_user_question answers arrive as
       // toolResult entries, handled below), so every user message is plain
       // trusted intent.
-      const text = textFromContent(message.content);
-      if (text && trustedIntent.length < options.maxUserMessages) {
-        trustedIntent.push(truncateMiddle(normalizeAndRedactText(text), options.maxCharsPerEntry));
-      }
+      pushTrustedIntent(textFromContent(message.content));
       continue;
     }
 
@@ -238,12 +234,7 @@ export function stripTranscript(
     if (role === "toolResult") {
       // ask_user_question results are trusted (user's structured answers)
       if (isAskUserQuestionResult(message)) {
-        const text = textFromContent(message.content);
-        if (text && trustedIntent.length < options.maxUserMessages) {
-          trustedIntent.push(
-            truncateMiddle(normalizeAndRedactText(text), options.maxCharsPerEntry),
-          );
-        }
+        pushTrustedIntent(textFromContent(message.content));
       } else {
         // Other tool results are untrusted and token-heavy → strip entirely
         strippedCount++;

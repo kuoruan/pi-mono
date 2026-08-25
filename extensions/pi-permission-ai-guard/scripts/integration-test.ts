@@ -147,7 +147,7 @@ function buildProvider(provider: ProviderName): AnyProvider {
 // ── Session helpers ─────────────────────────────────────────────────
 
 function emptySession(): SessionManagerLike {
-  return { buildContextEntries: () => [] as SessionEntry[] };
+  return { getSessionId: () => "s1", buildContextEntries: () => [] as SessionEntry[] };
 }
 
 function sessionWithUserMessages(messages: string[]): SessionManagerLike {
@@ -158,7 +158,7 @@ function sessionWithUserMessages(messages: string[]): SessionManagerLike {
     timestamp: String(i),
     message: { role: "user", content: text },
   })) as unknown as SessionEntry[];
-  return { buildContextEntries: () => entries };
+  return { getSessionId: () => "s1", buildContextEntries: () => entries };
 }
 
 /**
@@ -201,7 +201,7 @@ function sessionWithInjection(userIntent: string, maliciousToolResult: string): 
       },
     },
   ] as unknown as SessionEntry[];
-  return { buildContextEntries: () => entries };
+  return { getSessionId: () => "s1", buildContextEntries: () => entries };
 }
 
 // ── Test harness ────────────────────────────────────────────────────

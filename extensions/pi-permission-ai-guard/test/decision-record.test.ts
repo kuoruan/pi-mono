@@ -2,8 +2,8 @@ import type { PermissionCheckResult, PermissionState } from "@gotgenes/pi-permis
 import { describe, expect, it } from "vitest";
 
 import {
+  type DecisionRecordEntry,
   type DecisionBase,
-  type DecisionRecord as DecisionRecordType,
   BREAKER_DENY_REASON,
   DecisionRecord,
   modelReply,
@@ -19,7 +19,7 @@ const SHARED_FIELDS = ["requestId", "surface", "target", "gate", "modelCalled", 
 const ORIGIN: PermissionCheckResult["origin"] = "builtin";
 
 /** All six gate constructors, exercised once with representative inputs. */
-const allGates: Array<{ name: string; record: DecisionRecordType }> = [
+const allGates: Array<{ name: string; record: DecisionRecordEntry }> = [
   {
     name: "policyDecided",
     record: DecisionRecord.policyDecided(base, {

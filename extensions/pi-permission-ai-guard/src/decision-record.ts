@@ -37,7 +37,7 @@ export interface DecisionBase {
  * gate adds its specifics. The index signature admits gate-specific fields
  * without a per-gate type explosion.
  */
-export interface DecisionRecord extends DecisionBase {
+export interface DecisionRecordEntry extends DecisionBase {
   /** Which decision gate produced this record. */
   gate: string;
   /** Whether the model was called for this decision. */
@@ -123,7 +123,7 @@ export const MODEL_CALL_ERROR_EVENT = "ai_guard.model_call_error";
  * omitted. Distinct from null so it can't be confused with the throw-based
  * absence (timeout / call-failed / empty-reply).
  */
-export const CLEAN_VERDICT_OMITTED = "(clean verdict, rawReply omitted)";
+const CLEAN_VERDICT_OMITTED = "(clean verdict, rawReply omitted)";
 
 /**
  * The deny reason emitted when the circuit breaker trips. Shared by the
@@ -140,7 +140,7 @@ export const DecisionRecord = {
    * @param policy - The policy gate's resolved facts.
    * @returns A decision record for the policy-decided gate.
    */
-  policyDecided(base: DecisionBase, policy: PolicyGateFacts): DecisionRecord {
+  policyDecided(base: DecisionBase, policy: PolicyGateFacts): DecisionRecordEntry {
     return {
       ...base,
       gate: "policy-decided",
@@ -160,7 +160,7 @@ export const DecisionRecord = {
    * @param cbVerdict - The verdict the circuit breaker forces (deny or defer).
    * @returns A decision record for the circuit-breaker gate.
    */
-  breaker(base: DecisionBase, cbVerdict: BreakerVerdict): DecisionRecord {
+  breaker(base: DecisionBase, cbVerdict: BreakerVerdict): DecisionRecordEntry {
     return {
       ...base,
       gate: "circuit-breaker",
@@ -178,7 +178,7 @@ export const DecisionRecord = {
    * @param modelId - The model id that failed to resolve.
    * @returns A decision record for the model-unresolved gate.
    */
-  modelUnresolved(base: DecisionBase, modelId: string): DecisionRecord {
+  modelUnresolved(base: DecisionBase, modelId: string): DecisionRecordEntry {
     return {
       ...base,
       gate: "model-unresolved",
@@ -197,7 +197,7 @@ export const DecisionRecord = {
    * @param error - The auth error message.
    * @returns A decision record for the auth-failed gate.
    */
-  authFailed(base: DecisionBase, modelId: string, error: string): DecisionRecord {
+  authFailed(base: DecisionBase, modelId: string, error: string): DecisionRecordEntry {
     return {
       ...base,
       gate: "auth-failed",
@@ -216,7 +216,7 @@ export const DecisionRecord = {
    * @param verdict - The cached verdict (full, so a deny reason can be persisted).
    * @returns A decision record for the cache-hit gate.
    */
-  cacheHit(base: DecisionBase, verdict: AuthorizerVerdict): DecisionRecord {
+  cacheHit(base: DecisionBase, verdict: AuthorizerVerdict): DecisionRecordEntry {
     return {
       ...base,
       gate: "cache-hit",
@@ -243,7 +243,7 @@ export const DecisionRecord = {
     modelId: string,
     strippedCount: number,
     reviewOutcome: ReviewOutcome,
-  ): DecisionRecord {
+  ): DecisionRecordEntry {
     return {
       ...base,
       gate: "model",
@@ -315,10 +315,10 @@ function rawReplyForRecord(reviewOutcome: ReviewOutcome): string | null {
  * @returns The annotated decision record.
  */
 export function mapped(
-  record: DecisionRecord,
+  record: DecisionRecordEntry,
   mode: string,
   emittedKind: AuthorizerVerdict["kind"],
-): DecisionRecord {
+): DecisionRecordEntry {
   return { ...record, emittedVerdict: emittedKind, mode };
 }
 

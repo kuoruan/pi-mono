@@ -5,7 +5,11 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type Authorizer, PERMISSIONS_READY_CHANNEL } from "@gotgenes/pi-permission-system";
+import {
+  type Authorizer,
+  PERMISSIONS_READY_CHANNEL,
+  type PermissionsReadyEvent,
+} from "@gotgenes/pi-permission-system";
 
 import { type LoadConfigResult, loadAiGuardConfig } from "./config-loader.ts";
 import { MODE_VALUES } from "./config-schema.ts";
@@ -54,7 +58,10 @@ export function createAiGuardExtension(
   // The lifecycle owns session identity, the registration, and the stable
   // overrides object; the settings surface reads/writes overrides through
   // that same object (the single write path).
-  const lifecycle = new SessionLifecycle({
+  // Annotated (not inferred) because the completeSimple closure below
+  // references `lifecycle` from its own initializer — an explicit type
+  // removes the self-reference from type inference entirely.
+  const lifecycle: SessionLifecycle = new SessionLifecycle({
     // The authorizer factory defaults to the real ReviewPipeline. Tests
     // inject a stub to exercise lifecycle timing without the model stack.
     createPipeline: dependencies.createPipeline ?? createReviewPipeline,
@@ -92,8 +99,18 @@ export function createAiGuardExtension(
     }
   });
 
-  pi.events.on(PERMISSIONS_READY_CHANNEL, () => {
-    lifecycle.onPermissionsReady();
+  // v27: ready fires at least once per session and may repeat. The payload
+  // carries the node's session id — the official source for the
+  // session-keyed service locator (the lifecycle falls back to the
+  // session_start ctx self-read for hosts whose payload is null) — and the
+  // lifecycle registers once, guarding repeats. `adjudicatesLocally` is
+  // intentionally ignored: the link registers on its own node's service
+  // regardless of adjudication mode (upstream accepts links on relaying
+  // nodes too).
+  pi.events.on(PERMISSIONS_READY_CHANNEL, (payload) => {
+    // pi's event bus is untyped — the channel contract IS this payload
+    // shape (the lifecycle runtime-narrows the one field it reads).
+    lifecycle.onPermissionsReady(payload as PermissionsReadyEvent);
   });
 
   pi.on("session_tree", (_event, ctx) => {

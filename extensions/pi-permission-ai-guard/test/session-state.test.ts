@@ -13,18 +13,20 @@ describe("CircuitBreaker", () => {
     const s = new CircuitBreaker();
     s.recordVerdict("deny");
     s.recordVerdict("deny");
-    expect(s.checkAndResetIfTripped(cb)).toBe(false);
+    expect(s.isTripped(cb)).toBe(false);
   });
 
-  it("trips at the consecutive threshold and resets consecutive", () => {
+  it("isTripped is a pure query — resetConsecutive is the separate, visible step", () => {
     const s = new CircuitBreaker();
     s.recordVerdict("deny");
     s.recordVerdict("deny");
     s.recordVerdict("deny");
-    expect(s.checkAndResetIfTripped(cb)).toBe(true);
-    // After tripping, consecutive is reset — next check won't trip until
-    // another 3 denies accumulate.
-    expect(s.checkAndResetIfTripped(cb)).toBe(false);
+    expect(s.isTripped(cb)).toBe(true);
+    // The pure query keeps reporting tripped until the caller resets.
+    expect(s.isTripped(cb)).toBe(true);
+    s.resetConsecutive();
+    // Fresh consecutive window — next check won't trip until 3 more denies.
+    expect(s.isTripped(cb)).toBe(false);
   });
 
   it("allow resets the consecutive counter", () => {
@@ -33,15 +35,16 @@ describe("CircuitBreaker", () => {
     s.recordVerdict("deny");
     s.recordVerdict("allow");
     // allow broke the streak, so consecutive is 0 → not tripped
-    expect(s.checkAndResetIfTripped(cb)).toBe(false);
+    expect(s.isTripped(cb)).toBe(false);
   });
 
-  it("total is a permanent trip (never resets)", () => {
+  it("total is a permanent trip (resetConsecutive cannot clear it)", () => {
     const s = new CircuitBreaker();
     for (let i = 0; i < 20; i++) s.recordVerdict("deny");
-    expect(s.checkAndResetIfTripped(cb)).toBe(true);
-    // total stays at 20; permanent trip persists
-    expect(s.checkAndResetIfTripped(cb)).toBe(true);
+    expect(s.isTripped(cb)).toBe(true);
+    // total stays at 20; the reset is moot on the hard tier — still tripped.
+    s.resetConsecutive();
+    expect(s.isTripped(cb)).toBe(true);
   });
 
   it("does not count a breaker short-circuit or cache hit (caller responsibility)", () => {
@@ -52,8 +55,9 @@ describe("CircuitBreaker", () => {
     s.recordVerdict("deny");
     s.recordVerdict("deny");
     s.recordVerdict("deny");
-    s.checkAndResetIfTripped(cb); // trip → reset consecutive, total still 3
-    expect(s.checkAndResetIfTripped(cb)).toBe(false); // consecutive 0, total 3 < 20
+    expect(s.isTripped(cb)).toBe(true); // trip → total still 3
+    s.resetConsecutive();
+    expect(s.isTripped(cb)).toBe(false); // consecutive 0, total 3 < 20
   });
 
   it("defer does not change counters", () => {
@@ -61,7 +65,7 @@ describe("CircuitBreaker", () => {
     s.recordVerdict("defer");
     s.recordVerdict("defer");
     s.recordVerdict("defer");
-    expect(s.checkAndResetIfTripped(cb)).toBe(false);
+    expect(s.isTripped(cb)).toBe(false);
   });
 });
 

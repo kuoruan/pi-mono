@@ -18,7 +18,11 @@
  * whole UX materializes from the spec.
  */
 
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionShortcut,
+  ExtensionUIContext,
+  RegisteredCommand,
+} from "@earendil-works/pi-coding-agent";
 
 import type { AiGuardConfig } from "./config-schema.ts";
 import {
@@ -48,38 +52,37 @@ export interface EnumSettingSpec {
 
 /**
  * The UI-context subset the settings surface uses — derived from the host's
- * UI context so the method signatures can't drift. Structurally satisfied
- * by `ExtensionCommandContext` / `ExtensionContext`.
+ * contexts so the method signatures can't drift. Structurally satisfied by
+ * the real `ExtensionContext` / `ExtensionCommandContext` the host passes
+ * (both carry a full `ui: ExtensionUIContext` and the `hasUI` flag); the
+ * narrow shape keeps test fixtures light.
  */
 export interface AiGuardUiContext {
   /** Picker / notify / footer-status surface. */
   ui: Pick<ExtensionUIContext, "select" | "notify" | "setStatus">;
+  /** Whether dialog-capable UI is available (TUI/RPC) — gates the picker paths. */
+  hasUI: boolean;
 }
 
-/** Context for the command handler: the UI subset plus the dialog-capability flag. */
-export type AiGuardCommandContext = AiGuardUiContext & { hasUI: boolean };
+/**
+ * The /ai-guard command registration object — derived from pi's
+ * `RegisteredCommand` (registerCommand's options shape). Only the handler's
+ * ctx is narrowed to the consumed {@link AiGuardUiContext} subset.
+ */
+export type AiGuardCommand = Omit<RegisteredCommand, "name" | "sourceInfo" | "handler"> & {
+  handler: (args: string, ctx: AiGuardUiContext) => Promise<void>;
+  /** Required here: the command always registers completion support. */
+  getArgumentCompletions: NonNullable<RegisteredCommand["getArgumentCompletions"]>;
+};
 
-/** The /ai-guard command registration object (pi.registerCommand's second argument). */
-export interface AiGuardCommand {
-  /** One-line command description. */
-  description: string;
-  /**
-   * Completes setting names, then the named setting's values.
-   * Returns `{ value, label }` items — structurally satisfies pi's
-   * `AutocompleteItem[]` (its extra fields are optional).
-   */
-  getArgumentCompletions: (argumentPrefix: string) => { value: string; label: string }[] | null;
-  /** Dispatch: direct form, value picker, or the settings menu. */
-  handler: (args: string, ctx: AiGuardCommandContext) => Promise<void>;
-}
-
-/** The ctrl+alt+g shortcut registration object (pi.registerShortcut's second argument). */
-export interface AiGuardShortcut {
-  /** One-line shortcut description. */
-  description: string;
-  /** Cycles the first setting's value (wrap-around, config default as start). */
+/**
+ * The ctrl+alt+g shortcut registration object — derived from pi's
+ * `ExtensionShortcut` (registerShortcut's options shape), handler ctx
+ * narrowed to the consumed subset like the command's.
+ */
+export type AiGuardShortcut = Omit<ExtensionShortcut, "shortcut" | "extensionPath" | "handler"> & {
   handler: (ctx: AiGuardUiContext) => void;
-}
+};
 
 /** The settings' view of session state — {@link SessionLifecycle} satisfies this structurally. */
 export interface SettingsSessionSurface {
@@ -99,6 +102,14 @@ export interface RuntimeSettingsDeps {
 
 /** Footer status key the settings line lives under. */
 const FOOTER_KEY = "ai-guard";
+
+/**
+ * One option in a setting's picker and completion surface: an enum value,
+ * or the reset action. The union keeps the reset ACTION out of the value
+ * channel — a spec whose values someday include a literal "reset" stays
+ * unambiguous.
+ */
+type SettingOption = { readonly text: string; readonly kind: "value" | "reset" };
 
 /**
  * Owns the runtime settings surface for the given specs.
@@ -134,14 +145,14 @@ export class RuntimeSettings {
           .filter((s) => s.name.startsWith(trimmed))
           .map((s) => ({ value: s.name, label: s.name }));
       } else {
-        // Second token: complete the named setting's values.
+        // Second token: complete the named setting's values (and the reset action).
         const name = trimmed.slice(0, spaceAt);
         const valuePrefix = trimmed.slice(spaceAt + 1);
         const spec = this.#spec(name);
         if (!spec) return null;
         items = this.#options(spec)
-          .filter((v) => v.startsWith(valuePrefix))
-          .map((v) => ({ value: v, label: v }));
+          .filter((o) => o.text.startsWith(valuePrefix))
+          .map((o) => ({ value: o.text, label: o.text }));
       }
       return items.length > 0 ? items : null;
     },
@@ -174,14 +185,17 @@ export class RuntimeSettings {
         }
         if (tokens[1] !== undefined) {
           const value = tokens.slice(1).join(" ");
-          if (!this.#options(spec).includes(value)) {
+          const option = this.#optionByText(spec, value);
+          if (!option) {
             ctx.ui.notify(
-              `ai-guard: invalid value "${value}" for ${spec.name} (${this.#options(spec).join(", ")})`,
+              `ai-guard: invalid value "${value}" for ${spec.name} (${this.#options(spec)
+                .map((o) => o.text)
+                .join(", ")})`,
               "error",
             );
             return;
           }
-          this.#apply(spec, value === "reset" ? undefined : value, ctx);
+          this.#applyOption(spec, option, ctx);
           return;
         }
         await this.#pickValue(spec, ctx);
@@ -275,13 +289,38 @@ export class RuntimeSettings {
   }
 
   /**
-   * Picker options: the spec's values plus the reset action.
+   * The spec's options: its enum values followed by the reset action.
    *
    * @param spec - The setting to list options for.
-   * @returns The value options (includes "reset").
+   * @returns The value options, then the reset action.
    */
-  #options(spec: EnumSettingSpec): readonly string[] {
-    return [...spec.values, "reset"];
+  #options(spec: EnumSettingSpec): readonly SettingOption[] {
+    return [
+      ...spec.values.map((v) => ({ text: v, kind: "value" as const })),
+      { text: "reset", kind: "reset" as const },
+    ];
+  }
+
+  /**
+   * Resolve a spelled option (`<value>` or `reset`) into its option record.
+   *
+   * @param spec - The setting to look the option up in.
+   * @param text - The spelled option text.
+   * @returns The matching option, or undefined.
+   */
+  #optionByText(spec: EnumSettingSpec, text: string): SettingOption | undefined {
+    return this.#options(spec).find((o) => o.text === text);
+  }
+
+  /**
+   * Apply an option: the reset action clears the override, a value writes it.
+   *
+   * @param spec - The setting to apply the option to.
+   * @param option - The resolved option (kind-discriminated).
+   * @param ctx - The command/shortcut UI context.
+   */
+  #applyOption(spec: EnumSettingSpec, option: SettingOption, ctx: AiGuardUiContext): void {
+    this.#apply(spec, option.kind === "reset" ? undefined : option.text, ctx);
   }
 
   /**
@@ -366,9 +405,15 @@ export class RuntimeSettings {
    */
   async #pickValue(spec: EnumSettingSpec, ctx: AiGuardUiContext): Promise<void> {
     const title = `${spec.name} — current: ${this.#label(spec)}`;
-    const choice = await ctx.ui.select(title, [...this.#options(spec)]);
+    const choice = await ctx.ui.select(
+      title,
+      this.#options(spec).map((o) => o.text),
+    );
     if (choice !== undefined) {
-      this.#apply(spec, choice === "reset" ? undefined : choice, ctx);
+      const option = this.#optionByText(spec, choice);
+      if (option) {
+        this.#applyOption(spec, option, ctx);
+      }
     }
   }
 }

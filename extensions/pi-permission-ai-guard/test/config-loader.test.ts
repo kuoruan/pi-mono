@@ -1,12 +1,12 @@
 import { vol } from "memfs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { loadAiGuardConfig } from "#src/config-loader.ts";
+
 vi.mock("node:fs", async () => {
   const { createFsFromVolume } = await import("memfs");
   return createFsFromVolume(vol);
 });
-
-import { loadAiGuardConfig } from "#src/config-loader.ts";
 
 describe("loadAiGuardConfig", () => {
   beforeEach(() => {

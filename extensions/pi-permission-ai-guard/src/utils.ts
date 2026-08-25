@@ -171,3 +171,90 @@ export function truncateMiddle(text: string, maxChars: number): string {
 export function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+/**
+ * Fast deterministic hash to shorten long strings for cache/identity keys.
+ *
+ * Copied from pi-ai's internal `utils/hash.ts` (not re-exported from the
+ * package root). Two independent 32-bit Math.imul hashes (cypherCB),
+ * finalized and combined as base36.
+ *
+ * @param str - The string to hash.
+ * @returns A short base36 hash of the input string.
+ */
+export function shortHash(str: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
+}
+
+/**
+ * Normalize an absent (undefined) or empty-string field to `null`.
+ *
+ * @param value - The field value to normalize.
+ * @returns The value when non-empty, else `null`.
+ */
+export function normalizeEmpty(value: string | undefined | null): string | null {
+  return value && value.length > 0 ? value : null;
+}
+
+/**
+ * Extract text from a message's content (string or array of blocks).
+ *
+ * @param content - The message content (string or array of blocks).
+ * @returns The concatenated text from the content, or an empty string if none.
+ */
+export function textFromContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block: unknown) => {
+      if (!isObjectRecord(block)) return "";
+      if (block.type === "text" && typeof block.text === "string") return block.text;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Glob match: `*` matches any character sequence, other chars match literally.
+ *
+ * @param pattern - The glob pattern (with `*` wildcards).
+ * @param text - The text to test against.
+ * @returns True if `text` matches the glob `pattern`.
+ */
+export function globMatch(pattern: string, text: string): boolean {
+  if (!pattern.includes("*")) return pattern === text;
+  const re = new RegExp(
+    "^" +
+      pattern
+        .split("*")
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join(".*") +
+      "$",
+  );
+  return re.test(text);
+}
+
+/**
+ * Safely stringify a value to JSON, guarding against cycles or BigInt.
+ * Returns "[unstringifiable]" on failure instead of throwing.
+ *
+ * @param value - The value to stringify.
+ * @returns The JSON string, or `"[unstringifiable]"` if stringification threw.
+ */
+export function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[unstringifiable]";
+  }
+}

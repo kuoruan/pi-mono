@@ -64,26 +64,25 @@ export class CircuitBreaker {
   private totalDenies = 0;
 
   /**
-   * Check whether the breaker should trip. If it does, reset the
-   * consecutive counter (recoverable tier) so the model gets another chance
-   * on the next ask; `total` is never reset (hard tier).
-   *
-   * The reset side-effect is intentional and named in the method to make it
-   * obvious — callers must not assume this is a pure query.
+   * Pure query: would the breaker trip on the next verdict? No counters
+   * mutate — the trip's reset is a separate, deliberately visible step
+   * ({@link resetConsecutive}), never hidden inside a boolean condition.
    *
    * @param cb - The circuit-breaker thresholds to check against.
-   * @returns True if the breaker tripped (and the consecutive counter was reset if it was the
-   *   recoverable tier).
+   * @returns True if either tier is at its threshold.
    */
-  checkAndResetIfTripped(cb: CircuitBreakerConfig): boolean {
-    if (this.totalDenies >= cb.total) {
-      return true; // permanent (hard tier): total never resets
-    }
-    if (this.consecutiveDenies >= cb.consecutive) {
-      this.consecutiveDenies = 0; // recoverable tier: give the model another chance
-      return true;
-    }
-    return false;
+  isTripped(cb: CircuitBreakerConfig): boolean {
+    return this.totalDenies >= cb.total || this.consecutiveDenies >= cb.consecutive;
+  }
+
+  /**
+   * Reset the recoverable consecutive tier. The pipeline calls it when a
+   * trip was consumed, giving the model a fresh consecutive window. After a
+   * hard-tier trip the reset is behaviorally moot (the total tier never
+   * clears), but the call site stays uniform.
+   */
+  resetConsecutive(): void {
+    this.consecutiveDenies = 0;
   }
 
   /**

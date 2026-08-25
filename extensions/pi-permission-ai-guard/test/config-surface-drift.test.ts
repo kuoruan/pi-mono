@@ -11,12 +11,20 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { MODE_VALUES, configSchema } from "#src/config-schema.ts";
+import {
+  BREAKER_VERDICT_VALUES,
+  MODE_VALUES,
+  REASONING_VALUES,
+  configSchema,
+} from "#src/config-schema.ts";
 
 const schemaJson = JSON.parse(
   readFileSync(new URL("../schemas/ai-guard.schema.json", import.meta.url), "utf-8"),
 ) as {
-  properties: Record<string, { default?: unknown; enum?: unknown[]; properties?: unknown }>;
+  properties: Record<
+    string,
+    { default?: unknown; enum?: unknown[]; properties?: Record<string, { enum?: unknown[] }> }
+  >;
 };
 
 /**
@@ -72,5 +80,9 @@ describe("config surface drift", () => {
 
   it("JSON-schema enums match the zod enums", () => {
     expect(schemaJson.properties.mode.enum).toEqual([...MODE_VALUES]);
+    expect(schemaJson.properties.reasoning.enum).toEqual([...REASONING_VALUES]);
+    expect(schemaJson.properties.circuitBreaker.properties!.verdict.enum).toEqual([
+      ...BREAKER_VERDICT_VALUES,
+    ]);
   });
 });

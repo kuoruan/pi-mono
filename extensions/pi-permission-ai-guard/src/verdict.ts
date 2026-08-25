@@ -1,7 +1,7 @@
 import { parseJsonWithRepair } from "@earendil-works/pi-ai";
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
-import { isObjectRecord, normalizeAndRedactText } from "./utils.ts";
+import { isObjectRecord, normalizeAndRedactText, safeStringify } from "./utils.ts";
 
 /** Why a model call deferred (for logging/debugging). */
 export type ModelCallDeferKind =
@@ -67,21 +67,6 @@ export const GENERIC_DENY_REASON =
  */
 function isRiskLevel(value: string): value is RiskLevel {
   return RISK_LEVELS.has(value as RiskLevel);
-}
-
-/**
- * Safely stringify a value to JSON, guarding against cycles or BigInt.
- * Returns "[unstringifiable]" on failure instead of throwing.
- *
- * @param value - The value to stringify.
- * @returns The JSON string, or `"[unstringifiable]"` if stringification threw.
- */
-function safeStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "[unstringifiable]";
-  }
 }
 
 /**

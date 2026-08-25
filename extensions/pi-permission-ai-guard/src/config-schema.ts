@@ -15,7 +15,7 @@ export const MODE_VALUES = ["manual", "default", "auto"] as const;
 export type Mode = (typeof MODE_VALUES)[number];
 
 /** Verdicts the circuit breaker can force when it trips. */
-const BREAKER_VERDICT_VALUES = ["deny", "defer"] as const;
+export const BREAKER_VERDICT_VALUES = ["deny", "defer"] as const;
 
 /** Verdict the circuit breaker forces on trip. */
 export type BreakerVerdict = (typeof BREAKER_VERDICT_VALUES)[number];
@@ -25,7 +25,7 @@ export type BreakerVerdict = (typeof BREAKER_VERDICT_VALUES)[number];
  * vocabulary ("off" = don't pass the reasoning option; providers clamp
  * unsupported levels per model). Tied to the upstream type via `satisfies`.
  */
-const REASONING_VALUES: readonly ModelThinkingLevel[] = [
+export const REASONING_VALUES: readonly ModelThinkingLevel[] = [
   "off",
   "minimal",
   "low",

@@ -45,6 +45,22 @@ function makeCompaction(summary: string): unknown {
 
 const opts = { maxUserMessages: 5, maxToolCalls: 10, maxCharsPerEntry: 500 };
 
+/**
+ * Run the stripper over `entries` with a session-manager fragment
+ * (getSessionId is part of the shared projection the lifecycle reads, not
+ * the stripper).
+ *
+ * @param entries - The session entries to strip.
+ * @param settings - Strip limits (default: the shared `opts`).
+ * @returns The stripped transcript.
+ */
+function strip(entries: unknown[], settings = opts) {
+  return stripTranscript(
+    { getSessionId: () => "s1", buildContextEntries: () => entries as unknown as SessionEntry[] },
+    settings,
+  );
+}
+
 describe("stripTranscript", () => {
   it("extracts user messages as trusted intent", () => {
     const entries = [
@@ -52,8 +68,7 @@ describe("stripTranscript", () => {
       makeMessage("assistant", "I'll help"),
       makeMessage("user", "also check tests"),
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent).toContain("fix the bug");
     expect(result.trustedIntent).toContain("also check tests");
   });
@@ -64,8 +79,7 @@ describe("stripTranscript", () => {
       makeAssistantWithToolCall("bash", { command: "ls -la" }),
       makeMessage("assistant", [{ type: "text", text: "Done!" }]),
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.toolCalls).toContain("bash: " + JSON.stringify({ command: "ls -la" }));
     expect(result.toolCalls).not.toContain("Done!");
     expect(result.strippedCount).toBeGreaterThan(0);
@@ -76,8 +90,7 @@ describe("stripTranscript", () => {
       makeMessage("user", "read the file"),
       makeToolResult("read", "line1\nline2\nline3\n... 500 lines of code ..."),
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent).toContain("read the file");
     expect(result.toolCalls.length).toBe(0);
     expect(result.strippedCount).toBeGreaterThan(0);
@@ -86,17 +99,8 @@ describe("stripTranscript", () => {
   });
 
   it("keeps ask_user_question results as trusted intent", () => {
-    const entries = [
-      makeEntry("message", {
-        message: {
-          role: "toolResult",
-          toolName: "ask_user_question",
-          content: [{ type: "text", text: "User chose option A" }],
-        },
-      }),
-    ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const entries = [makeToolResult("ask_user_question", "User chose option A")];
+    const result = strip(entries, opts);
     expect(result.trustedIntent).toContain("User chose option A");
   });
 
@@ -105,8 +109,7 @@ describe("stripTranscript", () => {
       makeCompaction("Summary of previous work: fixed auth module"),
       makeMessage("user", "now fix the tests"),
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent.some((s) => s.includes("Summary of previous work"))).toBe(false);
     expect(result.trustedIntent).toContain("now fix the tests");
     expect(result.strippedCount).toBeGreaterThan(0);
@@ -114,8 +117,7 @@ describe("stripTranscript", () => {
 
   it("respects maxUserMessages limit", () => {
     const entries = Array.from({ length: 10 }, (_, i) => makeMessage("user", `message ${i}`));
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, { ...opts, maxUserMessages: 3 });
+    const result = strip(entries, { ...opts, maxUserMessages: 3 });
     expect(result.trustedIntent.length).toBe(3);
     // Should keep most recent 3
     expect(result.trustedIntent).toContain("message 9");
@@ -127,39 +129,34 @@ describe("stripTranscript", () => {
     const entries = Array.from({ length: 15 }, (_, i) =>
       makeAssistantWithToolCall("bash", { command: `cmd${i}` }),
     );
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, { ...opts, maxToolCalls: 5 });
+    const result = strip(entries, { ...opts, maxToolCalls: 5 });
     expect(result.toolCalls.length).toBe(5);
   });
 
   it("truncates long entries to maxCharsPerEntry", () => {
     const longText = "x".repeat(2000);
     const entries = [makeMessage("user", longText)];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, { ...opts, maxCharsPerEntry: 100 });
+    const result = strip(entries, { ...opts, maxCharsPerEntry: 100 });
     expect(result.trustedIntent[0]!.length).toBeLessThan(200);
     expect(result.trustedIntent[0]).toContain("truncated");
   });
 
   it("returns empty arrays for empty session", () => {
-    const sm = { buildContextEntries: () => [] as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip([], opts);
     expect(result.trustedIntent.length).toBe(0);
     expect(result.toolCalls.length).toBe(0);
   });
 
   it("handles message entry with missing message field", () => {
     const entries = [{ type: "message", id: "1", parentId: null, timestamp: "x" }];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent.length).toBe(0);
     expect(result.strippedCount).toBeGreaterThan(0);
   });
 
   it("handles message entry with missing role", () => {
     const entries = [{ type: "message", id: "1", parentId: null, timestamp: "x", message: {} }];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent.length).toBe(0);
     expect(result.strippedCount).toBeGreaterThan(0);
   });
@@ -174,8 +171,7 @@ describe("stripTranscript", () => {
         message: { role: "system", content: "hello" },
       },
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent.length).toBe(0);
     expect(result.toolCalls.length).toBe(0);
     expect(result.strippedCount).toBeGreaterThan(0);
@@ -197,8 +193,7 @@ describe("stripTranscript", () => {
         },
       },
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent).toContain("User message");
   });
 
@@ -214,8 +209,7 @@ describe("stripTranscript", () => {
         fromHook: true,
       },
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent.length).toBe(0);
     expect(result.strippedCount).toBe(1);
   });
@@ -230,8 +224,7 @@ describe("stripTranscript", () => {
         content: [{ type: "text", text: "custom" }],
       },
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.strippedCount).toBeGreaterThan(0);
   });
 
@@ -245,8 +238,7 @@ describe("stripTranscript", () => {
         message: { role: "assistant", content: [{ type: "text", text: "Just thinking..." }] },
       },
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.toolCalls.length).toBe(0);
     expect(result.strippedCount).toBeGreaterThan(0);
   });
@@ -268,8 +260,7 @@ describe("stripTranscript", () => {
         },
       },
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.toolCalls.length).toBe(1);
     expect(result.toolCalls[0]).toContain("write:");
   });
@@ -289,8 +280,7 @@ describe("stripTranscript", () => {
         },
       },
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.toolCalls.length).toBe(1);
     expect(result.toolCalls[0]).toContain("custom-tool:");
   });
@@ -308,8 +298,7 @@ describe("stripTranscript", () => {
         },
       },
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.toolCalls.length).toBe(1);
     expect(result.toolCalls[0]).toContain("unknown:");
   });
@@ -328,8 +317,7 @@ describe("stripTranscript", () => {
         },
       },
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     // No text content → nothing added to trustedIntent
     expect(result.trustedIntent.length).toBe(0);
   });
@@ -340,8 +328,7 @@ describe("stripTranscript", () => {
       { type: "model_change", id: "2", parentId: "1", timestamp: "x", model: "gpt-4" },
       makeMessage("user", "hello"),
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent).toContain("hello");
     expect(result.strippedCount).toBe(2);
   });
@@ -350,15 +337,13 @@ describe("stripTranscript", () => {
     // buildContextEntries should always return defined entries, but the guard
     // must handle an undefined hole without crashing.
     const entries = [undefined, makeMessage("user", "hello"), undefined];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent).toContain("hello");
   });
 
   it("skips compaction entries with an empty summary", () => {
     const entries = [makeCompaction(""), makeMessage("user", "after compact")];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     // Empty summary → not added to trustedIntent, but not counted as stripped either
     expect(result.trustedIntent).toContain("after compact");
     expect(result.trustedIntent.some((s) => s === "")).toBe(false);
@@ -376,8 +361,7 @@ describe("stripTranscript", () => {
       makeToolResult("ask_user_question", "chose AKIAABCDEFGHIJKLMNOP"),
       makeCompaction("summary with password=hunter2supersecretvalue"),
     ];
-    const sm = { buildContextEntries: () => entries as unknown as SessionEntry[] };
-    const result = stripTranscript(sm, opts);
+    const result = strip(entries, opts);
     expect(result.trustedIntent.some((s) => s.includes("sk-ant-"))).toBe(false);
     expect(result.trustedIntent.some((s) => s.includes("AKIAABCDEFGHIJKLMNOP"))).toBe(false);
     expect(result.trustedIntent.some((s) => s.includes("hunter2"))).toBe(false);
