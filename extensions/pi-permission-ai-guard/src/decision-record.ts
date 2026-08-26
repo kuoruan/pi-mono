@@ -11,6 +11,19 @@
  * and each gate's constructor adds only what's specific to it.
  *
  * The event constants live here so callers don't redeclare them.
+ *
+ * Log-stream doctrine: the REVIEW stream (log.review, always on) carries
+ * one bounded decision record per REVIEWER-RELEVANT gate — the model
+ * gate, the circuit breaker, and the reviewer's pre-call failures (model
+ * unresolved, auth failed). Pass-through gates that add no judgment —
+ * policy-decided (the policy already ruled; the link defers) and
+ * cache-hit (a replay of the recorded model verdict) — go to the DEBUG
+ * stream. Everything verbose or diagnostic — raw replies (defer failures
+ * only), call-error records, cache-miss telemetry, transcript-error
+ * short-circuits, and empty-reply stop-reason details — also goes to
+ * DEBUG (log.debug, written only while the operator has the permission
+ * system's debugLog on). Do not promote verbose payloads to the review
+ * stream; never demote reviewer judgment.
  */
 
 import type {
@@ -218,6 +231,22 @@ export const DecisionRecord = {
   },
 
   /**
+   * Transcript stripping failed — the review never opened.
+   *
+   * @param base - Shared decision-record context.
+   * @returns A decision record for the transcript-error gate.
+   */
+  transcriptError(base: DecisionBase): DecisionRecordEntry {
+    return {
+      ...base,
+      gate: "transcript-error",
+      modelCalled: false,
+      verdict: "defer",
+      deferKind: "transcript-error",
+    };
+  },
+
+  /**
    * Auth resolution failed — defer.
    *
    * @param base - Shared decision-record context.
@@ -290,6 +319,8 @@ export const DecisionRecord = {
           : reviewOutcome.deferReason,
       deferKind: reviewOutcome.deferKind ?? null,
       riskLevel: reviewOutcome.riskLevel ?? null,
+      // Empty-reply diagnostics ride along so the review log stands alone.
+      diagnostic: reviewOutcome.diagnostic ?? null,
       // rawReply distinguishes three states so audit readers can tell them apart:
       //  - defer with a reply (no-json / invalid-verdict-value / model-defer):
       //    keep the raw text — it's the operator's clue to why parsing failed.
@@ -316,14 +347,20 @@ export const DecisionRecord = {
  * @param record - The decision record for the model or cache-hit gate.
  * @param mode - The effective mode that triggered the mapping.
  * @param emittedKind - The verdict kind the link emitted after mapping.
+ * @param emittedReason - The human-readable deny/defer/x reason that was
+ *   emitted, when the mode mapping introduced one.
  * @returns The annotated decision record.
  */
 export function mapped(
   record: DecisionRecordEntry,
   mode: string,
   emittedKind: AuthorizerVerdict["kind"],
+  emittedReason?: string,
 ): DecisionRecordEntry {
-  return { ...record, emittedVerdict: emittedKind, mode };
+  // The emitted reason rides along so the audit trail shows what the agent
+  // actually received — reconstructing it from the deferKind would leave
+  // the reader guessing.
+  return { ...record, emittedVerdict: emittedKind, mode, emittedReason };
 }
 
 /**

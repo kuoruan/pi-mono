@@ -25,6 +25,7 @@ import {
   modelReply,
   shortCircuit,
 } from "./decision-record.ts";
+import { NOTIFY_PREFIX } from "./logger.ts";
 import {
   type CompleteSimpleFn,
   type ModelCallContext,
@@ -37,12 +38,7 @@ import { reviewRequestCacheMaterial, type ReviewRequestContext } from "./review-
 import type { CircuitBreaker, SessionOverrides, VerdictCache } from "./session-state.ts";
 import { type SessionManagerLike, stripTranscript } from "./transcript-stripper.ts";
 import { normalizeAndRedactText, shortHash } from "./utils.ts";
-import {
-  applyVerdictMode,
-  type MachineryFailureKind,
-  machineryDeferMessage,
-  manualEscalationMessage,
-} from "./verdict-mode.ts";
+import { applyVerdictMode, autoDenyReason, manualEscalationMessage } from "./verdict-mode.ts";
 import type { RiskLevel } from "./verdict.ts";
 
 /**
@@ -75,27 +71,6 @@ export interface ReviewPipelineDeps {
   completeSimple: CompleteSimpleFn;
   /** Best-effort human notification for verdicts that escalate to the user. */
   notify?: NotifyFn;
-}
-
-/**
- * Auto mode's machinery-escape contract: the human is about to see an
- * interruption they didn't opt into (reviewer broken, not uncertain), so
- * explain it. Pre-call paths (model unresolved, auth failed, transcript
- * errors) defer before any mode mapping, but the contract is the same —
- * the notify fires in auto mode only.
- *
- * @param deps - The pipeline dependencies (notify is optional).
- * @param mode - The effective mode (the notify fires in auto mode only).
- * @param kind - The machinery failure kind for the message.
- */
-function notifyMachineryEscape(
-  deps: ReviewPipelineDeps,
-  mode: Mode,
-  kind: MachineryFailureKind,
-): void {
-  if (mode === "auto") {
-    deps.notify?.(machineryDeferMessage(kind), "warning");
-  }
 }
 
 /**
@@ -151,8 +126,10 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // default. Read per-call: the override object is mutable session state.
     const mode = deps.overrides.mode ?? config.mode;
 
-    // surface-unmatched is expected config behavior (silent defer); no-target
-    // is an unexpected ask (logged, then defer).
+    // surface-unmatched is expected config behavior (silent defer; outside
+    // this link's jurisdiction). no-target is an unexpected ask — the
+    // REVIEW FAILED to open, so auto mode denies it like any other
+    // machinery failure.
     const resolved = resolveReviewTarget(details, config);
     if ("reason" in resolved) {
       if (resolved.reason === "no-target") {
@@ -160,6 +137,10 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
           SHORT_CIRCUIT_EVENT,
           shortCircuit(details.requestId, resolved.surface, "no-target"),
         );
+        if (mode === "auto") {
+          deps.circuitBreaker.recordMachineryFailure();
+          return { kind: "deny", reason: autoDenyReason("no-target") };
+        }
       }
       return { kind: "defer" };
     }
@@ -174,7 +155,10 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // this link only adds value when the policy is undecided ("ask").
     const policyResult = query.checkPermission(surface, target, details.agentName ?? undefined);
     if (policyResult.state === "allow" || policyResult.state === "deny") {
-      log.review(
+      // Pass-through gate: the policy already decided and the link adds no
+      // judgment — debug stream only (see the log-stream doctrine in
+      // decision-record.ts).
+      log.debug(
         DECISION_EVENT,
         DecisionRecord.policyDecided(base, {
           state: policyResult.state,
@@ -205,7 +189,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // by design: specific config beats the general mode).
       if (verdict.kind === "defer") {
         deps.notify?.(
-          "ai-guard: circuit breaker tripped — too many reviewer denials, deferring to you",
+          `${NOTIFY_PREFIX} circuit breaker tripped — too many reviewer denials, deferring to you`,
           "warning",
         );
       }
@@ -216,8 +200,17 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const modelId = `${config.provider}/${config.model}`;
     const model = deps.registry.find(config.provider, config.model);
     if (!model) {
-      log.review(DECISION_EVENT, DecisionRecord.modelUnresolved(base, modelId));
-      notifyMachineryEscape(deps, mode, "model-unresolved");
+      const record = DecisionRecord.modelUnresolved(base, modelId);
+      if (mode === "auto") {
+        // Auto denies EVERYTHING that would fall to the human — including
+        // machinery failures; the classified failure becomes the reason.
+        log.review(
+          DECISION_EVENT,
+          mapped(record, mode, "deny", autoDenyReason("model-unresolved")),
+        );
+        return { kind: "deny", reason: autoDenyReason("model-unresolved") };
+      }
+      log.review(DECISION_EVENT, record);
       return { kind: "defer" };
     }
 
@@ -225,11 +218,13 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // { ok: false } result both collapse to one auth-failed defer path.
     const auth = await resolveAuth(deps.registry, model);
     if (!auth.ok) {
-      log.review(
-        DECISION_EVENT,
-        DecisionRecord.authFailed(base, modelId, normalizeAndRedactText(auth.error)),
-      );
-      notifyMachineryEscape(deps, mode, "auth-failed");
+      const record = DecisionRecord.authFailed(base, modelId, normalizeAndRedactText(auth.error));
+      if (mode === "auto") {
+        deps.circuitBreaker.recordMachineryFailure();
+        log.review(DECISION_EVENT, mapped(record, mode, "deny", autoDenyReason("auth-failed")));
+        return { kind: "deny", reason: autoDenyReason("auth-failed") };
+      }
+      log.review(DECISION_EVENT, record);
       return { kind: "defer" };
     }
 
@@ -248,7 +243,16 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
           error: normalizeAndRedactText(e instanceof Error ? e.message : String(e)),
         }),
       );
-      notifyMachineryEscape(deps, mode, "transcript-error");
+      const record = DecisionRecord.transcriptError(base);
+      if (mode === "auto") {
+        deps.circuitBreaker.recordMachineryFailure();
+        log.review(
+          DECISION_EVENT,
+          mapped(record, mode, "deny", autoDenyReason("transcript-error")),
+        );
+        return { kind: "deny", reason: autoDenyReason("transcript-error") };
+      }
+      log.review(DECISION_EVENT, record);
       return { kind: "defer" };
     }
 
@@ -271,7 +275,10 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         lookup.riskLevel,
         deps,
       );
-      log.review(DECISION_EVENT, record);
+      // Replay gate: the verdict was already recorded at its model gate —
+      // debug stream only (see the log-stream doctrine in
+      // decision-record.ts).
+      log.debug(DECISION_EVENT, record);
       return emitted;
     }
     // Cache miss: record the miss reason for telemetry.
@@ -292,8 +299,16 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     };
     const reviewOutcome = await reviewModel(callCtx, systemPrompt, userPrompt, config.timeoutMs);
 
-    if (reviewOutcome.rawReply !== undefined) {
-      log.debug(MODEL_REPLY_EVENT, modelReply(requestId, modelId, reviewOutcome.rawReply));
+    // Raw replies are verbose AND unnecessary for clean verdicts (the
+    // structured record + sentinel suffice) — only defer failures keep the
+    // original text, so a broken parse can be replayed.
+    if (reviewOutcome.verdict.kind === "defer" && reviewOutcome.rawReply !== undefined) {
+      // The raw reply may re-quote prompt content — redact before it
+      // lands in any log stream (models can parrot credentials).
+      log.debug(
+        MODEL_REPLY_EVENT,
+        modelReply(requestId, modelId, normalizeAndRedactText(reviewOutcome.rawReply)),
+      );
     }
 
     // The mode maps only what the link EMITS: the breaker still
@@ -304,6 +319,21 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       kind: reviewOutcome.deferKind,
       reason: reviewOutcome.deferReason,
     });
+    // model-defer in manual/default passes through to the human — but the
+    // upstream defer verdict carries no reason field, so the dialog alone
+    // would never show WHAT the reviewer wants clarified. Mirror it via
+    // the escalation channel (footer/notify), symmetric with auto's deny
+    // reason.
+    if (
+      emitted.kind === "defer" &&
+      reviewOutcome.deferKind === "model-defer" &&
+      reviewOutcome.deferReason
+    ) {
+      deps.notify?.(
+        `${NOTIFY_PREFIX} the reviewer asks for clarification: ${reviewOutcome.deferReason}`,
+        "info",
+      );
+    }
     const record = annotateAndEscalate(
       DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome),
       mode,
@@ -312,16 +342,20 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       reviewOutcome.riskLevel,
       deps,
     );
-    // In auto mode an emitted defer can only be a machinery failure
-    // (timeout, call-failed, empty-reply, no-json, invalid-verdict-value)
-    // that escaped the fail-closed mapping — the human is about to see an
-    // interruption they didn't opt into, so explain it.
-    if (mode === "auto" && emitted.kind === "defer") {
-      deps.notify?.(machineryDeferMessage(reviewOutcome.deferKind), "warning");
-    }
     log.review(DECISION_EVENT, record);
 
+    // Real model verdicts feed the breaker as usual; auto's
+    // machinery-failure denies (the reviewer never produced a verdict)
+    // also count via recordMachineryFailure — a broken reviewer can trip
+    // the breaker, not just a miscalibrated one.
     deps.circuitBreaker.recordVerdict(reviewOutcome.verdict.kind);
+    if (
+      mode === "auto" &&
+      reviewOutcome.verdict.kind === "defer" &&
+      reviewOutcome.deferKind !== "model-defer"
+    ) {
+      deps.circuitBreaker.recordMachineryFailure();
+    }
     if (reviewOutcome.verdict.kind !== "defer") {
       deps.verdictCache.store(
         commandHash,

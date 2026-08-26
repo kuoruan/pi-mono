@@ -102,6 +102,20 @@ export class CircuitBreaker {
   }
 
   /**
+   * Record a reviewer MACHINERY failure — the reviewer could not even
+   * produce a verdict (empty reply, timeout, missing model, broken
+   * transcript, unextractable target). Auto mode denies these; crediting
+   * them into the breaker makes the deny-storm escape valve work for a
+   * BROKEN reviewer as well as a miscalibrated one.
+   *
+   * Increments both tiers, same as a model deny.
+   */
+  recordMachineryFailure(): void {
+    this.consecutiveDenies++;
+    this.totalDenies++;
+  }
+
+  /**
    * Record a model-produced verdict into the breaker counters.
    * Only call this for genuine model verdicts (not cache hits or breaker
    * short-circuits) — otherwise counts would double and the breaker would

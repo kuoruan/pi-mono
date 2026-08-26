@@ -26,6 +26,7 @@ import type {
 
 import type { ConfigLayerTarget, SaveConfigFn } from "./config-loader.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
+import { NOTIFY_PREFIX } from "./logger.ts";
 import {
   type SessionBranchReader,
   persistSetting,
@@ -189,7 +190,7 @@ export class RuntimeSettings {
     },
     handler: async (args, ctx) => {
       if (!this.#deps.session.session?.config) {
-        ctx.ui.notify("ai-guard: no active session (config not loaded)", "warning");
+        ctx.ui.notify(`${NOTIFY_PREFIX} no active session (config not loaded)`, "warning");
         return;
       }
       const tokens = args.trim().split(/\s+/).filter(Boolean);
@@ -208,7 +209,7 @@ export class RuntimeSettings {
       // `/ai-guard <setting> <value>` form works everywhere.
       if (tokens.length < 2 && !ctx.hasUI) {
         ctx.ui.notify(
-          "ai-guard: the settings menu needs an interactive UI — use /ai-guard <setting> <value>",
+          `${NOTIFY_PREFIX} the settings menu needs an interactive UI — use /ai-guard <setting> <value>`,
           "error",
         );
         return;
@@ -219,7 +220,7 @@ export class RuntimeSettings {
         const spec = this.#spec(tokens[0]);
         if (!spec) {
           ctx.ui.notify(
-            `ai-guard: unknown setting "${tokens[0]}" (${this.#specs.map((s) => s.name).join(", ")})`,
+            `${NOTIFY_PREFIX} unknown setting "${tokens[0]}" (${this.#specs.map((s) => s.name).join(", ")})`,
             "error",
           );
           return;
@@ -229,7 +230,7 @@ export class RuntimeSettings {
           const option = this.#optionByText(spec, value);
           if (!option) {
             ctx.ui.notify(
-              `ai-guard: invalid value "${value}" for ${spec.name} (${this.#options(spec)
+              `${NOTIFY_PREFIX} invalid value "${value}" for ${spec.name} (${this.#options(spec)
                 .map((o) => o.text)
                 .join(", ")})`,
               "error",
@@ -269,7 +270,7 @@ export class RuntimeSettings {
     handler: (ctx) => {
       const spec = this.#specs[0];
       if (!spec || !this.#deps.session.session?.config) {
-        ctx.ui.notify("ai-guard: no active session (config not loaded)", "warning");
+        ctx.ui.notify(`${NOTIFY_PREFIX} no active session (config not loaded)`, "warning");
         return;
       }
       const values = spec.values;
@@ -389,7 +390,7 @@ export class RuntimeSettings {
     if (!sessionConfig) {
       // Unreachable through the command (the handler guards up front) — a
       // silent no-op here would hide a future caller's bug, so surface it.
-      ctx.ui.notify("ai-guard: no active session (config not loaded)", "warning");
+      ctx.ui.notify(`${NOTIFY_PREFIX} no active session (config not loaded)`, "warning");
       return;
     }
     // The single projection point: defined overrides win over the loaded
@@ -399,19 +400,22 @@ export class RuntimeSettings {
       effectiveConfig(sessionConfig, this.#deps.session.overrides),
     );
     if (result.error) {
-      ctx.ui.notify(`ai-guard: could not save to ${target} config — ${result.error}`, "error");
+      ctx.ui.notify(
+        `${NOTIFY_PREFIX} could not save to ${target} config — ${result.error}`,
+        "error",
+      );
       return;
     }
     if (!result.changed) {
       ctx.ui.notify(
-        `ai-guard: ${target} config already matches the current settings — nothing written`,
+        `${NOTIFY_PREFIX} ${target} config already matches the current settings — nothing written`,
         "info",
       );
       return;
     }
     const created = result.created ? " (created)" : "";
     ctx.ui.notify(
-      `ai-guard: current config saved to ${target} config${created}: ${result.path} — new sessions start from it; this session keeps its overrides`,
+      `${NOTIFY_PREFIX} current config saved to ${target} config${created}: ${result.path} — new sessions start from it; this session keeps its overrides`,
       "info",
     );
   }
@@ -493,9 +497,9 @@ export class RuntimeSettings {
     persistSetting(this.#deps.appendEntry, spec.name, value ?? null);
     const effective = this.#effective(spec);
     if (value === undefined) {
-      ctx.ui.notify(`ai-guard ${spec.name}: ${effective} (config default)`, "info");
+      ctx.ui.notify(`${NOTIFY_PREFIX} ${spec.name}: ${effective} (config default)`, "info");
     } else {
-      ctx.ui.notify(`ai-guard ${spec.name}: ${value} (session override)`, "info");
+      ctx.ui.notify(`${NOTIFY_PREFIX} ${spec.name}: ${value} (session override)`, "info");
     }
     this.syncFooter(ctx);
   }

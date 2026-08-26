@@ -26,7 +26,7 @@
       "type": "string",
       "enum": ["manual", "default", "auto"],
       "default": "default",
-      "description": "Who adjudicates model deny/defer verdicts: 'manual' — the human decides everything the model doesn't allow; 'default' — model denies are final, defers ask the human; 'auto' — fully automatic, fail-closed: the model's own uncertainty is denied, while reviewer machinery failures still defer to the human."
+      "description": "Who adjudicates model deny/defer verdicts: 'manual' — the human decides everything the model doesn't allow; 'default' — model denies are final, defers ask the human; 'auto' — fully automatic, fail-closed: nothing falls to the user — the model's own uncertainty and every reviewer machinery failure are denied with an explanatory reason."
     },
     "circuitBreaker": {
       "type": "object",

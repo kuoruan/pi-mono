@@ -7,15 +7,16 @@
  * place for the whole semantic, one test file for its table.
  *
  * `manual` maps every deny to a defer — the human adjudicates (and can
- * override) everything the model doesn't allow. `auto` denies the model's
- * own uncertainty (`model-defer`): the defer's clarification request
- * becomes the deny's teaching reason so the agent can adapt. Machinery
- * failures (timeout, call-failed, empty-reply, no-json,
- * invalid-verdict-value) are NOT denied — they pass through to the human
- * escape valve, matching the pipeline's pre-call failure paths (model
- * unresolved, auth failed, transcript errors). `default` passes both
- * verdict kinds through. Allow is never transformed, and no mapping ever
- * weakens a deny into an allow.
+ * override) everything the model doesn't allow. `auto` is fully
+ * automatic and fail-closed: EVERYTHING that would otherwise fall to the
+ * human is denied — the model's own uncertainty (`model-defer`) uses the
+ * defer's clarification request as the deny's teaching reason, and
+ * reviewer machinery failures (timeout, call-failed, empty-reply,
+ * no-json, invalid-verdict-value, model-unresolved, auth-failed,
+ * transcript-error) deny with the classified failure as the reason.
+ * Nothing falls to the user in auto mode. `default` passes both verdict
+ * kinds through. Allow is never transformed, and no mapping ever weakens
+ * a deny into an allow.
  *
  * Pure functions: the fresh-model path and the cache-hit path both run
  * the mapping, so a cached deny maps identically to a fresh one.
@@ -24,6 +25,7 @@
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import type { Mode } from "./config-schema.ts";
+import { NOTIFY_PREFIX } from "./logger.ts";
 import type { ModelCallDeferKind, RiskLevel } from "./verdict.ts";
 
 /**
@@ -45,7 +47,8 @@ export type MachineryFailureKind =
   | ModelCallDeferKind
   | "model-unresolved"
   | "auth-failed"
-  | "transcript-error";
+  | "transcript-error"
+  | "no-target";
 
 /** Reason carried by an auto-policy deny mapped from a defer with no clarification request. */
 export const AUTO_DEFER_DENY_REASON = "Reviewer was uncertain; auto mode denies uncertain requests";
@@ -67,8 +70,14 @@ export function applyVerdictMode(
     return policy === "manual" ? { kind: "defer" } : verdict;
   }
   if (verdict.kind === "defer") {
-    if (policy !== "auto" || modelDefer?.kind !== "model-defer") return verdict;
-    return { kind: "deny", reason: modelDefer.reason ?? AUTO_DEFER_DENY_REASON };
+    if (policy !== "auto") return verdict;
+    return {
+      kind: "deny",
+      reason:
+        modelDefer?.kind === "model-defer"
+          ? (modelDefer.reason ?? AUTO_DEFER_DENY_REASON)
+          : autoDenyReason(modelDefer?.kind),
+    };
   }
   return verdict;
 }
@@ -90,17 +99,16 @@ export function manualEscalationMessage(
   const reason = verdict.kind === "deny" ? verdict.reason : undefined;
   const risk = riskLevel ? ` (risk: ${riskLevel})` : "";
   const reasonSuffix = reason ? ` — ${reason}` : "";
-  return `ai-guard reviewer denied this request${risk}${reasonSuffix}`;
+  return `${NOTIFY_PREFIX} reviewer denied this request${risk}${reasonSuffix}`;
 }
 
 /**
- * Explain an auto-policy interruption caused by reviewer machinery
- * failure (the only defers auto still emits): the human is about to see
- * an interruption they didn't opt into, so say why.
+ * The deny reason for an auto-policy machinery-failure denial: the agent
+ * sees why the review could not complete instead of a silent deny.
  *
  * @param deferKind - The classified failure kind, if any.
- * @returns The notification message.
+ * @returns The deny teaching reason.
  */
-export function machineryDeferMessage(deferKind: MachineryFailureKind | undefined): string {
-  return `ai-guard: reviewer could not complete the review (${deferKind ?? "unknown"}) — deferring to you`;
+export function autoDenyReason(deferKind: MachineryFailureKind | undefined): string {
+  return `reviewer could not complete the review (${deferKind ?? "unknown"}) — auto mode denied the request`;
 }

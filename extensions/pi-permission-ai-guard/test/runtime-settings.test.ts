@@ -87,7 +87,10 @@ describe("RuntimeSettings — command", () => {
 
     expect(overrides.mode).toBe("manual");
     expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: "manual" });
-    expect(ctx.ui.notify).toHaveBeenCalledWith("ai-guard mode: manual (session override)", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "[ai-guard] mode: manual (session override)",
+      "info",
+    );
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "manual (session)");
   });
 
@@ -98,7 +101,7 @@ describe("RuntimeSettings — command", () => {
 
     expect(overrides.mode).toBeUndefined();
     expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: null });
-    expect(ctx.ui.notify).toHaveBeenCalledWith("ai-guard mode: default (config default)", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("[ai-guard] mode: default (config default)", "info");
     // Default is the shipped baseline — the line clears instead of showing it.
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", undefined);
   });
@@ -112,11 +115,11 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.mode).toBeUndefined();
     expect(appendEntry).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      'ai-guard: invalid value "yolo" for mode (manual, default, auto, reset)',
+      '[ai-guard] invalid value "yolo" for mode (manual, default, auto, reset)',
       "error",
     );
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      'ai-guard: unknown setting "surfaces" (mode)',
+      '[ai-guard] unknown setting "surfaces" (mode)',
       "error",
     );
   });
@@ -135,7 +138,7 @@ describe("RuntimeSettings — command", () => {
     const ctx = makeUiCtx();
     await settings.command.handler("mode manual", ctx);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "ai-guard: no active session (config not loaded)",
+      "[ai-guard] no active session (config not loaded)",
       "warning",
     );
   });
@@ -171,7 +174,7 @@ describe("RuntimeSettings — command", () => {
 
     await settings.command.handler("mode", noUi);
     expect(noUi.ui.notify).toHaveBeenCalledWith(
-      "ai-guard: the settings menu needs an interactive UI — use /ai-guard <setting> <value>",
+      "[ai-guard] the settings menu needs an interactive UI — use /ai-guard <setting> <value>",
       "error",
     );
     expect(overrides.mode).toBeUndefined();
@@ -240,7 +243,7 @@ describe("RuntimeSettings — shortcut", () => {
     const ctx = makeUiCtx();
     expect(() => settings.shortcut.handler(ctx)).not.toThrow();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "ai-guard: no active session (config not loaded)",
+      "[ai-guard] no active session (config not loaded)",
       "warning",
     );
   });
@@ -331,7 +334,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
     expect(config.mode).toBe("manual"); // override won over the snapshot
     expect(config.provider).toBe("test"); // other fields intact
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "ai-guard: current config saved to global config: /cfg-global.json — new sessions start from it; this session keeps its overrides",
+      "[ai-guard] current config saved to global config: /cfg-global.json — new sessions start from it; this session keeps its overrides",
       "info",
     );
   });
@@ -367,7 +370,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
     await settings.command.handler("save-to-global-config", ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "ai-guard: could not save to global config — not valid JSONC",
+      "[ai-guard] could not save to global config — not valid JSONC",
       "error",
     );
   });
@@ -473,7 +476,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
     await settings.command.handler("save-to-global-config", ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "ai-guard: global config already matches the current settings — nothing written",
+      "[ai-guard] global config already matches the current settings — nothing written",
       "info",
     );
   });

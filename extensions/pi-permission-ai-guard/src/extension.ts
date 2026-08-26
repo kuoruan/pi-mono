@@ -6,7 +6,9 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+  type PermissionDecisionEvent,
   type Authorizer,
+  PERMISSIONS_DECISION_CHANNEL,
   PERMISSIONS_READY_CHANNEL,
   type PermissionsReadyEvent,
 } from "@gotgenes/pi-permission-system";
@@ -23,7 +25,7 @@ import { warn } from "./logger.ts";
 import { type CompleteSimpleFn, createCompleteSimple } from "./model-review.ts";
 import { type ReviewPipelineDeps, createReviewPipeline } from "./review-pipeline.ts";
 import { RuntimeSettings, type EnumSettingSpec } from "./runtime-settings.ts";
-import { SessionLifecycle } from "./session-lifecycle.ts";
+import { REVIEW_FOOTER_KEY, SessionLifecycle } from "./session-lifecycle.ts";
 
 /**
  * Optional overrides for testing. In production (default export) all
@@ -143,6 +145,28 @@ export function createAiGuardExtension(
     // pi's event bus is untyped — the channel contract IS this payload
     // shape (the lifecycle runtime-narrows the one field it reads).
     lifecycle.onPermissionsReady(payload as PermissionsReadyEvent);
+  });
+
+  // The permission dialog resolved (any gate decision): hide the
+  // escalate-to-human footer warning we may have shown before the prompt.
+  // Fires after every permission gate resolution — a no-op when nothing
+  // was rendered.
+  pi.events.on(PERMISSIONS_DECISION_CHANNEL, (payload) => {
+    // The channel contract IS the payload shape (same rationale as the
+    // ready channel): pps always emits an object here.
+    const decision = payload as PermissionDecisionEvent;
+    // A decision made while SERVING another session's forwarded request
+    // resolved somebody else's dialog — leave our own pending escalation
+    // warning alone.
+    if (decision.forwarding) return;
+    // Symmetric with the notify bridge's hasUI branch: the warning only
+    // ever rendered on the footer in dialog-capable UIs, so only clear it
+    // there (headless arrivals never wrote it, though setStatus is a
+    // no-op stub there anyway).
+    const ctx = lifecycle.session?.ctx;
+    if (ctx?.hasUI) {
+      ctx.ui.setStatus(REVIEW_FOOTER_KEY, undefined);
+    }
   });
 
   pi.on("session_tree", (_event, ctx) => {

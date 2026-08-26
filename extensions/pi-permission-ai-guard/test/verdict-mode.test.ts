@@ -13,7 +13,7 @@ import {
   AUTO_DEFER_DENY_REASON,
   type ModelDeferInfo,
   applyVerdictMode,
-  machineryDeferMessage,
+  autoDenyReason,
   manualEscalationMessage,
 } from "#src/verdict-mode.ts";
 
@@ -63,12 +63,29 @@ describe("applyVerdictMode — mapping table", () => {
       { kind: "deny", reason: AUTO_DEFER_DENY_REASON },
     ],
 
-    // Machinery failures are NOT safety verdicts: they pass through to the
-    // human escape valve in every mode, auto included.
-    ["auto", MODEL_DEFER, { kind: "no-json" }, { kind: "defer" }],
+    // Auto denies machinery failures too — nothing falls to the user.
+    [
+      "auto",
+      MODEL_DEFER,
+      { kind: "no-json" },
+      {
+        kind: "deny",
+        reason: "reviewer could not complete the review (no-json) — auto mode denied the request",
+      },
+    ],
+    [
+      "auto",
+      MODEL_DEFER,
+      undefined,
+      {
+        kind: "deny",
+        reason: "reviewer could not complete the review (unknown) — auto mode denied the request",
+      },
+    ],
+
+    // Manual and default still pass machinery failures to the human.
     ["default", MODEL_DEFER, { kind: "timeout" }, { kind: "defer" }],
     ["manual", MODEL_DEFER, { kind: "empty-reply" }, { kind: "defer" }],
-    ["auto", MODEL_DEFER, undefined, { kind: "defer" }],
   ])("%s × %j (deferKind %j) → %j", (policy, verdict, modelDefer, expected) => {
     expect(applyVerdictMode(policy, verdict, modelDefer)).toEqual(expected);
   });
@@ -77,22 +94,22 @@ describe("applyVerdictMode — mapping table", () => {
 describe("escalation messages", () => {
   it("manualEscalationMessage carries the risk level and the deny reason", () => {
     expect(manualEscalationMessage(DENY, "high")).toBe(
-      "ai-guard reviewer denied this request (risk: high) — secrets in the command",
+      "[ai-guard] reviewer denied this request (risk: high) — secrets in the command",
     );
     expect(manualEscalationMessage(DENY, undefined)).toBe(
-      "ai-guard reviewer denied this request — secrets in the command",
+      "[ai-guard] reviewer denied this request — secrets in the command",
     );
     expect(manualEscalationMessage({ kind: "deny" }, "medium")).toBe(
-      "ai-guard reviewer denied this request (risk: medium)",
+      "[ai-guard] reviewer denied this request (risk: medium)",
     );
   });
 
-  it("machineryDeferMessage names the failure kind, tolerating none", () => {
-    expect(machineryDeferMessage("no-json")).toBe(
-      "ai-guard: reviewer could not complete the review (no-json) — deferring to you",
+  it("autoDenyReason names the failure kind, tolerating none", () => {
+    expect(autoDenyReason("no-json")).toBe(
+      "reviewer could not complete the review (no-json) — auto mode denied the request",
     );
-    expect(machineryDeferMessage(undefined)).toBe(
-      "ai-guard: reviewer could not complete the review (unknown) — deferring to you",
+    expect(autoDenyReason(undefined)).toBe(
+      "reviewer could not complete the review (unknown) — auto mode denied the request",
     );
   });
 });

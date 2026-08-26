@@ -27,7 +27,12 @@ import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 import type { AiGuardConfig } from "./config-schema.ts";
 import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT, modelCallError } from "./decision-record.ts";
 import { normalizeAndRedactText } from "./utils.ts";
-import { type ModelCallDeferKind, type ReviewOutcome, parseTextFallback } from "./verdict.ts";
+import {
+  type ModelCallDeferKind,
+  type ReviewOutcome,
+  type ReviewOutcomeDiagnostic,
+  parseTextFallback,
+} from "./verdict.ts";
 
 /**
  * Auth result from `ModelRegistry.getApiKeyAndHeaders`, derived from the
@@ -227,10 +232,7 @@ export async function reviewModel(
   // telemetry.
   const stopReason = result.reply.stopReason ?? null;
   const isTimeout = stopReason === "aborted";
-
-  ctx.log.debug(MODEL_REPLY_EVENT, {
-    requestId: ctx.requestId,
-    diagnostic: true,
+  const diagnostic: ReviewOutcomeDiagnostic = {
     stopReason,
     rawStopReason: result.reply.rawStopReason ?? null,
     errorMessage: result.reply.errorMessage
@@ -243,6 +245,12 @@ export async function reviewModel(
             : typeof b,
         )
       : [],
+  };
+
+  ctx.log.debug(MODEL_REPLY_EVENT, {
+    requestId: ctx.requestId,
+    diagnostic: true,
+    ...diagnostic,
     latencyMs: result.latencyMs,
   });
 
@@ -250,5 +258,9 @@ export async function reviewModel(
     verdict: { kind: "defer" },
     deferKind: isTimeout ? "timeout" : "empty-reply",
     latencyMs: result.latencyMs,
+    // Ride the outcome into the decision record: the review log itself
+    // then shows WHY the reply was empty, independent of the permission
+    // system's debug-log toggle.
+    diagnostic,
   };
 }

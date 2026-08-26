@@ -155,6 +155,31 @@ describe("DecisionRecord — per-gate shape", () => {
     expect(cleanDeny.rawReply).toBe("(clean verdict, rawReply omitted)");
     expect(cleanDeny.reason).toBe("unsafe");
 
+    // empty-reply outcome carries diagnostics → persisted (null when absent)
+    const withDiagnostic = DecisionRecord.model(base, "anthropic/haiku", 2, {
+      verdict: { kind: "defer" },
+      latencyMs: 10,
+      deferKind: "empty-reply",
+      diagnostic: {
+        stopReason: "end_turn",
+        rawStopReason: "end_turn",
+        contentTypes: [],
+        errorMessage: null,
+      },
+    });
+    expect(withDiagnostic.diagnostic).toEqual({
+      stopReason: "end_turn",
+      rawStopReason: "end_turn",
+      contentTypes: [],
+      errorMessage: null,
+    });
+    const withoutDiagnostic = DecisionRecord.model(base, "anthropic/haiku", 2, {
+      verdict: { kind: "defer" },
+      latencyMs: 10,
+      deferKind: "timeout",
+    });
+    expect(withoutDiagnostic.diagnostic).toBeNull();
+
     // throw-based defer (timeout) → no rawReply on outcome → null (genuine
     // absence, distinct from the clean-verdict sentinel)
     const timeout = DecisionRecord.model(base, "anthropic/haiku", 2, {

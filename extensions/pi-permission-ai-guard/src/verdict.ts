@@ -26,6 +26,27 @@ export interface ReviewOutcome {
   rawReply?: string;
   /** Risk level from the model verdict, if provided. */
   riskLevel?: RiskLevel;
+  /**
+   * Empty/aborted-reply diagnostics, present only when the reply carried
+   * no text — see {@link ReviewOutcomeDiagnostic}.
+   */
+  diagnostic?: ReviewOutcomeDiagnostic;
+}
+
+/**
+ * Why a model reply carried no text, captured when the reply is empty or
+ * aborted. Persisted into the decision record so the review log is
+ * self-diagnosing even with the permission system's debug log disabled.
+ */
+export interface ReviewOutcomeDiagnostic {
+  /** The provider stop reason (null when unknown). */
+  stopReason: string | null;
+  /** The UNADJUSTED provider stop reason (through the aborted reclassification). */
+  rawStopReason: string | null;
+  /** Content-block types present in the reply ("" text implies "text"). */
+  contentTypes: string[];
+  /** Sanitized provider error message, when the reply carried one. */
+  errorMessage: string | null;
 }
 
 /**

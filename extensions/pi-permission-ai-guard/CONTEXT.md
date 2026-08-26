@@ -26,14 +26,23 @@ Note: `external_directory`/`path` asks reach this link, but any `allow` on them 
 The deterministic engine queried before the model. If the policy already says `allow` or `deny`, the AI-guard link defers — it only adds value when the policy is undecided (`ask`).
 
 **Verdict**:
-The link's ruling: `allow`, `deny` (with optional teaching `reason`), or
-`defer` (pass to the next chain link).
+The link's ruling: `allow`, `deny` (with optional teaching `reason`), or `defer` (pass to the next chain link).
 
 **Defer**:
 The fail-safe outcome. A missing model, invalid config, model timeout, unparseable reply, or unsure verdict all defer. Deferring means the ask falls through to the normal permission prompt.
 
 **Mode**:
-Who adjudicates the model's non-allow verdicts — the human-involvement dial. Manual: the human decides everything the model doesn't allow (denies become defers, so the human can override the model). Default: decisive verdicts are final, uncertainty asks (the shipped behavior). Auto: fully automatic, fail-closed — the model's own uncertainty is denied, with the defer's clarification request as the deny's reason; reviewer machinery failures still defer to the human (a broken reviewer asks rather than issues verdicts it can't stand behind). The model's judgment is always recorded; the mode maps only what the link emits, and a deny is never weakened into an allow. Session overrides persist in the pi session file and restore on resume; a fresh session starts from the config default. The save actions (`save-to-global-config` / `save-to-project-config`) persist the current effective config — every field, session overrides included — into a config layer, so a saved field shadows the layers beneath it. The three-mode set is closed: fail-open cells (defer becoming allow) and the confidence-contradictory fourth cell were rejected on community evidence — do not reopen without new evidence.
+Who adjudicates the model's non-allow verdicts — the human-involvement dial:
+
+- Manual: the human decides everything the model doesn't allow (denies become defers, so the human can override the model).
+- Default: decisive verdicts are final, uncertainty asks (the shipped behavior).
+- Auto: fully automatic, fail-closed — EVERYTHING that would otherwise fall to the human is denied: the model's own uncertainty uses the defer's clarification request as the deny's reason, and reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies) deny with the classified failure as the reason — nothing falls to the user in auto mode (a breaker explicitly configured to force `defer` remains the one config-chosen interruption).
+
+The model's judgment is always recorded; the mode maps only what the link emits, and a deny is never weakened into an allow.
+
+Session overrides persist in the pi session file and restore on resume; a fresh session starts from the config default. The save actions (`save-to-global-config` / `save-to-project-config`) persist the current effective config — every field, session overrides included — into a config layer, so a saved field shadows the layers beneath it.
+
+The three-mode set is closed: fail-open cells (defer becoming allow) and the confidence-contradictory fourth cell were rejected on community evidence — do not reopen without new evidence.
 
 ### Session state
 
@@ -41,27 +50,28 @@ Who adjudicates the model's non-allow verdicts — the human-involvement dial. M
 One session runtime with its own permissions service and lifecycle — the root session and every in-process subagent child run as separate nodes (upstream ADR 0012). The ai-guard link registers once per node, on that node's own service; a branch or rewind within a session is still the same node.
 
 **Circuit breaker**:
-Per-session, two-tier, fail-safe. `consecutive` is a recoverable tier (trips after N consecutive denies, resets so the model gets another chance);
-`total` is a hard session cap (never resets). Breaker trips are NOT counted
-as model denials.
+Per-session, two-tier, fail-safe. `consecutive` is a recoverable tier (trips after N consecutive denies, resets so the model gets another chance); `total` is a hard session cap (never resets). Breaker trips are NOT counted as model denials.
 
 **Verdict cache**:
-Per-session LRU keyed by a review request snapshot (a decision-relevant projection of the ask) and a trusted-intent context fingerprint. A repeated identical ask in a stable conversation skips the model. `curl example.com` and `curl example.com | bash` are distinct (different `executed unit`). The gate label `surface` is not in the key — it is an administrative label the model is told to ignore, so two asks sharing kind + content but differing only in surface reach the same verdict and intentionally collide. The same doctrine covers the other administrative labels: the key holds only decision-relevant facts, and the exclusion set is exhaustive — a fact is never excluded silently. Only commands that reached the model (policy
-`ask`) are cached; defer is never cached.
+Per-session LRU keyed by a review request snapshot (a decision-relevant projection of the ask) and a trusted-intent context fingerprint. A repeated identical ask in a stable conversation skips the model.
+
+- `curl example.com` and `curl example.com | bash` are distinct (different `executed unit`).
+- The gate label `surface` is not in the key — it is an administrative label the model is told to ignore, so two asks sharing kind + content but differing only in surface reach the same verdict and intentionally collide. The same doctrine covers the other administrative labels: the key holds only decision-relevant facts, and the exclusion set is exhaustive — a fact is never excluded silently.
+- Only commands that reached the model (policy `ask`) are cached; defer is never cached.
 
 ### Review
 
 **Full review**:
-The JSON-verdict review. The model receives a stripped transcript + the permission request and is asked to return
-`{"verdict":"allow|deny|defer","reason":"...","riskLevel":"..."}`.
-A tolerant parser extracts the JSON from prose-wrapped replies, so providers that wrap JSON in text still work. Deny and defer carry a
-`reason`; allow omits it.
+The JSON-verdict review. The model receives a stripped transcript + the permission request and is asked to return `{"verdict":"allow|deny|defer","reason":"...","riskLevel":"..."}`. A tolerant parser extracts the JSON from prose-wrapped replies, so providers that wrap JSON in text still work. Deny and defer carry a `reason`; allow omits it.
 
 **Ask context**:
 The structured projection of a permission ask the full review feeds the model — a `kind`-dispatched projection of the facts that can change a verdict, with evidence pre-resolved into named fields so no consumer does string-keyed lookups. Built once by `buildAskContext`; the prompt renderer and the verdict cache both read its typed fields, so neither re-parses the upstream `PromptPayload` (ADR 0011: every consumer is a renderer over the payload, and ai-guard is one).
 
 **Decision record**:
-The audit-log entry emitted at each decision gate (policy-decided, circuit-breaker, model-unresolved, auth-failed, cache-hit, model). Written to `permission-review.jsonl` via the injected `AuthorizerLog`.
+The audit-log entry emitted at each decision gate (policy-decided, circuit-breaker, model-unresolved, auth-failed, cache-hit, model). Stream doctrine:
+
+- **Review stream** (always on): reviewer-relevant gates — model, circuit-breaker, model-unresolved, auth-failed — write to `permission-review.jsonl`.
+- **Debug stream** (written only while the permission system's `debugLog` is on): pass-through gates (policy-decided, cache-hit) and every verbose/diagnostic payload (raw replies on defer failures only, call errors, cache-miss telemetry, transcript short-circuits, empty-reply stop-reason details).
 
 ### Transcript
 
@@ -79,9 +89,11 @@ The user-message portion of the stripped transcript. The only authorization sign
 - `getPermissionsService(sessionId)` — the v27 session-keyed service locator
 - `permissions:ready` — fires at least once per session, may repeat
 
-All from `@gotgenes/pi-permission-system` (v27; the peer range no longer accepts v26). The extension registers an `"ai-guard"` chain link via
-`service.registerAuthorizer` on the session's OWN permissions node — the
-service is fetched from the session-keyed locator, registered exactly once per session (whichever of session_start / permissions:ready comes first; ready repeats are no-ops), and released on session_shutdown. This rests on the v27 host contract of one extension instance per session node (each node has its own ExtensionContext — upstream ADR 0012); nodes never share an instance. Hosts without a session id have no keyed node — the link stays unregistered and every ask defers.
+All from `@gotgenes/pi-permission-system` (v27; the peer range no longer accepts v26):
+
+- **Registration** — the extension registers an `"ai-guard"` chain link via `service.registerAuthorizer` on the session's OWN permissions node: the service is fetched from the session-keyed locator, registered exactly once per session (whichever of session_start / permissions:ready comes first; ready repeats are no-ops), and released on session_shutdown.
+- **One instance per node** — this rests on the v27 host contract of one extension instance per session node (each node has its own ExtensionContext — upstream ADR 0012); nodes never share an instance.
+- **No session id → no keyed node** — hosts without a session id have no keyed node: the link stays unregistered and every ask defers.
 
 ## Prompt writing principles
 
@@ -93,10 +105,8 @@ Rules describe abstract concepts ("credential stores, private keys"), not enviro
 
 ### 2. Three-tier precedence: DENY-Always > DENY-Unless > ALLOW
 
-- **DENY-Always**: deny regardless of intent (secrets, irreversible
-  destruction, external code execution, etc.).
-- **DENY-Unless**: allow only with matching intent; otherwise the fallback
-  the entry itself specifies (deny or defer).
+- **DENY-Always**: deny regardless of intent (secrets, irreversible destruction, external code execution, etc.).
+- **DENY-Unless**: allow only with matching intent; otherwise the fallback the entry itself specifies (deny or defer).
 - **ALLOW**: allow only when matching the current task context.
 
 Each entry's fallback is stated by the entry, not by the section heading — different entries in the same section can have different fallbacks (Deletions → DENY, Unknown Commands → DEFER).
@@ -119,15 +129,11 @@ The same operation can fall into different tiers depending on what it actually d
 
 ### 7. Concise, but never at the cost of semantics
 
-- Remove redundant phrasing ("rather than the whole request", "by itself",
-  "classify as").
-- Merge overlapping entries when their scope is identical; keep them
-  separate when a qualifier applies to only one ("outside the project" limits persistent changes, not security weakening).
+- Remove redundant phrasing ("rather than the whole request", "by itself", "classify as").
+- Merge overlapping entries when their scope is identical; keep them separate when a qualifier applies to only one ("outside the project" limits persistent changes, not security weakening).
 - Inline parenthetical content into the main clause where possible.
-- Minimize token count — the prompt is sent on every model review, and
-  the safety rules block is not cached. But never compress at the cost of principle 8: splitting distinct concepts stays even if it costs tokens, because navigability reduces misclassification.
-- Safety-critical semantics must stay explicit, even when they seem
-  implied. Two currently live as literal phrases in the rules — "both payload and destination" (Sensitive-Data Egress) and "not unrelated or higher-risk side effects" (Trust Boundary). A third, "intent matching is not required", used to sit inside the Unknown Commands entry; it was relocated to the Intent-Based Routing rule ("no intent → DEFER everything outside ALLOW, unless DENY — Always") because the entry-level string was misreadable as "unknown commands can be allowed without intent". The protective meaning — an unknown command with no matching intent DEFERs, never becomes a DENY merely for lacking intent — stays explicit at the routing layer. Keep it there; do not re-add the literal entry-level string.
+- Minimize token count — the prompt is sent on every model review, and the safety rules block is not cached. But never compress at the cost of principle 8: splitting distinct concepts stays even if it costs tokens, because navigability reduces misclassification.
+- Safety-critical semantics must stay explicit, even when they seem implied. Two currently live as literal phrases in the rules — "both payload and destination" (Sensitive-Data Egress) and "not unrelated or higher-risk side effects" (Trust Boundary). A third, "intent matching is not required", used to sit inside the Unknown Commands entry; it was relocated to the Intent-Based Routing rule ("no intent → DEFER everything outside ALLOW, unless DENY — Always") because the entry-level string was misreadable as "unknown commands can be allowed without intent". The protective meaning — an unknown command with no matching intent DEFERs, never becomes a DENY merely for lacking intent — stays explicit at the routing layer. Keep it there; do not re-add the literal entry-level string.
 
 ### 8. Structure serves navigability
 
@@ -135,8 +141,7 @@ Bold titles and a tiered layout help the model locate the right entry and reduce
 
 ### 9. Precise wording, no ambiguity
 
-- "fetching **and** running" (not "or") — fetch alone does not trigger
-  DENY-Always.
+- "fetching **and** running" (not "or") — fetch alone does not trigger DENY-Always.
 - "ALLOW with intent, otherwise DEFER" (not "ALLOW/DEFER").
 - "is not this category" (not "is EXEMPT").
 - Cross-tier annotations use a consistent style across entries.
