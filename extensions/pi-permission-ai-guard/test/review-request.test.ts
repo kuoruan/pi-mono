@@ -1,7 +1,7 @@
 import type { PromptPayload, PromptPermissionDetails } from "@gotgenes/pi-permission-system";
 import { describe, expect, it } from "vitest";
 
-import { buildAskContext } from "#src/ask-eligibility.ts";
+import { buildAskContext } from "#src/ask.ts";
 import {
   EXCLUDED_ASK_FIELDS,
   EXCLUDED_REQUEST_FACTS,

@@ -186,6 +186,36 @@ describe("SessionLifecycle — session identity + registration guard", () => {
   });
 });
 
+describe("SessionLifecycle — shutdown", () => {
+  it("disposes the registration and drops the session", () => {
+    const { lifecycle } = makeLifecycle();
+    const dispose = vi.fn<() => void>();
+    mocks.registerAuthorizer.mockReturnValue(dispose);
+    lifecycle.onSessionStart(makeSeed());
+    expect(mocks.registerAuthorizer).toHaveBeenCalledTimes(1);
+
+    lifecycle.onShutdown();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(lifecycle.session).toBeUndefined();
+  });
+
+  it("a permissions:ready arriving after shutdown never resurrects the session", () => {
+    const { lifecycle, calls } = makeLifecycle();
+    lifecycle.onSessionStart(makeSeed());
+    lifecycle.onShutdown();
+
+    lifecycle.onPermissionsReady({ sessionId: "s1", adjudicatesLocally: true });
+    expect(mocks.registerAuthorizer).toHaveBeenCalledTimes(1);
+    expect(calls.length).toBe(1);
+    expect(lifecycle.session).toBeUndefined();
+  });
+
+  it("session_tree before any session is a no-op guard", () => {
+    const { lifecycle } = makeLifecycle();
+    expect(() => lifecycle.onSessionTree(makeCtx(vi.fn<() => void>()) as never)).not.toThrow();
+  });
+});
+
 describe("SessionLifecycle — notify bridge", () => {
   it("deps.notify routes through the ctx captured at session_start", async () => {
     const { lifecycle, calls } = makeLifecycle();

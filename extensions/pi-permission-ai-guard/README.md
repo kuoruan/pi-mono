@@ -16,12 +16,13 @@ The reviewer runs a short, cheap decision on each ask and defers at the first mi
 2. Extract the review target (the value being authorized).
 3. Policy gate: query the deterministic engine at gate parity — if the policy already says `allow` or `deny`, defer. This link only adds value when the engine is undecided (`ask`).
 4. Circuit breaker: a tripped breaker short-circuits without a model call.
-5. Resolve model + auth.
+5. Resolve the model (fails fast on a config error).
 6. Strip transcript (token-optimized): the stripped transcript feeds both the verdict cache's context fingerprint and the model review prompt.
 7. Verdict cache lookup: a repeated ask in a stable conversation hits the cache and skips the model.
-8. Build prompt (redaction happens here — credentials in the command/intent are scrubbed before the prompt is built).
-9. Model review: JSON verdict.
-10. Record the verdict into the breaker counters and cache.
+8. Resolve auth — after the cache, so a cached repeat ask survives an auth flap.
+9. Build prompt (redaction happens here — credentials in the command/intent are scrubbed before the prompt is built).
+10. Model review: JSON verdict.
+11. Record the verdict into the breaker counters and cache.
 
 Fail-safe by construction: a missing model, invalid config, model timeout, unparseable reply, or an unsure verdict all resolve to `defer`. This list is representative, not exhaustive — any unexpected error path also defers. Deferring means the ask falls through to the normal permission prompt.
 
@@ -92,7 +93,7 @@ See [`config/config.example.json`](config/config.example.json) for a complete ex
 | `transcript`     | object                                                                  | see below                                 | Transcript stripping config (see below)                                |
 | `surfaces`       | string[]                                                                | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes |
 | `instructions`   | string\|null                                                            | `null`                                    | Custom safety rules (replaces defaults; null = built-in)               |
-| `mode`           | `"manual"\|"default"\|"auto"`                                           | `"default"`                               | Who adjudicates non-allow verdicts (see below)                         |
+| `mode`           | `"strict"\|"default"\|"advisory"\|"lenient"\|"permissive"`              | `"default"`                               | Leniency ladder for non-allow verdicts (see below)                     |
 | `circuitBreaker` | object                                                                  | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                     |
 | `cache`          | object                                                                  | `{maxEntries:128}`                        | Verdict cache (see below)                                              |
 
@@ -108,26 +109,29 @@ Controls how much context is kept for the model review. Only trusted user messag
 
 ### Mode
 
-The reviewer model answers each permission ask with `allow`, `deny`, or `defer` (uncertain). `mode` decides who adjudicates the non-allow verdicts — the human-involvement dial:
+The reviewer model answers each permission ask with `allow`, `deny`, or `defer` (uncertain), and `deny` carries a `riskLevel`. Hard-tier denies (`high`/`critical`, or missing risk) are **terminal in every mode**. The ladder decides how each mode disposes the soft tier (`low`/`medium`) and the model's own uncertainty:
 
-| Policy                | model `deny`             | model `defer`            | Reading                                                                           |
-| --------------------- | ------------------------ | ------------------------ | --------------------------------------------------------------------------------- |
-| `"default"` (default) | `deny` (final)           | `defer` (next authority) | Decisive verdicts are final; uncertainty asks                                     |
-| `"manual"`            | `defer` (next authority) | `defer` (next authority) | The human adjudicates everything the model doesn't allow                          |
-| `"auto"`              | `deny` (final)           | `deny`                   | Fully automatic, fail-closed: the link never interrupts on a normal model verdict |
+| Mode         | hard-tier deny | soft deny (`low\|medium`) | model `defer`          | Reading                                                              |
+| ------------ | -------------- | ------------------------- | ---------------------- | -------------------------------------------------------------------- |
+| `strict`     | deny (final)   | deny (final)              | deny (final)           | The reviewer's `allow` is the only pass                              |
+| `default`    | deny (final)   | deny (final)              | defer (next authority) | Decisive verdicts are final; uncertainty asks (the shipped behavior) |
+| `advisory`   | deny (final)   | defer (next authority)    | defer (next authority) | You decide everything the reviewer doesn't allow                     |
+| `lenient`    | deny (final)   | defer (next authority)    | **allow**              | Only the reviewer's active alarms ask you                            |
+| `permissive` | deny (final)   | **allow**                 | **allow**              | Only clear high-danger requests are blocked                          |
+
+Reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies, no review target) **never map to allow** — a broken reviewer must not rubber-stamp: they deny under `strict` and `permissive`, and defer under the other three.
 
 Notes:
 
 - A link's `deny` is final — it short-circuits the chain and never reaches a prompt. A link's `defer` falls to the next authority: the interactive permission prompt in a TUI session, the denying terminal in a headless one.
-- `"manual"` lets the human override the model's denies — the reviewer becomes an advisor, not a judge. Its deny reason surfaces as a notification when the request escalates, and lands in the `ai_guard.decision` log (`verdict: "deny"` + `emittedVerdict: "defer"`) either way.
-- `"auto"` — fully automatic, fail-closed: EVERYTHING that would otherwise fall to the human is denied.
-  - The model's own uncertainty carries the defer's clarification request as the deny's reason.
-  - Reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies) deny with the classified failure as the reason.
-  - Nothing falls to the user in auto mode, except a breaker explicitly configured to force `defer` still reaches the human (the reviewer-untrusted escape valve, with a notification explaining the interruption). Headless sessions resolve those defers to deny either way.
-- Headless sessions collapse the modes: a `defer` always resolves to the denying terminal, so `"manual"` and `"auto"` both deny everything the model doesn't allow — the difference lives in the audit trail and the TUI behavior.
-- The mapping never weakens a deny into an allow in any mode. A tripped breaker's forced verdict bypasses the mapping by design (its forced `deny` stays terminal even under `"manual"` — specific config beats the general mode).
+- `strict` is fully automatic and fail-closed: EVERYTHING that would otherwise fall to the human is denied. The model's own uncertainty carries the defer's clarification request as the deny's reason; machinery failures deny with the classified failure as the reason. Nothing falls to the user in strict mode, except a breaker explicitly configured to force `defer` still reaches the human (the reviewer-untrusted escape valve, with a notification explaining the interruption). Headless sessions resolve those defers to deny either way.
+- `advisory` is the shadow/override mode: you decide everything the reviewer doesn't allow (the soft tier and its uncertainty) — for onboarding a new reviewer or auditing a systematically misjudging one. Its deny reason surfaces as a notification when the request escalates, and lands in the `ai_guard.decision` log (`verdict: "deny"` + `emittedVerdict: "defer"`) either way.
+- `lenient` trusts the reviewer's silence: model defers pass with their clarification request recorded as `emittedReason: "clarification-suppressed"` in the audit; its soft-denies still ask you.
+- `permissive` needs a verdict to pass anything: soft denies and model defers pass, machinery failures still deny. The first mapped allow surfaces a one-time notice (`permissive auto-approves non-allow verdicts — hard-tier denials still block`), and the footer renders the value in warning red.
+- Headless sessions collapse the modes: a `defer` always resolves to the denying terminal, so defer-based modes all deny everything the model doesn't allow — the difference lives in the audit trail and the TUI behavior.
+- A tripped breaker's forced verdict bypasses the mapping by design (its forced `deny` stays terminal even under `advisory` — specific config beats the general mode).
 
-Mapped verdicts still count toward the circuit breaker (the breaker counts real model denials only) and denies are still stored in the verdict cache (the cache holds the model's deny; the mapping re-applies on every hit, so a repeated ask maps consistently without a new model call). Model defers are never cached — `"auto"` re-reviews them fresh.
+Mapped verdicts still count toward the circuit breaker (the breaker counts what the model produced, whatever the mode) and denies are still stored in the verdict cache (the cache holds the model's deny; the mapping re-applies on every hit, so a repeated ask maps consistently without a new model call). Model defers are never cached.
 
 ### Runtime control
 
@@ -135,14 +139,14 @@ Effective config layers, in precedence order: **session overrides** (the control
 
 Two session-scoped controls change the effective mode without touching the config file:
 
-- `/ai-guard` — opens the settings menu (each entry shows its current value and source); picking an entry opens its value picker. Direct forms: `/ai-guard mode manual|default|auto` and `/ai-guard mode reset` (back to the config default). Argument completion is two-stage: setting names first, then the setting's values.
+- `/ai-guard` — opens the settings menu (each entry shows its current value and source); picking an entry opens its value picker. Direct forms: `/ai-guard mode strict|default|advisory|lenient|permissive` and `/ai-guard mode reset` (back to the config default). Argument completion is two-stage: setting names first, then the setting's values.
 - `/ai-guard mode save-to-global-config` / `/ai-guard mode save-to-project-config` — persist the current EFFECTIVE config (every field, session overrides included, so future command-configured settings ride along) into the global or project config file.
   - Leaves are written in place via JSONC edits: comments, formatting, and untouched keys survive; when the layer already matches, nothing is written.
   - The project target is refused for untrusted projects (that layer isn't honored there).
   - New sessions start from the saved layer; the current session keeps its overrides. Both actions are the last picker entries.
-- `ctrl+alt+g` — cycle `manual → default → auto → manual` (from the default, one press reaches `auto`).
+- `ctrl+alt+g` — cycle the casual subset `default → advisory → lenient → default` (one press = one notch looser; the wrap returns to the anchor). The extremes stay out of casual reach, mirroring Claude Code's Shift+Tab pattern: `strict` and `permissive` are set explicitly via the command or picker.
 
-The footer only shows deviations from the shipped baseline: nothing while the effective mode is `default`; `<value>` (e.g. `auto`) from the config; `<value> (session)` while an override is active (including after resume). The pipeline picks up the change on the next ask without re-registering the chain link, and `ai_guard.decision` records carry the effective mode at decision time.
+The footer only shows deviations from the shipped baseline: nothing while the effective mode is `default`; `<value>` (e.g. `lenient`) from the config; `<value> (session)` while an override is active (including after resume). The footer renders `permissive` in warning red (command surfaces stay plain text). The pipeline picks up the change on the next ask without re-registering the chain link, and `ai_guard.decision` records carry the effective mode at decision time.
 
 Overrides persist **per session**: each change is appended to pi's session file as a custom entry (custom entries never enter LLM context), so resuming a session restores the last policy set on its active branch — a `reset` persists too, a fresh session always starts from the config default, and tree navigation (`/tree` rewind/branch) re-derives the override from the new active branch.
 
@@ -157,13 +161,12 @@ What feeds the counters:
 
 - Breaker trips and cache hits are not counted as model denials (no double-counting).
 - The breaker counts what the model produced regardless of the mode — mapping never changes what the model said.
-- **Scope note:** machinery-failure denies (`auto` mode's empty replies, timeouts, unparseable verdicts, unresolved models) count into the breaker like model denials — a consistently broken reviewer trips it just like a miscalibrated one, so the `verdict: "defer"` escape valve also fires for machinery failure storms.
-- The model's own uncertainty (`model-defer`) does not count: it is a model verdict, not a reviewer failure.
+- Deny-equivalents count into the **recoverable** tier only: machinery-failure denies (`strict`/`permissive` mode's empty replies, timeouts, unparseable verdicts, unresolved models) AND `strict`'s model-defer→deny mapping (a wavering reviewer becomes a denial stream). A consistently broken or persistently uncertain reviewer trips the breaker like a miscalibrated one, so the `verdict: "defer"` escape valve also fires for those storms. The permanent `total` tier stays model-denies-only: an equivalent storm never burns the session.
 
 A tripped breaker's forced verdict **bypasses the verdict-mode mapping** (the explicit breaker config is more specific than the general mode):
 
-- `verdict: "deny"` (default): the trip forces a deny (with a breaker reason the agent can act on) — in `auto` mode the session keeps running uninterrupted, fail-closed.
-- `verdict: "defer"`: the trip defers to the human — in `auto` mode this **interrupts on purpose**: the breaker tripping means the reviewer itself is untrusted (a deny storm — miscalibrated or prompt-injected), and this is the designed escape valve. A notification explains the interruption; headless sessions degrade to deny (no human is present). The config loader warns about the `auto` + `defer` combination up front.
+- `verdict: "deny"` (default): the trip forces a deny (with a breaker reason the agent can act on) — in `strict` mode the session keeps running uninterrupted, fail-closed.
+- `verdict: "defer"`: the trip defers to the human — in `strict` mode this **interrupts on purpose**: the breaker tripping means the reviewer itself is untrusted (a deny storm — miscalibrated or prompt-injected), and this is the designed escape valve. A notification explains the interruption; headless sessions degrade to deny (no human is present). The config loader warns about the `strict` + `defer` and `permissive` + `defer` combinations up front.
 
 ### Verdict cache
 
@@ -187,16 +190,16 @@ A tripped breaker's forced verdict **bypasses the verdict-mode mapping** (the ex
 
 Each decision writes an `ai_guard.decision` record to pi-permission-system's review log at `~/.pi/agent/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl`. Fields on the `model` gate record:
 
-| Field       | Meaning                                                                                                                                                                                                                                                                                                                                                                                     |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gate`      | Which decision gate produced the record (see How it works)                                                                                                                                                                                                                                                                                                                                  |
-| `verdict`   | `allow` / `deny` / `defer`                                                                                                                                                                                                                                                                                                                                                                  |
-| `reason`    | Sanitized model explanation. Present on deny (from the model, or `GENERIC_DENY_REASON` fallback) and on `model-defer` (what the model found unclear). Absent for allow and defer-without-explanation. The circuit-breaker gate uses a static `BREAKER_DENY_REASON` instead                                                                                                                  |
-| `deferKind` | Why it deferred (classification). Model-gate: `empty-reply` (completed non-aborted reply without text), `no-json` (text present but no JSON found), `timeout` (per-call timeout elapsed), `call-failed` (call threw), `model-defer`, `invalid-verdict-value`. Other gates: `circuit-breaker`, `model-unresolved`, `auth-failed`, `policy-allow`, `policy-deny`. `null` for clean allow/deny |
-| `latencyMs` | End-to-end model-call latency                                                                                                                                                                                                                                                                                                                                                               |
-| `modelId`   | `provider/model` of the reviewer                                                                                                                                                                                                                                                                                                                                                            |
-| `rawReply`  | Three states: the raw model text for defer paths that produced one (`no-json` / `invalid-verdict-value` / `model-defer`); `null` for `timeout` / `call-failed` / `empty-reply` (no text was produced); `"(clean verdict, rawReply omitted)"` for allow/deny where the parsed JSON is already in structured fields (`verdict`, `reason`, `riskLevel`)                                        |
-| `riskLevel` | Model-assessed risk (`low`/`medium`/`high`/`critical`), or `null`                                                                                                                                                                                                                                                                                                                           |
+| Field       | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gate`      | Which decision gate produced the record (see How it works)                                                                                                                                                                                                                                                                                                                                                                   |
+| `verdict`   | `allow` / `deny` / `defer`                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `reason`    | Sanitized model explanation. Present on deny (from the model, or `GENERIC_DENY_REASON` fallback) and on `model-defer` (what the model found unclear). Absent for allow and defer-without-explanation. The circuit-breaker gate uses a static `BREAKER_DENY_REASON` instead                                                                                                                                                   |
+| `deferKind` | Why it deferred (classification). Model-gate: `empty-reply` (completed non-aborted reply without text), `no-json` (text present but no JSON found), `timeout` (per-call timeout elapsed), `call-failed` (call threw), `model-defer`, `invalid-verdict-value`. Other gates: `circuit-breaker`, `model-unresolved`, `auth-failed`, `no-target`, `transcript-error`, `policy-allow`, `policy-deny`. `null` for clean allow/deny |
+| `latencyMs` | End-to-end model-call latency                                                                                                                                                                                                                                                                                                                                                                                                |
+| `modelId`   | `provider/model` of the reviewer                                                                                                                                                                                                                                                                                                                                                                                             |
+| `rawReply`  | Three states: the raw model text for defer paths that produced one (`no-json` / `invalid-verdict-value` / `model-defer`); `null` for `timeout` / `call-failed` / `empty-reply` (no text was produced); `"(clean verdict, rawReply omitted)"` for allow/deny where the parsed JSON is already in structured fields (`verdict`, `reason`, `riskLevel`)                                                                         |
+| `riskLevel` | Model-assessed risk (`low`/`medium`/`high`/`critical`), or `null`                                                                                                                                                                                                                                                                                                                                                            |
 
 Supplementary debug records (written via `log.debug`, gated by the upstream log level):
 

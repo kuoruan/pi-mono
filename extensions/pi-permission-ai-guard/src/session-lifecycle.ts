@@ -60,7 +60,7 @@ import {
   getPermissionsService,
 } from "@gotgenes/pi-permission-system";
 
-import { type LoadConfigResult } from "./config-loader.ts";
+import { type LoadConfigResult } from "./config-layer.ts";
 import { LINK_NAME } from "./config-schema.ts";
 import { warn } from "./logger.ts";
 import { type CompleteSimpleFn, type ModelRegistryLike } from "./model-review.ts";

@@ -8,9 +8,9 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import type { Authorizer, AuthorizerVerdict } from "@gotgenes/pi-permission-system";
+import type { Authorizer, AuthorizerLog, AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
-import { buildAskContext, resolveReviewTarget } from "./ask-eligibility.ts";
+import { type DriftWarnState, openAsk } from "./ask.ts";
 import type { AiGuardConfig, Mode } from "./config-schema.ts";
 import {
   BREAKER_DENY_REASON,
@@ -33,13 +33,27 @@ import {
   type ResolvedRequestAuth,
   reviewModel,
 } from "./model-review.ts";
+import type { RiskLevel } from "./model-verdict.ts";
 import { buildReviewPrompt, buildReviewSystemPrompt } from "./prompt.ts";
 import { reviewRequestCacheMaterial, type ReviewRequestContext } from "./review-request.ts";
-import type { CircuitBreaker, SessionOverrides, VerdictCache } from "./session-state.ts";
+import {
+  accountModelOutcome,
+  type CircuitBreaker,
+  consumeTrip,
+  effectiveOverride,
+  type SessionOverrides,
+  type VerdictCache,
+} from "./session-state.ts";
 import { type SessionManagerLike, stripTranscript } from "./transcript-stripper.ts";
-import { normalizeAndRedactText, shortHash } from "./utils.ts";
-import { applyVerdictMode, autoDenyReason, manualEscalationMessage } from "./verdict-mode.ts";
-import type { RiskLevel } from "./verdict.ts";
+import { normalizeAndRedactText, shortHash, truncateMiddle } from "./utils.ts";
+import {
+  applyVerdictMode,
+  type MachineryFailureKind,
+  machineryDenyReason,
+  machineryTarget,
+  advisoryEscalationMessage,
+  CLARIFICATION_SUPPRESSED_REASON,
+} from "./verdict-mode.ts";
 
 /**
  * Fire-and-forget user notification — the host UI context's own notify
@@ -69,46 +83,51 @@ export interface ReviewPipelineDeps {
   overrides: SessionOverrides;
   /** Model call function (wrapped provider.streamSimple().result()). */
   completeSimple: CompleteSimpleFn;
-  /** Best-effort human notification for verdicts that escalate to the user. */
-  notify?: NotifyFn;
+  /**
+   * Human notification for verdicts that escalate to the user — REQUIRED:
+   * production always wires the lifecycle's notify bridge (hasUI footer vs
+   * notify, try/catch around the disposed-runner window); every escalate
+   * path depends on it, so absence is never a legal pipeline shape.
+   */
+  notify: NotifyFn;
 }
 
 /**
- * The mode mapping's shared footwork for a gate that emitted a real
- * verdict (cache-hit and fresh model — the two paths that can be remapped):
- * when the mapping changes what the link EMITS, annotate the decision
- * record with the mapping facts, and when the change escalates to the
- * human (manual mode's deny→defer) carry the reviewer's reasoning via
- * notify — the permission dialog renders only the request.
+ * Release a pre-call machinery gate: the single disposal seam for the
+ * four reviewer-failure gates that never hold a parsed verdict (no-target,
+ * model-unresolved, transcript-error, auth-failed).
  *
- * Only the mapping result belongs here. The call sites keep their own
- * verdict sources (cache entry vs model outcome) and their extra notify
- * paths (auto mode's machinery explanation lives only on the fresh path).
+ * Owns the whole disposition: the machinery lane lookup, the deny reason
+ * (computed ONCE — the audit annotation and the returned verdict share
+ * it), the breaker's recoverable-tier credit, the review-stream record
+ * (mapped when the gate denies, plain when it defers), and the returned
+ * verdict. The shared invariants — a broken reviewer never rubber-stamps,
+ * every reviewer-relevant gate writes the review stream — live here
+ * instead of being hand-copied per gate.
  *
- * @param record - The gate's decision record (cache-hit or model).
- * @param mode - The effective mode.
- * @param original - The verdict before mapping.
- * @param emitted - The verdict after mapping.
- * @param riskLevel - The original verdict's risk level.
- * @param deps - Pipeline deps (notify is optional).
- * @returns The annotated record, or `record` unchanged when nothing was mapped.
+ * @param mode - The effective mode (the machinery lane's only input).
+ * @param kind - The classified machinery failure.
+ * @param record - The gate's decision record (verdict "defer" — the
+ *   review never opened).
+ * @param breaker - The session circuit breaker (recoverable-tier credit).
+ * @param log - The authorizer log pair (review stream).
+ * @returns The verdict the gate emits.
  */
-function annotateAndEscalate(
-  record: DecisionRecordEntry,
+function releaseMachineryGate(
   mode: Mode,
-  original: AuthorizerVerdict,
-  emitted: AuthorizerVerdict,
-  riskLevel: RiskLevel | undefined,
-  deps: ReviewPipelineDeps,
-): DecisionRecordEntry {
-  if (emitted.kind === original.kind) {
-    return record;
+  kind: MachineryFailureKind,
+  record: DecisionRecordEntry,
+  breaker: CircuitBreaker,
+  log: AuthorizerLog,
+): AuthorizerVerdict {
+  if (machineryTarget(mode) !== "deny") {
+    log.review(DECISION_EVENT, record);
+    return { kind: "defer" };
   }
-  const annotated = mapped(record, mode, emitted.kind);
-  if (emitted.kind === "defer") {
-    deps.notify?.(manualEscalationMessage(original, riskLevel), "warning");
-  }
-  return annotated;
+  breaker.recordDenyEquivalent();
+  const reason = machineryDenyReason(kind, mode);
+  log.review(DECISION_EVENT, mapped(record, mode, "deny", reason));
+  return { kind: "deny", reason };
 }
 
 /**
@@ -120,35 +139,100 @@ function annotateAndEscalate(
  * @returns The `authorize` function implementing the review pipeline.
  */
 export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["authorize"] {
+  // Once per pipeline instance: the fail-open notice (mode auto-approves
+  // what the reviewer didn't) fires on the first mapped allow, then stays
+  // silent — the operator asked for this mode, the notice guards against
+  // forgetting it's on.
+  const noticeState = { shown: false };
+
+  const driftState: DriftWarnState = { warned: false };
+
   return async (details, query, log) => {
     const { config } = deps;
     // Session-scoped override (/ai-guard, ctrl+alt+g) wins over the config
-    // default. Read per-call: the override object is mutable session state.
-    const mode = deps.overrides.mode ?? config.mode;
+    // default — the typed per-field accessor spells the rule once (see
+    // effectiveOverride in session-state). Read per-call: the override
+    // object is mutable session state.
+    const mode = effectiveOverride(deps.overrides, config, "mode");
+
+    // Per-call closure: the mode read here flows into every mapping
+    // annotation below; noticeState/deps stay captured from the factory.
+    // The mode mapping's shared footwork for the two gates that emit a real
+    // verdict (cache-hit and fresh model): annotate the record when the
+    // mapping changed the emitted kind, escalate to the human on
+    // deny→defer lanes (advisory/lenient), and fire the once-per-pipeline
+    // fail-open notice on the mapped allow. The per-call constants (mode,
+    // noticeState, deps) are closure-captured — only the per-verdict facts
+    // travel as parameters.
+    const annotateAndEscalate = (
+      record: DecisionRecordEntry,
+      original: AuthorizerVerdict,
+      emitted: AuthorizerVerdict,
+      riskLevel: RiskLevel | undefined,
+    ): DecisionRecordEntry => {
+      if (emitted.kind === original.kind) {
+        return record;
+      }
+      // The emittedReason tells audit readers what the agent actually
+      // received: deny→allow keeps the swallowed deny reason; defer→allow
+      // marks the swallowed clarification; defer→deny records the
+      // synthesized teaching reason the agent DID get (never a "suppressed"
+      // marker — nothing was suppressed on the way to a deny).
+      const emittedReason =
+        emitted.kind === "allow"
+          ? original.kind === "defer"
+            ? CLARIFICATION_SUPPRESSED_REASON
+            : original.kind === "deny"
+              ? original.reason
+              : undefined
+          : emitted.kind === "deny"
+            ? emitted.reason
+            : undefined;
+      const annotated = mapped(record, mode, emitted.kind, emittedReason);
+      if (emitted.kind === "defer") {
+        deps.notify(advisoryEscalationMessage(original, riskLevel), "warning");
+      } else if (emitted.kind === "allow" && !noticeState.shown) {
+        noticeState.shown = true;
+        // The copy names what the mode actually loosens — lenient only passes
+        // the reviewer's uncertainty; permissive passes everything but the
+        // hard tier.
+        const loosened =
+          mode === "lenient"
+            ? "uncertainty — soft denials still ask"
+            : "non-allow verdicts — hard-tier denials still block";
+        deps.notify(`${NOTIFY_PREFIX} ${mode} auto-approves ${loosened}`, "warning");
+      }
+      return annotated;
+    };
+    // Once per pipeline instance (one per session): the annotation-drift
+    // integrity warning — injected state keeps buildAskContext pure.
 
     // surface-unmatched is expected config behavior (silent defer; outside
     // this link's jurisdiction). no-target is an unexpected ask — the
-    // REVIEW FAILED to open, so auto mode denies it like any other
-    // machinery failure.
-    const resolved = resolveReviewTarget(details, config);
-    if ("reason" in resolved) {
-      if (resolved.reason === "no-target") {
+    // REVIEW FAILED to open, so it follows the machinery lane.
+    const opened = openAsk(details, config, deps.cwd, driftState);
+    if ("reason" in opened) {
+      if (opened.reason === "no-target") {
         log.debug(
           SHORT_CIRCUIT_EVENT,
-          shortCircuit(details.requestId, resolved.surface, "no-target"),
+          shortCircuit(details.requestId, opened.surface, "no-target"),
         );
-        if (mode === "auto") {
-          deps.circuitBreaker.recordMachineryFailure();
-          return { kind: "deny", reason: autoDenyReason("no-target") };
-        }
+        // The review failed to open — a machinery-lane gate (a permanent
+        // property of the ask's shape, not a transient reviewer failure).
+        return releaseMachineryGate(
+          mode,
+          "no-target",
+          DecisionRecord.noTarget(details.requestId, opened.surface),
+          deps.circuitBreaker,
+          log,
+        );
       }
       return { kind: "defer" };
     }
-    const { surface, target } = resolved;
+    const { surface, target, ask } = opened;
 
     const { requestId } = details;
     const base = { requestId, surface, target };
-    const ask = buildAskContext(details, deps.cwd);
     const request: ReviewRequestContext = { ask, target };
 
     // Policy gate: defer when the deterministic engine already decided —
@@ -170,12 +254,10 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     }
 
     // Circuit breaker: a tripped breaker short-circuits without a model
-    // call. Breaker trips are not recorded as model verdicts (no
-    // recordVerdict) — only real model verdicts move the counters.
-    if (deps.circuitBreaker.isTripped(config.circuitBreaker)) {
-      // The trip consumes the recoverable tier — reset explicitly, so the
-      // side effect is visible here rather than hidden in a query.
-      deps.circuitBreaker.resetConsecutive();
+    // call. The trip's consume (query + recoverable reset) is one visible
+    // accounting step beside the breaker (see consumeTrip in
+    // session-state) — breaker trips are not recorded as model verdicts.
+    if (consumeTrip(deps.circuitBreaker, config.circuitBreaker)) {
       const verdict =
         config.circuitBreaker.verdict === "deny"
           ? {
@@ -188,7 +270,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // own — surface why (the breaker verdict bypasses the mode mapping
       // by design: specific config beats the general mode).
       if (verdict.kind === "defer") {
-        deps.notify?.(
+        deps.notify(
           `${NOTIFY_PREFIX} circuit breaker tripped — too many reviewer denials, deferring to you`,
           "warning",
         );
@@ -196,36 +278,23 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       return verdict;
     }
 
-    // 5. Resolve model + auth.
+    // 5. Resolve the model. Fails fast on a config error, and sits BEFORE
+    // the cache (an unresolved model makes every ask a machinery failure;
+    // the cache lookup adds nothing). registry.find is the one unwrapped
+    // dependency call in the pipeline — a throwing registry collapses into
+    // model-unresolved like an absent one.
     const modelId = `${config.provider}/${config.model}`;
-    const model = deps.registry.find(config.provider, config.model);
-    if (!model) {
-      const record = DecisionRecord.modelUnresolved(base, modelId);
-      if (mode === "auto") {
-        // Auto denies EVERYTHING that would fall to the human — including
-        // machinery failures; the classified failure becomes the reason.
-        log.review(
-          DECISION_EVENT,
-          mapped(record, mode, "deny", autoDenyReason("model-unresolved")),
-        );
-        return { kind: "deny", reason: autoDenyReason("model-unresolved") };
-      }
-      log.review(DECISION_EVENT, record);
-      return { kind: "defer" };
+    let model;
+    try {
+      model = deps.registry.find(config.provider, config.model);
+    } catch {
+      model = undefined;
     }
-
-    // getApiKeyAndHeaders is wrapped to never throw — a thrown error and an
-    // { ok: false } result both collapse to one auth-failed defer path.
-    const auth = await resolveAuth(deps.registry, model);
-    if (!auth.ok) {
-      const record = DecisionRecord.authFailed(base, modelId, normalizeAndRedactText(auth.error));
-      if (mode === "auto") {
-        deps.circuitBreaker.recordMachineryFailure();
-        log.review(DECISION_EVENT, mapped(record, mode, "deny", autoDenyReason("auth-failed")));
-        return { kind: "deny", reason: autoDenyReason("auth-failed") };
-      }
-      log.review(DECISION_EVENT, record);
-      return { kind: "defer" };
+    if (!model) {
+      // An unresolved model makes every ask a machinery failure — strict
+      // and permissive deny what would fall to the human, the others defer.
+      const record = DecisionRecord.modelUnresolved(base, modelId);
+      return releaseMachineryGate(mode, "model-unresolved", record, deps.circuitBreaker, log);
     }
 
     // 6. Strip transcript (feeds both the prompt and the cache fingerprint).
@@ -244,16 +313,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         }),
       );
       const record = DecisionRecord.transcriptError(base);
-      if (mode === "auto") {
-        deps.circuitBreaker.recordMachineryFailure();
-        log.review(
-          DECISION_EVENT,
-          mapped(record, mode, "deny", autoDenyReason("transcript-error")),
-        );
-        return { kind: "deny", reason: autoDenyReason("transcript-error") };
-      }
-      log.review(DECISION_EVENT, record);
-      return { kind: "defer" };
+      return releaseMachineryGate(mode, "transcript-error", record, deps.circuitBreaker, log);
     }
 
     // 7. Cache lookup. The request snapshot contains the action context,
@@ -265,15 +325,15 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const lookup = deps.verdictCache.lookup(commandHash, contextHash, cc);
     if (lookup.hit) {
       // Cached verdicts are allow/deny only (defers are never stored), so
-      // the defer branch of the mapping is unreachable here.
-      const emitted = applyVerdictMode(mode, lookup.verdict);
+      // the defer branch of the mapping is unreachable here. The cached
+      // riskLevel rides along so a cached deny maps identically to its
+      // fresh first pass.
+      const emitted = applyVerdictMode(mode, lookup.verdict, undefined, lookup.riskLevel);
       const record = annotateAndEscalate(
         DecisionRecord.cacheHit(base, lookup.verdict),
-        mode,
         lookup.verdict,
         emitted,
         lookup.riskLevel,
-        deps,
       );
       // Replay gate: the verdict was already recorded at its model gate —
       // debug stream only (see the log-stream doctrine in
@@ -283,6 +343,16 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     }
     // Cache miss: record the miss reason for telemetry.
     log.debug(CACHE_LOOKUP_EVENT, cacheLookup(requestId, surface, lookup.missReason));
+
+    // 8. Resolve auth — AFTER the cache: a hit never needed auth, and a
+    // repeat ask survives an auth flap via its cached verdict.
+    // getApiKeyAndHeaders is wrapped to never throw — a thrown error and an
+    // { ok: false } result both collapse to one auth-failed defer path.
+    const auth = await resolveAuth(deps.registry, model);
+    if (!auth.ok) {
+      const record = DecisionRecord.authFailed(base, modelId, normalizeAndRedactText(auth.error));
+      return releaseMachineryGate(mode, "auth-failed", record, deps.circuitBreaker, log);
+    }
 
     // Build prompt (redaction happens inside buildReviewPrompt).
     const systemPrompt = buildReviewSystemPrompt(config.instructions);
@@ -315,47 +385,43 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // counts real model denials and the cache still stores the model's
     // deny, so a cached deny maps identically on a later hit. Defer isn't
     // cached (cache hits and breaker trips short-circuited above).
-    const emitted = applyVerdictMode(mode, reviewOutcome.verdict, {
-      kind: reviewOutcome.deferKind,
-      reason: reviewOutcome.deferReason,
-    });
-    // model-defer in manual/default passes through to the human — but the
-    // upstream defer verdict carries no reason field, so the dialog alone
-    // would never show WHAT the reviewer wants clarified. Mirror it via
-    // the escalation channel (footer/notify), symmetric with auto's deny
-    // reason.
+    const emitted = applyVerdictMode(
+      mode,
+      reviewOutcome.verdict,
+      {
+        kind: reviewOutcome.deferKind,
+        reason: reviewOutcome.deferReason,
+      },
+      reviewOutcome.riskLevel,
+    );
+    // model-defer in default/advisory passes through to the human — but
+    // the upstream defer verdict carries no reason field, so the dialog
+    // alone would never show WHAT the reviewer wants clarified. Mirror it
+    // via the escalation channel (footer/notify), symmetric with strict's
+    // deny reason.
     if (
       emitted.kind === "defer" &&
       reviewOutcome.deferKind === "model-defer" &&
       reviewOutcome.deferReason
     ) {
-      deps.notify?.(
-        `${NOTIFY_PREFIX} the reviewer asks for clarification: ${reviewOutcome.deferReason}`,
+      deps.notify(
+        `${NOTIFY_PREFIX} reviewer asks: ${truncateMiddle(reviewOutcome.deferReason, 60)}`,
         "info",
       );
     }
     const record = annotateAndEscalate(
       DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome),
-      mode,
       reviewOutcome.verdict,
       emitted,
       reviewOutcome.riskLevel,
-      deps,
     );
     log.review(DECISION_EVENT, record);
 
-    // Real model verdicts feed the breaker as usual; auto's
-    // machinery-failure denies (the reviewer never produced a verdict)
-    // also count via recordMachineryFailure — a broken reviewer can trip
-    // the breaker, not just a miscalibrated one.
-    deps.circuitBreaker.recordVerdict(reviewOutcome.verdict.kind);
-    if (
-      mode === "auto" &&
-      reviewOutcome.verdict.kind === "defer" &&
-      reviewOutcome.deferKind !== "model-defer"
-    ) {
-      deps.circuitBreaker.recordMachineryFailure();
-    }
+    // The per-ask accounting: the model's real verdict feeds the breaker,
+    // and a machinery denial (the reviewer never produced a verdict) earns
+    // a recoverable-tier credit — the doctrine lives beside the breaker
+    // (see accountModelOutcome in session-state).
+    accountModelOutcome(deps.circuitBreaker, reviewOutcome.verdict.kind, emitted);
     if (reviewOutcome.verdict.kind !== "defer") {
       deps.verdictCache.store(
         commandHash,

@@ -24,9 +24,9 @@
     },
     "mode": {
       "type": "string",
-      "enum": ["manual", "default", "auto"],
+      "enum": ["strict", "default", "advisory", "lenient", "permissive"],
       "default": "default",
-      "description": "Who adjudicates model deny/defer verdicts: 'manual' — the human decides everything the model doesn't allow; 'default' — model denies are final, defers ask the human; 'auto' — fully automatic, fail-closed: nothing falls to the user — the model's own uncertainty and every reviewer machinery failure are denied with an explanatory reason."
+      "description": "The leniency ladder for the reviewer's non-allow verdicts, strictest first. Hard-tier denies (riskLevel high|critical, or missing) always deny. Soft-tier denies (low|medium) and the model's own uncertainty map per mode: 'strict' — both deny, the reviewer's allow is the only pass; 'default' — deny soft denies, uncertainty asks; 'advisory' — both ask, you decide everything the reviewer doesn't allow; 'lenient' — soft denies ask, uncertainty passes; 'permissive' — both pass, only hard-tier denies block. Reviewer machinery failures never map to allow: they deny under strict and permissive, and defer otherwise."
     },
     "circuitBreaker": {
       "type": "object",

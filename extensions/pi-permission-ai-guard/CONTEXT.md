@@ -32,17 +32,21 @@ The link's ruling: `allow`, `deny` (with optional teaching `reason`), or `defer`
 The fail-safe outcome. A missing model, invalid config, model timeout, unparseable reply, or unsure verdict all defer. Deferring means the ask falls through to the normal permission prompt.
 
 **Mode**:
-Who adjudicates the model's non-allow verdicts — the human-involvement dial:
+The leniency ladder for the reviewer's non-allow verdicts, strictest first. Denies split by tier: the **hard tier** (riskLevel high|critical, or missing) is terminal in EVERY mode — the reviewer's hard stops are never loosened. The **soft tier** (low|medium) and the model's own uncertainty map against the ladder:
 
-- Manual: the human decides everything the model doesn't allow (denies become defers, so the human can override the model).
-- Default: decisive verdicts are final, uncertainty asks (the shipped behavior).
-- Auto: fully automatic, fail-closed — EVERYTHING that would otherwise fall to the human is denied: the model's own uncertainty uses the defer's clarification request as the deny's reason, and reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies) deny with the classified failure as the reason — nothing falls to the user in auto mode (a breaker explicitly configured to force `defer` remains the one config-chosen interruption).
+- `strict`: both deny — the reviewer's `allow` is the only pass.
+- `default`: soft denies deny; uncertainty asks (the shipped behavior).
+- `advisory`: both ask — you decide everything the reviewer doesn't allow. The shadow/override mode for onboarding a new reviewer or auditing a systematically misjudging one.
+- `lenient`: soft denies ask; uncertainty passes (allow).
+- `permissive`: both pass — only hard-tier denies block.
 
-The model's judgment is always recorded; the mode maps only what the link emits, and a deny is never weakened into an allow.
+Reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies, no review target) never map to allow in any mode — a broken reviewer must not rubber-stamp: they deny under `strict` (fail-closed by doctrine) and `permissive` (allow needs a verdict), and defer under the other three.
+
+The model's judgment is always recorded; the mode maps only what the link emits. The ctrl+alt+g cycle visits only the middle three (`default → advisory → lenient`); the extremes are set explicitly via `/ai-guard mode <value>` or the picker.
 
 Session overrides persist in the pi session file and restore on resume; a fresh session starts from the config default. The save actions (`save-to-global-config` / `save-to-project-config`) persist the current effective config — every field, session overrides included — into a config layer, so a saved field shadows the layers beneath it.
 
-The three-mode set is closed: fail-open cells (defer becoming allow) and the confidence-contradictory fourth cell were rejected on community evidence — do not reopen without new evidence.
+The five-mode ladder is the monotone closure of the two soft lanes (nine combinations, filtered by "defer never judged stricter than a weak deny"); the fail-open cells formerly rejected (defer becoming allow) were reopened deliberately on new evidence — the operator's experienced reviewer failure modes and the explicit product intent to offer fail-open policies.
 
 ### Session state
 
@@ -50,7 +54,7 @@ The three-mode set is closed: fail-open cells (defer becoming allow) and the con
 One session runtime with its own permissions service and lifecycle — the root session and every in-process subagent child run as separate nodes (upstream ADR 0012). The ai-guard link registers once per node, on that node's own service; a branch or rewind within a session is still the same node.
 
 **Circuit breaker**:
-Per-session, two-tier, fail-safe. `consecutive` is a recoverable tier (trips after N consecutive denies, resets so the model gets another chance); `total` is a hard session cap (never resets). Breaker trips are NOT counted as model denials.
+Per-session, two-tier, fail-safe. `consecutive` is a recoverable tier (trips after N consecutive denies, resets so the model gets another chance); `total` is a hard session cap (never resets). Breaker trips are NOT counted as model denials. Deny-equivalents — machinery-failure denials (the modes that deny them) AND `strict`'s model-defer→deny mapping — count into `consecutive` only: a broken or persistently uncertain reviewer can trip the recoverable tier like a miscalibrated one, but an equivalent storm never burns the permanent `total` tier (that one stays model-denies-only).
 
 **Verdict cache**:
 Per-session LRU keyed by a review request snapshot (a decision-relevant projection of the ask) and a trusted-intent context fingerprint. A repeated identical ask in a stable conversation skips the model.
@@ -68,9 +72,9 @@ The JSON-verdict review. The model receives a stripped transcript + the permissi
 The structured projection of a permission ask the full review feeds the model — a `kind`-dispatched projection of the facts that can change a verdict, with evidence pre-resolved into named fields so no consumer does string-keyed lookups. Built once by `buildAskContext`; the prompt renderer and the verdict cache both read its typed fields, so neither re-parses the upstream `PromptPayload` (ADR 0011: every consumer is a renderer over the payload, and ai-guard is one).
 
 **Decision record**:
-The audit-log entry emitted at each decision gate (policy-decided, circuit-breaker, model-unresolved, auth-failed, cache-hit, model). Stream doctrine:
+The audit-log entry emitted at each decision gate (policy-decided, circuit-breaker, no-target, model-unresolved, auth-failed, transcript-error, cache-hit, model). Stream doctrine:
 
-- **Review stream** (always on): reviewer-relevant gates — model, circuit-breaker, model-unresolved, auth-failed — write to `permission-review.jsonl`.
+- **Review stream** (always on): reviewer-relevant gates — model, circuit-breaker, no-target, model-unresolved, auth-failed, transcript-error — write to `permission-review.jsonl`.
 - **Debug stream** (written only while the permission system's `debugLog` is on): pass-through gates (policy-decided, cache-hit) and every verbose/diagnostic payload (raw replies on defer failures only, call errors, cache-miss telemetry, transcript short-circuits, empty-reply stop-reason details).
 
 ### Transcript

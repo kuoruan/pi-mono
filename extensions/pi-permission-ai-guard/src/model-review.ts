@@ -26,13 +26,13 @@ import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 
 import type { AiGuardConfig } from "./config-schema.ts";
 import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT, modelCallError } from "./decision-record.ts";
-import { normalizeAndRedactText } from "./utils.ts";
 import {
   type ModelCallDeferKind,
   type ReviewOutcome,
   type ReviewOutcomeDiagnostic,
   parseTextFallback,
-} from "./verdict.ts";
+} from "./model-verdict.ts";
+import { normalizeAndRedactText } from "./utils.ts";
 
 /**
  * Auth result from `ModelRegistry.getApiKeyAndHeaders`, derived from the

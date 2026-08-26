@@ -12,18 +12,15 @@
  *
  * The event constants live here so callers don't redeclare them.
  *
- * Log-stream doctrine: the REVIEW stream (log.review, always on) carries
- * one bounded decision record per REVIEWER-RELEVANT gate — the model
- * gate, the circuit breaker, and the reviewer's pre-call failures (model
- * unresolved, auth failed). Pass-through gates that add no judgment —
- * policy-decided (the policy already ruled; the link defers) and
- * cache-hit (a replay of the recorded model verdict) — go to the DEBUG
- * stream. Everything verbose or diagnostic — raw replies (defer failures
- * only), call-error records, cache-miss telemetry, transcript-error
- * short-circuits, and empty-reply stop-reason details — also goes to
- * DEBUG (log.debug, written only while the operator has the permission
- * system's debugLog on). Do not promote verbose payloads to the review
- * stream; never demote reviewer judgment.
+ * Log-stream doctrine: the REVIEW stream (log.review, always on) carries one bounded decision
+ * record per REVIEWER-RELEVANT gate — the model gate, the circuit breaker, and the reviewer's
+ * pre-call failures (no target, model unresolved, auth failed, transcript error). Pass-through
+ * gates that add no judgment — policy-decided (the policy already ruled; the link defers) and
+ * cache-hit (a replay of the recorded model verdict) — go to the DEBUG stream. Everything verbose
+ * or diagnostic — raw replies (defer failures only), call-error records, cache-miss telemetry,
+ * transcript-error short-circuits, and empty-reply stop-reason details — also goes to DEBUG
+ * (log.debug, written only while the operator has the permission system's debugLog on). Do not
+ * promote verbose payloads to the review stream; never demote reviewer judgment.
  */
 
 import type {
@@ -33,16 +30,17 @@ import type {
 } from "@gotgenes/pi-permission-system";
 
 import type { BreakerVerdict } from "./config-schema.ts";
-import type { ModelCallDeferKind, ReviewOutcome } from "./verdict.ts";
+import type { ModelCallDeferKind, ReviewOutcome } from "./model-verdict.ts";
+import { normalizeAndRedactText } from "./utils.ts";
 
 /** Shared context captured once for every decision record. */
 export interface DecisionBase {
   /** The ask's request id (correlates with the gate's permission-review entry). */
   requestId: string;
-  /** The tool surface being reviewed. */
-  surface: string;
-  /** The value being authorized (command, tool name, path, etc.). */
-  target: string;
+  /** The tool surface being reviewed; absent on the no-target gate where it could not be resolved. */
+  surface: string | undefined;
+  /** The value being authorized (command, tool name, path, etc.); absent on the no-target gate. */
+  target: string | undefined;
 }
 
 /**
@@ -163,8 +161,13 @@ function rawReplyForRecord(reviewOutcome: ReviewOutcome): string | null {
     // defer: keep the raw text when the call produced any (no-json / invalid-
     // verdict-value / model-defer); null when it threw before replying
     // (timeout / call-failed) or returned an empty body (empty-reply), so the
-    // absence of text stays a genuine null.
-    return reviewOutcome.rawReply !== undefined ? reviewOutcome.rawReply : null;
+    // absence of text stays a genuine null. The review stream is always on,
+    // so the text is redacted like the debug stream's copy — the model may
+    // parrot prompt content (credentials, working directory) and the audit
+    // record must carry no more than the debug event does.
+    return reviewOutcome.rawReply !== undefined
+      ? normalizeAndRedactText(reviewOutcome.rawReply)
+      : null;
   }
   // Clean allow/deny: the JSON parsed; verdict, reason (deny only), and
   // riskLevel are already in the structured record fields, so the raw text is
@@ -227,6 +230,28 @@ export const DecisionRecord = {
       verdict: "defer",
       modelId,
       deferKind: "model-unresolved",
+    };
+  },
+
+  /**
+   * No review target could be extracted — the review never opened. A
+   * permanent property of the ask's shape (the surface never yields a
+   * target), not a transient reviewer failure; still a machinery-lane
+   * gate because the review never started.
+   *
+   * @param requestId - The ask's request id.
+   * @param surface - The resolved surface, if any.
+   * @returns A decision record for the no-target gate.
+   */
+  noTarget(requestId: string, surface: string | undefined): DecisionRecordEntry {
+    return {
+      requestId,
+      surface,
+      target: undefined,
+      gate: "no-target",
+      modelCalled: false,
+      verdict: "defer",
+      deferKind: "no-target",
     };
   },
 
@@ -341,8 +366,9 @@ export const DecisionRecord = {
  * verdict to a different emitted kind. The record's `verdict` keeps the
  * MODEL's judgment (with its reason and riskLevel); `emittedVerdict` names
  * what the link actually returned, and `mode` names which mode
- * mapped it (manual tightens denial to human review, auto tightens
- * uncertainty to denial — the annotation covers both directions).
+ * mapped it (the advisory/lenient lanes tighten denial to human review,
+ * the strict lane tightens uncertainty to denial, the fail-open lanes
+ * loosen both to allow — the annotation covers every direction).
  *
  * @param record - The decision record for the model or cache-hit gate.
  * @param mode - The effective mode that triggered the mapping.

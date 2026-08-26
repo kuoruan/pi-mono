@@ -19,9 +19,10 @@ import {
   type SaveConfigFn,
   loadAiGuardConfig,
   persistConfigLayer,
-} from "./config-loader.ts";
+} from "./config-layer.ts";
 import { MODE_VALUES } from "./config-schema.ts";
 import { warn } from "./logger.ts";
+import { CYCLE_MODE_VALUES, EMPHASIZED_MODE } from "./mode-table.ts";
 import { type CompleteSimpleFn, createCompleteSimple } from "./model-review.ts";
 import { type ReviewPipelineDeps, createReviewPipeline } from "./review-pipeline.ts";
 import { RuntimeSettings, type EnumSettingSpec } from "./runtime-settings.ts";
@@ -52,12 +53,16 @@ export interface AiGuardDependencies {
  */
 const SETTINGS: readonly EnumSettingSpec[] = [
   // `default` is the shipped baseline — a footer line saying "default"
-  // permanently would be pure noise, so RuntimeSettings omits it.
+  // permanently would be pure noise, so RuntimeSettings omits it. The
+  // cycle subset and the warning-red emphasis derive from the ladder
+  // table (mode-table.ts), not from hand-edited copies here.
   {
     name: "mode",
     values: [...MODE_VALUES],
-    description: "what happens to the model's denials and uncertainty",
+    description: "what happens to the reviewer's denials and uncertainty",
     hiddenValue: "default",
+    cycleValues: CYCLE_MODE_VALUES,
+    highlightValue: EMPHASIZED_MODE,
   },
 ];
 

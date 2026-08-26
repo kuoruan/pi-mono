@@ -1,32 +1,31 @@
 /**
- * The mode: who adjudicates the model's non-allow verdicts.
+ * The mode mapping: how the link disposes the reviewer's non-allow
+ * verdicts, and the messages that disposition produces.
  *
- * This module owns the mapping from what the model (or the cache) said to
- * what the link emits, the deny reasons that mapping produces, and the
- * human-facing messages for the interruptions the mapping causes — one
- * place for the whole semantic, one test file for its table.
+ * This module owns the verdict-bearing side of the leniency ladder — the
+ * hard/soft deny tiers, the soft-deny/model-defer/machinery lanes'
+ * application, the deny reasons, and the human-facing escalation messages.
+ * The ladder's operational facts (lanes, cycle membership, emphasis,
+ * config warnings) are single-sourced in {@link ./mode-table.ts} and
+ * consumed here as data.
  *
- * `manual` maps every deny to a defer — the human adjudicates (and can
- * override) everything the model doesn't allow. `auto` is fully
- * automatic and fail-closed: EVERYTHING that would otherwise fall to the
- * human is denied — the model's own uncertainty (`model-defer`) uses the
- * defer's clarification request as the deny's teaching reason, and
- * reviewer machinery failures (timeout, call-failed, empty-reply,
- * no-json, invalid-verdict-value, model-unresolved, auth-failed,
- * transcript-error) deny with the classified failure as the reason.
- * Nothing falls to the user in auto mode. `default` passes both verdict
- * kinds through. Allow is never transformed, and no mapping ever weakens
- * a deny into an allow.
+ * The doctrine stays local: hard-tier denies (riskLevel high|critical, or
+ * missing) are terminal in every mode; reviewer machinery failures never
+ * map to allow in ANY mode (a broken reviewer must not rubber-stamp) —
+ * they deny under the two extremes and defer under the remaining three;
+ * allow is never transformed.
  *
  * Pure functions: the fresh-model path and the cache-hit path both run
- * the mapping, so a cached deny maps identically to a fresh one.
+ * the mapping, so a cached verdict maps identically to a fresh one.
  */
 
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import type { Mode } from "./config-schema.ts";
 import { NOTIFY_PREFIX } from "./logger.ts";
-import type { ModelCallDeferKind, RiskLevel } from "./verdict.ts";
+import { MODE_TABLE, type ModeLanes } from "./mode-table.ts";
+import type { ModelCallDeferKind, RiskLevel, VerdictOrigin } from "./model-verdict.ts";
+import { truncateMiddle } from "./utils.ts";
 
 /**
  * Extra context for a model defer verdict (fresh-path only — defers are
@@ -50,8 +49,46 @@ export type MachineryFailureKind =
   | "transcript-error"
   | "no-target";
 
-/** Reason carried by an auto-policy deny mapped from a defer with no clarification request. */
-export const AUTO_DEFER_DENY_REASON = "Reviewer was uncertain; auto mode denies uncertain requests";
+/**
+ * The two deny tiers the ladder splits a deny into — hard (terminal in
+ * every mode) and soft (mapped by the mode's lanes).
+ */
+export type DenyTier = "hard" | "soft";
+
+/**
+ * Which mapping tier a deny falls into.
+ *
+ * @param riskLevel - The model's risk assessment for the deny.
+ * @returns `"hard"` for high|critical or a missing risk level (absence of
+ *   signal must not buy leniency), `"soft"` for low|medium.
+ */
+export function denyTier(riskLevel: RiskLevel | undefined): DenyTier {
+  return riskLevel === undefined || riskLevel === "high" || riskLevel === "critical"
+    ? "hard"
+    : "soft";
+}
+
+/**
+ * The machinery lane's target for a mode: deny under the two extremes
+ * (`strict` — fail closed by doctrine; `permissive` — a broken reviewer
+ * must not rubber-stamp), defer otherwise. Exported for the pipeline's
+ * pre-call gates (no-target, model-unresolved, auth-failed,
+ * transcript-error), which never hold a parsed verdict.
+ *
+ * @param mode - The effective mode.
+ * @returns The lane's verdict kind (never allow).
+ */
+export function machineryTarget(mode: Mode): ModeLanes["machinery"] {
+  return lanes(mode).machinery;
+}
+
+/**
+ * Audit marker for a model defer the mode mapped to allow: the reviewer's
+ * clarification request never reached the agent. Persisted as the decision
+ * record's emittedReason so readers of the review log see what was
+ * swallowed.
+ */
+export const CLARIFICATION_SUPPRESSED_REASON = "clarification-suppressed";
 
 /**
  * Apply the configured mode to a model verdict.
@@ -59,56 +96,134 @@ export const AUTO_DEFER_DENY_REASON = "Reviewer was uncertain; auto mode denies 
  * @param policy - The effective mode.
  * @param verdict - The model's (or cached) verdict.
  * @param modelDefer - Deferred-call context when the verdict is a fresh model defer.
+ * @param riskLevel - The model's risk assessment for a deny verdict.
  * @returns The verdict the link emits.
  */
 export function applyVerdictMode(
   policy: Mode,
   verdict: AuthorizerVerdict,
   modelDefer?: ModelDeferInfo,
+  riskLevel?: RiskLevel,
 ): AuthorizerVerdict {
-  if (verdict.kind === "deny") {
-    return policy === "manual" ? { kind: "defer" } : verdict;
+  if (verdict.kind === "allow") {
+    return verdict;
   }
-  if (verdict.kind === "defer") {
-    if (policy !== "auto") return verdict;
+  if (verdict.kind === "deny") {
+    // Hard-tier denies are terminal in every mode — the reviewer's hard
+    // stops are the one judgment the ladder never loosens.
+    if (denyTier(riskLevel) === "hard") {
+      return verdict;
+    }
+    return mapLane(lanes(policy).softDeny, verdict, "deny", undefined, policy);
+  }
+  // Defer: the lane depends on WHO deferred — the model's own uncertainty
+  // maps per the ladder, machinery failures never map to allow.
+  const isModelDefer = modelDefer?.kind === "model-defer";
+  const lane = isModelDefer ? lanes(policy).modelDefer : lanes(policy).machinery;
+  return mapLane(lane, verdict, "defer", modelDefer, policy);
+}
+
+/**
+ * The mode's ladder lanes — the single-sourced table, projected.
+ *
+ * @param mode - The effective mode.
+ * @returns The mode's lanes.
+ */
+function lanes(mode: Mode): ModeLanes {
+  return MODE_TABLE[mode].lanes;
+}
+
+/**
+ * Emit the mapped verdict for one lane of the ladder table, keyed on the
+ * verdict's ORIGIN — deny origins map by tier (caller-side), defer origins
+ * map by defer lane (the model's uncertainty vs machinery failure).
+ *
+ * @param target - The lane's verdict kind.
+ * @param verdict - The original verdict.
+ * @param origin - The original verdict's kind (deny or defer).
+ * @param modelDefer - Defer context for reason extraction on deny targets.
+ * @param policy - The effective mode (names the policy in deny reasons).
+ * @returns The emitted verdict.
+ */
+function mapLane(
+  target: AuthorizerVerdict["kind"],
+  verdict: AuthorizerVerdict,
+  origin: VerdictOrigin,
+  modelDefer: ModelDeferInfo | undefined,
+  policy: Mode,
+): AuthorizerVerdict {
+  if (target === "allow") {
+    return { kind: "allow" };
+  }
+  if (origin === "defer") {
+    // Defer origin: defer passes through as-is; deny synthesizes a
+    // teaching reason (the clarification request for the reviewer's own
+    // uncertainty, the classified failure for machinery).
+    if (target === "defer") {
+      return verdict;
+    }
     return {
       kind: "deny",
       reason:
         modelDefer?.kind === "model-defer"
-          ? (modelDefer.reason ?? AUTO_DEFER_DENY_REASON)
-          : autoDenyReason(modelDefer?.kind),
+          ? (modelDefer.reason ?? uncertainDenyReason(policy))
+          : machineryDenyReason(modelDefer?.kind, policy),
     };
   }
-  return verdict;
+  // Deny origin: deny passes through with its reason; defer drops the
+  // reason — the advisory escalation message re-surfaces it at the human.
+  if (target === "deny") {
+    return verdict;
+  }
+  return { kind: "defer" };
 }
 
 /**
- * Surface the reviewer's reasoning when the manual policy hands a model
+ * The deny reason when the reviewer's own uncertainty is denied with no
+ * clarification request attached.
+ *
+ * @param mode - The effective mode.
+ * @returns The deny teaching reason.
+ */
+export function uncertainDenyReason(mode: Mode): string {
+  return `Reviewer was uncertain about this request — ${mode} mode denies uncertain requests`;
+}
+
+/**
+ * The deny reason for a machinery-failure denial: the agent sees why the
+ * review could not complete instead of a silent deny. Mode-parameterized
+ * so audit readers see which policy produced the deny.
+ *
+ * @param deferKind - The classified failure kind, if any.
+ * @param mode - The effective mode.
+ * @returns The deny teaching reason.
+ */
+export function machineryDenyReason(
+  deferKind: MachineryFailureKind | undefined,
+  mode: Mode,
+): string {
+  return `reviewer could not complete the review (${deferKind ?? "unknown"}) — ${mode} mode denied the request`;
+}
+
+/**
+ * Surface the reviewer's reasoning when the advisory policy hands a model
  * deny to the human — the permission dialog renders only the request, so
  * without this the reviewer's judgment is audit-log-only.
  *
  * @param verdict - The model's verdict (a deny at every call site — the
- *   manual mapping only produces defers from denies).
+ *   defer-escalating mappings of advisory/lenient only produce defers from
+ *   denies).
  * @param riskLevel - The risk level attached to the deny, if any.
  * @returns The notification message.
  */
-export function manualEscalationMessage(
+export function advisoryEscalationMessage(
   verdict: AuthorizerVerdict,
   riskLevel: RiskLevel | undefined,
 ): string {
   const reason = verdict.kind === "deny" ? verdict.reason : undefined;
   const risk = riskLevel ? ` (risk: ${riskLevel})` : "";
-  const reasonSuffix = reason ? ` — ${reason}` : "";
+  // The teaching reason is model text — the notify line stays readable
+  // (terminal-width); the full reason stays in the audit record.
+  const reasonSuffix = reason ? ` — ${truncateMiddle(reason, 60)}` : "";
   return `${NOTIFY_PREFIX} reviewer denied this request${risk}${reasonSuffix}`;
-}
-
-/**
- * The deny reason for an auto-policy machinery-failure denial: the agent
- * sees why the review could not complete instead of a silent deny.
- *
- * @param deferKind - The classified failure kind, if any.
- * @returns The deny teaching reason.
- */
-export function autoDenyReason(deferKind: MachineryFailureKind | undefined): string {
-  return `reviewer could not complete the review (${deferKind ?? "unknown"}) — auto mode denied the request`;
 }

@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { type AiGuardConfig, configSchema } from "#src/config-schema.ts";
+import { MODE_VALUES, type AiGuardConfig, configSchema } from "#src/config-schema.ts";
 import {
   type EnumSettingSpec,
   type RuntimeSettings,
@@ -18,9 +18,11 @@ import type { SessionOverrides } from "#src/session-state.ts";
 const SPECS: readonly EnumSettingSpec[] = [
   {
     name: "mode",
-    values: ["manual", "default", "auto"],
-    description: "what happens to the model's denials and uncertainty",
+    values: [...MODE_VALUES],
+    description: "what happens to the reviewer's denials and uncertainty",
     hiddenValue: "default",
+    cycleValues: ["default", "advisory", "lenient"],
+    highlightValue: "permissive",
   },
 ];
 
@@ -83,19 +85,19 @@ describe("RuntimeSettings — command", () => {
   it("the direct form applies a value: override + persist + notify + footer", async () => {
     const { settings, overrides, appendEntry } = makeSettings();
     const ctx = makeUiCtx();
-    await settings.command.handler("mode manual", ctx);
+    await settings.command.handler("mode advisory", ctx);
 
-    expect(overrides.mode).toBe("manual");
-    expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: "manual" });
+    expect(overrides.mode).toBe("advisory");
+    expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: "advisory" });
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] mode: manual (session override)",
+      "[ai-guard] mode: advisory (session override)",
       "info",
     );
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "manual (session)");
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "advisory (session)");
   });
 
   it("reset clears the override, persists null, and shows the config default", async () => {
-    const { settings, overrides, appendEntry } = makeSettings({ mode: "auto" });
+    const { settings, overrides, appendEntry } = makeSettings({ mode: "strict" });
     const ctx = makeUiCtx();
     await settings.command.handler("mode reset", ctx);
 
@@ -115,7 +117,7 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.mode).toBeUndefined();
     expect(appendEntry).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      '[ai-guard] invalid value "yolo" for mode (manual, default, auto, reset)',
+      '[ai-guard] invalid value "yolo" for mode — valid: strict|default|advisory|lenient|permissive|reset',
       "error",
     );
     expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -136,7 +138,7 @@ describe("RuntimeSettings — command", () => {
       SPECS,
     );
     const ctx = makeUiCtx();
-    await settings.command.handler("mode manual", ctx);
+    await settings.command.handler("mode advisory", ctx);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "[ai-guard] no active session (config not loaded)",
       "warning",
@@ -147,14 +149,14 @@ describe("RuntimeSettings — command", () => {
     const { settings, overrides } = makeSettings();
     // Menu picks the (only) setting's label, then the value picker picks auto.
     const ctx = makeUiCtx();
-    ctx.ui.select.mockResolvedValueOnce("mode — default (config)").mockResolvedValueOnce("auto");
+    ctx.ui.select.mockResolvedValueOnce("mode — default (config)").mockResolvedValueOnce("strict");
     await settings.command.handler("", ctx);
 
     expect(ctx.ui.select).toHaveBeenCalledWith(
       "ai-guard settings — pick a setting to adjust, or save the current config",
       ["mode — default (config)", "save-to-global-config", "save-to-project-config"],
     );
-    expect(overrides.mode).toBe("auto");
+    expect(overrides.mode).toBe("strict");
   });
 
   it("cancelling the picker changes nothing", async () => {
@@ -174,13 +176,13 @@ describe("RuntimeSettings — command", () => {
 
     await settings.command.handler("mode", noUi);
     expect(noUi.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] the settings menu needs an interactive UI — use /ai-guard <setting> <value>",
+      "[ai-guard] settings menu needs an interactive UI — use /ai-guard <setting> <value>",
       "error",
     );
     expect(overrides.mode).toBeUndefined();
 
-    await settings.command.handler("mode manual", noUi);
-    expect(overrides.mode).toBe("manual");
+    await settings.command.handler("mode advisory", noUi);
+    expect(overrides.mode).toBe("advisory");
   });
 });
 
@@ -189,12 +191,14 @@ describe("RuntimeSettings — completions", () => {
     const { settings } = makeSettings();
     const completions = settings.command.getArgumentCompletions;
     expect(completions("mo")).toEqual([
-      { value: "mode", label: "mode — what happens to the model's denials and uncertainty" },
+      { value: "mode", label: "mode — what happens to the reviewer's denials and uncertainty" },
     ]);
     expect(completions("mode ")).toEqual([
-      { value: "manual", label: "manual" },
+      { value: "strict", label: "strict" },
       { value: "default", label: "default" },
-      { value: "auto", label: "auto" },
+      { value: "advisory", label: "advisory" },
+      { value: "lenient", label: "lenient" },
+      { value: "permissive", label: "permissive" },
       { value: "reset", label: "reset" },
     ]);
     // Save verbs complete at the TOP level, not inside a setting.
@@ -214,20 +218,30 @@ describe("RuntimeSettings — shortcut", () => {
     const { settings, overrides } = makeSettings();
     const ctx = makeUiCtx();
 
-    // MODE_VALUES order is manual -> default -> auto; the config
-    // default sits mid-cycle, so one press from default reaches auto.
+    // The cycle visits only the casual subset (default → advisory →
+    // lenient), one press loosens one notch, and the wrap returns to
+    // default — the extremes stay reachable via the command only.
     settings.shortcut.handler(ctx);
-    expect(overrides.mode).toBe("auto");
+    expect(overrides.mode).toBe("advisory");
     settings.shortcut.handler(ctx);
-    expect(overrides.mode).toBe("manual");
+    expect(overrides.mode).toBe("lenient");
     settings.shortcut.handler(ctx);
     expect(overrides.mode).toBe("default");
   });
 
-  it("cycles from an override, not the config default", () => {
-    const { settings, overrides } = makeSettings({ mode: "manual" });
+  it("cycles from an override, one notch looser", () => {
+    const { settings, overrides } = makeSettings({ mode: "advisory" });
+    settings.shortcut.handler(makeUiCtx());
+    expect(overrides.mode).toBe("lenient");
+  });
+
+  it("a value outside the cycle subset anchors to the subset start", () => {
+    const { settings, overrides } = makeSettings({ mode: "strict" });
     settings.shortcut.handler(makeUiCtx());
     expect(overrides.mode).toBe("default");
+    const { settings: s2, overrides: o2 } = makeSettings({ mode: "permissive" });
+    s2.shortcut.handler(makeUiCtx());
+    expect(o2.mode).toBe("default");
   });
 
   it("without an active session warns instead of crashing", () => {
@@ -254,22 +268,32 @@ describe("RuntimeSettings — restore + footer", () => {
     const { settings, overrides } = makeSettings();
     settings.restore({
       getBranch: () =>
-        [{ type: "custom", customType: "ai-guard-setting", data: { mode: "auto" } }] as never[],
+        [{ type: "custom", customType: "ai-guard-setting", data: { mode: "strict" } }] as never[],
     });
-    expect(overrides.mode).toBe("auto");
+    expect(overrides.mode).toBe("strict");
   });
 
   it("restore with no entries clears any stale override", () => {
-    const { settings, overrides } = makeSettings({ mode: "manual" });
+    const { settings, overrides } = makeSettings({ mode: "advisory" });
     settings.restore({ getBranch: () => [] });
     expect(overrides.mode).toBeUndefined();
   });
 
   it("syncFooter shows the effective value with the (session) marker while overridden", () => {
-    const { settings } = makeSettings({ mode: "auto" });
+    const { settings } = makeSettings({ mode: "strict" });
     const ctx = makeUiCtx();
     settings.syncFooter(ctx);
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "auto (session)");
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "strict (session)");
+  });
+
+  it("syncFooter renders the highlighted value in warning red", () => {
+    const { settings } = makeSettings({ mode: "permissive" });
+    const ctx = makeUiCtx();
+    settings.syncFooter(ctx);
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+      "ai-guard",
+      "\x1b[1;31mpermissive (session)\x1b[0m",
+    );
   });
 
   it("syncFooter hides the default mode — the line clears instead of showing the baseline", () => {
@@ -321,7 +345,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
         changed: boolean;
       }
     >((target) => ({ path: `/cfg-${target}.json`, created: false, changed: true }));
-    const { settings } = makeSettings({ mode: "manual" }, saveConfig);
+    const { settings } = makeSettings({ mode: "advisory" }, saveConfig);
     const ctx = makeUiCtx();
 
     await settings.command.handler("save-to-global-config", ctx);
@@ -331,10 +355,10 @@ describe("RuntimeSettings — save to config layer actions", () => {
     expect(saveConfig).toHaveBeenCalledTimes(1);
     const [target, config] = saveConfig.mock.calls[0]!;
     expect(target).toBe("global");
-    expect(config.mode).toBe("manual"); // override won over the snapshot
+    expect(config.mode).toBe("advisory"); // override won over the snapshot
     expect(config.provider).toBe("test"); // other fields intact
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] current config saved to global config: /cfg-global.json — new sessions start from it; this session keeps its overrides",
+      "[ai-guard] saved to global config: cfg-global.json — new sessions start from it; higher layers still shadow it; this session keeps its overrides",
       "info",
     );
   });
@@ -407,7 +431,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
         changed: boolean;
       }
     >(() => ({ path: "/cfg.json", created: false, changed: true }));
-    const { settings, overrides } = makeSettings({ mode: "manual" }, saveConfig);
+    const { settings, overrides } = makeSettings({ mode: "advisory" }, saveConfig);
     const ctx = makeUiCtx();
 
     await settings.command.handler("mode reset", ctx); // deletes the override
@@ -418,7 +442,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("reset deletes the override key outright (present ⇒ defined invariant)", () => {
-    const { settings, overrides } = makeSettings({ mode: "manual" });
+    const { settings, overrides } = makeSettings({ mode: "advisory" });
     const ctx = makeUiCtx();
     void settings.command.handler("mode reset", ctx);
     expect("mode" in overrides).toBe(false);
@@ -476,8 +500,48 @@ describe("RuntimeSettings — save to config layer actions", () => {
     await settings.command.handler("save-to-global-config", ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] global config already matches the current settings — nothing written",
+      "[ai-guard] global config already matches — nothing written",
       "info",
     );
+  });
+});
+
+describe("RuntimeSettings — picker stays plain for the highlighted value", () => {
+  it("applies a plain permissive pick and notifies at warning level, undecorated", async () => {
+    const { settings, overrides } = makeSettings();
+    const ctx = makeUiCtx("permissive");
+    await settings.command.handler("mode", ctx);
+    expect(overrides.mode).toBe("permissive");
+    // The command surface is plain text — the warning-red emphasis is
+    // footer-only. The severity bump stays.
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "[ai-guard] mode: permissive (session override)",
+      "warning",
+    );
+  });
+});
+
+describe("RuntimeSettings — settings-menu labels stay plain", () => {
+  it("renders the mode label undecorated and resolves a plain pick", async () => {
+    const { settings, overrides } = makeSettings({ mode: "permissive" });
+    const menuOptions: string[][] = [];
+    let calls = 0;
+    const select = vi.fn<(title: string, options: string[]) => Promise<string | undefined>>(
+      async (title, options) => {
+        if (calls++ === 0) {
+          menuOptions.push(options);
+          return "mode — permissive (session)";
+        }
+        return "permissive";
+      },
+    );
+    const ctx = {
+      hasUI: true,
+      ui: { notify: vi.fn<() => void>(), setStatus: vi.fn<() => void>(), select },
+    } as never;
+    await settings.command.handler("", ctx);
+    expect(overrides.mode).toBe("permissive");
+    // The menu label is plain — the warning-red emphasis is footer-only.
+    expect(menuOptions[0]![0]).toBe("mode — permissive (session)");
   });
 });

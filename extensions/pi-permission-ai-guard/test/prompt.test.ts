@@ -1,7 +1,7 @@
 import type { PromptAnnotation, PromptPayload } from "@gotgenes/pi-permission-system";
 import { describe, expect, it } from "vitest";
 
-import type { AskContext } from "#src/ask-eligibility.ts";
+import type { AskContext } from "#src/ask.ts";
 import { configSchema, EXTENSION_ID, LINK_NAME } from "#src/config-schema.ts";
 import { buildReviewPrompt, buildReviewSystemPrompt } from "#src/prompt.ts";
 

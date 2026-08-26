@@ -61,7 +61,15 @@ export type RiskLevel = "low" | "medium" | "high" | "critical";
  * the upstream type is the single source of truth. Used to validate the
  * `verdict` field the model returns in its JSON reply.
  */
-type VerdictKind = AuthorizerVerdict["kind"];
+export type VerdictKind = AuthorizerVerdict["kind"];
+
+/**
+ * A non-allow verdict's origin kind (deny or defer) — the mapping's input
+ * origins, and exactly the lane kinds a machinery lane may target
+ * (never allow). Derived from the upstream verdict, which is the single
+ * source of truth.
+ */
+export type VerdictOrigin = Exclude<VerdictKind, "allow">;
 
 /**
  * The deny reason attached when the model denies without one — the prompt

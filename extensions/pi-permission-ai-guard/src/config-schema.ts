@@ -5,11 +5,14 @@ export const EXTENSION_ID = "pi-permission-ai-guard";
 export const LINK_NAME = "ai-guard";
 
 /**
- * Who adjudicates the model's non-allow verdicts — the human-involvement
- * dial, also the /ai-guard shortcut cycle order (from `default`, one press
- * reaches `auto`).
+ * How the link disposes the reviewer's non-allow verdicts — the leniency
+ * ladder, strictest first. Hard-tier denies (riskLevel high|critical, or
+ * missing) always deny; the mode maps soft-tier denies (low|medium) and
+ * the model's own uncertainty against the ladder. The ctrl+alt+g cycle
+ * only visits the middle three (`default`, `advisory`, `lenient`); the
+ * extremes are set explicitly (`/ai-guard mode strict|permissive`).
  */
-export const MODE_VALUES = ["manual", "default", "auto"] as const;
+export const MODE_VALUES = ["strict", "default", "advisory", "lenient", "permissive"] as const;
 
 /** How the link disposes model deny/defer verdicts (see the `mode` field comment). */
 export type Mode = (typeof MODE_VALUES)[number];
@@ -66,18 +69,23 @@ export const configSchema = z.object({
   // null = use the built-in rules.
   instructions: z.string().min(1).nullable().default(null),
 
-  // Who adjudicates the review verdicts (the link's mapping of model deny and
-  // defer; allow always passes through untouched):
-  // - "default": model denies are terminal; defers pass to the next
-  //   authority (the interactive prompt in a TUI session; the denying
-  //   terminal headless). The shipped behavior.
-  // - "manual": the human adjudicates everything the model doesn't allow —
-  //   denies are mapped to defers, so the human can override the model.
-  // - "auto": fully automatic, fail-closed — denies stay terminal AND
-  //   the model's own uncertainty is denied too (the link never interrupts
-  //   the agent on a normal model verdict; reviewer machinery failures and
-  //   an explicitly configured breaker `defer` still reach the human escape
-  //   valve, with a notification explaining the interruption).
+  // How the link disposes the reviewer's non-allow verdicts (the leniency
+  // ladder, strictest first). Hard-tier denies (riskLevel high|critical,
+  // or missing) always stay deny. Soft-tier denies (low|medium) and the
+  // model's own uncertainty map per mode:
+  // - "strict": both deny — the reviewer's allow is the only pass.
+  // - "default": deny soft denies; uncertainty passes to the next authority
+  //   (the interactive prompt in a TUI session; the denying terminal
+  //   headless). The shipped behavior.
+  // - "advisory": both pass to the human — you decide everything the
+  //   reviewer doesn't allow. Shadow/override mode for onboarding a new
+  //   reviewer or auditing a systematically misjudging one.
+  // - "lenient": soft denies pass to the human; the model's uncertainty
+  //   passes (allow).
+  // - "permissive": both pass — only hard-tier denies block.
+  // Reviewer machinery failures never map to allow in any mode: they deny
+  // under "strict" and "permissive" (a broken reviewer must not rubber-
+  // stamp), and defer under the other three.
   mode: z.enum(MODE_VALUES).default("default"),
 
   // Circuit breaker (session-level, fail-safe). `consecutive` is recoverable

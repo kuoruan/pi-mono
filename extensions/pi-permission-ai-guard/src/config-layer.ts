@@ -25,6 +25,7 @@ import {
 } from "jsonc-parser";
 
 import { type AiGuardConfig, EXTENSION_ID, configSchema } from "./config-schema.ts";
+import { modeWarnings } from "./mode-table.ts";
 import { isObjectRecord } from "./utils.ts";
 
 /** A single validation or read error from config loading. */
@@ -138,7 +139,18 @@ function getProjectConfigPath(cwd: string): string {
  * @param dir - The layer directory.
  * @returns The resolved file, or undefined when no config exists yet.
  */
-function resolveLayerFile(dir: string): { path: string; ambiguous: boolean } | undefined {
+/** A config-layer file, when both names exist the jsonc one wins (with a warning). */
+interface LayerFile {
+  path: string;
+  ambiguous: boolean;
+}
+
+/** A layer file read: parsed object, or a tagged failure to surface upstream. */
+type ReadLayerResult =
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; failure: LayerParseFailure };
+
+function resolveLayerFile(dir: string): LayerFile | undefined {
   let path: string | undefined;
   let found = 0;
   for (const name of CONFIG_FILE_NAMES) {
@@ -159,9 +171,7 @@ function resolveLayerFile(dir: string): { path: string; ambiguous: boolean } | u
  * @param text - The file text.
  * @returns The parsed object, or the classified failure.
  */
-function parseLayerText(
-  text: string,
-): { ok: true; value: Record<string, unknown> } | { ok: false; failure: LayerParseFailure } {
+function parseLayerText(text: string): ReadLayerResult {
   const errors: ParseError[] = [];
   const parsed: unknown = parseJsonc(text, errors, { allowTrailingComma: true });
   const first = errors.at(0);
@@ -300,17 +310,11 @@ export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
     return { issues };
   }
 
-  // A legal but surprising combination: in `auto` mode a breaker configured
-  // to force `defer` will interrupt the human when the reviewer is untrusted
-  // (the designed escape valve — specific config beats the mode). Surface it
-  // as a warning so the interaction is visible without opening the docs.
-  if (parsed.data.mode === "auto" && parsed.data.circuitBreaker.verdict === "defer") {
-    issues.push({
-      path: "mode",
-      message:
-        'mode "auto" + circuitBreaker.verdict "defer": the breaker interrupts the human when it trips (reviewer untrusted escape valve).',
-    });
-  }
+  // Ladder-owned surprise warnings (e.g. the extremes plus a breaker
+  // forced to defer — the reviewer-untrusted escape valve interrupts the
+  // human): the JSONC layer asks the ladder module instead of carrying
+  // ladder semantics itself.
+  issues.push(...modeWarnings(parsed.data));
 
   return { config: parsed.data, issues };
 }

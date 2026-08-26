@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { ConfigEnv, ConfigLayerTarget, LoadConfigResult } from "#src/config-loader.ts";
+import type { ConfigEnv, ConfigLayerTarget, LoadConfigResult } from "#src/config-layer.ts";
 import { type AiGuardConfig, configSchema } from "#src/config-schema.ts";
 import { createAiGuardExtension } from "#src/extension.ts";
 import type { ReviewPipelineDeps } from "#src/review-pipeline.ts";
@@ -285,8 +285,8 @@ describe("createAiGuardExtension lifecycle", () => {
     const live = calls[0]!;
 
     // A session override reaches the pipeline's overrides object.
-    await pi.commands.get("ai-guard")!.handler("mode manual", makeUiCtx());
-    expect(live.overrides.mode).toBe("manual");
+    await pi.commands.get("ai-guard")!.handler("mode advisory", makeUiCtx());
+    expect(live.overrides.mode).toBe("advisory");
 
     // Re-dispatched session_start (no shutdown in between).
     pi.fire("session_start", {}, makeSessionCtx());
@@ -302,8 +302,8 @@ describe("createAiGuardExtension lifecycle", () => {
     expect(calls[1]!.verdictCache).not.toBe(live.verdictCache);
 
     // A runtime write after the re-dispatch reaches the live pipeline.
-    await pi.commands.get("ai-guard")!.handler("mode auto", makeUiCtx());
-    expect(calls[1]!.overrides.mode).toBe("auto");
+    await pi.commands.get("ai-guard")!.handler("mode strict", makeUiCtx());
+    expect(calls[1]!.overrides.mode).toBe("strict");
   });
 
   it("permissions:ready after registration is a no-op (register once per session)", () => {
@@ -603,12 +603,12 @@ describe("createAiGuardExtension — /ai-guard command + ctrl+alt+g shortcut", (
     expect(deps.overrides.mode).toBeUndefined();
 
     const ctx = makeUiCtx();
-    await pi.commands.get("ai-guard")!.handler("mode manual", ctx);
+    await pi.commands.get("ai-guard")!.handler("mode advisory", ctx);
 
     // The pipeline closed over this exact object at registration — the
     // override takes effect without re-registering the authorizer.
-    expect(deps.overrides.mode).toBe("manual");
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "manual (session)");
+    expect(deps.overrides.mode).toBe("advisory");
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "advisory (session)");
   });
 });
 
@@ -616,12 +616,12 @@ describe("createAiGuardExtension — mode session persistence", () => {
   it("session_start restores the override from the leaf entry and shows the footer status", () => {
     const setStatus = vi.fn<() => void>();
     const { calls } = setupExtension({
-      sessionManager: { getBranch: () => [settingEntry("auto")] },
+      sessionManager: { getBranch: () => [settingEntry("strict")] },
       ui: { setStatus },
     });
     // The restored override is live in the deps the pipeline closed over.
-    expect(calls[0]!.overrides.mode).toBe("auto");
-    expect(setStatus).toHaveBeenCalledWith("ai-guard", "auto (session)");
+    expect(calls[0]!.overrides.mode).toBe("strict");
+    expect(setStatus).toHaveBeenCalledWith("ai-guard", "strict (session)");
   });
 
   it("session_start clears the footer for the default mode (no baseline noise)", () => {
@@ -649,10 +649,10 @@ describe("createAiGuardExtension — official-pattern follow-ups", () => {
   it("session_tree re-derives the override from the new active branch", () => {
     const setStatus = vi.fn<() => void>();
     const { pi, calls } = setupExtension({
-      sessionManager: { getBranch: () => [settingEntry("manual")] },
+      sessionManager: { getBranch: () => [settingEntry("advisory")] },
       ui: { setStatus },
     });
-    expect(calls[0]!.overrides.mode).toBe("manual");
+    expect(calls[0]!.overrides.mode).toBe("advisory");
 
     // Rewind past the setting entry: the new active branch has none.
     const treeStatus = vi.fn<() => void>();
@@ -674,11 +674,11 @@ describe("createAiGuardExtension — official-pattern follow-ups", () => {
       "session_tree",
       {},
       makeSessionCtx({
-        sessionManager: { getBranch: () => [settingEntry("auto")] },
+        sessionManager: { getBranch: () => [settingEntry("strict")] },
       }),
     );
 
-    expect(calls[0]!.overrides.mode).toBe("auto");
+    expect(calls[0]!.overrides.mode).toBe("strict");
   });
 });
 
@@ -717,7 +717,7 @@ describe("createAiGuardExtension — save-to-config actions", () => {
     // Saving is a config-layer write; no session override is added.
     expect(pi.appendEntry).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("current config saved to global config"),
+      expect.stringContaining("saved to global config"),
       "info",
     );
     // Config-layer saves don't change this session's effective state: no

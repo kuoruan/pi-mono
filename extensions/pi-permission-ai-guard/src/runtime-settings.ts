@@ -18,21 +18,24 @@
  * whole UX materializes from the spec.
  */
 
+import { basename } from "node:path";
+
 import type {
   ExtensionShortcut,
   ExtensionUIContext,
   RegisteredCommand,
 } from "@earendil-works/pi-coding-agent";
 
-import type { ConfigLayerTarget, SaveConfigFn } from "./config-loader.ts";
+import type { ConfigLayerTarget, SaveConfigFn } from "./config-layer.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
 import { NOTIFY_PREFIX } from "./logger.ts";
+import { CYCLE_DESCRIPTION } from "./mode-table.ts";
 import {
   type SessionBranchReader,
   persistSetting,
   restoreSetting,
 } from "./session-settings-store.ts";
-import { effectiveConfig, type SessionOverrides } from "./session-state.ts";
+import { effectiveConfig, effectiveOverride, type SessionOverrides } from "./session-state.ts";
 
 /**
  * An enum-valued session setting overriding its same-named config field.
@@ -55,6 +58,21 @@ export interface EnumSettingSpec {
    * result clears the status line.
    */
   readonly hiddenValue?: string;
+  /**
+   * The ctrl+alt+g cycle subset (the casual-reach surface). Absent = cycle
+   * all values. The community pattern (Claude Code's Shift+Tab) keeps the
+   * extremes out of casual reach — they stay selectable via the command
+   * and picker, just not stumblable.
+   */
+  readonly cycleValues?: readonly string[];
+  /**
+   * A value that renders in warning red in the FOOTER status fragment —
+   * e.g. the mode whose mapping auto-approves what the reviewer didn't.
+   * The command surfaces (menu label, picker entry, change notification)
+   * stay plain text. Emphasizing is presentation-only: matching and
+   * persistence always use the value's plain text.
+   */
+  readonly highlightValue?: string;
 }
 
 /**
@@ -128,6 +146,20 @@ type SettingOption = {
 const FOOTER_KEY = "ai-guard";
 
 /**
+ * Wrap text in terminal warning-red (bold) — used ONLY by the footer
+ * status fragment (the command surfaces stay plain text). Width-safe in
+ * pi-tui: its visibleWidth strips ANSI codes before measuring and
+ * truncateToWidth re-attaches pending codes when truncating, so a
+ * decorated status string is a supported shape, not a hack.
+ *
+ * @param text - The plain text to emphasize.
+ * @returns The ANSI-wrapped text.
+ */
+function highlightText(text: string): string {
+  return `\x1b[1;31m${text}\x1b[0m`;
+}
+
+/**
  * The save verbs, reserved at the command's top level: a setting spec must
  * never take one of these names (they'd shadow the action).
  */
@@ -160,7 +192,7 @@ export class RuntimeSettings {
   /** The /ai-guard command registration object. */
   readonly command: AiGuardCommand = {
     description:
-      "AI Guard review settings — decide what happens to the model's denials and uncertainty (session-scoped)",
+      "AI Guard review settings — decide what happens to the reviewer's denials and uncertainty (session-scoped)",
     getArgumentCompletions: (prefix) => {
       const trimmed = prefix.replace(/^\s+/, "");
       const spaceAt = trimmed.indexOf(" ");
@@ -209,7 +241,7 @@ export class RuntimeSettings {
       // `/ai-guard <setting> <value>` form works everywhere.
       if (tokens.length < 2 && !ctx.hasUI) {
         ctx.ui.notify(
-          `${NOTIFY_PREFIX} the settings menu needs an interactive UI — use /ai-guard <setting> <value>`,
+          `${NOTIFY_PREFIX} settings menu needs an interactive UI — use /ai-guard <setting> <value>`,
           "error",
         );
         return;
@@ -230,9 +262,11 @@ export class RuntimeSettings {
           const option = this.#optionByText(spec, value);
           if (!option) {
             ctx.ui.notify(
-              `${NOTIFY_PREFIX} invalid value "${value}" for ${spec.name} (${this.#options(spec)
+              `${NOTIFY_PREFIX} invalid value "${value}" for ${spec.name} — valid: ${this.#options(
+                spec,
+              )
                 .map((o) => o.text)
-                .join(", ")})`,
+                .join("|")}`,
               "error",
             );
             return;
@@ -245,7 +279,9 @@ export class RuntimeSettings {
       }
 
       // No args: settings menu, then the picked setting's value picker —
-      // or one of the save actions, which apply directly.
+      // or one of the save actions, which apply directly. Labels are plain
+      // text (only the FOOTER renders the highlighted value in color), so
+      // resolution is a plain match.
       const specLabels = this.#specs.map((s) => this.#label(s));
       const labels = [...specLabels, ...SAVE_VERBS.map((v) => v.text)];
       const choice = await ctx.ui.select(
@@ -266,18 +302,25 @@ export class RuntimeSettings {
 
   /** The ctrl+alt+g shortcut registration object (cycles the first setting). */
   readonly shortcut: AiGuardShortcut = {
-    description: "Cycle ai-guard mode: manual → default → auto (session-scoped)",
+    // Generated from the ladder table's cycle membership — the description
+    // cannot drift from the cycle it describes.
+    description: `Cycle ai-guard mode: ${CYCLE_DESCRIPTION} (session-scoped)`,
     handler: (ctx) => {
       const spec = this.#specs[0];
       if (!spec || !this.#deps.session.session?.config) {
         ctx.ui.notify(`${NOTIFY_PREFIX} no active session (config not loaded)`, "warning");
         return;
       }
-      const values = spec.values;
+      // The cycle visits the CASUAL subset only (cycleValues) — the
+      // command and picker cover the full value set.
+      const values = spec.cycleValues ?? spec.values;
       const first = values[0];
       if (first === undefined) return;
-      const current = this.#effective(spec) ?? first;
-      const next = values[(values.indexOf(current) + 1) % values.length] ?? first;
+      const current = this.#effective(spec);
+      // An effective value outside the cycle subset (e.g. `strict` or
+      // `permissive`) anchors to the subset's start on the next press.
+      const index = current === undefined ? -1 : values.indexOf(current);
+      const next = values[index + 1] ?? first;
       this.#apply(spec, next, ctx);
     },
   };
@@ -298,8 +341,8 @@ export class RuntimeSettings {
 
   /**
    * Sync the footer status line with the effective settings. Only
-   * deviations render: the value itself (`auto`), with `(session)` while
-   * an override is active (`auto (session)`). A spec whose effective value
+   * deviations render: the value itself (`lenient`), with `(session)` while
+   * an override is active (`lenient (session)`). A spec whose effective value
    * is its {@link EnumSettingSpec.hiddenValue} contributes nothing, and an
    * all-hidden result clears the line — the shipped baseline (`default`)
    * never occupies a footer row.
@@ -313,7 +356,8 @@ export class RuntimeSettings {
       const override = this.#readOverride(spec);
       const effective = this.#effective(spec) ?? "";
       if (effective === spec.hiddenValue) continue;
-      fragments.push(override ? `${effective} (session)` : effective);
+      const fragment = override ? `${effective} (session)` : effective;
+      fragments.push(effective === spec.highlightValue ? highlightText(fragment) : fragment);
     }
     ctx.ui.setStatus(FOOTER_KEY, fragments.length > 0 ? fragments.join(" · ") : undefined);
   }
@@ -328,16 +372,18 @@ export class RuntimeSettings {
   }
 
   /**
-   * The setting's menu label: `name — value (source)`.
+   * The setting's menu label: `name — value (source)`; the highlighted
+   * value renders in warning red (presentation-only — matching stays on
+   * the plain text).
    *
    * @param spec - The setting to label.
    * @returns The label string.
    */
   #label(spec: EnumSettingSpec): string {
     const override = this.#readOverride(spec);
-    return override
-      ? `${spec.name} — ${override} (session)`
-      : `${spec.name} — ${this.#effective(spec)} (config)`;
+    // Plain text — the warning-red emphasis is footer-only.
+    const value = override ?? this.#effective(spec);
+    return override ? `${spec.name} — ${value} (session)` : `${spec.name} — ${value} (config)`;
   }
 
   /**
@@ -407,15 +453,17 @@ export class RuntimeSettings {
       return;
     }
     if (!result.changed) {
-      ctx.ui.notify(
-        `${NOTIFY_PREFIX} ${target} config already matches the current settings — nothing written`,
-        "info",
-      );
+      ctx.ui.notify(`${NOTIFY_PREFIX} ${target} config already matches — nothing written`, "info");
       return;
     }
     const created = result.created ? " (created)" : "";
     ctx.ui.notify(
-      `${NOTIFY_PREFIX} current config saved to ${target} config${created}: ${result.path} — new sessions start from it; this session keeps its overrides`,
+      // Layer semantics: a saved layer feeds new sessions, but a
+      // higher-precedence layer (session > project > global) still shadows
+      // it — say so rather than promising the saved value takes effect.
+      // The basename keeps the line terminal-width while the path remains
+      // documented in the config-layer module.
+      `${NOTIFY_PREFIX} saved to ${target} config: ${basename(result.path)}${created} — new sessions start from it; higher layers still shadow it; this session keeps its overrides`,
       "info",
     );
   }
@@ -441,24 +489,22 @@ export class RuntimeSettings {
   }
 
   /**
-   * The effective value: session override first, then config default.
+   * The effective value: session override first, then config default —
+   * the typed accessor's spelling (see effectiveOverride in
+   * session-state).
    *
    * @param spec - The setting to resolve.
    * @returns The effective value, or undefined without a config.
    */
   #effective(spec: EnumSettingSpec): string | undefined {
-    return this.#readOverride(spec) ?? this.#configValue(spec);
-  }
-
-  /**
-   * The config default for the spec's field.
-   *
-   * @param spec - The setting to read the config default of.
-   * @returns The config value, or undefined without a session config.
-   */
-  #configValue(spec: EnumSettingSpec): string | undefined {
-    const value = this.#deps.session.session?.config?.[spec.name];
-    return typeof value === "string" ? value : undefined;
+    // The one read-side cast, mirroring #writeOverride's write-side one:
+    // the spec's values channel is string-typed, so the accessor's
+    // precise field type widens to string at this single seam.
+    return effectiveOverride(
+      this.#deps.session.overrides,
+      this.#deps.session.session?.config,
+      spec.name,
+    ) as string | undefined;
   }
 
   /**
@@ -499,7 +545,13 @@ export class RuntimeSettings {
     if (value === undefined) {
       ctx.ui.notify(`${NOTIFY_PREFIX} ${spec.name}: ${effective} (config default)`, "info");
     } else {
-      ctx.ui.notify(`${NOTIFY_PREFIX} ${spec.name}: ${value} (session override)`, "info");
+      // Selecting the highlighted value deserves a warning-level notice
+      // (plain text — the emphasis is footer-only).
+      const highlighted = value === spec.highlightValue;
+      ctx.ui.notify(
+        `${NOTIFY_PREFIX} ${spec.name}: ${value} (session override)`,
+        highlighted ? "warning" : "info",
+      );
     }
     this.syncFooter(ctx);
   }
@@ -512,6 +564,8 @@ export class RuntimeSettings {
    */
   async #pickValue(spec: EnumSettingSpec, ctx: AiGuardUiContext): Promise<void> {
     const title = `${spec.name} — current: ${this.#label(spec)}`;
+    // Picker options are plain text — the warning-red emphasis is
+    // footer-only.
     const choice = await ctx.ui.select(
       title,
       this.#options(spec).map((o) => o.text),

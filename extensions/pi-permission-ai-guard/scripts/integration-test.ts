@@ -278,6 +278,8 @@ function buildHarness(
     verdictCache: new VerdictCache(),
     overrides: {},
     completeSimple: createCompleteSimple(() => registry),
+    // CLI: escalation messages surface on the console — no TUI footer here.
+    notify: (message, level) => console.log(`[${level ?? "info"}] ${message}`),
   });
   return { authorize, log };
 }

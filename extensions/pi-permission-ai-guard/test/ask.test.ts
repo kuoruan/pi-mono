@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildAskContext, resolveReviewTarget } from "#src/ask-eligibility.ts";
+import { buildAskContext, openAsk, resolveReviewTarget } from "#src/ask.ts";
 import { bashPayload, ev, makeDetails, payload } from "#test/fixtures.ts";
 
 describe("resolveReviewTarget — surface matching", () => {
@@ -510,12 +510,49 @@ describe("buildAskContext — 9-kind dispatch", () => {
         [{ source: "test-annotator", text: "advisory" }],
       ),
     });
-    const ask = buildAskContext(details, cwd);
+    const driftState = { warned: false };
+    const ask = buildAskContext(details, cwd, driftState);
     expect(ask.annotations).toEqual([{ source: "test-annotator", text: "advisory" }]);
     // The cache keys without annotations — when they stop being empty the
-    // one-time integrity warning must fire (assumption break is detectable).
+    // one-time integrity warning must fire (assumption break is detectable),
+    // once per injected state, and the state records it.
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("annotator is registered"));
+    expect(driftState.warned).toBe(true);
+    buildAskContext(details, cwd, driftState);
+    expect(warnSpy).toHaveBeenCalledTimes(1); // warn-once holds per state
     warnSpy.mockRestore();
+  });
+});
+
+describe("openAsk — the composed ask-opening seam", () => {
+  const cwd = "/project";
+
+  it("returns the complete review context for a reviewable ask", () => {
+    const details = makeDetails({ surface: "bash", value: "ls" });
+    const result = openAsk(details, { surfaces: ["bash"] }, cwd);
+    expect(result).toEqual({
+      surface: "bash",
+      target: "ls",
+      ask: buildAskContext(details, cwd),
+    });
+  });
+
+  it("returns the tagged reason for a surface-unmatched ask", () => {
+    const result = openAsk(
+      makeDetails({ surface: "bash", value: "ls" }),
+      { surfaces: ["mcp"] },
+      cwd,
+    );
+    expect(result).toEqual({ reason: "surface-unmatched" });
+  });
+
+  it("returns the tagged reason for a no-target ask", () => {
+    const result = openAsk(
+      makeDetails({ surface: "bash", value: "", command: "" }),
+      { surfaces: ["bash"] },
+      cwd,
+    );
+    expect(result).toEqual({ reason: "no-target", surface: "bash" });
   });
 });

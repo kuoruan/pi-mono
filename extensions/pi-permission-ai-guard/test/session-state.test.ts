@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { CircuitBreaker, VerdictCache } from "#src/session-state.ts";
+import {
+  CircuitBreaker,
+  VerdictCache,
+  accountModelOutcome,
+  consumeTrip,
+} from "#src/session-state.ts";
 
 const cb = { consecutive: 3, total: 20, verdict: "deny" as const };
 const cc = { maxEntries: 3 };
@@ -162,5 +167,49 @@ describe("VerdictCache", () => {
       hit: true,
       verdict: { kind: "deny", reason: "dangerous" },
     });
+  });
+});
+
+describe("breaker accounting steps", () => {
+  it("consumeTrip combines the query and the visible reset in one step", () => {
+    const s = new CircuitBreaker();
+    const config = { consecutive: 2, total: 20, verdict: "deny" as const };
+    s.recordVerdict("deny");
+    s.recordVerdict("deny");
+    // Below threshold: reports false and never mutates.
+    expect(consumeTrip(s, { ...config, consecutive: 3 })).toBe(false);
+    expect(s.isTripped({ ...config, consecutive: 3 })).toBe(false);
+    // At threshold: reports true once and consumes the recoverable tier.
+    expect(consumeTrip(s, config)).toBe(true);
+    expect(consumeTrip(s, config)).toBe(false); // window reset
+  });
+
+  it("accountModelOutcome records the model verdict and credits machinery denials only", () => {
+    const s = new CircuitBreaker();
+    // A machinery denial: original defer + emitted deny + non-model-defers.
+    accountModelOutcome(s, "defer", { kind: "deny", reason: "x" });
+    // Two credits (real defer is a no-op, machinery is consecutive-only) →
+    // consecutive = 1, total = 0.
+    expect(s.isTripped({ consecutive: 1, total: 200, verdict: "deny" })).toBe(true);
+    expect(s.isTripped({ consecutive: 2, total: 200, verdict: "deny" })).toBe(false);
+    expect(s.isTripped({ consecutive: 999, total: 1, verdict: "deny" })).toBe(false);
+  });
+
+  it("strict's model-defer→deny counts as a deny-equivalent into the recoverable tier only", () => {
+    const s = new CircuitBreaker();
+    const tripAtOne = { consecutive: 1, total: 20, verdict: "deny" as const };
+    accountModelOutcome(s, "defer", { kind: "deny", reason: "clarification" });
+    // A wavering reviewer under strict is a denial stream — consecutive
+    // fills (recoverable escape can fire), total stays model-denies-only.
+    expect(s.isTripped(tripAtOne)).toBe(true);
+    expect(s.isTripped({ consecutive: 99, total: 1, verdict: "deny" })).toBe(false);
+  });
+
+  it("accountModelOutcome records real denies into both tiers regardless of the emitted mapping", () => {
+    const s = new CircuitBreaker();
+    // permissive maps a soft deny to allow — the recording keeps the model's deny.
+    accountModelOutcome(s, "deny", { kind: "allow" });
+    expect(s.isTripped({ consecutive: 1, total: 20, verdict: "deny" })).toBe(true);
+    expect(s.isTripped({ consecutive: 2, total: 1, verdict: "deny" })).toBe(true);
   });
 });

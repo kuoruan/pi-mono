@@ -15,7 +15,7 @@
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import type { AiGuardConfig, BreakerVerdict, Mode } from "./config-schema.ts";
-import type { RiskLevel } from "./verdict.ts";
+import type { RiskLevel } from "./model-verdict.ts";
 
 /**
  * Session-scoped runtime overrides over the config file. Set via the
@@ -102,17 +102,18 @@ export class CircuitBreaker {
   }
 
   /**
-   * Record a reviewer MACHINERY failure — the reviewer could not even
-   * produce a verdict (empty reply, timeout, missing model, broken
-   * transcript, unextractable target). Auto mode denies these; crediting
-   * them into the breaker makes the deny-storm escape valve work for a
-   * BROKEN reviewer as well as a miscalibrated one.
-   *
-   * Increments both tiers, same as a model deny.
+   * Record a deny-EQUIVALENT — a denial the agent experienced although the
+   * model never pronounced one: machinery failures denied by the strict /
+   * permissive lanes (the reviewer could not even produce a verdict), and
+   * strict's model-defer→deny mapping (a wavering reviewer becomes a
+   * denial stream). Deny-equivalents credit the RECOVERABLE tier only, so
+   * a broken or persistently uncertain reviewer can trip the
+   * consecutive-denial trip like a miscalibrated one. The `total` hard cap
+   * stays model-denies-only: an equivalent storm must not permanently trip
+   * a session.
    */
-  recordMachineryFailure(): void {
+  recordDenyEquivalent(): void {
     this.consecutiveDenies++;
-    this.totalDenies++;
   }
 
   /**
@@ -135,6 +136,51 @@ export class CircuitBreaker {
       this.consecutiveDenies = 0;
     }
     // defer: no-op
+  }
+}
+
+/**
+ * The breaker gate's accounting step: consume a trip — one visible call
+ * combining the pure query and the explicit recoverable-tier reset, so
+ * the side effect stays at this single point instead of being split
+ * across the pipeline's condition and its body.
+ *
+ * @param breaker - The session breaker.
+ * @param cb - The thresholds.
+ * @returns True when the trip fired (the caller short-circuits the ask).
+ */
+export function consumeTrip(breaker: CircuitBreaker, cb: CircuitBreakerConfig): boolean {
+  if (!breaker.isTripped(cb)) {
+    return false;
+  }
+  breaker.resetConsecutive();
+  return true;
+}
+
+/**
+ * The model lane's per-ask accounting step: record the model's real
+ * verdict, then credit the recoverable tier when the emitted verdict was
+ * a machinery denial — the reviewer never produced a verdict (strict and
+ * permissive deny machinery; a broken reviewer must still be able to trip
+ * the breaker like a miscalibrated one). The two-tier doctrine lives
+ * beside the breaker: model denies feed both tiers, machinery failures
+ * feed consecutive only, mapped verdicts don't change what was recorded.
+ *
+ * @param breaker - The session breaker.
+ * @param original - The model's verdict kind.
+ * @param emitted - The verdict the link emitted.
+ */
+export function accountModelOutcome(
+  breaker: CircuitBreaker,
+  original: AuthorizerVerdict["kind"],
+  emitted: AuthorizerVerdict,
+): void {
+  breaker.recordVerdict(original);
+  if (emitted.kind === "deny" && original === "defer") {
+    // strict maps the model's own uncertainty to a deny as well as
+    // machinery failures — both are deny-equivalents for the recoverable
+    // tier (see recordDenyEquivalent).
+    breaker.recordDenyEquivalent();
   }
 }
 
@@ -196,13 +242,45 @@ export class VerdictCache {
   }
 }
 
+/** The overridable config keys: name-matched fields of overrides and config. */
+export type OverridableKey = keyof SessionOverrides & keyof AiGuardConfig;
+
+/**
+ * The "override beats config" rule, spelled once: the typed per-field
+ * accessor every runtime reader of an overridable key routes through. A
+ * new override field is compile-keyed here — a reader that forgets the
+ * precedence stops type-checking instead of silently reading the config.
+ * The full-snapshot projection ({@link effectiveConfig}) serves only the
+ * save action.
+ *
+ * @param overrides - The stable session overrides object.
+ * @param config - The validated config (required config yields a
+ *   non-optional result).
+ * @param key - The field to resolve.
+ * @returns The effective field value.
+ */
+export function effectiveOverride<T extends OverridableKey>(
+  overrides: SessionOverrides,
+  config: AiGuardConfig,
+  key: T,
+): AiGuardConfig[T];
+export function effectiveOverride<T extends OverridableKey>(
+  overrides: SessionOverrides,
+  config: AiGuardConfig | undefined,
+  key: T,
+): AiGuardConfig[T] | undefined;
+export function effectiveOverride<T extends OverridableKey>(
+  overrides: SessionOverrides,
+  config: AiGuardConfig | undefined,
+  key: T,
+): AiGuardConfig[T] | undefined {
+  return overrides[key] ?? config?.[key];
+}
+
 /**
  * The effective config: the loaded snapshot with every DEFINED override
- * applied. The single combination point for the "session override beats
- * config" rule — the save action (whole snapshot), and the settings
- * surface's per-field reads both project through here (the pipeline reads
- * individual fields directly, which is the same rule spelled per field —
- * hot path, no object allocation).
+ * applied — the save action's hole-snapshot projection (per-field reads
+ * go through {@link effectiveOverride}).
  *
  * Keys whose override is undefined are skipped, so a reset (which deletes
  * the key) never lets a dead `mode: undefined` shadow the config value

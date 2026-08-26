@@ -1,6 +1,6 @@
 /**
  * Shared ask fixtures: upstream-shaped PromptPayload / evidence / details
- * builders used across the ask-eligibility and review-request test files.
+ * builders used across the ask and review-request test files.
  * One definition per fixture shape so ask projections can't drift between
  * suites.
  */

@@ -2,8 +2,8 @@ import { parse as parseJsonc } from "jsonc-parser";
 import { createFsFromVolume, vol } from "memfs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ConfigEnv } from "#src/config-loader.ts";
-import { loadAiGuardConfig, persistConfigLayer } from "#src/config-loader.ts";
+import type { ConfigEnv } from "#src/config-layer.ts";
+import { loadAiGuardConfig, persistConfigLayer } from "#src/config-layer.ts";
 import { configSchema } from "#src/config-schema.ts";
 
 vi.mock("node:fs", () => createFsFromVolume(vol));
@@ -28,7 +28,7 @@ const fullConfig = configSchema.parse({
   cache: { maxEntries: 100 },
   circuitBreaker: { consecutive: 3, total: 20, verdict: "deny" },
   surfaces: ["bash"],
-  mode: "manual",
+  mode: "advisory",
   instructions: null,
 });
 
@@ -189,35 +189,51 @@ describe("loadAiGuardConfig — mode", () => {
     expect(result.issues.some((i) => i.path === "mode")).toBe(true);
   });
 
-  it("warns on the auto + breaker-defer combination (legal but interrupts)", () => {
+  it("warns on the permissive + breaker-defer combination (legal but interrupts)", () => {
     vol.fromJSON({
       "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
         provider: "anthropic",
         model: "claude-haiku-4-5",
-        mode: "auto",
+        mode: "permissive",
         circuitBreaker: { verdict: "defer" },
       }),
     });
 
     const result = loadAiGuardConfig(env());
     // The config itself is valid — the escape valve is a designed feature.
-    expect(result.config?.mode).toBe("auto");
+    expect(result.config?.mode).toBe("permissive");
     expect(result.config?.circuitBreaker.verdict).toBe("defer");
     const warning = result.issues.find((i) => i.path === "mode");
     expect(warning?.message).toContain("circuitBreaker.verdict");
   });
 
-  it("does not warn on auto with the default breaker deny", () => {
+  it("does not warn on strict with the default breaker deny", () => {
     vol.fromJSON({
       "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
         provider: "anthropic",
         model: "claude-haiku-4-5",
-        mode: "auto",
+        mode: "strict",
       }),
     });
 
     const result = loadAiGuardConfig(env());
     expect(result.issues).toEqual([]);
+  });
+
+  it("warns on the strict + breaker-defer combination too", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        mode: "strict",
+        circuitBreaker: { verdict: "defer" },
+      }),
+    });
+
+    const result = loadAiGuardConfig(env());
+    const warning = result.issues.find((i) => i.path === "mode");
+    expect(warning?.message).toContain("circuitBreaker.verdict");
+    expect(warning?.message).toContain('"strict"');
   });
 });
 
@@ -232,12 +248,12 @@ describe("config loader — JSONC", () => {
   // the reviewer model
   "provider": "anthropic",
   "model": "claude-haiku-4-5", // cheap + fast
-  "mode": "manual",
+  "mode": "advisory",
 }
 `,
     });
     const result = loadAiGuardConfig(env());
-    expect(result.config?.mode).toBe("manual");
+    expect(result.config?.mode).toBe("advisory");
     expect(result.issues).toEqual([]);
   });
 
@@ -306,7 +322,7 @@ describe("persistConfigLayer", () => {
   // careful with models
   "provider": "anthropic",
   "model": "claude-haiku-4-5",
-  "mode": "manual",
+  "mode": "advisory",
   "circuitBreaker": { "consecutive": 3 }
 }
 `;
@@ -314,7 +330,7 @@ describe("persistConfigLayer", () => {
     const result = persistConfigLayer({
       target: "global",
       env: env(),
-      config: { ...fullConfig, mode: "auto" },
+      config: { ...fullConfig, mode: "strict" },
     });
     expect(result.changed).toBe(true);
     expect(result.created).toBe(false);
@@ -325,9 +341,9 @@ describe("persistConfigLayer", () => {
     // The comment and the untouched fields survive byte-for-byte; the
     // changed leaf and the appended missing leaves land too.
     expect(written).toContain("// careful with models");
-    expect(written).toContain('"mode": "auto"');
+    expect(written).toContain('"mode": "strict"');
     // The file is JSONC — parse back through the same tolerant parser.
-    expect(parseJsonc(written)).toEqual({ ...fullConfig, mode: "auto" });
+    expect(parseJsonc(written)).toEqual({ ...fullConfig, mode: "strict" });
   });
 
   it("appends missing leaves without touching the rest", () => {
@@ -340,7 +356,7 @@ describe("persistConfigLayer", () => {
     const result = persistConfigLayer({
       target: "global",
       env: env(),
-      config: { ...fullConfig, provider: "anthropic", mode: "manual" },
+      config: { ...fullConfig, provider: "anthropic", mode: "advisory" },
     });
     expect(result.changed).toBe(true);
     const written = vol.readFileSync(
@@ -349,7 +365,7 @@ describe("persistConfigLayer", () => {
     ) as string;
     expect(written).toContain('"provider": "anthropic"');
     expect(JSON.parse(written)).toEqual(
-      configSchema.parse({ ...fullConfig, provider: "anthropic", mode: "manual" }),
+      configSchema.parse({ ...fullConfig, provider: "anthropic", mode: "advisory" }),
     );
   });
 
@@ -376,7 +392,7 @@ describe("persistConfigLayer", () => {
     const result = persistConfigLayer({
       target: "global",
       env: env(),
-      config: { ...fullConfig, mode: "auto" },
+      config: { ...fullConfig, mode: "strict" },
     });
     expect(result.error).toContain("not valid JSONC");
     expect(vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8")).toBe(
@@ -389,7 +405,7 @@ describe("persistConfigLayer", () => {
     const result = persistConfigLayer({
       target: "global",
       env: env(),
-      config: { ...fullConfig, mode: "auto" },
+      config: { ...fullConfig, mode: "strict" },
     });
     expect(result.error).toContain("not a JSON object");
   });
@@ -412,7 +428,7 @@ describe("persistConfigLayer", () => {
     // A "successful" save here would still read back "manual" next load.
     vol.fromJSON({
       "/agent/extensions/pi-permission-ai-guard/config.json":
-        '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "auto", "mode": "manual" }',
+        '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "strict", "mode": "advisory" }',
     });
     const result = persistConfigLayer({
       target: "global",
@@ -422,7 +438,7 @@ describe("persistConfigLayer", () => {
     expect(result.error).toContain("duplicate keys");
     expect(result.changed).toBe(false);
     expect(vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8")).toBe(
-      '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "auto", "mode": "manual" }',
+      '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "strict", "mode": "advisory" }',
     );
   });
 
@@ -582,27 +598,27 @@ describe("config file discovery — jsonc preferred", () => {
 
   it("persist edits the jsonc file when both exist", () => {
     vol.fromJSON({
-      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({ mode: "auto" }),
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({ mode: "strict" }),
       "/agent/extensions/pi-permission-ai-guard/config.jsonc": `{
-  "mode": "auto"
+  "mode": "strict"
 }
 `,
     });
     const result = persistConfigLayer({
       target: "global",
       env: env(),
-      config: { ...fullConfig, mode: "manual" },
+      config: { ...fullConfig, mode: "advisory" },
     });
     expect(result.path).toBe("/agent/extensions/pi-permission-ai-guard/config.jsonc");
     expect(result.changed).toBe(true);
     expect(
       vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.jsonc", "utf-8"),
-    ).toContain('"mode": "manual"');
+    ).toContain('"mode": "advisory"');
     // the legacy json is untouched
     expect(
       JSON.parse(
         vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8") as string,
       ),
-    ).toEqual({ mode: "auto" });
+    ).toEqual({ mode: "strict" });
   });
 });

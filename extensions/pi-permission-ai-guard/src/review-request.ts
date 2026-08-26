@@ -6,7 +6,7 @@
 
 import type { PromptRequestFacts } from "@gotgenes/pi-permission-system";
 
-import type { AskContext } from "./ask-eligibility.ts";
+import type { AskContext } from "./ask.ts";
 import { normalizeEmpty } from "./utils.ts";
 
 export interface ReviewRequestContext {
