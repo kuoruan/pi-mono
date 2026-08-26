@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { configSchema } from "#src/config-schema.ts";
+import { type AiGuardConfig, configSchema } from "#src/config-schema.ts";
 import {
   type EnumSettingSpec,
   type RuntimeSettings,
@@ -16,7 +16,12 @@ import {
 import type { SessionOverrides } from "#src/session-state.ts";
 
 const SPECS: readonly EnumSettingSpec[] = [
-  { name: "mode", values: ["manual", "default", "auto"], hiddenValue: "default" },
+  {
+    name: "mode",
+    values: ["manual", "default", "auto"],
+    description: "what happens to the model's denials and uncertainty",
+    hiddenValue: "default",
+  },
 ];
 
 /**
@@ -40,9 +45,22 @@ function makeUiCtx(selectResult?: string) {
  * Build settings over a plain surface with the config default.
  *
  * @param overridesInit - Initial overrides (mutated by the settings).
+ * @param saveConfig - Optional config-layer save stub (default: a path
+ *   echo reporting a change).
  * @returns The settings, the overrides object, and the append spy.
  */
-function makeSettings(overridesInit: SessionOverrides = {}) {
+function makeSettings(
+  overridesInit: SessionOverrides = {},
+  saveConfig?: (
+    target: "global" | "project",
+    config: AiGuardConfig,
+  ) => {
+    path: string;
+    created: boolean;
+    changed: boolean;
+    error?: string;
+  },
+) {
   const overrides: SessionOverrides = { ...overridesInit };
   const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
   const settings: RuntimeSettings = new RuntimeSettingsClass(
@@ -52,6 +70,9 @@ function makeSettings(overridesInit: SessionOverrides = {}) {
         overrides,
       },
       appendEntry,
+      saveConfig:
+        saveConfig ??
+        ((target) => ({ path: `/config-${target}.json`, created: false, changed: true })),
     },
     SPECS,
   );
@@ -104,7 +125,11 @@ describe("RuntimeSettings — command", () => {
     const overrides: SessionOverrides = {};
     const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
     const settings = new RuntimeSettingsClass(
-      { session: { session: undefined, overrides }, appendEntry },
+      {
+        session: { session: undefined, overrides },
+        appendEntry,
+        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
+      },
       SPECS,
     );
     const ctx = makeUiCtx();
@@ -122,7 +147,10 @@ describe("RuntimeSettings — command", () => {
     ctx.ui.select.mockResolvedValueOnce("mode — default (config)").mockResolvedValueOnce("auto");
     await settings.command.handler("", ctx);
 
-    expect(ctx.ui.select).toHaveBeenCalledWith("ai-guard settings:", ["mode — default (config)"]);
+    expect(ctx.ui.select).toHaveBeenCalledWith(
+      "ai-guard settings — pick a setting to adjust, or save the current config",
+      ["mode — default (config)", "save-to-global-config", "save-to-project-config"],
+    );
     expect(overrides.mode).toBe("auto");
   });
 
@@ -157,12 +185,19 @@ describe("RuntimeSettings — completions", () => {
   it("completes setting names first, then the setting's values", () => {
     const { settings } = makeSettings();
     const completions = settings.command.getArgumentCompletions;
-    expect(completions("mo")).toEqual([{ value: "mode", label: "mode" }]);
+    expect(completions("mo")).toEqual([
+      { value: "mode", label: "mode — what happens to the model's denials and uncertainty" },
+    ]);
     expect(completions("mode ")).toEqual([
       { value: "manual", label: "manual" },
       { value: "default", label: "default" },
       { value: "auto", label: "auto" },
       { value: "reset", label: "reset" },
+    ]);
+    // Save verbs complete at the TOP level, not inside a setting.
+    expect(completions("save")).toEqual([
+      { value: "save-to-global-config", label: "save-to-global-config" },
+      { value: "save-to-project-config", label: "save-to-project-config" },
     ]);
     expect(completions("mode de")).toEqual([{ value: "default", label: "default" }]);
     expect(completions("mode nope")).toBeNull();
@@ -195,7 +230,11 @@ describe("RuntimeSettings — shortcut", () => {
   it("without an active session warns instead of crashing", () => {
     const overrides: SessionOverrides = {};
     const settings = new RuntimeSettingsClass(
-      { session: { session: undefined, overrides }, appendEntry: () => {} },
+      {
+        session: { session: undefined, overrides },
+        appendEntry: () => {},
+        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
+      },
       SPECS,
     );
     const ctx = makeUiCtx();
@@ -219,7 +258,7 @@ describe("RuntimeSettings — restore + footer", () => {
 
   it("restore with no entries clears any stale override", () => {
     const { settings, overrides } = makeSettings({ mode: "manual" });
-    settings.restore({ getBranch: () => [] as never[] });
+    settings.restore({ getBranch: () => [] });
     expect(overrides.mode).toBeUndefined();
   });
 
@@ -247,7 +286,11 @@ describe("RuntimeSettings — restore + footer", () => {
   it("syncFooter without an active session sets nothing", () => {
     const overrides: SessionOverrides = {};
     const settings = new RuntimeSettingsClass(
-      { session: { session: undefined, overrides }, appendEntry: () => {} },
+      {
+        session: { session: undefined, overrides },
+        appendEntry: () => {},
+        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
+      },
       SPECS,
     );
     const ctx = makeUiCtx();
@@ -260,5 +303,178 @@ describe("RuntimeSettings — restore + footer", () => {
     const ctx = makeUiCtx();
     settings.clearFooter(ctx);
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", undefined);
+  });
+});
+
+describe("RuntimeSettings — save to config layer actions", () => {
+  it("save-to-global snapshots the full effective config (overrides merged)", async () => {
+    const saveConfig = vi.fn<
+      (
+        target: "global" | "project",
+        config: AiGuardConfig,
+      ) => {
+        path: string;
+        created: boolean;
+        changed: boolean;
+      }
+    >((target) => ({ path: `/cfg-${target}.json`, created: false, changed: true }));
+    const { settings } = makeSettings({ mode: "manual" }, saveConfig);
+    const ctx = makeUiCtx();
+
+    await settings.command.handler("save-to-global-config", ctx);
+
+    // The snapshot merges the session override over the loaded config —
+    // every field flows, so future command-configured settings ride along.
+    expect(saveConfig).toHaveBeenCalledTimes(1);
+    const [target, config] = saveConfig.mock.calls[0]!;
+    expect(target).toBe("global");
+    expect(config.mode).toBe("manual"); // override won over the snapshot
+    expect(config.provider).toBe("test"); // other fields intact
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "ai-guard: current config saved to global config: /cfg-global.json — new sessions start from it; this session keeps its overrides",
+      "info",
+    );
+  });
+
+  it("save-to-project passes the project target through", async () => {
+    const saveConfig = vi.fn<
+      (
+        target: "global" | "project",
+        config: AiGuardConfig,
+      ) => {
+        path: string;
+        created: boolean;
+        changed: boolean;
+      }
+    >((target) => ({ path: `/cfg-${target}.json`, created: false, changed: true }));
+    const { settings } = makeSettings({}, saveConfig);
+    const ctx = makeUiCtx();
+
+    await settings.command.handler("save-to-project-config", ctx);
+
+    expect(saveConfig.mock.calls[0]![0]).toBe("project");
+  });
+
+  it("notifies a refusal and changes nothing when the save errors", async () => {
+    const { settings } = makeSettings({}, () => ({
+      path: "/cfg.json",
+      created: false,
+      changed: false,
+      error: "not valid JSONC",
+    }));
+    const ctx = makeUiCtx();
+
+    await settings.command.handler("save-to-global-config", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "ai-guard: could not save to global config — not valid JSONC",
+      "error",
+    );
+  });
+
+  it("a no-override session saves the config's own value — no dead key shadows", async () => {
+    const saveConfig = vi.fn<
+      (
+        target: "global" | "project",
+        config: AiGuardConfig,
+      ) => {
+        path: string;
+        created: boolean;
+        changed: boolean;
+      }
+    >(() => ({ path: "/cfg.json", created: false, changed: true }));
+    const { settings, overrides } = makeSettings({}, saveConfig);
+    settings.restore({ getBranch: () => [] });
+    const ctx = makeUiCtx();
+
+    await settings.command.handler("save-to-global-config", ctx);
+
+    expect(saveConfig.mock.calls[0]![1].mode).toBe("default");
+    expect("mode" in overrides).toBe(false); // restore-noop left no dead key
+  });
+
+  it("save after an override reset carries the config value — the undefined-shadow is gone", async () => {
+    const saveConfig = vi.fn<
+      (
+        target: "global" | "project",
+        config: AiGuardConfig,
+      ) => {
+        path: string;
+        created: boolean;
+        changed: boolean;
+      }
+    >(() => ({ path: "/cfg.json", created: false, changed: true }));
+    const { settings, overrides } = makeSettings({ mode: "manual" }, saveConfig);
+    const ctx = makeUiCtx();
+
+    await settings.command.handler("mode reset", ctx); // deletes the override
+    await settings.command.handler("save-to-global-config", ctx);
+
+    expect(saveConfig.mock.calls[0]![1].mode).toBe("default");
+    expect("mode" in overrides).toBe(false);
+  });
+
+  it("reset deletes the override key outright (present ⇒ defined invariant)", () => {
+    const { settings, overrides } = makeSettings({ mode: "manual" });
+    const ctx = makeUiCtx();
+    void settings.command.handler("mode reset", ctx);
+    expect("mode" in overrides).toBe(false);
+    expect(overrides.mode).toBeUndefined();
+  });
+
+  it("the direct save form needs no picker UI — hasUI=false still saves", async () => {
+    const saveConfig = vi.fn<
+      (
+        target: "global" | "project",
+        config: AiGuardConfig,
+      ) => {
+        path: string;
+        created: boolean;
+        changed: boolean;
+      }
+    >(() => ({ path: "/cfg.json", created: false, changed: true }));
+    const { settings } = makeSettings({}, saveConfig);
+    const noUi = makeUiCtx();
+    noUi.hasUI = false;
+
+    await settings.command.handler("save-to-global-config", noUi);
+
+    expect(saveConfig).toHaveBeenCalledTimes(1);
+    expect(saveConfig.mock.calls[0]![0]).toBe("global");
+  });
+
+  it("the root menu applies a picked save action directly", async () => {
+    const saveConfig = vi.fn<
+      (
+        target: "global" | "project",
+        config: AiGuardConfig,
+      ) => {
+        path: string;
+        created: boolean;
+        changed: boolean;
+      }
+    >(() => ({ path: "/cfg.json", created: false, changed: true }));
+    const { settings } = makeSettings({}, saveConfig);
+    const ctx = makeUiCtx();
+    ctx.ui.select.mockResolvedValueOnce("save-to-project-config");
+    await settings.command.handler("", ctx);
+
+    expect(saveConfig.mock.calls[0]![0]).toBe("project");
+  });
+
+  it("reports when the layer already matches (nothing written)", async () => {
+    const { settings } = makeSettings({}, () => ({
+      path: "/cfg.json",
+      created: false,
+      changed: false,
+    }));
+    const ctx = makeUiCtx();
+
+    await settings.command.handler("save-to-global-config", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "ai-guard: global config already matches the current settings — nothing written",
+      "info",
+    );
   });
 });

@@ -43,6 +43,14 @@ export type RiskLevel = "low" | "medium" | "high" | "critical";
 type VerdictKind = AuthorizerVerdict["kind"];
 
 /**
+ * The deny reason attached when the model denies without one — the prompt
+ * demands a reason, but a terse model may omit it; this default keeps the
+ * teaching signal present.
+ */
+export const GENERIC_DENY_REASON =
+  "This action may be unsafe. Verify the target and intent before retrying.";
+
+/**
  * The valid risk levels as a readonly set, derived from {@link RiskLevel}
  * so the runtime check and the type can never drift apart. Built once at
  * module load; membership lookups are O(1).
@@ -55,9 +63,6 @@ const RISK_LEVELS: ReadonlySet<RiskLevel> = new Set<RiskLevel>([
 ]);
 
 const VERDICT_VALUES: ReadonlySet<VerdictKind> = new Set<VerdictKind>(["allow", "deny", "defer"]);
-
-export const GENERIC_DENY_REASON =
-  "This action may be unsafe. Verify the target and intent before retrying.";
 
 /**
  * Type guard: is `value` one of the risk levels?
@@ -81,116 +86,8 @@ function normalizeReason(value: unknown): string | undefined {
   return reason || undefined;
 }
 
-/**
- * Parse a verdict object (extracted from the model's JSON text reply) into a
- * ReviewOutcome. Anything other than a clean verdict defers (fail-safe).
- *
- * @param args - The parsed verdict object from the model's JSON reply.
- * @param latencyMs - Model call latency in milliseconds.
- * @returns A `ReviewOutcome` with the parsed verdict, or a defer outcome for invalid/missing
- *   verdicts.
- */
-export function parseVerdictObject(
-  args: Record<string, unknown>,
-  latencyMs: number,
-): ReviewOutcome {
-  const verdict = args.verdict;
-  const raw = safeStringify(args);
-  if (typeof verdict !== "string" || !VERDICT_VALUES.has(verdict as VerdictKind)) {
-    return {
-      verdict: { kind: "defer" },
-      deferKind: "invalid-verdict-value",
-      latencyMs,
-      rawReply: raw,
-    };
-  }
-  const riskLevel = parseRiskLevel(args.riskLevel);
-  if (verdict === "defer") {
-    return {
-      verdict: { kind: "defer" },
-      deferKind: "model-defer",
-      deferReason: normalizeReason(args.reason),
-      latencyMs,
-      riskLevel,
-      rawReply: raw,
-    };
-  }
-  if (verdict === "deny") {
-    // The deny reason is model-generated text. It is structurally sanitized
-    // (normalizeAndRedactText: strips zero-width chars, collapses whitespace,
-    // redacts secrets) but NOT semantically filtered. It is passed back as
-    // AuthorizerVerdict.reason (a "teaching reason" the invoking agent sees)
-    // and persisted in the audit log. This is safe under the trust
-    // assumption that the reviewer model is operator-configured and
-    // trusted — it is not adversarial. If that assumption ever breaks (e.g.
-    // untrusted reviewer, cross-tenant reviewer), semantic filtering would
-    // be needed to prevent prompt-injection via the reason text.
-    const reason = normalizeReason(args.reason) ?? GENERIC_DENY_REASON;
-    return { verdict: { kind: "deny", reason }, latencyMs, riskLevel, rawReply: raw };
-  }
-  return { verdict: { kind: "allow" }, latencyMs, riskLevel, rawReply: raw };
-}
-
 function parseRiskLevel(value: unknown): RiskLevel | undefined {
   return typeof value === "string" && isRiskLevel(value) ? value : undefined;
-}
-
-/**
- * Parse the model's text reply. Extracts the first balanced JSON object and
- * reads it as a verdict. Returns the text as rawReply for logging.
- *
- * @param text - The model's raw text reply.
- * @param latencyMs - Model call latency in milliseconds.
- * @returns A `ReviewOutcome` parsed from the first JSON object, or a `no-json` defer outcome if
- *   none is found.
- */
-export function parseTextFallback(text: string, latencyMs: number): ReviewOutcome {
-  const parsed = extractFirstJsonObject(text);
-  if (isObjectRecord(parsed)) {
-    return parseVerdictObject(parsed, latencyMs);
-  }
-  return { verdict: { kind: "defer" }, deferKind: "no-json", latencyMs, rawReply: text };
-}
-
-/**
- * Extract the first balanced JSON object from a string and return it parsed.
- * Tracks brace depth and respects string literals (including escaped quotes).
- *
- * If the first balanced object fails to parse, the recovery depends on whether
- * it looks like a verdict attempt:
- * - A malformed verdict-shaped candidate (e.g. `{verdict: "deny", reason: "x"}`
- * with unquoted keys, which `parseJsonWithRepair` does not fix) stops the
- * search and returns `null` — so a broken verdict is never overridden by an
- * unrelated later object (prevents a deny→allow flip when the model wraps a
- * malformed deny and then includes an allow example in its reasoning).
- * - Non-verdict-shaped brace noise (e.g. `{var}`, `{bad}`, template/markdown
- * fragments) keeps scanning — preserving recovery when the model mentions
- * config syntax before the real verdict JSON.
- *
- * Returns `null` if no parseable object is found.
- *
- * @param text - The text to search.
- * @returns The first parseable JSON object, or `null` if none is found (or a
- *   malformed verdict attempt short-circuits the search).
- */
-function extractFirstJsonObject(text: string): unknown | null {
-  let start = 0;
-  while (start < text.length) {
-    const nextBrace = findNextCharOutsideString(text, start, "{");
-    if (nextBrace < 0) return null;
-    const candidate = tryExtractBalanced(text, nextBrace);
-    if (candidate !== null) {
-      try {
-        return parseJsonWithRepair(candidate);
-      } catch {
-        // A malformed verdict attempt defers rather than being overridden by
-        // an unrelated later object; other brace noise keeps scanning.
-        if (looksLikeVerdictAttempt(candidate)) return null;
-      }
-    }
-    start = nextBrace + 1;
-  }
-  return null;
 }
 
 /**
@@ -272,4 +169,112 @@ function tryExtractBalanced(text: string, start: number): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Extract the first balanced JSON object from a string and return it parsed.
+ * Tracks brace depth and respects string literals (including escaped quotes).
+ *
+ * If the first balanced object fails to parse, the recovery depends on whether
+ * it looks like a verdict attempt:
+ * - A malformed verdict-shaped candidate (e.g. `{verdict: "deny", reason: "x"}`
+ * with unquoted keys, which `parseJsonWithRepair` does not fix) stops the
+ * search and returns `null` — so a broken verdict is never overridden by an
+ * unrelated later object (prevents a deny→allow flip when the model wraps a
+ * malformed deny and then includes an allow example in its reasoning).
+ * - Non-verdict-shaped brace noise (e.g. `{var}`, `{bad}`, template/markdown
+ * fragments) keeps scanning — preserving recovery when the model mentions
+ * config syntax before the real verdict JSON.
+ *
+ * Returns `null` if no parseable object is found.
+ *
+ * @param text - The text to search.
+ * @returns The first parseable JSON object, or `null` if none is found (or a
+ *   malformed verdict attempt short-circuits the search).
+ */
+function extractFirstJsonObject(text: string): unknown | null {
+  let start = 0;
+  while (start < text.length) {
+    const nextBrace = findNextCharOutsideString(text, start, "{");
+    if (nextBrace < 0) return null;
+    const candidate = tryExtractBalanced(text, nextBrace);
+    if (candidate !== null) {
+      try {
+        return parseJsonWithRepair(candidate);
+      } catch {
+        // A malformed verdict attempt defers rather than being overridden by
+        // an unrelated later object; other brace noise keeps scanning.
+        if (looksLikeVerdictAttempt(candidate)) return null;
+      }
+    }
+    start = nextBrace + 1;
+  }
+  return null;
+}
+
+/**
+ * Parse a verdict object (extracted from the model's JSON text reply) into a
+ * ReviewOutcome. Anything other than a clean verdict defers (fail-safe).
+ *
+ * @param args - The parsed verdict object from the model's JSON reply.
+ * @param latencyMs - Model call latency in milliseconds.
+ * @returns A `ReviewOutcome` with the parsed verdict, or a defer outcome for invalid/missing
+ *   verdicts.
+ */
+export function parseVerdictObject(
+  args: Record<string, unknown>,
+  latencyMs: number,
+): ReviewOutcome {
+  const verdict = args.verdict;
+  const raw = safeStringify(args);
+  if (typeof verdict !== "string" || !VERDICT_VALUES.has(verdict as VerdictKind)) {
+    return {
+      verdict: { kind: "defer" },
+      deferKind: "invalid-verdict-value",
+      latencyMs,
+      rawReply: raw,
+    };
+  }
+  const riskLevel = parseRiskLevel(args.riskLevel);
+  if (verdict === "defer") {
+    return {
+      verdict: { kind: "defer" },
+      deferKind: "model-defer",
+      deferReason: normalizeReason(args.reason),
+      latencyMs,
+      riskLevel,
+      rawReply: raw,
+    };
+  }
+  if (verdict === "deny") {
+    // The deny reason is model-generated text. It is structurally sanitized
+    // (normalizeAndRedactText: strips zero-width chars, collapses whitespace,
+    // redacts secrets) but NOT semantically filtered. It is passed back as
+    // AuthorizerVerdict.reason (a "teaching reason" the invoking agent sees)
+    // and persisted in the audit log. This is safe under the trust
+    // assumption that the reviewer model is operator-configured and
+    // trusted — it is not adversarial. If that assumption ever breaks (e.g.
+    // untrusted reviewer, cross-tenant reviewer), semantic filtering would
+    // be needed to prevent prompt-injection via the reason text.
+    const reason = normalizeReason(args.reason) ?? GENERIC_DENY_REASON;
+    return { verdict: { kind: "deny", reason }, latencyMs, riskLevel, rawReply: raw };
+  }
+  return { verdict: { kind: "allow" }, latencyMs, riskLevel, rawReply: raw };
+}
+
+/**
+ * Parse the model's text reply. Extracts the first balanced JSON object and
+ * reads it as a verdict. Returns the text as rawReply for logging.
+ *
+ * @param text - The model's raw text reply.
+ * @param latencyMs - Model call latency in milliseconds.
+ * @returns A `ReviewOutcome` parsed from the first JSON object, or a `no-json` defer outcome if
+ *   none is found.
+ */
+export function parseTextFallback(text: string, latencyMs: number): ReviewOutcome {
+  const parsed = extractFirstJsonObject(text);
+  if (isObjectRecord(parsed)) {
+    return parseVerdictObject(parsed, latencyMs);
+  }
+  return { verdict: { kind: "defer" }, deferKind: "no-json", latencyMs, rawReply: text };
 }

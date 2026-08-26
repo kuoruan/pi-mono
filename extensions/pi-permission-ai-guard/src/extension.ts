@@ -11,7 +11,13 @@ import {
   type PermissionsReadyEvent,
 } from "@gotgenes/pi-permission-system";
 
-import { type LoadConfigResult, loadAiGuardConfig } from "./config-loader.ts";
+import {
+  type ConfigEnv,
+  type LoadConfigResult,
+  type SaveConfigFn,
+  loadAiGuardConfig,
+  persistConfigLayer,
+} from "./config-loader.ts";
 import { MODE_VALUES } from "./config-schema.ts";
 import { warn } from "./logger.ts";
 import { type CompleteSimpleFn, createCompleteSimple } from "./model-review.ts";
@@ -25,7 +31,7 @@ import { SessionLifecycle } from "./session-lifecycle.ts";
  */
 export interface AiGuardDependencies {
   /** Override config loading (inject mock config in tests). */
-  loadConfig?: (cwd: string, trustedProject: boolean) => LoadConfigResult;
+  loadConfig?: (env: ConfigEnv) => LoadConfigResult;
   /** Override model call (inject mock replies in tests). */
   completeSimple?: CompleteSimpleFn;
   /**
@@ -34,8 +40,9 @@ export interface AiGuardDependencies {
    * used — the factory owns authorizer construction.
    */
   createPipeline?: (deps: ReviewPipelineDeps) => Authorizer["authorize"];
+  /** Override the config-layer persistence (the save-to-config actions). */
+  saveConfig?: SaveConfigFn;
 }
-
 /**
  * The settings this extension exposes: enum-valued overrides over their
  * same-named config fields. The whole /ai-guard UX materializes from
@@ -44,16 +51,23 @@ export interface AiGuardDependencies {
 const SETTINGS: readonly EnumSettingSpec[] = [
   // `default` is the shipped baseline — a footer line saying "default"
   // permanently would be pure noise, so RuntimeSettings omits it.
-  { name: "mode", values: [...MODE_VALUES], hiddenValue: "default" },
+  {
+    name: "mode",
+    values: [...MODE_VALUES],
+    description: "what happens to the model's denials and uncertainty",
+    hiddenValue: "default",
+  },
 ];
 
 export function createAiGuardExtension(
   pi: ExtensionAPI,
   dependencies: AiGuardDependencies = {},
 ): void {
-  const loadConfig =
-    dependencies.loadConfig ??
-    ((cwd: string, trustedProject: boolean) => loadAiGuardConfig({ cwd, trustedProject }));
+  // The live environment for the session. Replaced wholesale at each
+  // session_start (no cross-session leakage); the config-layer module
+  // resolves paths AND the project trust rule from it.
+  let sessionEnv: ConfigEnv | undefined;
+  const loadConfig = dependencies.loadConfig ?? ((env: ConfigEnv) => loadAiGuardConfig(env));
 
   // The lifecycle owns session identity, the registration, and the stable
   // overrides object; the settings surface reads/writes overrides through
@@ -73,7 +87,23 @@ export function createAiGuardExtension(
   });
 
   const settings = new RuntimeSettings(
-    { session: lifecycle, appendEntry: (type, data) => pi.appendEntry(type, data) },
+    {
+      session: lifecycle,
+      appendEntry: (type, data) => pi.appendEntry(type, data),
+      // The production adapter is a pure pass-through: persistConfigLayer
+      // owns the trust guard and the schema gate inside its interface.
+      saveConfig:
+        dependencies.saveConfig ??
+        ((target, config) => {
+          // Structurally unreachable (the settings command requires an
+          // active session, which implies a session_start has set the
+          // env) — kept as the typed floor for the undefined state.
+          if (!sessionEnv) {
+            return { path: "", created: false, changed: false, error: "no active session" };
+          }
+          return persistConfigLayer({ target, env: sessionEnv, config });
+        }),
+    },
     SETTINGS,
   );
 
@@ -81,7 +111,9 @@ export function createAiGuardExtension(
   pi.registerShortcut("ctrl+alt+g", settings.shortcut);
 
   pi.on("session_start", (_event, ctx) => {
-    const result = loadConfig(ctx.cwd, ctx.isProjectTrusted());
+    const env: ConfigEnv = { cwd: ctx.cwd, trustedProject: ctx.isProjectTrusted() };
+    sessionEnv = env;
+    const result = loadConfig(env);
     lifecycle.onSessionStart({
       config: result.config,
       registry: ctx.modelRegistry,
@@ -125,6 +157,7 @@ export function createAiGuardExtension(
   });
   pi.on("session_shutdown", (_event, ctx) => {
     lifecycle.onShutdown();
+    sessionEnv = undefined; // no cross-session leakage (mirrors onSessionStart)
     settings.clearFooter(ctx);
   });
 }

@@ -14,7 +14,7 @@
 
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
-import type { BreakerVerdict, Mode } from "./config-schema.ts";
+import type { AiGuardConfig, BreakerVerdict, Mode } from "./config-schema.ts";
 import type { RiskLevel } from "./verdict.ts";
 
 /**
@@ -22,6 +22,11 @@ import type { RiskLevel } from "./verdict.ts";
  * `/ai-guard` command or the `ctrl+alt+g` shortcut; each change is appended
  * to the pi session file (custom entry, never LLM context) and restored on
  * resume. A new session starts from the config values.
+ *
+ * Invariant: an override key PRESENT means it carries a defined value.
+ * Writers delete on undefined (the settings surface does); readers treat
+ * "absent" and "undefined" as the same. This keeps the save snapshot
+ * projection ({@link effectiveConfig}) from being shadowed by dead keys.
  */
 export interface SessionOverrides {
   /** Guard mode for this session; undefined = use the config's mode. */
@@ -51,6 +56,17 @@ export interface CacheConfig {
   /** Max entries (LRU). 0 disables caching. */
   maxEntries: number;
 }
+
+/** Why a cache lookup missed. */
+export type CacheMissReason =
+  | "disabled" // cache.maxEntries is 0
+  | "no-entry" // commandHash not in cache (first time or evicted)
+  | "context-changed"; // commandHash exists but contextHash differs
+
+/** Result of a cache lookup: either a hit with the verdict, or a miss reason. */
+export type CacheLookupResult =
+  | { hit: true; verdict: AuthorizerVerdict; riskLevel?: RiskLevel }
+  | { hit: false; missReason: CacheMissReason };
 
 /**
  * Circuit breaker: trips after too many deny verdicts in one session.
@@ -108,17 +124,6 @@ export class CircuitBreaker {
   }
 }
 
-/** Why a cache lookup missed. */
-export type CacheMissReason =
-  | "disabled" // cache.maxEntries is 0
-  | "no-entry" // commandHash not in cache (first time or evicted)
-  | "context-changed"; // commandHash exists but contextHash differs
-
-/** Result of a cache lookup: either a hit with the verdict, or a miss reason. */
-export type CacheLookupResult =
-  | { hit: true; verdict: AuthorizerVerdict; riskLevel?: RiskLevel }
-  | { hit: false; missReason: CacheMissReason };
-
 /**
  * Verdict cache: LRU of recent (command, context) → verdict, so repeated
  * identical asks in a stable conversation skip the model call.
@@ -175,4 +180,34 @@ export class VerdictCache {
     }
     this.cache.set(commandHash, { ...entry, contextHash });
   }
+}
+
+/**
+ * The effective config: the loaded snapshot with every DEFINED override
+ * applied. The single combination point for the "session override beats
+ * config" rule — the save action (whole snapshot), and the settings
+ * surface's per-field reads both project through here (the pipeline reads
+ * individual fields directly, which is the same rule spelled per field —
+ * hot path, no object allocation).
+ *
+ * Keys whose override is undefined are skipped, so a reset (which deletes
+ * the key) never lets a dead `mode: undefined` shadow the config value
+ * into the saved layer file — the bug this projection exists to make
+ * impossible.
+ *
+ * @param config - The validated loaded config.
+ * @param overrides - The stable session overrides object.
+ * @returns The materialized effective config. Values of override keys are
+ *   runtime-validated upstream; legality for persistence is re-checked by
+ *   the persist schema gate, not here.
+ */
+export function effectiveConfig(config: AiGuardConfig, overrides: SessionOverrides): AiGuardConfig {
+  const result: Record<string, unknown> = { ...config };
+  for (const key of Object.keys(overrides) as Array<keyof SessionOverrides>) {
+    const value = overrides[key];
+    if (value !== undefined) result[key] = value;
+  }
+  // The projection point carries the module's cast budget: SessionOverrides
+  // keys are dynamic, so the rebuilt shape is re-asserted here, once.
+  return result as AiGuardConfig;
 }

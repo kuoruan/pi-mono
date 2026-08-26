@@ -69,30 +69,6 @@ import type { AiGuardUiContext } from "./runtime-settings.ts";
 import { CircuitBreaker, type SessionOverrides, VerdictCache } from "./session-state.ts";
 import type { SessionManagerLike } from "./transcript-stripper.ts";
 
-/**
- * Read the host's session id, never throwing. Mirrors upstream's
- * `readSessionId` shape (hosts at the peer floor may lack
- * `SessionManager.getSessionId`; a missing id means the node publishes no
- * keyed permissions service). This is the FALLBACK source — the official
- * source is the `permissions:ready` payload; this read covers nodes whose
- * payload carries null.
- *
- * @param sessionManager - The session manager from the session ctx.
- * @returns The session id, or null when the host has none.
- */
-export function readSessionId(sessionManager: SessionManagerLike): string | null {
-  try {
-    return sessionManager.getSessionId() || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The event-ctx subset stored on the session for authorize-time
- * notifications. Only `ui.notify` is used; the whole ctx object is stored
- * (never destructured) so pi's lazy, active-checked getters stay intact.
- */
 /** What a session_start hands the lifecycle: the session's own inputs. */
 export interface SessionSeed {
   /** Validated extension config, or undefined if loading failed (fail-safe). */
@@ -135,6 +111,44 @@ export interface SessionLifecycleDeps {
   createPipeline: (deps: ReviewPipelineDeps) => Authorizer["authorize"];
   /** Model-call function (lazy registry resolution happens per call). */
   completeSimple: CompleteSimpleFn;
+}
+
+/**
+ * Whether `error` is the exact "already registered" rejection from
+ * `AuthorizerRegistry.register`. Used to distinguish a stale registration
+ * (the /reload dispose glitch) from a genuine registration failure.
+ *
+ * Exact match on the full message — not substring — so a different error
+ * that merely contains "already registered" stays a generic warning.
+ *
+ * @param error - The caught error from `service.registerAuthorizer()`.
+ * @param linkName - The link name passed to `registerAuthorizer`.
+ * @returns True if `error` is the duplicate-registration rejection for `linkName`.
+ */
+function isDuplicateAuthorizerError(error: unknown, linkName: string): boolean {
+  return (
+    error instanceof Error &&
+    error.message === `An authorizer is already registered for '${linkName}'.`
+  );
+}
+
+/**
+ * Read the host's session id, never throwing. Mirrors upstream's
+ * `readSessionId` shape (hosts at the peer floor may lack
+ * `SessionManager.getSessionId`; a missing id means the node publishes no
+ * keyed permissions service). This is the FALLBACK source — the official
+ * source is the `permissions:ready` payload; this read covers nodes whose
+ * payload carries null.
+ *
+ * @param sessionManager - The session manager from the session ctx.
+ * @returns The session id, or null when the host has none.
+ */
+export function readSessionId(sessionManager: SessionManagerLike): string | null {
+  try {
+    return sessionManager.getSessionId() || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -322,23 +336,4 @@ export class SessionLifecycle {
       warn(`Failed to register authorizer: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-}
-
-/**
- * Whether `error` is the exact "already registered" rejection from
- * `AuthorizerRegistry.register`. Used to distinguish a stale registration
- * (the /reload dispose glitch) from a genuine registration failure.
- *
- * Exact match on the full message — not substring — so a different error
- * that merely contains "already registered" stays a generic warning.
- *
- * @param error - The caught error from `service.registerAuthorizer()`.
- * @param linkName - The link name passed to `registerAuthorizer`.
- * @returns True if `error` is the duplicate-registration rejection for `linkName`.
- */
-function isDuplicateAuthorizerError(error: unknown, linkName: string): boolean {
-  return (
-    error instanceof Error &&
-    error.message === `An authorizer is already registered for '${linkName}'.`
-  );
 }

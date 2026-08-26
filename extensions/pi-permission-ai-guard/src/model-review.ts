@@ -60,7 +60,32 @@ export type CallResult =
   | { ok: true; reply: AssistantMessage; latencyMs: number }
   | { ok: false; deferKind: ModelCallDeferKind; latencyMs: number };
 
-/** Enough for a JSON verdict with a short reason. */
+/**
+ * Resolved auth fields needed to make a model call. Extracted from
+ * {@link ResolvedRequestAuth} after the pipeline's auth gate has passed.
+ */
+export type ModelCallAuth = Pick<SimpleStreamOptions, "apiKey" | "headers">;
+
+/**
+ * Everything a model review call needs, captured once. The pipeline builds
+ * this from its resolved model + auth + call context; {@link reviewModel}
+ * consumes it.
+ */
+export interface ModelCallContext {
+  /** The resolved reviewer model. */
+  model: Model<Api>;
+  /** Model completion function (wraps `provider.streamSimple().result()`). */
+  completeSimple: CompleteSimpleFn;
+  /** Resolved auth fields for the call. */
+  auth: ModelCallAuth;
+  /** Reasoning level ("off" omits the option). */
+  reasoning: AiGuardConfig["reasoning"];
+  /** Audit log for call-failure and diagnostic records. */
+  log: AuthorizerLog;
+  /** Request id for audit-log correlation. */
+  requestId: string;
+}
+
 const REVIEW_MAX_TOKENS = 512;
 
 /**
@@ -89,29 +114,78 @@ export function createCompleteSimple(
 }
 
 /**
- * Resolved auth fields needed to make a model call. Extracted from
- * {@link ResolvedRequestAuth} after the pipeline's auth gate has passed.
+ * Emit a call-failure record to the audit log (keyed by requestId).
+ *
+ * @param ctx - The resolved model-call context (for log + requestId).
+ * @param deferKind - The classified defer kind.
+ * @param error - The thrown error.
  */
-export type ModelCallAuth = Pick<SimpleStreamOptions, "apiKey" | "headers">;
+function reportCallFailure(
+  ctx: ModelCallContext,
+  deferKind: ModelCallDeferKind,
+  error: unknown,
+): void {
+  const rawError = error instanceof Error ? error.message : String(error);
+  ctx.log.debug(
+    MODEL_CALL_ERROR_EVENT,
+    modelCallError(ctx.requestId, deferKind, normalizeAndRedactText(rawError)),
+  );
+}
+
+/** Enough for a JSON verdict with a short reason. */
 
 /**
- * Everything a model review call needs, captured once. The pipeline builds
- * this from its resolved model + auth + call context; {@link reviewModel}
- * consumes it.
+ * Shared call scaffolding for {@link reviewModel}: builds the context +
+ * options, runs `completeSimple`, and normalizes a thrown error into a defer
+ * reason. {@link reviewModel} owns the parser and the outcome-shape mapping;
+ * this owns the call machinery — AbortSignal, auth headers, maxTokens,
+ * reasoning, and the timeout/call-failed classification.
+ *
+ * @param ctx - The resolved model-call context.
+ * @param systemPrompt - The system prompt for the call.
+ * @param userPrompt - The user prompt for the call.
+ * @param timeoutMs - Per-call timeout in milliseconds.
+ * @param maxTokens - Maximum tokens for the model reply.
+ * @returns A `CallResult`: success with the reply, or failure with the classified defer reason.
  */
-export interface ModelCallContext {
-  /** The resolved reviewer model. */
-  model: Model<Api>;
-  /** Model completion function (wraps `provider.streamSimple().result()`). */
-  completeSimple: CompleteSimpleFn;
-  /** Resolved auth fields for the call. */
-  auth: ModelCallAuth;
-  /** Reasoning level ("off" omits the option). */
-  reasoning: AiGuardConfig["reasoning"];
-  /** Audit log for call-failure and diagnostic records. */
-  log: AuthorizerLog;
-  /** Request id for audit-log correlation. */
-  requestId: string;
+async function executeCall(
+  ctx: ModelCallContext,
+  systemPrompt: string,
+  userPrompt: string,
+  timeoutMs: number,
+  maxTokens: number,
+): Promise<CallResult> {
+  // The Authorizer callback receives no ExtensionContext, so the agent's
+  // ctx.signal can't be threaded here; this timeout is the only abort source.
+  const signal = AbortSignal.timeout(timeoutMs);
+  const startedAt = Date.now();
+  try {
+    const context: Context = {
+      systemPrompt,
+      messages: [{ role: "user", content: userPrompt, timestamp: Date.now() }],
+    };
+    const options: SimpleStreamOptions = {
+      signal,
+      apiKey: ctx.auth.apiKey,
+      headers: ctx.auth.headers,
+      maxTokens,
+    };
+    // reasoning: "off" → don't pass reasoning option → pi-ai sets
+    // thinkingEnabled: false → sends thinking: {type: "disabled"}.
+    // Non-off values pass through as the reasoning level.
+    if (ctx.reasoning && ctx.reasoning !== "off") {
+      options.reasoning = ctx.reasoning;
+    }
+    const reply = await ctx.completeSimple(ctx.model, context, options);
+    return { ok: true, reply, latencyMs: Date.now() - startedAt };
+  } catch (e) {
+    const deferKind: ModelCallDeferKind =
+      e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")
+        ? "timeout"
+        : "call-failed";
+    reportCallFailure(ctx, deferKind, e);
+    return { ok: false, deferKind, latencyMs: Date.now() - startedAt };
+  }
 }
 
 /**
@@ -177,77 +251,4 @@ export async function reviewModel(
     deferKind: isTimeout ? "timeout" : "empty-reply",
     latencyMs: result.latencyMs,
   };
-}
-
-/**
- * Shared call scaffolding for {@link reviewModel}: builds the context +
- * options, runs `completeSimple`, and normalizes a thrown error into a defer
- * reason. {@link reviewModel} owns the parser and the outcome-shape mapping;
- * this owns the call machinery — AbortSignal, auth headers, maxTokens,
- * reasoning, and the timeout/call-failed classification.
- *
- * @param ctx - The resolved model-call context.
- * @param systemPrompt - The system prompt for the call.
- * @param userPrompt - The user prompt for the call.
- * @param timeoutMs - Per-call timeout in milliseconds.
- * @param maxTokens - Maximum tokens for the model reply.
- * @returns A `CallResult`: success with the reply, or failure with the classified defer reason.
- */
-async function executeCall(
-  ctx: ModelCallContext,
-  systemPrompt: string,
-  userPrompt: string,
-  timeoutMs: number,
-  maxTokens: number,
-): Promise<CallResult> {
-  // The Authorizer callback receives no ExtensionContext, so the agent's
-  // ctx.signal can't be threaded here; this timeout is the only abort source.
-  const signal = AbortSignal.timeout(timeoutMs);
-  const startedAt = Date.now();
-  try {
-    const context: Context = {
-      systemPrompt,
-      messages: [{ role: "user", content: userPrompt, timestamp: Date.now() }],
-    };
-    const options: SimpleStreamOptions = {
-      signal,
-      apiKey: ctx.auth.apiKey,
-      headers: ctx.auth.headers,
-      maxTokens,
-    };
-    // reasoning: "off" → don't pass reasoning option → pi-ai sets
-    // thinkingEnabled: false → sends thinking: {type: "disabled"}.
-    // Non-off values pass through as the reasoning level.
-    if (ctx.reasoning && ctx.reasoning !== "off") {
-      options.reasoning = ctx.reasoning;
-    }
-    const reply = await ctx.completeSimple(ctx.model, context, options);
-    return { ok: true, reply, latencyMs: Date.now() - startedAt };
-  } catch (e) {
-    const deferKind: ModelCallDeferKind =
-      e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")
-        ? "timeout"
-        : "call-failed";
-    reportCallFailure(ctx, deferKind, e);
-    return { ok: false, deferKind, latencyMs: Date.now() - startedAt };
-  }
-}
-
-/**
- * Emit a call-failure record to the audit log (keyed by requestId).
- *
- * @param ctx - The resolved model-call context (for log + requestId).
- * @param deferKind - The classified defer kind.
- * @param error - The thrown error.
- */
-function reportCallFailure(
-  ctx: ModelCallContext,
-  deferKind: ModelCallDeferKind,
-  error: unknown,
-): void {
-  const rawError = error instanceof Error ? error.message : String(error);
-  ctx.log.debug(
-    MODEL_CALL_ERROR_EVENT,
-    modelCallError(ctx.requestId, deferKind, normalizeAndRedactText(rawError)),
-  );
 }

@@ -12,18 +12,24 @@
 
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 
-/**
- * The custom-entry type all runtime-setting changes are persisted under.
- * One entry carries one setting's change keyed by setting name; entries
- * for different settings interleave freely on the branch.
- */
-export const SETTING_ENTRY_TYPE = "ai-guard-setting";
+import type { AiGuardConfig } from "./config-schema.ts";
+import type { SessionOverrides } from "./session-state.ts";
+
+/** The persisted setting names — the field-name intersection both types share. */
+export type SettingName = keyof SessionOverrides & keyof AiGuardConfig;
 
 /**
  * Branch-reader surface the restore scan needs — derived from the host's
  * SessionManager so it can't drift: the scan needs only `getBranch`.
  */
 export type SessionBranchReader = Pick<SessionManager, "getBranch">;
+
+/**
+ * The custom-entry type all runtime-setting changes are persisted under.
+ * One entry carries one setting's change keyed by setting name; entries
+ * for different settings interleave freely on the branch.
+ */
+export const SETTING_ENTRY_TYPE = "ai-guard-setting";
 
 /**
  * Append a setting change to the session file. `null` records an explicit
@@ -36,7 +42,7 @@ export type SessionBranchReader = Pick<SessionManager, "getBranch">;
  */
 export function persistSetting(
   appendEntry: (customType: string, data?: unknown) => void,
-  name: string,
+  name: SettingName,
   value: string | null,
 ): void {
   appendEntry(SETTING_ENTRY_TYPE, { [name]: value });
@@ -57,7 +63,7 @@ export function persistSetting(
  * @returns The persisted override, or undefined for none.
  */
 export function restoreSetting(
-  name: string,
+  name: SettingName,
   validValues: readonly string[],
   reader: SessionBranchReader,
 ): string | undefined {

@@ -1,14 +1,14 @@
 /**
- * Shared prompt-sanitization and small helpers used across modules.
+ * Shared prompt-sanitization, hashing, stringification, and record guards
+ * used across modules.
  *
  * - NormalizeText: strip zero-width chars + collapse whitespace (anti-injection)
  * - NormalizeAndRedactText: normalize + redact secrets (for model context / logs)
  * - RedactSecrets: scrub common credential patterns
  * - TruncateMiddle: head+tail string truncation
  * - IsObjectRecord: type guard for non-array objects
- *
- * Single-consumer helpers (extractFirstJsonObject, safeStringify, shortHash)
- * have been inlined into their consumers (verdict.ts, review-pipeline.ts).
+ * - ShortHash: stable hash for cache keys / log correlation
+ * - SafeStringify: JSON.stringify via try/catch (config snapshots, log data)
  */
 
 /**
@@ -81,6 +81,35 @@ function stripZeroWidthChars(text: string): string {
 }
 
 /**
+ * Truncate text to maxChars, preserving head and tail.
+ *
+ * @param text - Text to truncate in the middle.
+ * @param maxChars - Maximum character count of the result.
+ * @returns Truncated text with a `[...truncated...]` marker if shortened, or the original text if
+ *   within the limit.
+ */
+export function truncateMiddle(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const tag = "\n[...truncated...]\n";
+  const available = Math.max(0, maxChars - tag.length);
+  const headLength = Math.floor(available * 0.6);
+  const tailLength = available - headLength;
+  // slice(-0) returns the whole string, so guard against tailLength === 0
+  const tail = tailLength > 0 ? text.slice(-tailLength) : "";
+  return `${text.slice(0, headLength)}${tag}${tail}`;
+}
+
+/**
+ * Type guard: is this value an object record (not array, not null)?
+ *
+ * @param value - Value to test.
+ * @returns True if `value` is a non-array object (type-narrowed to `Record<string, unknown>`).
+ */
+export function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * Sanitize untrusted text before embedding it in prompts.
  *
  * Strips zero-width characters (ZWSP, ZWNJ, ZWJ, WJ, BOM) that bypass
@@ -141,35 +170,6 @@ export function normalizeAndRedactText(text: string): string {
  */
 export function encodeActionTextForPrompt(text: string): string {
   return JSON.stringify(redactSecrets(stripZeroWidthChars(text)));
-}
-
-/**
- * Truncate text to maxChars, preserving head and tail.
- *
- * @param text - Text to truncate in the middle.
- * @param maxChars - Maximum character count of the result.
- * @returns Truncated text with a `[...truncated...]` marker if shortened, or the original text if
- *   within the limit.
- */
-export function truncateMiddle(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  const tag = "\n[...truncated...]\n";
-  const available = Math.max(0, maxChars - tag.length);
-  const headLength = Math.floor(available * 0.6);
-  const tailLength = available - headLength;
-  // slice(-0) returns the whole string, so guard against tailLength === 0
-  const tail = tailLength > 0 ? text.slice(-tailLength) : "";
-  return `${text.slice(0, headLength)}${tag}${tail}`;
-}
-
-/**
- * Type guard: is this value an object record (not array, not null)?
- *
- * @param value - Value to test.
- * @returns True if `value` is a non-array object (type-narrowed to `Record<string, unknown>`).
- */
-export function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

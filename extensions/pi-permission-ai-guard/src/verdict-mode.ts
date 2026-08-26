@@ -26,9 +26,6 @@ import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 import type { Mode } from "./config-schema.ts";
 import type { ModelCallDeferKind, RiskLevel } from "./verdict.ts";
 
-/** Reason carried by an auto-policy deny mapped from a defer with no clarification request. */
-export const AUTO_DEFER_DENY_REASON = "Reviewer was uncertain; auto mode denies uncertain requests";
-
 /**
  * Extra context for a model defer verdict (fresh-path only — defers are
  * never cached, so the cache-hit path has none of this).
@@ -42,6 +39,16 @@ export interface ModelDeferInfo {
   /** The clarification request attached to a model defer. */
   reason?: string;
 }
+
+/** A reviewer machinery failure, wherever it happens in the pipeline. */
+export type MachineryFailureKind =
+  | ModelCallDeferKind
+  | "model-unresolved"
+  | "auth-failed"
+  | "transcript-error";
+
+/** Reason carried by an auto-policy deny mapped from a defer with no clarification request. */
+export const AUTO_DEFER_DENY_REASON = "Reviewer was uncertain; auto mode denies uncertain requests";
 
 /**
  * Apply the configured mode to a model verdict.
@@ -85,13 +92,6 @@ export function manualEscalationMessage(
   const reasonSuffix = reason ? ` — ${reason}` : "";
   return `ai-guard reviewer denied this request${risk}${reasonSuffix}`;
 }
-
-/** A reviewer machinery failure, wherever it happens in the pipeline. */
-export type MachineryFailureKind =
-  | ModelCallDeferKind
-  | "model-unresolved"
-  | "auth-failed"
-  | "transcript-error";
 
 /**
  * Explain an auto-policy interruption caused by reviewer machinery

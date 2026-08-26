@@ -10,3 +10,4 @@ Add a `mode` config option (`manual` | `default` | `auto`, default `default`) de
 - The mode is switchable at runtime via the `/ai-guard` settings menu (two-stage argument completion) and the `ctrl+alt+g` cycle shortcut; session overrides persist into pi's session file (custom entries, never LLM context) and restore on resume, re-deriving on tree navigation.
 - The footer renders only deviations from the `default` baseline.
 - A tripped circuit breaker's forced verdict bypasses the mapping by design: the default forced deny keeps auto sessions uninterrupted; a configured forced defer interrupts the human as the reviewer-untrusted escape valve (the config loader warns about that combination).
+- Save actions persist the current effective config (every field, session overrides included) into the global or project config file — in-place JSONC leaf edits that preserve comments and formatting, refused for untrusted projects; a saved field shadows the layers beneath it.

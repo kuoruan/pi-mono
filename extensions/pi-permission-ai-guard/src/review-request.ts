@@ -38,13 +38,13 @@ type KeyedAskFields =
   | "canonicalBoundary"
   | "workingDirectory";
 
+/** Upstream request facts the cache identity keys on (via the material below). */
+type KeyedRequestFacts = "value" | "commandContext" | "executedUnit";
+
 /** Every other AskContext field — excluded by doctrine, one entry each. */
 export const EXCLUDED_ASK_FIELDS: Record<Exclude<keyof AskContext, KeyedAskFields>, string> = {
   annotations: "model advisories — excluded while assumed absent; build-side warn trips when not",
 };
-
-/** Upstream request facts the cache identity keys on (via the material below). */
-type KeyedRequestFacts = "value" | "commandContext" | "executedUnit";
 
 /** Every other upstream request fact — excluded by doctrine, one entry each. */
 export const EXCLUDED_REQUEST_FACTS: Record<

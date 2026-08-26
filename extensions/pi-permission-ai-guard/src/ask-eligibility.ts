@@ -102,160 +102,6 @@ export interface AskContext {
   readonly annotations: readonly PromptAnnotation[];
 }
 
-/**
- * Resolve the review target for an ask.
- *
- * Returns `{ surface, target }` when the ask's surface matches the configured
- * `surfaces` list AND a non-empty target can be extracted. Otherwise returns
- * a tagged reason: `"surface-unmatched"` (surface missing or not configured)
- * is expected config behavior (silent); `"no-target"` (surface matched but
- * no target extractable) is an unexpected ask (logged).
- *
- * Target extraction takes `payload.request.value` as the primary value;
- * the `details` display-override fields (still present in v27 for forwarded
- * / degraded asks) are the fail-safe fallback chain. The `"no-target"`
- * reason stays reachable: a `forwarded` (degraded) ask whose `value` is `""`
- * and whose fallback chain is entirely empty still yields `no-target` rather
- * than a silent review of an empty string.
- *
- * @param details The permission ask details from the Authorizer chain.
- * @param config The surfaces list to match against (glob patterns).
- * @returns The resolved `{ surface, target }` when eligible, or a tagged reason
- *   (`surface-unmatched` / `no-target`, carrying the resolved surface for logging)
- *   when not.
- */
-export function resolveReviewTarget(
-  details: PromptPermissionDetails,
-  config: { surfaces: readonly string[] },
-): ReviewTargetResolution {
-  const surface = surfaceOf(details);
-  if (!surface) return { reason: "surface-unmatched" };
-  if (!matchSurface(config.surfaces, surface)) return { reason: "surface-unmatched" };
-
-  const target = extractTarget(details);
-  if (!target) return { reason: "no-target", surface };
-
-  return { surface, target };
-}
-
-/**
- * Build the structured {@link AskContext} for an ask.
- *
- * Projects the structured `payload` into named, typed fields by `payload.kind`
- * dispatch (the renderers' discriminant). Evidence is pre-parsed into named
- * slots; the raw `evidence` array is never exposed. `surface` is a display
- * field only.
- *
- * @param details - The permission ask details (the structured `payload` is read directly).
- * @param cwd - The session working directory (policy containment boundary).
- * @returns The structured {@link AskContext} with evidence pre-parsed into named fields.
- */
-export function buildAskContext(details: PromptPermissionDetails, cwd: string): AskContext {
-  const payload = details.payload;
-  const boundaryValue = details.accessIntent?.boundaryValue;
-
-  // Invariant: the verdict cache keys WITHOUT annotations (see the
-  // exclusion doctrine in review-request.ts), valid only while no
-  // annotator is registered upstream. Warn once when that assumption
-  // breaks — silent stale cache hits are the alternative.
-  if (payload.annotations.length > 0 && !annotationsDriftWarned) {
-    annotationsDriftWarned = true;
-    warn(
-      "ask carries model annotations (an upstream annotator is registered) — annotations can change verdicts but are excluded from the verdict-cache key; cache hits may be stale until the key includes them",
-    );
-  }
-
-  return {
-    kind: payload.kind,
-    request: payload.request,
-    ...flaggedFields(payload),
-    canonicalBoundary:
-      typeof boundaryValue === "string" && boundaryValue ? boundaryValue : undefined,
-    workingDirectory: cwd,
-    annotations: payload.annotations,
-  };
-}
-
-/**
- * Extract the display surface, preferring the forwarded intent.
- *
- * @param details - The permission ask details.
- * @returns The surface string, or undefined if none is present.
- */
-function surfaceOf(details: PromptPermissionDetails): string | undefined {
-  return details.accessIntent?.surface ?? details.surface ?? undefined;
-}
-
-/**
- * Check whether `surface` matches the configured surfaces list.
- * Supports glob-style patterns where `*` matches any character sequence:
- *
- * - `*`: match any surface
- * - `namespace:*`: match all tools under a namespace
- * - `*:bar`: match `bar` under any namespace
- * - `*:*`: match any namespaced surface
- * - Exact surface name (e.g. "bash", "mcp")
- * - "!pattern": exclude (negate) a pattern; exclusions take priority over inclusions. Useful for
- *   surfaces like `external_directory` and `path` that pi-permission-system's bounded-delegation
- *   checkpoint downgrades to `defer` regardless of the verdict. Empty array or excludes-only (no
- *   includes) = review nothing.
- *
- * @param configured - The configured surface patterns (glob, with `!` negation).
- * @param surface - The surface to test.
- * @returns True if `surface` matches an included pattern and is not excluded.
- */
-function matchSurface(configured: readonly string[], surface: string): boolean {
-  const excludes = configured.filter((e) => e.startsWith("!"));
-  if (excludes.some((e) => globMatch(e.slice(1), surface))) {
-    return false;
-  }
-  return configured.some((entry) => !entry.startsWith("!") && globMatch(entry, surface));
-}
-
-/**
- * Extract the review target (the value being authorized).
- *
- * Primary source is `payload.request.value`; the `details` display-override
- * fields (still present in v27) are the fail-safe fallback chain for a
- * `forwarded` (degraded) ask whose `value` is empty.
- *
- * `accessIntent.matchValues` (when present, for the path surface) are joined
- * with " | " so the model sees every form — `[absolute, cwd-relative,
- * canonical]` gives both the absolute and symlink-resolved paths, avoiding
- * the symlink-blindness of taking only the first.
- *
- * Note: `external_directory`/`path` allows are capped to `defer` by the host's
- * bounded-delegation checkpoint regardless of target correctness (see
- * CONTEXT.md "Ask eligibility") — the link's value there is limited to a
- * confident `deny`.
- *
- * @param details - The permission ask details.
- * @returns The extracted review target string, or undefined if no field yielded a value.
- */
-function extractTarget(details: PromptPermissionDetails): string | undefined {
-  const matchValues = details.accessIntent?.matchValues;
-  if (matchValues && matchValues.length > 0) {
-    return matchValues.join(" | ");
-  }
-
-  // payload.request.value is the authoritative decision-relevant value.
-  const payloadValue = details.payload.request.value;
-  if (payloadValue) {
-    return payloadValue;
-  }
-
-  // Fail-safe fallback chain for a degraded forwarded ask (empty payload
-  // value) or any future shape that leaves value empty: skip empty strings.
-  return [
-    details.value,
-    details.command,
-    details.path,
-    details.target,
-    details.toolName,
-    details.skillName,
-  ].find((field): field is string => typeof field === "string" && field.length > 0);
-}
-
 // ── Evidence projection (re-implemented; upstream helpers are not exported) ──
 
 /**
@@ -348,5 +194,159 @@ function flaggedFields(payload: PromptPayload): {
     ...(toolInputPreview !== undefined ? { toolInputPreview } : {}),
     ...(readPath !== undefined ? { readPath } : {}),
     ...(resolvedAlias !== undefined ? { resolvedAlias } : {}),
+  };
+}
+
+/**
+ * Extract the display surface, preferring the forwarded intent.
+ *
+ * @param details - The permission ask details.
+ * @returns The surface string, or undefined if none is present.
+ */
+function surfaceOf(details: PromptPermissionDetails): string | undefined {
+  return details.accessIntent?.surface ?? details.surface ?? undefined;
+}
+
+/**
+ * Check whether `surface` matches the configured surfaces list.
+ * Supports glob-style patterns where `*` matches any character sequence:
+ *
+ * - `*`: match any surface
+ * - `namespace:*`: match all tools under a namespace
+ * - `*:bar`: match `bar` under any namespace
+ * - `*:*`: match any namespaced surface
+ * - Exact surface name (e.g. "bash", "mcp")
+ * - "!pattern": exclude (negate) a pattern; exclusions take priority over inclusions. Useful for
+ *   surfaces like `external_directory` and `path` that pi-permission-system's bounded-delegation
+ *   checkpoint downgrades to `defer` regardless of the verdict. Empty array or excludes-only (no
+ *   includes) = review nothing.
+ *
+ * @param configured - The configured surface patterns (glob, with `!` negation).
+ * @param surface - The surface to test.
+ * @returns True if `surface` matches an included pattern and is not excluded.
+ */
+function matchSurface(configured: readonly string[], surface: string): boolean {
+  const excludes = configured.filter((e) => e.startsWith("!"));
+  if (excludes.some((e) => globMatch(e.slice(1), surface))) {
+    return false;
+  }
+  return configured.some((entry) => !entry.startsWith("!") && globMatch(entry, surface));
+}
+
+/**
+ * Extract the review target (the value being authorized).
+ *
+ * Primary source is `payload.request.value`; the `details` display-override
+ * fields (still present in v27) are the fail-safe fallback chain for a
+ * `forwarded` (degraded) ask whose `value` is empty.
+ *
+ * `accessIntent.matchValues` (when present, for the path surface) are joined
+ * with " | " so the model sees every form — `[absolute, cwd-relative,
+ * canonical]` gives both the absolute and symlink-resolved paths, avoiding
+ * the symlink-blindness of taking only the first.
+ *
+ * Note: `external_directory`/`path` allows are capped to `defer` by the host's
+ * bounded-delegation checkpoint regardless of target correctness (see
+ * CONTEXT.md "Ask eligibility") — the link's value there is limited to a
+ * confident `deny`.
+ *
+ * @param details - The permission ask details.
+ * @returns The extracted review target string, or undefined if no field yielded a value.
+ */
+function extractTarget(details: PromptPermissionDetails): string | undefined {
+  const matchValues = details.accessIntent?.matchValues;
+  if (matchValues && matchValues.length > 0) {
+    return matchValues.join(" | ");
+  }
+
+  // payload.request.value is the authoritative decision-relevant value.
+  const payloadValue = details.payload.request.value;
+  if (payloadValue) {
+    return payloadValue;
+  }
+
+  // Fail-safe fallback chain for a degraded forwarded ask (empty payload
+  // value) or any future shape that leaves value empty: skip empty strings.
+  return [
+    details.value,
+    details.command,
+    details.path,
+    details.target,
+    details.toolName,
+    details.skillName,
+  ].find((field): field is string => typeof field === "string" && field.length > 0);
+}
+
+/**
+ * Resolve the review target for an ask.
+ *
+ * Returns `{ surface, target }` when the ask's surface matches the configured
+ * `surfaces` list AND a non-empty target can be extracted. Otherwise returns
+ * a tagged reason: `"surface-unmatched"` (surface missing or not configured)
+ * is expected config behavior (silent); `"no-target"` (surface matched but
+ * no target extractable) is an unexpected ask (logged).
+ *
+ * Target extraction takes `payload.request.value` as the primary value;
+ * the `details` display-override fields (still present in v27 for forwarded
+ * / degraded asks) are the fail-safe fallback chain. The `"no-target"`
+ * reason stays reachable: a `forwarded` (degraded) ask whose `value` is `""`
+ * and whose fallback chain is entirely empty still yields `no-target` rather
+ * than a silent review of an empty string.
+ *
+ * @param details The permission ask details from the Authorizer chain.
+ * @param config The surfaces list to match against (glob patterns).
+ * @returns The resolved `{ surface, target }` when eligible, or a tagged reason
+ *   (`surface-unmatched` / `no-target`, carrying the resolved surface for logging)
+ *   when not.
+ */
+export function resolveReviewTarget(
+  details: PromptPermissionDetails,
+  config: { surfaces: readonly string[] },
+): ReviewTargetResolution {
+  const surface = surfaceOf(details);
+  if (!surface) return { reason: "surface-unmatched" };
+  if (!matchSurface(config.surfaces, surface)) return { reason: "surface-unmatched" };
+
+  const target = extractTarget(details);
+  if (!target) return { reason: "no-target", surface };
+
+  return { surface, target };
+}
+
+/**
+ * Build the structured {@link AskContext} for an ask.
+ *
+ * Projects the structured `payload` into named, typed fields by `payload.kind`
+ * dispatch (the renderers' discriminant). Evidence is pre-parsed into named
+ * slots; the raw `evidence` array is never exposed. `surface` is a display
+ * field only.
+ *
+ * @param details - The permission ask details (the structured `payload` is read directly).
+ * @param cwd - The session working directory (policy containment boundary).
+ * @returns The structured {@link AskContext} with evidence pre-parsed into named fields.
+ */
+export function buildAskContext(details: PromptPermissionDetails, cwd: string): AskContext {
+  const payload = details.payload;
+  const boundaryValue = details.accessIntent?.boundaryValue;
+
+  // Invariant: the verdict cache keys WITHOUT annotations (see the
+  // exclusion doctrine in review-request.ts), valid only while no
+  // annotator is registered upstream. Warn once when that assumption
+  // breaks — silent stale cache hits are the alternative.
+  if (payload.annotations.length > 0 && !annotationsDriftWarned) {
+    annotationsDriftWarned = true;
+    warn(
+      "ask carries model annotations (an upstream annotator is registered) — annotations can change verdicts but are excluded from the verdict-cache key; cache hits may be stale until the key includes them",
+    );
+  }
+
+  return {
+    kind: payload.kind,
+    request: payload.request,
+    ...flaggedFields(payload),
+    canonicalBoundary:
+      typeof boundaryValue === "string" && boundaryValue ? boundaryValue : undefined,
+    workingDirectory: cwd,
+    annotations: payload.annotations,
   };
 }

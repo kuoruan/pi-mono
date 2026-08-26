@@ -54,7 +54,7 @@ Or add to `settings.json`:
 
 ## Configure
 
-Two config files are involved: pi-permission-system's config names the chain link, and this extension's config declares the model and review behavior.
+Two config files are involved: pi-permission-system's config names the chain link, and this extension's config declares the model and review behavior. This extension reads `config.jsonc` or `config.json` (JSONC — comments and trailing commas are fine); when both exist, `config.jsonc` wins.
 
 1. In **pi-permission-system** config, name the link in `authorizerChain`:
 
@@ -66,7 +66,7 @@ Two config files are involved: pi-permission-system's config names the chain lin
 2. In **this** extension's config, declare the model and review behavior:
 
    ```jsonc
-   // ~/.pi/agent/extensions/pi-permission-ai-guard/config.json
+   // ~/.pi/agent/extensions/pi-permission-ai-guard/config.jsonc
    {
      "provider": "anthropic",
      "model": "claude-haiku-4-5",
@@ -152,12 +152,26 @@ Mapped verdicts still count toward the circuit breaker (the breaker counts real 
 
 ### Runtime control
 
+Effective config layers, in precedence order: **session overrides** (the
+controls below) > **project config** (trusted projects) > **global
+config**. Saving writes UPWARD into a layer; a saved field then shadows the
+layers beneath it.
+
 Two session-scoped controls change the effective mode without touching the config file:
 
 - `/ai-guard` — opens the settings menu (each entry shows its current
   value and source); picking an entry opens its value picker. Direct forms: `/ai-guard mode manual|default|auto` and
   `/ai-guard mode reset` (back to the config default). Argument
   completion is two-stage: setting names first, then the setting's values.
+- `/ai-guard mode save-to-global-config` / `/ai-guard mode
+save-to-project-config` — persist the current EFFECTIVE config (every
+  field, session overrides included, so future command-configured settings
+  ride along) into the global or project config file. Leaves are written
+  in place via JSONC edits: comments, formatting, and untouched keys
+  survive; when the layer already matches, nothing is written. The project
+  target is refused for untrusted projects (that layer isn't honored
+  there). New sessions start from the saved layer; the current session
+  keeps its overrides. Both actions are the last picker entries.
 - `ctrl+alt+g` — cycle `manual → default → auto → manual` (from the
   default, one press reaches `auto`).
 

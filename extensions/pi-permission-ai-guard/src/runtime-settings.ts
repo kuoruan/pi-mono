@@ -24,13 +24,14 @@ import type {
   RegisteredCommand,
 } from "@earendil-works/pi-coding-agent";
 
+import type { ConfigLayerTarget, SaveConfigFn } from "./config-loader.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
 import {
   type SessionBranchReader,
   persistSetting,
   restoreSetting,
 } from "./session-settings-store.ts";
-import type { SessionOverrides } from "./session-state.ts";
+import { effectiveConfig, type SessionOverrides } from "./session-state.ts";
 
 /**
  * An enum-valued session setting overriding its same-named config field.
@@ -42,6 +43,11 @@ export interface EnumSettingSpec {
   readonly name: keyof SessionOverrides & keyof AiGuardConfig;
   /** Valid values, in shortcut-cycle order. */
   readonly values: readonly string[];
+  /**
+   * One-line what-this-changes description, shown in completion labels
+   * (e.g. `mode — what happens to model denials`).
+   */
+  readonly description?: string;
   /**
    * A value not worth a footer line — the shipped baseline (e.g. "default").
    * When the effective value equals it, no fragment renders; an all-hidden
@@ -98,10 +104,13 @@ export interface RuntimeSettingsDeps {
   session: SettingsSessionSurface;
   /** Session-file append (persistence of setting changes). */
   appendEntry: (customType: string, data?: unknown) => void;
+  /**
+   * Persists the current effective config snapshot into a config layer
+   * (the "save to global/project config" actions). In production this
+   * targets the global or project config file; tests inject a stub.
+   */
+  saveConfig: SaveConfigFn;
 }
-
-/** Footer status key the settings line lives under. */
-const FOOTER_KEY = "ai-guard";
 
 /**
  * One option in a setting's picker and completion surface: an enum value,
@@ -109,7 +118,22 @@ const FOOTER_KEY = "ai-guard";
  * channel — a spec whose values someday include a literal "reset" stays
  * unambiguous.
  */
-type SettingOption = { readonly text: string; readonly kind: "value" | "reset" };
+type SettingOption = {
+  readonly text: string;
+  readonly kind: "value" | "reset";
+};
+
+/** Footer status key the settings line lives under. */
+const FOOTER_KEY = "ai-guard";
+
+/**
+ * The save verbs, reserved at the command's top level: a setting spec must
+ * never take one of these names (they'd shadow the action).
+ */
+const SAVE_VERBS = [
+  { text: "save-to-global-config", target: "global" as const },
+  { text: "save-to-project-config", target: "project" as const },
+];
 
 /**
  * Owns the runtime settings surface for the given specs.
@@ -134,16 +158,23 @@ export class RuntimeSettings {
 
   /** The /ai-guard command registration object. */
   readonly command: AiGuardCommand = {
-    description: "Configure the AI guard link (settings menu; session-scoped)",
+    description:
+      "AI Guard review settings — decide what happens to the model's denials and uncertainty (session-scoped)",
     getArgumentCompletions: (prefix) => {
       const trimmed = prefix.replace(/^\s+/, "");
       const spaceAt = trimmed.indexOf(" ");
       let items: { value: string; label: string }[];
       if (spaceAt < 0) {
-        // First token: complete setting names.
-        items = this.#specs
-          .filter((s) => s.name.startsWith(trimmed))
-          .map((s) => ({ value: s.name, label: s.name }));
+        // First token: complete setting names followed by the save verbs.
+        items = [
+          ...this.#specs
+            .filter((s) => s.name.startsWith(trimmed))
+            .map((s) => ({
+              value: s.name,
+              label: s.description ? `${s.name} — ${s.description}` : s.name,
+            })),
+          ...SAVE_VERBS.map((v) => ({ value: v.text, label: v.text })),
+        ].filter((i) => i.value.startsWith(trimmed));
       } else {
         // Second token: complete the named setting's values (and the reset action).
         const name = trimmed.slice(0, spaceAt);
@@ -162,6 +193,16 @@ export class RuntimeSettings {
         return;
       }
       const tokens = args.trim().split(/\s+/).filter(Boolean);
+
+      // Save verbs are surface-level actions, not setting values: they
+      // dispatch before the setting path and need no picker UI.
+      if (tokens[0] !== undefined) {
+        const verb = SAVE_VERBS.find((v) => v.text === tokens[0]);
+        if (verb) {
+          this.#applyConfigSave(verb.target, ctx);
+          return;
+        }
+      }
 
       // The picker paths need a dialog-capable UI (TUI or RPC); the direct
       // `/ai-guard <setting> <value>` form works everywhere.
@@ -202,9 +243,19 @@ export class RuntimeSettings {
         return;
       }
 
-      // No args: settings menu, then the picked setting's value picker.
-      const labels = this.#specs.map((s) => this.#label(s));
-      const choice = await ctx.ui.select("ai-guard settings:", labels);
+      // No args: settings menu, then the picked setting's value picker —
+      // or one of the save actions, which apply directly.
+      const specLabels = this.#specs.map((s) => this.#label(s));
+      const labels = [...specLabels, ...SAVE_VERBS.map((v) => v.text)];
+      const choice = await ctx.ui.select(
+        "ai-guard settings — pick a setting to adjust, or save the current config",
+        labels,
+      );
+      const verb = choice ? SAVE_VERBS.find((v) => v.text === choice) : undefined;
+      if (verb) {
+        this.#applyConfigSave(verb.target, ctx);
+        return;
+      }
       const spec = choice ? this.#specs[labels.indexOf(choice)] : undefined;
       if (spec) {
         await this.#pickValue(spec, ctx);
@@ -214,7 +265,7 @@ export class RuntimeSettings {
 
   /** The ctrl+alt+g shortcut registration object (cycles the first setting). */
   readonly shortcut: AiGuardShortcut = {
-    description: "Cycle ai-guard mode (session-scoped)",
+    description: "Cycle ai-guard mode: manual → default → auto (session-scoped)",
     handler: (ctx) => {
       const spec = this.#specs[0];
       if (!spec || !this.#deps.session.session?.config) {
@@ -313,7 +364,8 @@ export class RuntimeSettings {
   }
 
   /**
-   * Apply an option: the reset action clears the override, a value writes it.
+   * Apply an option: the reset action clears the override, a value writes
+   * it.
    *
    * @param spec - The setting to apply the option to.
    * @param option - The resolved option (kind-discriminated).
@@ -321,6 +373,47 @@ export class RuntimeSettings {
    */
   #applyOption(spec: EnumSettingSpec, option: SettingOption, ctx: AiGuardUiContext): void {
     this.#apply(spec, option.kind === "reset" ? undefined : option.text, ctx);
+  }
+
+  /**
+   * Persist the current effective config into the chosen layer. The loaded
+   * config snapshot can't hot-swap inside this session, so the session
+   * overrides stay as they are: the current session keeps behaving as
+   * before, while new sessions start from the saved layer.
+   *
+   * @param target - Which layer to write (global / project).
+   * @param ctx - The command UI context (notify).
+   */
+  #applyConfigSave(target: ConfigLayerTarget, ctx: AiGuardUiContext): void {
+    const sessionConfig = this.#deps.session.session?.config;
+    if (!sessionConfig) {
+      // Unreachable through the command (the handler guards up front) — a
+      // silent no-op here would hide a future caller's bug, so surface it.
+      ctx.ui.notify("ai-guard: no active session (config not loaded)", "warning");
+      return;
+    }
+    // The single projection point: defined overrides win over the loaded
+    // snapshot — whatever key the overrides layer carries now or later.
+    const result = this.#deps.saveConfig(
+      target,
+      effectiveConfig(sessionConfig, this.#deps.session.overrides),
+    );
+    if (result.error) {
+      ctx.ui.notify(`ai-guard: could not save to ${target} config — ${result.error}`, "error");
+      return;
+    }
+    if (!result.changed) {
+      ctx.ui.notify(
+        `ai-guard: ${target} config already matches the current settings — nothing written`,
+        "info",
+      );
+      return;
+    }
+    const created = result.created ? " (created)" : "";
+    ctx.ui.notify(
+      `ai-guard: current config saved to ${target} config${created}: ${result.path} — new sessions start from it; this session keeps its overrides`,
+      "info",
+    );
   }
 
   /**
@@ -340,7 +433,7 @@ export class RuntimeSettings {
    * @returns The override value, or undefined.
    */
   #readOverride(spec: EnumSettingSpec): string | undefined {
-    return (this.#deps.session.overrides as Record<string, string | undefined>)[spec.name];
+    return this.#deps.session.overrides[spec.name];
   }
 
   /**
@@ -360,8 +453,7 @@ export class RuntimeSettings {
    * @returns The config value, or undefined without a session config.
    */
   #configValue(spec: EnumSettingSpec): string | undefined {
-    const config = this.#deps.session.session?.config;
-    const value = config ? (config as Record<string, unknown>)[spec.name] : undefined;
+    const value = this.#deps.session.session?.config?.[spec.name];
     return typeof value === "string" ? value : undefined;
   }
 
@@ -372,7 +464,18 @@ export class RuntimeSettings {
    * @param value - The override value (undefined = config default).
    */
   #writeOverride(spec: EnumSettingSpec, value: string | undefined): void {
-    (this.#deps.session.overrides as Record<string, string | undefined>)[spec.name] = value;
+    // The overrides invariant is "present ⇒ defined": undefined deletes,
+    // so a reset never leaves a dead key that shadows the snapshot
+    // projection back into the config value (see effectiveConfig).
+    if (value === undefined) {
+      delete this.#deps.session.overrides[spec.name];
+      return;
+    }
+    // The one write-side cast: every value reaches this seam through
+    // spec.values (command validation and restoreSetting both check
+    // membership), so a string spec value IS a legal value of the dual-typed
+    // field.
+    this.#deps.session.overrides[spec.name] = value as AiGuardConfig[typeof spec.name];
   }
 
   /**

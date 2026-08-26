@@ -6,10 +6,14 @@
  * store have their own direct test files.
  */
 
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
-import type { LoadConfigResult } from "#src/config-loader.ts";
-import { configSchema } from "#src/config-schema.ts";
+import type { ConfigEnv, ConfigLayerTarget, LoadConfigResult } from "#src/config-loader.ts";
+import { type AiGuardConfig, configSchema } from "#src/config-schema.ts";
 import { createAiGuardExtension } from "#src/extension.ts";
 import type { ReviewPipelineDeps } from "#src/review-pipeline.ts";
 import { SETTING_ENTRY_TYPE } from "#src/session-settings-store.ts";
@@ -147,7 +151,7 @@ function makeSessionCtx(
     sessionManager: {
       getSessionId: () => "s1",
       buildContextEntries: () => [],
-      getBranch: () => [] as never[],
+      getBranch: () => [],
       ...overrides.sessionManager,
     },
     ui: { notify: vi.fn<() => void>(), setStatus: vi.fn<() => void>(), ...overrides.ui },
@@ -488,7 +492,7 @@ describe("createAiGuardExtension lifecycle", () => {
     const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
     mocks.getPermissionsService.mockReturnValue(fakeService);
     const { createPipeline } = makeStubPipeline();
-    const loadConfig = vi.fn<(cwd: string, trusted: boolean) => LoadConfigResult>(() => ({
+    const loadConfig = vi.fn<(env: ConfigEnv) => LoadConfigResult>(() => ({
       config: {
         provider: "test",
         model: "test",
@@ -508,7 +512,7 @@ describe("createAiGuardExtension lifecycle", () => {
 
     pi.fire("session_start", {}, makeSessionCtx({ cwd: "/my-project", trusted: false }));
 
-    expect(loadConfig).toHaveBeenCalledWith("/my-project", false);
+    expect(loadConfig).toHaveBeenCalledWith({ cwd: "/my-project", trustedProject: false });
   });
 
   it("handles registerAuthorizer throwing without crashing", () => {
@@ -673,5 +677,80 @@ describe("createAiGuardExtension — official-pattern follow-ups", () => {
     );
 
     expect(calls[0]!.overrides.mode).toBe("auto");
+  });
+});
+
+describe("createAiGuardExtension — save-to-config actions", () => {
+  it("save-to-global snapshots the effective config through the wired save function", async () => {
+    const pi = makeMockPi();
+    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
+    mocks.getPermissionsService.mockReturnValue(fakeService);
+    const saveConfig = vi.fn<
+      (
+        target: ConfigLayerTarget,
+        config: AiGuardConfig,
+      ) => {
+        path: string;
+        created: boolean;
+        changed: boolean;
+      }
+    >((target) => ({ path: `/agent/config-${target}.json`, created: false, changed: true }));
+    const config = configSchema.parse({ provider: "test", model: "test" });
+
+    createAiGuardExtension(pi as any, {
+      createPipeline: makeStubPipeline().createPipeline,
+      loadConfig: () => ({ config, issues: [] }),
+      saveConfig,
+    });
+
+    pi.fire("session_start", {}, makeSessionCtx());
+    const ctx = makeUiCtx();
+    await pi.commands.get("ai-guard")!.handler("save-to-global-config", ctx);
+
+    // The effective mode: after restore (a no-op here) no dead override
+    // key exists, so the config's own mode flows into the snapshot.
+    expect(saveConfig).toHaveBeenCalledTimes(1);
+    expect(saveConfig.mock.calls[0]![0]).toBe("global");
+    expect(saveConfig.mock.calls[0]![1].mode).toBe("default");
+    // Saving is a config-layer write; no session override is added.
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("current config saved to global config"),
+      "info",
+    );
+    // Config-layer saves don't change this session's effective state: no
+    // footer sync, no session override written.
+    expect(ctx.ui.setStatus).not.toHaveBeenCalled();
+  });
+
+  it("production wiring: an untrusted session's save-to-project is refused by the real persist", async () => {
+    const pi = makeMockPi();
+    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
+    mocks.getPermissionsService.mockReturnValue(fakeService);
+    const config = configSchema.parse({ provider: "test", model: "test" });
+
+    createAiGuardExtension(pi as any, {
+      createPipeline: makeStubPipeline().createPipeline,
+      loadConfig: () => ({ config, issues: [] }),
+      // No saveConfig injected: the production persistConfigLayer runs.
+    });
+
+    // Point the session cwd at a throwaway tmp dir: the guard must refuse
+    // BEFORE any filesystem work, and even if that ordering ever weakens,
+    // the write lands here (and gets removed) — never the real
+    // ~/.pi/agent dir.
+    const tmpCwd = mkdtempSync(join(tmpdir(), "ai-guard-untrusted-"));
+    try {
+      pi.fire("session_start", {}, makeSessionCtx({ trusted: false, cwd: tmpCwd }));
+      const ctx = makeUiCtx();
+      await pi.commands.get("ai-guard")!.handler("save-to-project-config", ctx);
+
+      expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("untrusted"), "error");
+      // Positive proof the guard never touched disk: the project dir must
+      // not exist even transiently.
+      expect(existsSync(join(tmpCwd, ".pi"))).toBe(false);
+    } finally {
+      rmSync(tmpCwd, { recursive: true, force: true });
+    }
   });
 });

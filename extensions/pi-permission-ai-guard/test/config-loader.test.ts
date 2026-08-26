@@ -1,11 +1,35 @@
-import { vol } from "memfs";
+import { parse as parseJsonc } from "jsonc-parser";
+import { createFsFromVolume, vol } from "memfs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { loadAiGuardConfig } from "#src/config-loader.ts";
+import type { ConfigEnv } from "#src/config-loader.ts";
+import { loadAiGuardConfig, persistConfigLayer } from "#src/config-loader.ts";
+import { configSchema } from "#src/config-schema.ts";
 
-vi.mock("node:fs", async () => {
-  const { createFsFromVolume } = await import("memfs");
-  return createFsFromVolume(vol);
+vi.mock("node:fs", () => createFsFromVolume(vol));
+
+/**
+ * A test environment: untrusted by default so the project layer stays inert.
+ *
+ * @param overrides - Fields to override (e.g. trustedProject: true).
+ * @returns A complete ConfigEnv for load/persist calls.
+ */
+function env(overrides: Partial<ConfigEnv> = {}): ConfigEnv {
+  return { cwd: "/project", agentDir: "/agent", trustedProject: false, ...overrides };
+}
+
+/** A full, schema-valid config the persist gate accepts. */
+const fullConfig = configSchema.parse({
+  provider: "anthropic",
+  model: "claude-haiku-4-5",
+  reasoning: "off",
+  timeoutMs: 10000,
+  transcript: { maxUserMessages: 5, maxToolCalls: 10, maxCharsPerEntry: 1000 },
+  cache: { maxEntries: 100 },
+  circuitBreaker: { consecutive: 3, total: 20, verdict: "deny" },
+  surfaces: ["bash"],
+  mode: "manual",
+  instructions: null,
 });
 
 describe("loadAiGuardConfig", () => {
@@ -14,7 +38,7 @@ describe("loadAiGuardConfig", () => {
   });
 
   it("returns undefined config when no files exist", () => {
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env());
     expect(result.config).toBeUndefined();
     expect(result.issues).toEqual([]);
   });
@@ -27,7 +51,7 @@ describe("loadAiGuardConfig", () => {
       }),
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env());
     expect(result.config).toBeDefined();
     expect(result.config?.provider).toBe("anthropic");
     expect(result.issues).toEqual([]);
@@ -44,7 +68,7 @@ describe("loadAiGuardConfig", () => {
       }),
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env({ trustedProject: true }));
     expect(result.config?.provider).toBe("anthropic"); // from global
     expect(result.config?.model).toBe("project-model"); // overridden by project
   });
@@ -54,7 +78,7 @@ describe("loadAiGuardConfig", () => {
       "/agent/extensions/pi-permission-ai-guard/config.json": "{ invalid json",
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env());
     expect(result.config).toBeUndefined();
     expect(result.issues.length).toBeGreaterThan(0);
     expect(result.issues[0]!.message).toContain("Failed to read");
@@ -65,7 +89,7 @@ describe("loadAiGuardConfig", () => {
       "/agent/extensions/pi-permission-ai-guard/config.json": "[]",
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env());
     expect(result.config).toBeUndefined();
     expect(result.issues.length).toBeGreaterThan(0);
     expect(result.issues[0]!.message).toContain("Expected a JSON object");
@@ -78,15 +102,9 @@ describe("loadAiGuardConfig", () => {
       }), // missing model
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env());
     expect(result.config).toBeUndefined();
     expect(result.issues.length).toBeGreaterThan(0);
-  });
-
-  it("uses defaults from cwd when options omitted", () => {
-    // This just tests it doesn't throw — it will read from the real
-    // ~/.pi/agent dir or not, depending on the test environment.
-    expect(() => loadAiGuardConfig()).not.toThrow();
   });
 
   it("skips project config when trustedProject is false", () => {
@@ -101,11 +119,7 @@ describe("loadAiGuardConfig", () => {
     });
 
     // Untrusted: project layer must be ignored, so global model wins.
-    const result = loadAiGuardConfig({
-      cwd: "/project",
-      agentDir: "/agent",
-      trustedProject: false,
-    });
+    const result = loadAiGuardConfig(env({ trustedProject: false }));
     expect(result.config?.model).toBe("global-model");
   });
 
@@ -120,7 +134,7 @@ describe("loadAiGuardConfig", () => {
       }),
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent", trustedProject: true });
+    const result = loadAiGuardConfig(env({ trustedProject: true }));
     expect(result.config?.model).toBe("project-model");
   });
 
@@ -136,7 +150,7 @@ describe("loadAiGuardConfig", () => {
       }),
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent", trustedProject: true });
+    const result = loadAiGuardConfig(env({ trustedProject: true }));
     expect(result.config?.transcript.maxUserMessages).toBe(3); // project override
     expect(result.config?.transcript.maxToolCalls).toBe(10); // preserved from global
     expect(result.config?.transcript.maxCharsPerEntry).toBe(1000); // preserved from global
@@ -156,7 +170,7 @@ describe("loadAiGuardConfig — mode", () => {
       }),
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env());
     expect(result.config?.mode).toBe("default");
     expect(result.issues).toEqual([]);
   });
@@ -170,7 +184,7 @@ describe("loadAiGuardConfig — mode", () => {
       }),
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env());
     expect(result.config).toBeUndefined();
     expect(result.issues.some((i) => i.path === "mode")).toBe(true);
   });
@@ -185,7 +199,7 @@ describe("loadAiGuardConfig — mode", () => {
       }),
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env());
     // The config itself is valid — the escape valve is a designed feature.
     expect(result.config?.mode).toBe("auto");
     expect(result.config?.circuitBreaker.verdict).toBe("defer");
@@ -202,7 +216,393 @@ describe("loadAiGuardConfig — mode", () => {
       }),
     });
 
-    const result = loadAiGuardConfig({ cwd: "/project", agentDir: "/agent" });
+    const result = loadAiGuardConfig(env());
     expect(result.issues).toEqual([]);
+  });
+});
+
+describe("config loader — JSONC", () => {
+  beforeEach(() => {
+    vol.reset();
+  });
+
+  it("loads config with comments and trailing commas", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": `{
+  // the reviewer model
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5", // cheap + fast
+  "mode": "manual",
+}
+`,
+    });
+    const result = loadAiGuardConfig(env());
+    expect(result.config?.mode).toBe("manual");
+    expect(result.issues).toEqual([]);
+  });
+
+  it("still records an issue on genuinely malformed JSONC", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": "{ invalid json",
+    });
+    const result = loadAiGuardConfig(env());
+    expect(result.config).toBeUndefined();
+    expect(result.issues[0]?.message).toContain("Failed to read");
+  });
+});
+
+describe("persistConfigLayer", () => {
+  beforeEach(() => {
+    vol.reset();
+  });
+
+  it("saves the full snapshot to the global layer when the file is missing", () => {
+    const result = persistConfigLayer({ target: "global", env: env(), config: fullConfig });
+    expect(result.created).toBe(true);
+    expect(result.changed).toBe(true);
+    expect(result.path).toBe("/agent/extensions/pi-permission-ai-guard/config.jsonc");
+    const written = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.jsonc",
+      "utf-8",
+    ) as string;
+    expect(JSON.parse(written)).toEqual(fullConfig);
+  });
+
+  it("saves to the project layer (cwd path)", () => {
+    const result = persistConfigLayer({
+      target: "project",
+      env: env({ trustedProject: true }),
+      config: fullConfig,
+    });
+    expect(result.created).toBe(true);
+    expect(result.path).toBe("/project/.pi/extensions/pi-permission-ai-guard/config.jsonc");
+    expect(
+      JSON.parse(
+        vol.readFileSync(
+          "/project/.pi/extensions/pi-permission-ai-guard/config.jsonc",
+          "utf-8",
+        ) as string,
+      ),
+    ).toEqual(fullConfig);
+  });
+
+  it("refuses the project target for an untrusted project — before any filesystem work", () => {
+    const result = persistConfigLayer({
+      target: "project",
+      env: env({ trustedProject: false }),
+      config: fullConfig,
+    });
+    expect(result.error).toContain("untrusted");
+    expect(result.path).toBe("");
+    expect(result.created).toBe(false);
+    expect(result.changed).toBe(false);
+    expect(vol.existsSync("/project/.pi/extensions/pi-permission-ai-guard/config.jsonc")).toBe(
+      false,
+    );
+  });
+
+  it("edits only the changed leaves — comments and formatting survive", () => {
+    const original = `{
+  // careful with models
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5",
+  "mode": "manual",
+  "circuitBreaker": { "consecutive": 3 }
+}
+`;
+    vol.fromJSON({ "/agent/extensions/pi-permission-ai-guard/config.json": original });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...fullConfig, mode: "auto" },
+    });
+    expect(result.changed).toBe(true);
+    expect(result.created).toBe(false);
+    const written = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    // The comment and the untouched fields survive byte-for-byte; the
+    // changed leaf and the appended missing leaves land too.
+    expect(written).toContain("// careful with models");
+    expect(written).toContain('"mode": "auto"');
+    // The file is JSONC — parse back through the same tolerant parser.
+    expect(parseJsonc(written)).toEqual({ ...fullConfig, mode: "auto" });
+  });
+
+  it("appends missing leaves without touching the rest", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": `{
+  "provider": "anthropic"
+}
+`,
+    });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...fullConfig, provider: "anthropic", mode: "manual" },
+    });
+    expect(result.changed).toBe(true);
+    const written = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(written).toContain('"provider": "anthropic"');
+    expect(JSON.parse(written)).toEqual(
+      configSchema.parse({ ...fullConfig, provider: "anthropic", mode: "manual" }),
+    );
+  });
+
+  it("reports changed: false and writes nothing when the layer already matches", () => {
+    const text = JSON.stringify(fullConfig, null, 2);
+    vol.fromJSON({ "/agent/extensions/pi-permission-ai-guard/config.json": text });
+    const before = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    );
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: fullConfig,
+    });
+    expect(result.changed).toBe(false);
+    expect(vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8")).toBe(
+      before,
+    );
+  });
+
+  it("refuses invalid JSONC untouched", () => {
+    vol.fromJSON({ "/agent/extensions/pi-permission-ai-guard/config.json": "{ invalid json" });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...fullConfig, mode: "auto" },
+    });
+    expect(result.error).toContain("not valid JSONC");
+    expect(vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8")).toBe(
+      "{ invalid json",
+    );
+  });
+
+  it("refuses a non-object root untouched", () => {
+    vol.fromJSON({ "/agent/extensions/pi-permission-ai-guard/config.json": "[]" });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...fullConfig, mode: "auto" },
+    });
+    expect(result.error).toContain("not a JSON object");
+  });
+
+  it("reports errors with the REAL file name — not a hardcoded config.json", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.jsonc": "{ oops",
+    });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: fullConfig,
+    });
+    expect(result.error).toContain("config.jsonc is not valid JSONC");
+    expect(result.error).not.toContain("config.json is not valid");
+  });
+
+  it("refuses duplicate-key files that would shadow the saved value — no false success", () => {
+    // jsonc-parser edits the FIRST occurrence; parse/readPath see the LAST.
+    // A "successful" save here would still read back "manual" next load.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json":
+        '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "auto", "mode": "manual" }',
+    });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...fullConfig, mode: "default" },
+    });
+    expect(result.error).toContain("duplicate keys");
+    expect(result.changed).toBe(false);
+    expect(vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8")).toBe(
+      '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "auto", "mode": "manual" }',
+    );
+  });
+
+  it("refuses a structural conflict in the target file — no false success", () => {
+    // Syntax-legal but schema-invalid: transcript is a scalar where the
+    // config expects an object. jsonc-parser's setProperty silently skips
+    // such edits, so the final-integrity gate must refuse, not "save".
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": `{
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5",
+  "transcript": 5
+}
+`,
+    });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...fullConfig, transcript: { ...fullConfig.transcript, maxUserMessages: 3 } },
+    });
+    expect(result.error).toBeDefined();
+    expect(result.changed).toBe(false);
+    expect(vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8")).toBe(
+      `{
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5",
+  "transcript": 5
+}
+`,
+    );
+  });
+
+  it("replaces an ARRAY leaf wholesale while the rest keeps its formatting", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": `{
+  "provider": "anthropic",
+  // surfaces reviewed by the link
+  "surfaces": ["bash"],
+  "model": "claude-haiku-4-5"
+}
+`,
+    });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...fullConfig, surfaces: ["mcp"] },
+    });
+    expect(result.changed).toBe(true);
+    const written = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    // jsonc-parser formats a replaced array multi-line; the comment and
+    // the value are what matter.
+    expect(written).toContain("// surfaces reviewed by the link");
+    expect(written).toContain('"mcp"');
+    expect(parseJsonc(written).surfaces).toEqual(["mcp"]);
+  });
+
+  it("inserts the full snapshot into an empty-object file", () => {
+    vol.fromJSON({ "/agent/extensions/pi-permission-ai-guard/config.json": "{}" });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: fullConfig,
+    });
+    expect(result.changed).toBe(true);
+    expect(
+      parseJsonc(
+        vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8") as string,
+      ),
+    ).toEqual(fullConfig);
+  });
+
+  it("refuses an invalid snapshot (schema gate) without touching the file", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify(fullConfig),
+    });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      // A bad override value — legal to TYPE-check past SaveConfigFn is
+      // impossible, so this simulates a hand-injected invalid snapshot.
+      config: { ...fullConfig, mode: "yolo" } as never,
+    });
+    expect(result.error).toContain("snapshot is invalid");
+    expect(vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8")).toBe(
+      JSON.stringify(fullConfig),
+    );
+  });
+
+  it("writes the CANONICAL parse output — unknown keys are stripped, not persisted", () => {
+    const withJunk = { ...fullConfig, junk: "not a config field" };
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: withJunk as never,
+    });
+    expect(result.created).toBe(true);
+    const written = JSON.parse(
+      vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.jsonc", "utf-8") as string,
+    );
+    expect(written).toEqual(fullConfig);
+    expect("junk" in written).toBe(false);
+  });
+});
+
+describe("config file discovery — jsonc preferred", () => {
+  beforeEach(() => {
+    vol.reset();
+  });
+
+  it("prefers config.jsonc when both files exist (with an ambiguity warning)", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "json-model",
+      }),
+      "/agent/extensions/pi-permission-ai-guard/config.jsonc": JSON.stringify({
+        // the jsonc file wins
+        provider: "openai",
+        model: "jsonc-model",
+      }),
+    });
+    const result = loadAiGuardConfig(env());
+    expect(result.config?.model).toBe("jsonc-model");
+    expect(
+      result.issues.some((i) => i.message.includes("Both config.jsonc and config.json exist")),
+    ).toBe(true);
+  });
+
+  it("loads a lone config.jsonc", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.jsonc": `{
+  // comment ok
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5",
+}
+`,
+    });
+    const result = loadAiGuardConfig(env());
+    expect(result.config?.provider).toBe("anthropic");
+    expect(result.issues).toEqual([]);
+  });
+
+  it("still loads a lone config.json (legacy)", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "legacy-model",
+      }),
+    });
+    const result = loadAiGuardConfig(env());
+    expect(result.config?.model).toBe("legacy-model");
+    expect(result.issues).toEqual([]);
+  });
+
+  it("persist edits the jsonc file when both exist", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({ mode: "auto" }),
+      "/agent/extensions/pi-permission-ai-guard/config.jsonc": `{
+  "mode": "auto"
+}
+`,
+    });
+    const result = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...fullConfig, mode: "manual" },
+    });
+    expect(result.path).toBe("/agent/extensions/pi-permission-ai-guard/config.jsonc");
+    expect(result.changed).toBe(true);
+    expect(
+      vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.jsonc", "utf-8"),
+    ).toContain('"mode": "manual"');
+    // the legacy json is untouched
+    expect(
+      JSON.parse(
+        vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8") as string,
+      ),
+    ).toEqual({ mode: "auto" });
   });
 });

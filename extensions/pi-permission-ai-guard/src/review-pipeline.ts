@@ -78,14 +78,6 @@ export interface ReviewPipelineDeps {
 }
 
 /**
- * Build the AI Guard authorizer from resolved session state. The returned
- * `authorize` function is the upstream `Authorizer["authorize"]` seam — the
- * only interface callers (extension.ts) and tests cross.
- *
- * @param deps - The resolved session-state dependencies for the pipeline.
- * @returns The `authorize` function implementing the review pipeline.
- */
-/**
  * Auto mode's machinery-escape contract: the human is about to see an
  * interruption they didn't opt into (reviewer broken, not uncertain), so
  * explain it. Pre-call paths (model unresolved, auth failed, transcript
@@ -144,6 +136,14 @@ function annotateAndEscalate(
   return annotated;
 }
 
+/**
+ * Build the AI Guard authorizer from resolved session state. The returned
+ * `authorize` function is the upstream `Authorizer["authorize"]` seam — the
+ * only interface callers (extension.ts) and tests cross.
+ *
+ * @param deps - The resolved session-state dependencies for the pipeline.
+ * @returns The `authorize` function implementing the review pipeline.
+ */
 export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["authorize"] {
   return async (details, query, log) => {
     const { config } = deps;

@@ -111,10 +111,21 @@ export interface ModelCallErrorRecord {
 
 /** The event constants live here so callers don't redeclare them. */
 export const DECISION_EVENT = "ai_guard.decision";
+
 export const SHORT_CIRCUIT_EVENT = "ai_guard.short_circuit";
+
 export const MODEL_REPLY_EVENT = "ai_guard.model_reply";
+
 export const CACHE_LOOKUP_EVENT = "ai_guard.cache_lookup";
+
 export const MODEL_CALL_ERROR_EVENT = "ai_guard.model_call_error";
+
+/**
+ * The deny reason emitted when the circuit breaker trips. Shared by the
+ * pipeline (which returns it to the caller) and {@link DecisionRecord.breaker}
+ * (which records it in the audit log) so the string cannot drift.
+ */
+export const BREAKER_DENY_REASON = "Circuit breaker tripped: too many denials this session";
 
 /**
  * Sentinel for the `rawReply` audit field when no verbatim reply is recorded.
@@ -126,11 +137,28 @@ export const MODEL_CALL_ERROR_EVENT = "ai_guard.model_call_error";
 const CLEAN_VERDICT_OMITTED = "(clean verdict, rawReply omitted)";
 
 /**
- * The deny reason emitted when the circuit breaker trips. Shared by the
- * pipeline (which returns it to the caller) and {@link DecisionRecord.breaker}
- * (which records it in the audit log) so the string cannot drift.
+ * Pick the rawReply value for the decision record, distinguishing the
+ * three reply states (defer-with-text / defer-threw / clean verdict). See
+ * the field comment in {@link DecisionRecord.model} for the rationale.
+ *
+ * @param reviewOutcome - The full-review call outcome.
+ * @returns The rawReply value for the audit record: a sentinel for a clean verdict, the raw text
+ *   for defer-with-reply, or null when the call threw.
  */
-export const BREAKER_DENY_REASON = "Circuit breaker tripped: too many denials this session";
+function rawReplyForRecord(reviewOutcome: ReviewOutcome): string | null {
+  if (reviewOutcome.verdict.kind === "defer") {
+    // defer: keep the raw text when the call produced any (no-json / invalid-
+    // verdict-value / model-defer); null when it threw before replying
+    // (timeout / call-failed) or returned an empty body (empty-reply), so the
+    // absence of text stays a genuine null.
+    return reviewOutcome.rawReply !== undefined ? reviewOutcome.rawReply : null;
+  }
+  // Clean allow/deny: the JSON parsed; verdict, reason (deny only), and
+  // riskLevel are already in the structured record fields, so the raw text is
+  // omitted via a sentinel (not null, to stay distinct from the throw-based
+  // defer absence above).
+  return CLEAN_VERDICT_OMITTED;
+}
 
 export const DecisionRecord = {
   /**
@@ -276,30 +304,6 @@ export const DecisionRecord = {
     };
   },
 };
-
-/**
- * Pick the rawReply value for the decision record, distinguishing the
- * three reply states (defer-with-text / defer-threw / clean verdict). See
- * the field comment in {@link DecisionRecord.model} for the rationale.
- *
- * @param reviewOutcome - The full-review call outcome.
- * @returns The rawReply value for the audit record: a sentinel for a clean verdict, the raw text
- *   for defer-with-reply, or null when the call threw.
- */
-function rawReplyForRecord(reviewOutcome: ReviewOutcome): string | null {
-  if (reviewOutcome.verdict.kind === "defer") {
-    // defer: keep the raw text when the call produced any (no-json / invalid-
-    // verdict-value / model-defer); null when it threw before replying
-    // (timeout / call-failed) or returned an empty body (empty-reply), so the
-    // absence of text stays a genuine null.
-    return reviewOutcome.rawReply !== undefined ? reviewOutcome.rawReply : null;
-  }
-  // Clean allow/deny: the JSON parsed; verdict, reason (deny only), and
-  // riskLevel are already in the structured record fields, so the raw text is
-  // omitted via a sentinel (not null, to stay distinct from the throw-based
-  // defer absence above).
-  return CLEAN_VERDICT_OMITTED;
-}
 
 /**
  * Annotate a decision record when the mode mapped the model's
