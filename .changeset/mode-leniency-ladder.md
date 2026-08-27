@@ -2,4 +2,12 @@
 "pi-permission-ai-guard": minor
 ---
 
-Replace the 3-mode verdict policy (`manual`/`default`/`auto`) with a five-mode leniency ladder — `strict`, `default`, `advisory`, `lenient`, `permissive`. Hard-tier denies (riskLevel high|critical, or missing) stay terminal in every mode; soft denies and the model's own uncertainty map per mode; reviewer machinery failures never map to allow. The ctrl+alt+g cycle visits only the middle three (`default → advisory → lenient`), and the footer renders `permissive` in warning red.
+Add a five-mode leniency ladder — `strict`, `default`, `advisory`, `lenient`, `permissive` — deciding who adjudicates the reviewer's non-allow verdicts.
+
+- `strict`: the reviewer's allow is the only pass (fail-closed).
+- `default`: decisive denials are final; uncertainty asks (the shipped behavior).
+- `advisory`: soft denials and uncertainty ask; only the reviewer's hardest calls stay final.
+- `lenient`: only the reviewer's active alarms ask; uncertainty passes.
+- `permissive`: only hard-tier denials block, and each such block warns the operator.
+
+Hard-tier denials (riskLevel high|critical, or missing) stay terminal in every mode. Reviewer machinery failures never map to allow: they deny under `strict` and `permissive`, defer under the other three, and every forced deferral announces its classified cause to the operator.

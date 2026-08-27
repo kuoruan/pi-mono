@@ -36,11 +36,15 @@ The leniency ladder for the reviewer's non-allow verdicts, strictest first. Deni
 
 - `strict`: both deny — the reviewer's `allow` is the only pass.
 - `default`: soft denies deny; uncertainty asks (the shipped behavior).
-- `advisory`: both ask — you decide everything the reviewer doesn't allow. The shadow/override mode for onboarding a new reviewer or auditing a systematically misjudging one.
+- `advisory`: both ask — you decide everything except the reviewer's hardest calls, which stay final. The shadow/override mode for onboarding a new reviewer or auditing a systematically misjudging one.
 - `lenient`: soft denies ask; uncertainty passes (allow).
 - `permissive`: both pass — only hard-tier denies block.
 
 Reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies, no review target) never map to allow in any mode — a broken reviewer must not rubber-stamp: they deny under `strict` (fail-closed by doctrine) and `permissive` (allow needs a verdict), and defer under the other three.
+
+The `permissive` deny is the ladder's one non-monotone cell (`lenient` defers, `permissive` denies): a defer would need a dialog the yolo contract forbids, and a broken reviewer must not rubber-stamp. Contract over monotonicity, stated as an exception.
+
+A machinery-forced defer notifies its classified cause, repeatedly when the failure repeats (no dedup: the same kind can recur for different underlying reasons, and each interruption lands on its own dialog).
 
 The model's judgment is always recorded; the mode maps only what the link emits. The ctrl+alt+g cycle visits only the middle three (`default → advisory → lenient`); the extremes are set explicitly via `/ai-guard mode <value>` or the picker.
 

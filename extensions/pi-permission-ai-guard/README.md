@@ -111,21 +111,25 @@ Controls how much context is kept for the model review. Only trusted user messag
 
 The reviewer model answers each permission ask with `allow`, `deny`, or `defer` (uncertain), and `deny` carries a `riskLevel`. Hard-tier denies (`high`/`critical`, or missing risk) are **terminal in every mode**. The ladder decides how each mode disposes the soft tier (`low`/`medium`) and the model's own uncertainty:
 
-| Mode         | hard-tier deny | soft deny (`low\|medium`) | model `defer`          | Reading                                                              |
-| ------------ | -------------- | ------------------------- | ---------------------- | -------------------------------------------------------------------- |
-| `strict`     | deny (final)   | deny (final)              | deny (final)           | The reviewer's `allow` is the only pass                              |
-| `default`    | deny (final)   | deny (final)              | defer (next authority) | Decisive verdicts are final; uncertainty asks (the shipped behavior) |
-| `advisory`   | deny (final)   | defer (next authority)    | defer (next authority) | You decide everything the reviewer doesn't allow                     |
-| `lenient`    | deny (final)   | defer (next authority)    | **allow**              | Only the reviewer's active alarms ask you                            |
-| `permissive` | deny (final)   | **allow**                 | **allow**              | Only clear high-danger requests are blocked                          |
+| Mode         | hard-tier deny | soft deny (`low\|medium`) | model `defer`          | Reading                                                                     |
+| ------------ | -------------- | ------------------------- | ---------------------- | --------------------------------------------------------------------------- |
+| `strict`     | deny (final)   | deny (final)              | deny (final)           | The reviewer's `allow` is the only pass                                     |
+| `default`    | deny (final)   | deny (final)              | defer (next authority) | Decisive verdicts are final; uncertainty asks (the shipped behavior)        |
+| `advisory`   | deny (final)   | defer (next authority)    | defer (next authority) | You decide everything except the reviewer's hardest calls, which stay final |
+| `lenient`    | deny (final)   | defer (next authority)    | **allow**              | Only the reviewer's active alarms ask you                                   |
+| `permissive` | deny (final)   | **allow**                 | **allow**              | Only clear high-danger requests are blocked                                 |
 
-Reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies, no review target) **never map to allow** — a broken reviewer must not rubber-stamp: they deny under `strict` and `permissive`, and defer under the other three.
+Reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies, no review target) **never map to allow** — a broken reviewer must not rubber-stamp: they deny under `strict` and `permissive`, and defer under the other three. Unlike a `permissive` hard-tier block (which warns the operator), a `permissive` machinery deny stays silent: the deny reason reaches the agent, and a fail-closed stop needs no announcement.
+
+(`permissive`'s deny is the ladder's one non-monotone cell: `lenient` defers, `permissive` denies — a defer would need a dialog the zero-interruption contract forbids, and a broken reviewer must not rubber-stamp.)
+
+A machinery-forced defer interrupts you with no dialog context of its own, so it notifies the classified cause — `reviewer could not complete the review (empty-reply) — deferring to you` — same doctrine as the breaker trip: every unexpected interruption names itself. Repeats do not collapse: every deferral notifies, because the same failure kind can recur for different underlying reasons and each one lands on its own dialog.
 
 Notes:
 
 - A link's `deny` is final — it short-circuits the chain and never reaches a prompt. A link's `defer` falls to the next authority: the interactive permission prompt in a TUI session, the denying terminal in a headless one.
 - `strict` is fully automatic and fail-closed: EVERYTHING that would otherwise fall to the human is denied. The model's own uncertainty carries the defer's clarification request as the deny's reason; machinery failures deny with the classified failure as the reason. Nothing falls to the user in strict mode, except a breaker explicitly configured to force `defer` still reaches the human (the reviewer-untrusted escape valve, with a notification explaining the interruption). Headless sessions resolve those defers to deny either way.
-- `advisory` is the shadow/override mode: you decide everything the reviewer doesn't allow (the soft tier and its uncertainty) — for onboarding a new reviewer or auditing a systematically misjudging one. Its deny reason surfaces as a notification when the request escalates, and lands in the `ai_guard.decision` log (`verdict: "deny"` + `emittedVerdict: "defer"`) either way.
+- `advisory` is the shadow/override mode: you decide everything except the reviewer's hardest calls — the soft tier and its uncertainty escalate to you (hard-tier denials stay final, as in every mode) — for onboarding a new reviewer or auditing a systematically misjudging one. Its deny reason surfaces as a notification when the request escalates, and lands in the `ai_guard.decision` log (`verdict: "deny"` + `emittedVerdict: "defer"`) either way.
 - `lenient` trusts the reviewer's silence: model defers pass with their clarification request recorded as `emittedReason: "clarification-suppressed"` in the audit; its soft-denies still ask you.
 - `permissive` needs a verdict to pass anything: soft denies and model defers pass, machinery failures still deny. The first mapped allow surfaces a one-time notice (`permissive auto-approves non-allow verdicts — hard-tier denials still block`), and the footer renders the value in warning red.
 - Headless sessions collapse the modes: a `defer` always resolves to the denying terminal, so defer-based modes all deny everything the model doesn't allow — the difference lives in the audit trail and the TUI behavior.
@@ -140,7 +144,7 @@ Effective config layers, in precedence order: **session overrides** (the control
 Two session-scoped controls change the effective mode without touching the config file:
 
 - `/ai-guard` — opens the settings menu (each entry shows its current value and source); picking an entry opens its value picker. Direct forms: `/ai-guard mode strict|default|advisory|lenient|permissive` and `/ai-guard mode reset` (back to the config default). Argument completion is two-stage: setting names first, then the setting's values.
-- `/ai-guard mode save-to-global-config` / `/ai-guard mode save-to-project-config` — persist the current EFFECTIVE config (every field, session overrides included, so future command-configured settings ride along) into the global or project config file.
+- `/ai-guard save-to-global-config` / `/ai-guard save-to-project-config` — persist the current EFFECTIVE config (every field, session overrides included, so future command-configured settings ride along) into the global or project config file.
   - Leaves are written in place via JSONC edits: comments, formatting, and untouched keys survive; when the layer already matches, nothing is written.
   - The project target is refused for untrusted projects (that layer isn't honored there).
   - New sessions start from the saved layer; the current session keeps its overrides. Both actions are the last picker entries.
