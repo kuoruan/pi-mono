@@ -85,13 +85,13 @@ export interface ModelCallContext {
   auth: ModelCallAuth;
   /** Reasoning level ("off" omits the option). */
   reasoning: AiGuardConfig["reasoning"];
+  /** Reply budget — thinking blocks count against it on reasoning upstreams. */
+  maxTokens: number;
   /** Audit log for call-failure and diagnostic records. */
   log: AuthorizerLog;
   /** Request id for audit-log correlation. */
   requestId: string;
 }
-
-const REVIEW_MAX_TOKENS = 512;
 
 /**
  * Build a non-deprecated model completer on top of `ModelRegistry.getProvider`.
@@ -209,7 +209,7 @@ export async function reviewModel(
   userPrompt: string,
   timeoutMs: number,
 ): Promise<ReviewOutcome> {
-  const result = await executeCall(ctx, systemPrompt, userPrompt, timeoutMs, REVIEW_MAX_TOKENS);
+  const result = await executeCall(ctx, systemPrompt, userPrompt, timeoutMs, ctx.maxTokens);
   if (!result.ok) {
     return {
       verdict: { kind: "defer" },

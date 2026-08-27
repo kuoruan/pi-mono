@@ -41,6 +41,7 @@ function makeContext(
     completeSimple,
     auth: { apiKey: overrides.apiKey, headers: overrides.headers },
     reasoning: overrides.reasoning ?? baseConfig.reasoning,
+    maxTokens: baseConfig.maxTokens,
     log: overrides.log ?? { review: () => {}, debug: () => {} },
     requestId: overrides.requestId ?? "test-req",
   };

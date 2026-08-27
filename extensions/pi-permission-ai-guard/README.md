@@ -84,18 +84,19 @@ See [`config/config.example.json`](config/config.example.json) for a complete ex
 
 ## Configuration
 
-| Field            | Type                                                                    | Default                                   | Description                                                            |
-| ---------------- | ----------------------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------- |
-| `provider`       | string                                                                  | required                                  | Model provider (e.g. `anthropic`)                                      |
-| `model`          | string                                                                  | required                                  | Model id (e.g. `claude-haiku-4-5`)                                     |
-| `reasoning`      | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"off"`                                   | Thinking level (pi-ai `ModelThinkingLevel`); `off` = disabled          |
-| `timeoutMs`      | integer                                                                 | `15000`                                   | Model-call timeout (ms)                                                |
-| `transcript`     | object                                                                  | see below                                 | Transcript stripping config (see below)                                |
-| `surfaces`       | string[]                                                                | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes |
-| `instructions`   | string\|null                                                            | `null`                                    | Custom safety rules (replaces defaults; null = built-in)               |
-| `mode`           | `"strict"\|"default"\|"advisory"\|"lenient"\|"permissive"`              | `"default"`                               | Leniency ladder for non-allow verdicts (see below)                     |
-| `circuitBreaker` | object                                                                  | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                     |
-| `cache`          | object                                                                  | `{maxEntries:128}`                        | Verdict cache (see below)                                              |
+| Field            | Type                                                                    | Default                                   | Description                                                                    |
+| ---------------- | ----------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
+| `provider`       | string                                                                  | required                                  | Model provider (e.g. `anthropic`)                                              |
+| `model`          | string                                                                  | required                                  | Model id (e.g. `claude-haiku-4-5`)                                             |
+| `reasoning`      | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"off"`                                   | Thinking level (pi-ai `ModelThinkingLevel`); `off` = disabled                  |
+| `timeoutMs`      | integer                                                                 | `15000`                                   | Model-call timeout (ms)                                                        |
+| `maxTokens`      | integer                                                                 | `4096`                                    | Reviewer reply budget; thinking blocks count against it on reasoning upstreams |
+| `transcript`     | object                                                                  | see below                                 | Transcript stripping config (see below)                                        |
+| `surfaces`       | string[]                                                                | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes         |
+| `instructions`   | string\|null                                                            | `null`                                    | Custom safety rules (replaces defaults; null = built-in)                       |
+| `mode`           | `"strict"\|"default"\|"advisory"\|"lenient"\|"permissive"`              | `"default"`                               | Leniency ladder for non-allow verdicts (see below)                             |
+| `circuitBreaker` | object                                                                  | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                             |
+| `cache`          | object                                                                  | `{maxEntries:128}`                        | Verdict cache (see below)                                                      |
 
 ### Transcript
 

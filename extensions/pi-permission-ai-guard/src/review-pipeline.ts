@@ -414,6 +414,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       completeSimple: deps.completeSimple,
       auth: { apiKey: auth.apiKey, headers: auth.headers },
       reasoning: config.reasoning,
+      maxTokens: config.maxTokens,
       log,
       requestId,
     };

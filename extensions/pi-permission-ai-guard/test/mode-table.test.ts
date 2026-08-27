@@ -55,6 +55,7 @@ describe("modeWarnings", () => {
     model: "m",
     reasoning: "off" as const,
     timeoutMs: 15000,
+    maxTokens: 4096,
     transcript: { maxUserMessages: 5, maxToolCalls: 10, maxCharsPerEntry: 1000 },
     surfaces: ["bash"],
     instructions: null,

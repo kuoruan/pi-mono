@@ -503,6 +503,7 @@ describe("createAiGuardExtension lifecycle", () => {
         circuitBreaker: { consecutive: 3, total: 20, verdict: "deny" as const },
         cache: { maxEntries: 0 },
         timeoutMs: 10000,
+        maxTokens: 4096,
         reasoning: "off" as const,
         instructions: null,
         mode: "default" as const,

@@ -22,6 +22,13 @@
       "maximum": 300000,
       "default": 15000
     },
+    "maxTokens": {
+      "type": "integer",
+      "minimum": 16,
+      "maximum": 32768,
+      "default": 4096,
+      "description": "Reviewer reply budget in tokens. Thinking blocks count against it on reasoning upstreams; too small a cap truncates the reply mid-think (the empty-reply machinery failure)."
+    },
     "mode": {
       "type": "string",
       "enum": ["strict", "default", "advisory", "lenient", "permissive"],
