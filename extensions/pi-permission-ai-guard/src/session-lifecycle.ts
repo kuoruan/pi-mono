@@ -119,7 +119,10 @@ export interface SessionLifecycleDeps {
  * (the /reload dispose glitch) from a genuine registration failure.
  *
  * Exact match on the full message — not substring — so a different error
- * that merely contains "already registered" stays a generic warning.
+ * that merely contains "already registered" stays a generic warning. The
+ * message is the contract today: upstream explicitly defers a typed
+ * error code (pi-packages #702) — when one lands, migrate this check to
+ * it.
  *
  * @param error - The caught error from `service.registerAuthorizer()`.
  * @param linkName - The link name passed to `registerAuthorizer`.
@@ -131,14 +134,6 @@ function isDuplicateAuthorizerError(error: unknown, linkName: string): boolean {
     error.message === `An authorizer is already registered for '${linkName}'.`
   );
 }
-
-/**
- * Footer status key the escalate-to-human warnings render under (a
- * dedicated key, so the settings footer line isn't clobbered). Cleared
- * when the permission dialog resolves (see the extension's
- * permissions:decision listener).
- */
-export const REVIEW_FOOTER_KEY = "ai-guard-review";
 
 /**
  * Read the host's session id, never throwing. Mirrors upstream's
@@ -309,23 +304,18 @@ export class SessionLifecycle {
         overrides: this.#overrides,
         completeSimple: this.#deps.completeSimple,
         // Best-effort human notification for verdicts that escalate to the
-        // user. In a dialog-capable UI the warning renders on the FOOTER
-        // (under REVIEW_FOOTER_KEY) so it can be cleared once the user
-        // finishes the permission dialog (the permissions:decision
-        // listener clears it); headless runners get a plain notify. Calls
-        // go through the stored event ctx (lazy getters); the try/catch
-        // covers the disposed-runner window between an authorize call in
-        // flight and session_shutdown — a notification must never take the
-        // verdict path down with it.
+        // user — always the plain notify channel (a message the host
+        // renders), never the footer: escalation reasons are read as
+        // messages, not persistent status. Calls go through the stored
+        // event ctx (lazy getters); the try/catch covers the
+        // disposed-runner window between an authorize call in flight and
+        // session_shutdown — a notification must never take the verdict
+        // path down with it.
         notify: (message, level) => {
           try {
             const target = this.#session;
             if (!target) return;
-            if (target.ctx.hasUI) {
-              target.ctx.ui.setStatus(REVIEW_FOOTER_KEY, message);
-            } else {
-              target.ctx.ui.notify(message, level);
-            }
+            target.ctx.ui.notify(message, level);
           } catch (e) {
             // The disposed-runner window is expected, but a lost escalation
             // message must not be silent: in manual mode this notify is the

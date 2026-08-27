@@ -110,18 +110,33 @@ export function isObjectRecord(value: unknown): value is Record<string, unknown>
 }
 
 /**
+ * Terminal control sequences and C0 controls: stripped from untrusted text
+ * before it reaches prompt fields, notifications, or the review log — the
+ * notify line is the one channel where model text reaches the operator's
+ * terminal unescaped. CSI (`ESC [ params final-byte`) and BEL-terminated OSC
+ * (`ESC ] … BEL`, e.g. OSC 8 hyperlinks) are removed whole; lone ESC and C0
+ * controls (NUL, BEL, DEL, …) are removed individually, which alone suffices
+ * to defuse every sequence — whatever is left is inert text.
+ */
+// Intentional: matching terminal control codes is this sanitizer's purpose,
+// so the generic accidental-match rule is disabled on the pattern itself.
+const STRIP_CONTROL_PATTERN =
+  // oxlint-disable-next-line no-control-regex
+  /\u001B\[[0-9;?]*[@-~]|\u001B\][^\u0007]*\u0007|[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u001B]/g;
+
+/**
  * Sanitize untrusted text before embedding it in prompts.
  *
  * Strips zero-width characters (ZWSP, ZWNJ, ZWJ, WJ, BOM) that bypass
- * `\s` matching and can obscure injection payloads, then collapses
- * all whitespace to single spaces and trims — preventing section header
+ * `\s` matching and can obscure injection payloads, then collapses all
+ * whitespace to single spaces and trims — preventing section header
  * injection via newlines.
  *
  * @param text - Untrusted text to normalize.
- * @returns Sanitized text with zero-width chars removed and whitespace collapsed.
+ * @returns Sanitized text with zero-width and terminal control chars removed, whitespace collapsed.
  */
 export function normalizeText(text: string): string {
-  return stripZeroWidthChars(text).replace(/\s+/g, " ").trim();
+  return stripZeroWidthChars(text).replace(STRIP_CONTROL_PATTERN, "").replace(/\s+/g, " ").trim();
 }
 
 /**

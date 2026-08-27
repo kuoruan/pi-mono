@@ -22,7 +22,12 @@ export interface ModeLanes {
   softDeny: AuthorizerVerdict["kind"];
   /** The model's own uncertainty target. */
   modelDefer: AuthorizerVerdict["kind"];
-  /** Machinery-failure target — narrower by type: a broken reviewer never maps to allow. */
+  /**
+   * Machinery-failure target — narrower by type: a broken reviewer never maps to allow. The
+   * `permissive` value tightens back to `deny` — the ladder's one non-monotone cell, contract over
+   * monotonicity: a defer would need a dialog the zero-interruption contract forbids, and a broken
+   * reviewer must not rubber-stamp.
+   */
   machinery: VerdictOrigin;
 }
 
@@ -65,7 +70,7 @@ export const MODE_TABLE: Record<Mode, ModeEntry> = {
   advisory: {
     lanes: { softDeny: "defer", modelDefer: "defer", machinery: "defer" },
     facts: {
-      blurb: "you decide everything the reviewer doesn't allow",
+      blurb: "you decide everything except the reviewer's hardest calls",
       inCycle: true,
       emphasize: false,
     },
@@ -100,6 +105,16 @@ export const CYCLE_MODE_VALUES: readonly Mode[] = MODE_VALUES.filter(
 /** The single emphasized value (renders in warning red), or undefined. */
 export const EMPHASIZED_MODE: Mode | undefined = MODE_VALUES.find(
   (m) => MODE_TABLE[m].facts.emphasize,
+);
+
+/**
+ * Each mode's one-line blurb, keyed by the mode name — the picker's
+ * per-value descriptions ("strict — the reviewer's allow is the only
+ * pass"). Derived from the table like the cycle subset, so the picker
+ * labels cannot drift from the modes they describe.
+ */
+export const MODE_BLURBS: Readonly<Record<string, string>> = Object.fromEntries(
+  MODE_VALUES.map((m) => [m, MODE_TABLE[m].facts.blurb]),
 );
 
 /** The generated shortcut description's cycle part ("default → advisory → lenient"). */

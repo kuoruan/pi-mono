@@ -725,43 +725,6 @@ describe("createAiGuardExtension — save-to-config actions", () => {
     expect(ctx.ui.setStatus).not.toHaveBeenCalled();
   });
 
-  it("a permissions:decision event clears the review footer warning", async () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const config = configSchema.parse({ provider: "test", model: "test" });
-
-    createAiGuardExtension(pi as any, {
-      createPipeline: makeStubPipeline().createPipeline,
-      loadConfig: () => ({ config, issues: [] }),
-    });
-
-    const setStatus = vi.fn<(key: string, text: string | undefined) => void>();
-    pi.fire("session_start", {}, makeSessionCtx({ ui: { setStatus } }));
-    // The permission dialog resolved — the review footer warning hides.
-    pi.fireEvent("permissions:decision", {});
-    expect(setStatus).toHaveBeenLastCalledWith("ai-guard-review", undefined);
-  });
-
-  it("a decision SERVING a forwarded request leaves the pending warning alone", async () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const config = configSchema.parse({ provider: "test", model: "test" });
-
-    createAiGuardExtension(pi as any, {
-      createPipeline: makeStubPipeline().createPipeline,
-      loadConfig: () => ({ config, issues: [] }),
-    });
-
-    const setStatus = vi.fn<(key: string, text: string | undefined) => void>();
-    pi.fire("session_start", {}, makeSessionCtx({ ui: { setStatus } }));
-    // A decision that resolved a forwarded (served) request must not clear
-    // this session's own pending warning.
-    pi.fireEvent("permissions:decision", { forwarding: { requesterSessionId: "other" } });
-    expect(setStatus).not.toHaveBeenCalledWith("ai-guard-review", undefined);
-  });
-
   it("production wiring: an untrusted session's save-to-project is refused by the real persist", async () => {
     const pi = makeMockPi();
     const fakeService = { registerAuthorizer: mocks.registerAuthorizer };

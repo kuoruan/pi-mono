@@ -382,7 +382,7 @@ describe("buildReviewPrompt", () => {
     );
     expect(prompt).toContain('command: "python3 script.py"');
     expect(prompt).toContain('external path(s): "/etc", "/var/log"');
-    expect(prompt).toContain("working directory: /repo");
+    expect(prompt).toContain('working directory: "/repo"');
     expect(prompt).toContain("resolved alias: /etc");
   });
 
@@ -403,7 +403,7 @@ describe("buildReviewPrompt", () => {
     );
     expect(prompt).toContain('executed unit: "rm -rf /"');
     expect(prompt).toContain("matched rule: <indirection-bash-wrapper>");
-    expect(prompt).toContain("command context: command substitution");
+    expect(prompt).toContain('command context: "command substitution"');
   });
 
   it("renders annotations when present", () => {

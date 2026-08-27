@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { MODE_VALUES, type AiGuardConfig, configSchema } from "#src/config-schema.ts";
+import { MODE_BLURBS } from "#src/mode-table.ts";
 import {
   type EnumSettingSpec,
   type RuntimeSettings,
@@ -23,6 +24,7 @@ const SPECS: readonly EnumSettingSpec[] = [
     hiddenValue: "default",
     cycleValues: ["default", "advisory", "lenient"],
     highlightValue: "permissive",
+    optionDetails: MODE_BLURBS,
   },
 ];
 
@@ -90,7 +92,7 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.mode).toBe("advisory");
     expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: "advisory" });
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] mode: advisory (session override)",
+      "[ai-guard] mode = advisory (session override)",
       "info",
     );
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "advisory (session)");
@@ -103,7 +105,10 @@ describe("RuntimeSettings — command", () => {
 
     expect(overrides.mode).toBeUndefined();
     expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: null });
-    expect(ctx.ui.notify).toHaveBeenCalledWith("[ai-guard] mode: default (config default)", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "[ai-guard] mode = default (config default)",
+      "info",
+    );
     // Default is the shipped baseline — the line clears instead of showing it.
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", undefined);
   });
@@ -117,7 +122,7 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.mode).toBeUndefined();
     expect(appendEntry).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      '[ai-guard] invalid value "yolo" for mode — valid: strict|default|advisory|lenient|permissive|reset',
+      '[ai-guard] invalid value "yolo" for mode — valid values are strict|default|advisory|lenient|permissive|reset',
       "error",
     );
     expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -149,12 +154,14 @@ describe("RuntimeSettings — command", () => {
     const { settings, overrides } = makeSettings();
     // Menu picks the (only) setting's label, then the value picker picks auto.
     const ctx = makeUiCtx();
-    ctx.ui.select.mockResolvedValueOnce("mode — default (config)").mockResolvedValueOnce("strict");
+    ctx.ui.select
+      .mockResolvedValueOnce("mode — default (config)")
+      .mockResolvedValueOnce("strict — the reviewer's allow is the only pass");
     await settings.command.handler("", ctx);
 
     expect(ctx.ui.select).toHaveBeenCalledWith(
       "ai-guard settings — pick a setting to adjust, or save the current config",
-      ["mode — default (config)", "save-to-global-config", "save-to-project-config"],
+      ["mode — default (config)", "save global config", "save project config"],
     );
     expect(overrides.mode).toBe("strict");
   });
@@ -203,8 +210,8 @@ describe("RuntimeSettings — completions", () => {
     ]);
     // Save verbs complete at the TOP level, not inside a setting.
     expect(completions("save")).toEqual([
-      { value: "save-to-global-config", label: "save-to-global-config" },
-      { value: "save-to-project-config", label: "save-to-project-config" },
+      { value: "save-to-global-config", label: "save global config" },
+      { value: "save-to-project-config", label: "save project config" },
     ]);
     expect(completions("mode de")).toEqual([{ value: "default", label: "default" }]);
     expect(completions("mode nope")).toBeNull();
@@ -358,7 +365,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
     expect(config.mode).toBe("advisory"); // override won over the snapshot
     expect(config.provider).toBe("test"); // other fields intact
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] saved to global config: cfg-global.json — new sessions start from it; higher layers still shadow it; this session keeps its overrides",
+      "[ai-guard] saved to global config (cfg-global.json) — new sessions start from it; higher layers still shadow it; this session keeps its overrides",
       "info",
     );
   });
@@ -483,7 +490,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
     >(() => ({ path: "/cfg.json", created: false, changed: true }));
     const { settings } = makeSettings({}, saveConfig);
     const ctx = makeUiCtx();
-    ctx.ui.select.mockResolvedValueOnce("save-to-project-config");
+    ctx.ui.select.mockResolvedValueOnce("save project config");
     await settings.command.handler("", ctx);
 
     expect(saveConfig.mock.calls[0]![0]).toBe("project");
@@ -509,13 +516,13 @@ describe("RuntimeSettings — save to config layer actions", () => {
 describe("RuntimeSettings — picker stays plain for the highlighted value", () => {
   it("applies a plain permissive pick and notifies at warning level, undecorated", async () => {
     const { settings, overrides } = makeSettings();
-    const ctx = makeUiCtx("permissive");
+    const ctx = makeUiCtx("permissive — only clear high-danger requests are blocked");
     await settings.command.handler("mode", ctx);
     expect(overrides.mode).toBe("permissive");
     // The command surface is plain text — the warning-red emphasis is
     // footer-only. The severity bump stays.
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] mode: permissive (session override)",
+      "[ai-guard] mode = permissive (session override)",
       "warning",
     );
   });

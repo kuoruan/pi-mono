@@ -175,13 +175,13 @@ describe("machineryTarget", () => {
 describe("human-facing messages", () => {
   it("advisoryEscalationMessage carries the risk level and the deny reason", () => {
     expect(advisoryEscalationMessage(DENY, "high")).toBe(
-      "[ai-guard] reviewer denied this request (risk: high) — secrets in the command",
+      "[ai-guard] reviewer denied this request (risk high) — secrets in the command",
     );
     expect(advisoryEscalationMessage(DENY, undefined)).toBe(
       "[ai-guard] reviewer denied this request — secrets in the command",
     );
     expect(advisoryEscalationMessage({ kind: "deny" }, "medium")).toBe(
-      "[ai-guard] reviewer denied this request (risk: medium)",
+      "[ai-guard] reviewer denied this request (risk medium)",
     );
   });
 

@@ -229,21 +229,23 @@ describe("SessionLifecycle — notify bridge", () => {
     expect(notify).toHaveBeenCalledWith("reviewer denied this request", "warning");
   });
 
-  it("with a dialog-capable UI the escalation renders on the REVIEW footer, not notify", async () => {
+  it("with a dialog-capable UI the escalation goes to notify, not the footer", async () => {
     const { lifecycle, calls } = makeLifecycle();
     const setStatus = vi.fn<(key: string, text: string | undefined) => void>();
+    const notify = vi.fn<() => void>();
     lifecycle.onSessionStart(
       makeSeed({
-        ctx: { ui: { notify: vi.fn<() => void>(), setStatus }, hasUI: true } as never,
+        ctx: { ui: { notify, setStatus }, hasUI: true } as never,
       }),
     );
     calls[0]!.notify!(
       "reviewer could not complete the review (empty-reply) — deferring to you",
       "warning",
     );
-    expect(setStatus).toHaveBeenCalledWith(
-      "ai-guard-review",
+    expect(setStatus).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
       "reviewer could not complete the review (empty-reply) — deferring to you",
+      "warning",
     );
   });
 

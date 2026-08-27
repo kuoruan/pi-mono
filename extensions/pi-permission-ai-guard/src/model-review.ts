@@ -61,7 +61,7 @@ export type ModelRegistryLike = Pick<ModelRegistry, "find" | "getApiKeyAndHeader
  * defer kind. Both carry latency so the public methods can populate their
  * outcome shapes without re-timing.
  */
-export type CallResult =
+type CallResult =
   | { ok: true; reply: AssistantMessage; latencyMs: number }
   | { ok: false; deferKind: ModelCallDeferKind; latencyMs: number };
 

@@ -49,6 +49,7 @@ import { normalizeAndRedactText, shortHash, truncateMiddle } from "./utils.ts";
 import {
   applyVerdictMode,
   type MachineryFailureKind,
+  denyTier,
   machineryDenyReason,
   machineryTarget,
   advisoryEscalationMessage,
@@ -85,9 +86,10 @@ export interface ReviewPipelineDeps {
   completeSimple: CompleteSimpleFn;
   /**
    * Human notification for verdicts that escalate to the user — REQUIRED:
-   * production always wires the lifecycle's notify bridge (hasUI footer vs
-   * notify, try/catch around the disposed-runner window); every escalate
-   * path depends on it, so absence is never a legal pipeline shape.
+   * production always wires the lifecycle's notify bridge (the plain
+   * notify channel, try/catch around the disposed-runner window); every
+   * escalate path depends on it, so absence is never a legal pipeline
+   * shape.
    */
   notify: NotifyFn;
 }
@@ -113,15 +115,32 @@ export interface ReviewPipelineDeps {
  * @param log - The authorizer log pair (review stream).
  * @returns The verdict the gate emits.
  */
+/**
+ * The human notice for a machinery-forced defer — the deferred ask lands on
+ * the operator with no dialog context of its own, so the line names the
+ * failure kind (doctrine symmetry with the breaker-trip notice). No
+ * structural colon: the TUI's own level prefix would double it up.
+ *
+ * @param kind - The classified machinery failure kind.
+ * @returns The notification message.
+ */
+function machineryDeferNotice(kind: MachineryFailureKind): string {
+  return `${NOTIFY_PREFIX} reviewer could not complete the review (${kind}) — deferring to you`;
+}
+
 function releaseMachineryGate(
   mode: Mode,
   kind: MachineryFailureKind,
   record: DecisionRecordEntry,
   breaker: CircuitBreaker,
   log: AuthorizerLog,
+  notify: NotifyFn,
 ): AuthorizerVerdict {
   if (machineryTarget(mode) !== "deny") {
     log.review(DECISION_EVENT, record);
+    // Forced defer interrupts the human with no dialog context of its
+    // own — same doctrine as the breaker trip: name the cause.
+    notify(machineryDeferNotice(kind), "warning");
     return { kind: "defer" };
   }
   breaker.recordDenyEquivalent();
@@ -171,6 +190,15 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       riskLevel: RiskLevel | undefined,
     ): DecisionRecordEntry => {
       if (emitted.kind === original.kind) {
+        // Permissive's hard tier is the one block left in the mode that
+        // auto-approves everything else — an override of the operator's
+        // yolo intent that is silent by default (no dialog; the reason goes
+        // to the agent alone). Name it at the human like every other
+        // interruption with no user-visible agent action: a rare,
+        // intent-contradicting block surfaces.
+        if (emitted.kind === "deny" && mode === "permissive" && denyTier(riskLevel) === "hard") {
+          deps.notify(advisoryEscalationMessage(original, riskLevel), "warning");
+        }
         return record;
       }
       // The emittedReason tells audit readers what the agent actually
@@ -225,6 +253,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
           DecisionRecord.noTarget(details.requestId, opened.surface),
           deps.circuitBreaker,
           log,
+          deps.notify,
         );
       }
       return { kind: "defer" };
@@ -294,7 +323,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // An unresolved model makes every ask a machinery failure — strict
       // and permissive deny what would fall to the human, the others defer.
       const record = DecisionRecord.modelUnresolved(base, modelId);
-      return releaseMachineryGate(mode, "model-unresolved", record, deps.circuitBreaker, log);
+      return releaseMachineryGate(
+        mode,
+        "model-unresolved",
+        record,
+        deps.circuitBreaker,
+        log,
+        deps.notify,
+      );
     }
 
     // 6. Strip transcript (feeds both the prompt and the cache fingerprint).
@@ -313,7 +349,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         }),
       );
       const record = DecisionRecord.transcriptError(base);
-      return releaseMachineryGate(mode, "transcript-error", record, deps.circuitBreaker, log);
+      return releaseMachineryGate(
+        mode,
+        "transcript-error",
+        record,
+        deps.circuitBreaker,
+        log,
+        deps.notify,
+      );
     }
 
     // 7. Cache lookup. The request snapshot contains the action context,
@@ -351,7 +394,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const auth = await resolveAuth(deps.registry, model);
     if (!auth.ok) {
       const record = DecisionRecord.authFailed(base, modelId, normalizeAndRedactText(auth.error));
-      return releaseMachineryGate(mode, "auth-failed", record, deps.circuitBreaker, log);
+      return releaseMachineryGate(
+        mode,
+        "auth-failed",
+        record,
+        deps.circuitBreaker,
+        log,
+        deps.notify,
+      );
     }
 
     // Build prompt (redaction happens inside buildReviewPrompt).
@@ -397,17 +447,28 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // model-defer in default/advisory passes through to the human — but
     // the upstream defer verdict carries no reason field, so the dialog
     // alone would never show WHAT the reviewer wants clarified. Mirror it
-    // via the escalation channel (footer/notify), symmetric with strict's
-    // deny reason.
+    // via the escalation channel (notify), symmetric with strict's
+    // deny reason. In-call machinery failures (empty reply, timeout, …)
+    // get the same treatment as pre-call gates: a forced defer must name
+    // its cause.
     if (
       emitted.kind === "defer" &&
       reviewOutcome.deferKind === "model-defer" &&
       reviewOutcome.deferReason
     ) {
       deps.notify(
-        `${NOTIFY_PREFIX} reviewer asks: ${truncateMiddle(reviewOutcome.deferReason, 60)}`,
+        `${NOTIFY_PREFIX} reviewer asks — ${truncateMiddle(reviewOutcome.deferReason, 60)}`,
         "info",
       );
+    } else if (
+      emitted.kind === "defer" &&
+      reviewOutcome.deferKind !== undefined &&
+      // The model's own defer is never machinery: a terse model may defer
+      // without a reason (parseVerdictObject documents the omission) — the
+      // verdict itself completed, so no cause-notice fires.
+      reviewOutcome.deferKind !== "model-defer"
+    ) {
+      deps.notify(machineryDeferNotice(reviewOutcome.deferKind), "warning");
     }
     const record = annotateAndEscalate(
       DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome),

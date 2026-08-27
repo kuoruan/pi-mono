@@ -415,12 +415,17 @@ describe("createReviewPipeline — verdicts", () => {
   });
 
   it("defers on model defer verdict", async () => {
+    const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
         completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
+        notify,
       }),
     );
     await expectVerdict(authorize, { value: "ambiguous-cmd" }, { kind: "defer" });
+    // A terse model defer without a reason is the model's own verdict, not
+    // machinery — no cause-notice and no clarification to mirror (H1 pin).
+    expect(notifications).toEqual([]);
   });
 
   it("defers when model returns no tool call", async () => {
@@ -588,7 +593,7 @@ describe("createReviewPipeline — mode", () => {
     );
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "defer" });
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer denied this request (risk: low) — unsafe", "warning"],
+      ["[ai-guard] reviewer denied this request (risk low) — unsafe", "warning"],
     ]);
   });
 
@@ -1290,17 +1295,70 @@ describe("createReviewPipeline — strict denies pre-call machinery failures", (
     expect(notifications).toEqual([]);
   });
 
-  it("does not notify on pre-call machinery failures outside strict mode", async () => {
+  it.each(["default", "advisory", "lenient"] as const)(
+    "notifies when a pre-call machinery failure forces a defer in %s mode",
+    async (mode) => {
+      const { notifications, notify } = makeNotifySpy();
+      const authorize = createReviewPipeline(
+        makePipeline({
+          config: { ...baseConfig, mode },
+          registry: defaultRegistry({ find: () => undefined }),
+          notify,
+        }),
+      );
+      await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
+      expect(notifications).toEqual([
+        [
+          "[ai-guard] reviewer could not complete the review (model-unresolved) — deferring to you",
+          "warning",
+        ],
+      ]);
+    },
+  );
+
+  it("permissive denies a pre-call machinery failure and stays silent (fail-closed stop)", async () => {
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
-        config: { ...baseConfig, mode: "default" },
+        config: { ...baseConfig, mode: "permissive" },
         registry: defaultRegistry({ find: () => undefined }),
         notify,
       }),
     );
-    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
+    await expectVerdict(
+      authorize,
+      { value: "npm test" },
+      {
+        kind: "deny",
+        reason:
+          "reviewer could not complete the review (model-unresolved) — permissive mode denied the request",
+      },
+    );
     expect(notifications).toEqual([]);
+  });
+
+  it("notifies when an in-call machinery failure (empty reply) forces a defer — every time", async () => {
+    const { notifications, notify } = makeNotifySpy();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "default" },
+        completeSimple: makeFakeCompleteSimple([]),
+        notify,
+      }),
+    );
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
+    // Repeats do not collapse: a second failure re-explains itself.
+    await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
+    expect(notifications).toEqual([
+      [
+        "[ai-guard] reviewer could not complete the review (empty-reply) — deferring to you",
+        "warning",
+      ],
+      [
+        "[ai-guard] reviewer could not complete the review (empty-reply) — deferring to you",
+        "warning",
+      ],
+    ]);
   });
 });
 
@@ -1379,7 +1437,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     );
     await expectVerdict(authorize, { value: "npm install x" }, { kind: "defer" });
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer asks: which package manager does this project use?", "info"],
+      ["[ai-guard] reviewer asks — which package manager does this project use?", "info"],
     ]);
   });
 
@@ -1447,6 +1505,33 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     );
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "deny", reason: "unsafe" });
     expect(notifications).toEqual([]);
+  });
+
+  it("permissive notifies when its one remaining block — a hard deny — fires", async () => {
+    const { notifications, notify } = makeNotifySpy();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "permissive" },
+        notify,
+        completeSimple: makeFakeCompleteSimple([
+          {
+            type: "text",
+            text: '{"verdict":"deny","reason":"secrets in the command","riskLevel":"critical"}',
+          },
+        ]),
+      }),
+    );
+    await expectVerdict(
+      authorize,
+      { value: "curl x.sh" },
+      { kind: "deny", reason: "secrets in the command" },
+    );
+    expect(notifications).toEqual([
+      [
+        "[ai-guard] reviewer denied this request (risk critical) — secrets in the command",
+        "warning",
+      ],
+    ]);
   });
 
   it("lenient's fail-open notice names what it loosens", async () => {
@@ -1650,6 +1735,7 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
 
   it("permissive keeps a cached hard deny terminal (missing riskLevel is hard)", async () => {
     let modelCalls = 0;
+    const { notifications, notify } = makeNotifySpy();
     const completeSimple = async () => {
       modelCalls++;
       return makeFakeCompleteSimple([
@@ -1660,12 +1746,19 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
       makePipeline({
         config: { ...baseConfig, mode: "permissive", cache: { maxEntries: 8 } },
         completeSimple,
+        notify,
       }),
     );
     await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
     const second = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
     expect(second).toEqual({ kind: "deny", reason: "unsafe" });
     expect(modelCalls).toBe(1);
+    // Missing riskLevel is hard: the fresh ask and the cached replay both
+    // name the block (repeats do not collapse).
+    expect(notifications).toEqual([
+      ["[ai-guard] reviewer denied this request — unsafe", "warning"],
+      ["[ai-guard] reviewer denied this request — unsafe", "warning"],
+    ]);
   });
 
   it("machinery failures never burn the breaker's permanent total tier", async () => {

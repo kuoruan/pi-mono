@@ -257,7 +257,9 @@ function buildPermissionRequestSection(request: ReviewRequestContext): string {
     lines.push(`- matched rule: ${normalizeAndRedactText(ask.request.matchedPattern)}`);
   }
   if (ask.request.commandContext) {
-    lines.push(`- command context: ${ask.request.commandContext.replace(/_/g, " ")}`);
+    lines.push(
+      `- command context: ${encodeActionTextForPrompt(ask.request.commandContext.replace(/_/g, " "))}`,
+    );
   }
 
   if (ask.canonicalBoundary) {
@@ -271,7 +273,7 @@ function buildPermissionRequestSection(request: ReviewRequestContext): string {
     );
   }
 
-  lines.push(`- working directory: ${ask.workingDirectory}`);
+  lines.push(`- working directory: ${encodeActionTextForPrompt(ask.workingDirectory)}`);
 
   return lines.join("\n");
 }

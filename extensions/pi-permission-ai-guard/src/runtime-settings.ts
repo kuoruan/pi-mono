@@ -73,6 +73,13 @@ export interface EnumSettingSpec {
    * persistence always use the value's plain text.
    */
   readonly highlightValue?: string;
+  /**
+   * Per-value one-line details for the picker (e.g. each mode's blurb).
+   * Rendered as `value — detail` on the picker line only — the command
+   * form and completions stay plain, and resolution is by option index,
+   * never by parsing the pretty line.
+   */
+  readonly optionDetails?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -164,8 +171,8 @@ function highlightText(text: string): string {
  * never take one of these names (they'd shadow the action).
  */
 const SAVE_VERBS = [
-  { text: "save-to-global-config", target: "global" as const },
-  { text: "save-to-project-config", target: "project" as const },
+  { text: "save-to-global-config", label: "save global config", target: "global" as const },
+  { text: "save-to-project-config", label: "save project config", target: "project" as const },
 ];
 
 /**
@@ -206,7 +213,7 @@ export class RuntimeSettings {
               value: s.name,
               label: s.description ? `${s.name} — ${s.description}` : s.name,
             })),
-          ...SAVE_VERBS.map((v) => ({ value: v.text, label: v.text })),
+          ...SAVE_VERBS.map((v) => ({ value: v.text, label: v.label })),
         ].filter((i) => i.value.startsWith(trimmed));
       } else {
         // Second token: complete the named setting's values (and the reset action).
@@ -262,7 +269,7 @@ export class RuntimeSettings {
           const option = this.#optionByText(spec, value);
           if (!option) {
             ctx.ui.notify(
-              `${NOTIFY_PREFIX} invalid value "${value}" for ${spec.name} — valid: ${this.#options(
+              `${NOTIFY_PREFIX} invalid value "${value}" for ${spec.name} — valid values are ${this.#options(
                 spec,
               )
                 .map((o) => o.text)
@@ -283,12 +290,12 @@ export class RuntimeSettings {
       // text (only the FOOTER renders the highlighted value in color), so
       // resolution is a plain match.
       const specLabels = this.#specs.map((s) => this.#label(s));
-      const labels = [...specLabels, ...SAVE_VERBS.map((v) => v.text)];
+      const labels = [...specLabels, ...SAVE_VERBS.map((v) => v.label)];
       const choice = await ctx.ui.select(
         "ai-guard settings — pick a setting to adjust, or save the current config",
         labels,
       );
-      const verb = choice ? SAVE_VERBS.find((v) => v.text === choice) : undefined;
+      const verb = choice ? SAVE_VERBS.find((v) => v.label === choice) : undefined;
       if (verb) {
         this.#applyConfigSave(verb.target, ctx);
         return;
@@ -463,7 +470,7 @@ export class RuntimeSettings {
       // it — say so rather than promising the saved value takes effect.
       // The basename keeps the line terminal-width while the path remains
       // documented in the config-layer module.
-      `${NOTIFY_PREFIX} saved to ${target} config: ${basename(result.path)}${created} — new sessions start from it; higher layers still shadow it; this session keeps its overrides`,
+      `${NOTIFY_PREFIX} saved to ${target} config (${basename(result.path)}${created}) — new sessions start from it; higher layers still shadow it; this session keeps its overrides`,
       "info",
     );
   }
@@ -543,13 +550,13 @@ export class RuntimeSettings {
     persistSetting(this.#deps.appendEntry, spec.name, value ?? null);
     const effective = this.#effective(spec);
     if (value === undefined) {
-      ctx.ui.notify(`${NOTIFY_PREFIX} ${spec.name}: ${effective} (config default)`, "info");
+      ctx.ui.notify(`${NOTIFY_PREFIX} ${spec.name} = ${effective} (config default)`, "info");
     } else {
       // Selecting the highlighted value deserves a warning-level notice
       // (plain text — the emphasis is footer-only).
       const highlighted = value === spec.highlightValue;
       ctx.ui.notify(
-        `${NOTIFY_PREFIX} ${spec.name}: ${value} (session override)`,
+        `${NOTIFY_PREFIX} ${spec.name} = ${value} (session override)`,
         highlighted ? "warning" : "info",
       );
     }
@@ -564,17 +571,17 @@ export class RuntimeSettings {
    */
   async #pickValue(spec: EnumSettingSpec, ctx: AiGuardUiContext): Promise<void> {
     const title = `${spec.name} — current: ${this.#label(spec)}`;
-    // Picker options are plain text — the warning-red emphasis is
-    // footer-only.
-    const choice = await ctx.ui.select(
-      title,
-      this.#options(spec).map((o) => o.text),
+    // Picker lines carry the per-value detail (`strict — the reviewer's
+    // allow is the only pass`) — plain text, resolved by index so the
+    // pretty line never has to be parsed back.
+    const options = this.#options(spec);
+    const labels = options.map((o) =>
+      spec.optionDetails?.[o.text] ? `${o.text} — ${spec.optionDetails[o.text]}` : o.text,
     );
-    if (choice !== undefined) {
-      const option = this.#optionByText(spec, choice);
-      if (option) {
-        this.#applyOption(spec, option, ctx);
-      }
+    const choice = await ctx.ui.select(title, labels);
+    const option = choice !== undefined ? options[labels.indexOf(choice)] : undefined;
+    if (option) {
+      this.#applyOption(spec, option, ctx);
     }
   }
 }

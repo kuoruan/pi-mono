@@ -221,7 +221,10 @@ export function advisoryEscalationMessage(
   riskLevel: RiskLevel | undefined,
 ): string {
   const reason = verdict.kind === "deny" ? verdict.reason : undefined;
-  const risk = riskLevel ? ` (risk: ${riskLevel})` : "";
+  // No structural colons: this line can render under the TUI's own
+  // "Warning:" prefix at warning level — "Warning: [ai-guard] … risk: x"
+  // would double up. Parens carry the detail colon-free.
+  const risk = riskLevel ? ` (risk ${riskLevel})` : "";
   // The teaching reason is model text — the notify line stays readable
   // (terminal-width); the full reason stays in the audit record.
   const reasonSuffix = reason ? ` — ${truncateMiddle(reason, 60)}` : "";

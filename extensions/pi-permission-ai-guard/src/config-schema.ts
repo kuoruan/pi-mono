@@ -77,9 +77,10 @@ export const configSchema = z.object({
   // - "default": deny soft denies; uncertainty passes to the next authority
   //   (the interactive prompt in a TUI session; the denying terminal
   //   headless). The shipped behavior.
-  // - "advisory": both pass to the human — you decide everything the
-  //   reviewer doesn't allow. Shadow/override mode for onboarding a new
-  //   reviewer or auditing a systematically misjudging one.
+  // - "advisory": soft denies and uncertainty ask — you decide everything
+  //   except the reviewer's hardest calls, which stay final. Shadow/override
+  //   mode for onboarding a new reviewer or auditing a systematically
+  //   misjudging one.
   // - "lenient": soft denies pass to the human; the model's uncertainty
   //   passes (allow).
   // - "permissive": both pass — only hard-tier denies block.

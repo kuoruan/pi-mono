@@ -23,7 +23,12 @@ const schemaJson = JSON.parse(
 ) as {
   properties: Record<
     string,
-    { default?: unknown; enum?: unknown[]; properties?: Record<string, { enum?: unknown[] }> }
+    {
+      default?: unknown;
+      description?: string;
+      enum?: unknown[];
+      properties?: Record<string, { enum?: unknown[] }>;
+    }
   >;
 };
 
@@ -84,5 +89,22 @@ describe("config surface drift", () => {
     expect(schemaJson.properties.circuitBreaker.properties!.verdict.enum).toEqual([
       ...BREAKER_VERDICT_VALUES,
     ]);
+  });
+
+  it("the curated mode prose twins carry the final advisory wording, not the superseded one", () => {
+    const zodSource = readFileSync(new URL("../src/config-schema.ts", import.meta.url), "utf-8");
+    const modeTableSource = readFileSync(new URL("../src/mode-table.ts", import.meta.url), "utf-8");
+    const description = schemaJson.properties.mode.description as string;
+    const stale = "you decide everything the reviewer doesn't allow";
+    const canonical = "hardest calls";
+    // One pair per curated surface: the twins drift independently unless
+    // each is pinned separately (this test exists because the advisory
+    // prose once drifted this exact way).
+    expect(description).toContain(canonical);
+    expect(description).not.toContain(stale);
+    expect(zodSource).toContain(canonical);
+    expect(zodSource).not.toContain(stale);
+    expect(modeTableSource).toContain(canonical);
+    expect(modeTableSource).not.toContain(stale);
   });
 });
