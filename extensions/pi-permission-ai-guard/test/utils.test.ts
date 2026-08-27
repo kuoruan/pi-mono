@@ -109,38 +109,39 @@ describe("truncateMiddle", () => {
     const result = truncateMiddle(text, 30);
     expect(result.length).toBeLessThanOrEqual(30);
     expect(result).toContain("[...truncated...]");
+    expect(result).not.toContain("\n");
     // Head and tail are preserved (shorter than the full text)
     expect(result.startsWith("0123")).toBe(true);
     expect(result.endsWith("6789")).toBe(true);
   });
 
-  it("returns truncated marker when maxChars is smaller than tag", () => {
+  it("returns the bare marker when maxChars is smaller than the marker", () => {
     const result = truncateMiddle("hello world", 5);
-    // tag is 19 chars, available = max(0, 5-19) = 0, tail guard prevents slice(-0)
-    expect(result).toBe("\n[...truncated...]\n");
+    // tag is 17 chars, available = max(0, 5-17) = 0, tail guard prevents slice(-0)
+    expect(result).toBe("[...truncated...]");
   });
 
-  it("returns just tag when maxChars is 0", () => {
-    expect(truncateMiddle("hello", 0)).toBe("\n[...truncated...]\n");
+  it("returns just the marker when maxChars is 0", () => {
+    expect(truncateMiddle("hello", 0)).toBe("[...truncated...]");
   });
 
   it("handles single character text", () => {
     expect(truncateMiddle("a", 10)).toBe("a");
   });
 
-  it("handles text shorter than tag", () => {
+  it("handles text shorter than the marker", () => {
     const result = truncateMiddle("short", 3);
-    expect(result).toBe("\n[...truncated...]\n");
+    expect(result).toBe("[...truncated...]");
   });
 
   it("preserves 60% head / 40% tail ratio", () => {
     const text = "abcdefghij".repeat(10); // 100 chars
     const result = truncateMiddle(text, 50);
-    // tag is 19 chars, available = 31; head = 18, tail = 13
-    const parts = result.split("\n[...truncated...]\n");
+    // tag is 17 chars, available = 33; head = 19, tail = 14
+    const parts = result.split("[...truncated...]");
     expect(parts).toHaveLength(2);
-    expect(parts[0]!).toHaveLength(18);
-    expect(parts[1]!).toHaveLength(13);
+    expect(parts[0]!).toHaveLength(19);
+    expect(parts[1]!).toHaveLength(14);
   });
 
   it("handles empty string", () => {

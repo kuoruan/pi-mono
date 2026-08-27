@@ -85,12 +85,14 @@ function stripZeroWidthChars(text: string): string {
  *
  * @param text - Text to truncate in the middle.
  * @param maxChars - Maximum character count of the result.
- * @returns Truncated text with a `[...truncated...]` marker if shortened, or the original text if
- *   within the limit.
+ * @returns Truncated text keeping the head and tail with an explicit `[...truncated...]`
+ *   marker, or the original text if within the limit. The marker spells the truncation out
+ *   because transcript entries feed the model which must read them as truncation, and it stays
+ *   single-line because every consumer wraps text into one-line fields.
  */
 export function truncateMiddle(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
-  const tag = "\n[...truncated...]\n";
+  const tag = "[...truncated...]";
   const available = Math.max(0, maxChars - tag.length);
   const headLength = Math.floor(available * 0.6);
   const tailLength = available - headLength;

@@ -185,6 +185,14 @@ describe("human-facing messages", () => {
     );
   });
 
+  it("advisoryEscalationMessage keeps a long deny reason on one line with an explicit marker", () => {
+    const long =
+      "this reason is deliberately long enough that the notify copy must truncate it to stay on one line";
+    const message = advisoryEscalationMessage({ kind: "deny", reason: long }, "low");
+    expect(message).not.toContain("\n");
+    expect(message).toContain("[...truncated...]");
+  });
+
   it("machineryDenyReason names the failure kind and the mode, tolerating none", () => {
     expect(machineryDenyReason("no-json", "strict")).toBe(
       "reviewer could not complete the review (no-json) — strict mode denied the request",

@@ -1441,6 +1441,29 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     ]);
   });
 
+  it("model-defer mirror keeps a long clarification on one line", async () => {
+    const { notifications, notify } = makeNotifySpy();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        notify,
+        completeSimple: makeFakeCompleteSimple([
+          {
+            type: "text",
+            text: JSON.stringify({
+              verdict: "defer",
+              reason:
+                "this clarification is deliberately long enough that the notify copy must truncate it to stay on one line",
+            }),
+          },
+        ]),
+      }),
+    );
+    await expectVerdict(authorize, { value: "npm install x" }, { kind: "defer" });
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]![0]).not.toContain("\n");
+    expect(notifications[0]![0]).toContain("[...truncated...]");
+  });
+
   it("raw reply debug only fires on defer failures, and redacted", async () => {
     const debugCalls: { event: string; data: Record<string, unknown> }[] = [];
     const log = {
