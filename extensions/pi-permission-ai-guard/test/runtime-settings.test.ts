@@ -365,7 +365,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
     expect(config.mode).toBe("advisory"); // override won over the snapshot
     expect(config.provider).toBe("test"); // other fields intact
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] saved to global config (cfg-global.json) — new sessions start from it; higher layers still shadow it; this session keeps its overrides",
+      "[ai-guard] saved to global config (cfg-global.json) — new sessions start from it; this session keeps current overrides",
       "info",
     );
   });

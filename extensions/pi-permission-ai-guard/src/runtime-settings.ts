@@ -465,12 +465,11 @@ export class RuntimeSettings {
     }
     const created = result.created ? " (created)" : "";
     ctx.ui.notify(
-      // Layer semantics: a saved layer feeds new sessions, but a
-      // higher-precedence layer (session > project > global) still shadows
-      // it — say so rather than promising the saved value takes effect.
-      // The basename keeps the line terminal-width while the path remains
-      // documented in the config-layer module.
-      `${NOTIFY_PREFIX} saved to ${target} config (${basename(result.path)}${created}) — new sessions start from it; higher layers still shadow it; this session keeps its overrides`,
+      // Layer semantics, one line under budget: what the save feeds (new
+      // sessions) and what it does NOT touch (this session's overrides).
+      // The rarest fact — a higher layer can still shadow the saved value —
+      // lives in the README's save-verbs section, not here.
+      `${NOTIFY_PREFIX} saved to ${target} config (${basename(result.path)}${created}) — new sessions start from it; this session keeps current overrides`,
       "info",
     );
   }

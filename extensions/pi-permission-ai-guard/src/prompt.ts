@@ -192,6 +192,9 @@ Reply with ONLY one JSON object — no markdown, no prose, no other text.
 - Omit fields that do not apply; never use empty strings.
 - For deny or defer, reason must be one concise sentence grounded in
   visible request context.
+- A deny reason must state what makes the request dangerous. If your
+  assessment concludes the request is safe, the verdict is allow — never
+  a deny with a safety conclusion.
 - riskLevel is required for deny and optional for defer. A deny under a
   DENY — Always category is critical; denies under DENY — Unless use
   high, medium, or low by severity.`;

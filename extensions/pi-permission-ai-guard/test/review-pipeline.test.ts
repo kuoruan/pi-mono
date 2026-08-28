@@ -593,7 +593,10 @@ describe("createReviewPipeline — mode", () => {
     );
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "defer" });
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer denied this request (risk low) — unsafe", "warning"],
+      [
+        "[ai-guard] reviewer denied this request (risk low) — unsafe — asking you instead",
+        "warning",
+      ],
     ]);
   });
 
@@ -645,9 +648,11 @@ describe("createReviewPipeline — mode", () => {
 
   it("strict maps a model defer to deny carrying the clarification request", async () => {
     const { log, reviewCalls } = makeRecordingLog();
+    const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, mode: "strict" },
+        notify,
         completeSimple: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"defer","reason":"needs the target path"}' },
         ]),
@@ -656,6 +661,10 @@ describe("createReviewPipeline — mode", () => {
     const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), log);
     // The defer's reason becomes the deny's teaching reason — not a silent deny.
     expect(verdict).toEqual({ kind: "deny", reason: "needs the target path" });
+    // The deny is mode-mapped (a synthesized teaching reason), not the
+    // model's own deny — Q5-A covers only model denies, so this stays
+    // silent (the ask did not hold or escalate; nothing reached the human).
+    expect(notifications).toEqual([]);
     const decision = reviewCalls.find((c) => c.event === DECISION_EVENT);
     expect(decision!.data.verdict).toBe("defer");
     expect(decision!.data.emittedVerdict).toBe("deny");
@@ -699,7 +708,7 @@ describe("createReviewPipeline — mode", () => {
     expect(notifications).toEqual([]);
   });
 
-  it("strict keeps a model deny terminal and does not notify", async () => {
+  it("strict keeps a model deny terminal and notifies (denials have no dialog)", async () => {
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
@@ -712,7 +721,9 @@ describe("createReviewPipeline — mode", () => {
     );
     const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
     expect(verdict).toEqual({ kind: "deny", reason: "unsafe" });
-    expect(notifications).toHaveLength(0);
+    expect(notifications).toEqual([
+      ["[ai-guard] reviewer denied this request (risk high) — unsafe", "warning"],
+    ]);
   });
 
   it("advisory denies still count toward the circuit breaker", async () => {
@@ -1178,7 +1189,7 @@ describe("createReviewPipeline — transcript stripping", () => {
 });
 
 describe("createReviewPipeline — mode edges", () => {
-  it("strict keeps a cached deny terminal on a cache hit (no model call, no notify)", async () => {
+  it("strict keeps a cached deny terminal on a cache hit (no model call, both passes notify)", async () => {
     let modelCalls = 0;
     const completeSimple = async () => {
       modelCalls++;
@@ -1198,12 +1209,16 @@ describe("createReviewPipeline — mode edges", () => {
     expect(first).toEqual({ kind: "deny", reason: "unsafe" });
 
     // Cache hit: the stored model deny re-maps through auto (identity for
-    // denies) without a model call — and without a notify (the agent sees
-    // the deny reason itself).
+    // denies) without a model call — and both passes notify: v27 has no
+    // dialog for denials, so the notify line is the operator's only copy
+    // (repeats do not collapse).
     const second = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
     expect(second).toEqual({ kind: "deny", reason: "unsafe" });
     expect(modelCalls).toBe(1);
-    expect(notifications).toHaveLength(0);
+    expect(notifications).toEqual([
+      ["[ai-guard] reviewer denied this request (risk high) — unsafe", "warning"],
+      ["[ai-guard] reviewer denied this request (risk high) — unsafe", "warning"],
+    ]);
   });
 
   it("a policy-decided ask defers regardless of the mode", async () => {
@@ -1460,8 +1475,13 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     );
     await expectVerdict(authorize, { value: "npm install x" }, { kind: "defer" });
     expect(notifications).toHaveLength(1);
+    // Q4-B — the clarification goes out whole: the operator must be able to
+    // answer the question, and only a pathological ramble (240+) truncates.
     expect(notifications[0]![0]).not.toContain("\n");
-    expect(notifications[0]![0]).toContain("[...truncated...]");
+    expect(notifications[0]![0]).toContain(
+      "this clarification is deliberately long enough that the notify copy must truncate it to stay on one line",
+    );
+    expect(notifications[0]![0]).not.toContain("[...truncated...]");
   });
 
   it("raw reply debug only fires on defer failures, and redacted", async () => {
@@ -1527,7 +1547,46 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       }),
     );
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "deny", reason: "unsafe" });
-    expect(notifications).toEqual([]);
+    // v27 has no dialog for denials — the notify line is the only human
+    // -visible copy, so every mode notifies a model deny that carries a
+    // reason (the denied outcome adds no tail; the verb already says it).
+    expect(notifications).toEqual([
+      ["[ai-guard] reviewer denied this request (risk high) — unsafe", "warning"],
+    ]);
+  });
+
+  it("default notifies a model deny with a reason (same lane as strict)", async () => {
+    const { notifications, notify } = makeNotifySpy();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "default" },
+        notify,
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
+        ]),
+      }),
+    );
+    await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "deny", reason: "unsafe" });
+    expect(notifications).toEqual([
+      ["[ai-guard] reviewer denied this request (risk low) — unsafe", "warning"],
+    ]);
+  });
+
+  it("strict notifies a model deny with a reason (no dialog exists for denials)", async () => {
+    const { notifications, notify } = makeNotifySpy();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "strict" },
+        notify,
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
+        ]),
+      }),
+    );
+    await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "deny", reason: "unsafe" });
+    expect(notifications).toEqual([
+      ["[ai-guard] reviewer denied this request (risk low) — unsafe", "warning"],
+    ]);
   });
 
   it("permissive notifies when its one remaining block — a hard deny — fires", async () => {

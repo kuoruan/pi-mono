@@ -49,8 +49,8 @@ import { normalizeAndRedactText, shortHash, truncateMiddle } from "./utils.ts";
 import {
   applyVerdictMode,
   type MachineryFailureKind,
-  denyTier,
   machineryDenyReason,
+  NOTIFY_REASON_CEILING,
   machineryTarget,
   advisoryEscalationMessage,
   CLARIFICATION_SUPPRESSED_REASON,
@@ -190,14 +190,20 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       riskLevel: RiskLevel | undefined,
     ): DecisionRecordEntry => {
       if (emitted.kind === original.kind) {
-        // Permissive's hard tier is the one block left in the mode that
-        // auto-approves everything else — an override of the operator's
-        // yolo intent that is silent by default (no dialog; the reason goes
-        // to the agent alone). Name it at the human like every other
-        // interruption with no user-visible agent action: a rare,
-        // intent-contradicting block surfaces.
-        if (emitted.kind === "deny" && mode === "permissive" && denyTier(riskLevel) === "hard") {
-          deps.notify(advisoryEscalationMessage(original, riskLevel), "warning");
+        // A model deny that holds in every mode is the reviewer's hardest
+        // call — v27 has no dialog for denials (the reason goes to the agent
+        // and the audit log alone), so the notify line is the only human
+        // -visible copy. Fires for every mode (Q5-A): deny + model reason,
+        // regardless of tier. The permissive hard tier used to be the only
+        // carve-out; it is now just another lane of the same rule.
+        //
+        // The reason check is doctrine, not live defense: the parser
+        // currently synthesizes GENERIC_DENY_REASON for a reason-less deny,
+        // so today this never evaluates false — but the Q5-A contract is
+        // "deny WITH a reason", and a future deny producer (e.g. a
+        // persisted cache) could reach here without one.
+        if (original.kind === "deny" && original.reason) {
+          deps.notify(advisoryEscalationMessage(original, riskLevel, "denied"), "warning");
         }
         return record;
       }
@@ -218,7 +224,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
             : undefined;
       const annotated = mapped(record, mode, emitted.kind, emittedReason);
       if (emitted.kind === "defer") {
-        deps.notify(advisoryEscalationMessage(original, riskLevel), "warning");
+        deps.notify(advisoryEscalationMessage(original, riskLevel, "asked"), "warning");
       } else if (emitted.kind === "allow" && !noticeState.shown) {
         noticeState.shown = true;
         // The copy names what the mode actually loosens — lenient only passes
@@ -458,7 +464,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       reviewOutcome.deferReason
     ) {
       deps.notify(
-        `${NOTIFY_PREFIX} reviewer asks — ${truncateMiddle(reviewOutcome.deferReason, 60)}`,
+        `${NOTIFY_PREFIX} reviewer asks — ${truncateMiddle(reviewOutcome.deferReason, NOTIFY_REASON_CEILING)}`,
         "info",
       );
     } else if (

@@ -174,23 +174,35 @@ describe("machineryTarget", () => {
 
 describe("human-facing messages", () => {
   it("advisoryEscalationMessage carries the risk level and the deny reason", () => {
-    expect(advisoryEscalationMessage(DENY, "high")).toBe(
+    expect(advisoryEscalationMessage(DENY, "high", "denied")).toBe(
       "[ai-guard] reviewer denied this request (risk high) — secrets in the command",
     );
-    expect(advisoryEscalationMessage(DENY, undefined)).toBe(
+    expect(advisoryEscalationMessage(DENY, undefined, "denied")).toBe(
       "[ai-guard] reviewer denied this request — secrets in the command",
     );
-    expect(advisoryEscalationMessage({ kind: "deny" }, "medium")).toBe(
+    expect(advisoryEscalationMessage({ kind: "deny" }, "medium", "denied")).toBe(
       "[ai-guard] reviewer denied this request (risk medium)",
     );
   });
 
-  it("advisoryEscalationMessage keeps a long deny reason on one line with an explicit marker", () => {
-    const long =
-      "this reason is deliberately long enough that the notify copy must truncate it to stay on one line";
-    const message = advisoryEscalationMessage({ kind: "deny", reason: long }, "low");
+  it("advisoryEscalationMessage names the ask outcome when the mode softened the deny", () => {
+    expect(advisoryEscalationMessage(DENY, "low", "asked")).toBe(
+      "[ai-guard] reviewer denied this request (risk low) — secrets in the command — asking you instead",
+    );
+    // The denied outcome needs no tail — the fact sentence already says it.
+    expect(advisoryEscalationMessage(DENY, "low", "denied")).not.toContain("instead");
+  });
+
+  it("advisoryEscalationMessage carries a sane reason whole; only a ramble hits the ceiling", () => {
+    const sane = "x".repeat(200);
+    expect(advisoryEscalationMessage({ kind: "deny", reason: sane }, "low", "denied")).toContain(
+      sane,
+    );
+    const ramble = "y".repeat(400);
+    const message = advisoryEscalationMessage({ kind: "deny", reason: ramble }, "low", "denied");
     expect(message).not.toContain("\n");
     expect(message).toContain("[...truncated...]");
+    expect(message).toContain("yyy");
   });
 
   it("machineryDenyReason names the failure kind and the mode, tolerating none", () => {

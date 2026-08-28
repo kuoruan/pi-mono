@@ -206,27 +206,56 @@ export function machineryDenyReason(
 }
 
 /**
+ * Defensive ceiling for model reasons in notify copies — a sane reason or
+ * clarifying question never reaches this; it only guards a runaway model
+ * from flooding the operator's message pane. The audit record keeps the
+ * full text regardless.
+ */
+export const NOTIFY_REASON_CEILING = 240;
+
+/**
+ * What actually happened to the request the reviewer denied: the deny held
+ * (`"denied"`), or the mode softened it into a human ask (`"asked"`).
+ */
+export type EscalationOutcome = "denied" | "asked";
+
+/**
  * Surface the reviewer's reasoning when the advisory policy hands a model
  * deny to the human — the permission dialog renders only the request, so
  * without this the reviewer's judgment is audit-log-only.
  *
- * @param verdict - The model's verdict (a deny at every call site — the
- *   defer-escalating mappings of advisory/lenient only produce defers from
- *   denies).
+ * @param verdict - The model's verdict (a deny at every call site).
  * @param riskLevel - The risk level attached to the deny, if any.
+ * @param outcome - The request's real outcome ({@link EscalationOutcome}) —
+ *   the tail appears only when it diverges from the fact sentence.
  * @returns The notification message.
  */
 export function advisoryEscalationMessage(
   verdict: AuthorizerVerdict,
   riskLevel: RiskLevel | undefined,
+  outcome: EscalationOutcome,
 ): string {
   const reason = verdict.kind === "deny" ? verdict.reason : undefined;
   // No structural colons: this line can render under the TUI's own
   // "Warning:" prefix at warning level — "Warning: [ai-guard] … risk: x"
   // would double up. Parens carry the detail colon-free.
-  const risk = riskLevel ? ` (risk ${riskLevel})` : "";
-  // The teaching reason is model text — the notify line stays readable
-  // (terminal-width); the full reason stays in the audit record.
-  const reasonSuffix = reason ? ` — ${truncateMiddle(reason, 60)}` : "";
-  return `${NOTIFY_PREFIX} reviewer denied this request${risk}${reasonSuffix}`;
+  //
+  // The reason goes out whole — the operator must be able to read (and for
+  // a clarification, answer) the model's full text; only a pathological
+  // ramble hits the ceiling. The audit record keeps the full text either way.
+  //
+  // Multi-part construction: segments carry no leading spaces — the join
+  // owns the separator, so an absent segment can never leave a gap.
+  return [
+    `${NOTIFY_PREFIX} reviewer denied this request`,
+    riskLevel ? `(risk ${riskLevel})` : undefined,
+    reason ? `— ${truncateMiddle(reason, NOTIFY_REASON_CEILING)}` : undefined,
+    // The tail appears only when the outcome diverges from the fact
+    // sentence: "denied this request" needs no "— denied" echo; "asking
+    // you instead" corrects the operator's read of the sentence (the
+    // request was NOT denied — a dialog is coming).
+    outcome === "asked" ? "— asking you instead" : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
