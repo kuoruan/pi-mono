@@ -22,7 +22,6 @@
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import type { Mode } from "./config-schema.ts";
-import { NOTIFY_PREFIX } from "./logger.ts";
 import { MODE_TABLE, type ModeLanes } from "./mode-table.ts";
 import type { ModelCallDeferKind, RiskLevel, VerdictOrigin } from "./model-verdict.ts";
 import { truncateMiddle } from "./utils.ts";
@@ -247,7 +246,7 @@ export function advisoryEscalationMessage(
   // Multi-part construction: segments carry no leading spaces — the join
   // owns the separator, so an absent segment can never leave a gap.
   return [
-    `${NOTIFY_PREFIX} reviewer denied this request`,
+    `reviewer denied this request`,
     riskLevel ? `(risk ${riskLevel})` : undefined,
     reason ? `— ${truncateMiddle(reason, NOTIFY_REASON_CEILING)}` : undefined,
     // The tail appears only when the outcome diverges from the fact

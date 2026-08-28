@@ -60,6 +60,7 @@ describe("modeWarnings", () => {
     surfaces: ["bash"],
     instructions: null,
     cache: { maxEntries: 128 },
+    notifyLevel: "info" as const,
   };
 
   it("warns on the two extremes combined with a breaker forced to defer", () => {

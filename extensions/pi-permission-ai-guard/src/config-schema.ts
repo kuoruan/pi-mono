@@ -17,6 +17,16 @@ export const MODE_VALUES = ["strict", "default", "advisory", "lenient", "permiss
 /** How the link disposes model deny/defer verdicts (see the `mode` field comment). */
 export type Mode = (typeof MODE_VALUES)[number];
 
+/**
+ * The notify-level thresholds — the minimum ambient level that still
+ * notifies, plus `off` for total ambient silence. Command feedback
+ * (the `/ai-guard` surface) is never gated.
+ */
+export const NOTIFY_LEVEL_VALUES = ["info", "warning", "error", "off"] as const;
+
+/** The `notifyLevel` config value (ambient-notify threshold). */
+export type NotifyThreshold = (typeof NOTIFY_LEVEL_VALUES)[number];
+
 /** Verdicts the circuit breaker can force when it trips. */
 export const BREAKER_VERDICT_VALUES = ["deny", "defer"] as const;
 
@@ -94,6 +104,12 @@ export const configSchema = z.object({
   // under "strict" and "permissive" (a broken reviewer must not rubber-
   // stamp), and defer under the other three.
   mode: z.enum(MODE_VALUES).default("default"),
+
+  // Ambient (review-loop) notification threshold. Levels mirror the TUI's
+  // notify levels plus `off`; `error` currently has no ambient occupant
+  // (ambient traffic is info/warning only) — the rung exists so the
+  // threshold chain never skips a level. Command feedback is NOT gated.
+  notifyLevel: z.enum(NOTIFY_LEVEL_VALUES).default("info"),
 
   // Circuit breaker (session-level, fail-safe). `consecutive` is recoverable
   // (resets on trip so the model gets another chance); `total` is a hard

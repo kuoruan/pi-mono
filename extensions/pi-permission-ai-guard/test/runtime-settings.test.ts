@@ -67,6 +67,7 @@ function makeSettings(
 ) {
   const overrides: SessionOverrides = { ...overridesInit };
   const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
+  const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
   const settings: RuntimeSettings = new RuntimeSettingsClass(
     {
       session: {
@@ -74,80 +75,71 @@ function makeSettings(
         overrides,
       },
       appendEntry,
+      notify,
       saveConfig:
         saveConfig ??
         ((target) => ({ path: `/config-${target}.json`, created: false, changed: true })),
     },
     SPECS,
   );
-  return { settings, overrides, appendEntry };
+  return { settings, overrides, appendEntry, notify };
 }
 
 describe("RuntimeSettings — command", () => {
   it("the direct form applies a value: override + persist + notify + footer", async () => {
-    const { settings, overrides, appendEntry } = makeSettings();
+    const { settings, overrides, appendEntry, notify } = makeSettings();
     const ctx = makeUiCtx();
     await settings.command.handler("mode advisory", ctx);
 
     expect(overrides.mode).toBe("advisory");
     expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: "advisory" });
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] mode = advisory (session override)",
-      "info",
-    );
+    expect(notify).toHaveBeenCalledWith("mode = advisory (session override)", "info");
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "advisory (session)");
   });
 
   it("reset clears the override, persists null, and shows the config default", async () => {
-    const { settings, overrides, appendEntry } = makeSettings({ mode: "strict" });
+    const { settings, overrides, appendEntry, notify } = makeSettings({ mode: "strict" });
     const ctx = makeUiCtx();
     await settings.command.handler("mode reset", ctx);
 
     expect(overrides.mode).toBeUndefined();
     expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: null });
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] mode = default (config default)",
-      "info",
-    );
+    expect(notify).toHaveBeenCalledWith("mode = default (config default)", "info");
     // Default is the shipped baseline — the line clears instead of showing it.
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", undefined);
   });
 
   it("unknown setting or invalid value notifies an error and changes nothing", async () => {
-    const { settings, overrides, appendEntry } = makeSettings();
+    const { settings, overrides, appendEntry, notify } = makeSettings();
     const ctx = makeUiCtx();
     await settings.command.handler("mode yolo", ctx);
     await settings.command.handler("surfaces bash", ctx);
 
     expect(overrides.mode).toBeUndefined();
     expect(appendEntry).not.toHaveBeenCalled();
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      '[ai-guard] invalid value "yolo" for mode — valid values are strict|default|advisory|lenient|permissive|reset',
+    expect(notify).toHaveBeenCalledWith(
+      'invalid value "yolo" for mode — valid values are strict|default|advisory|lenient|permissive|reset',
       "error",
     );
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      '[ai-guard] unknown setting "surfaces" (mode)',
-      "error",
-    );
+    expect(notify).toHaveBeenCalledWith('unknown setting "surfaces" (mode)', "error");
   });
 
   it("without an active session warns instead of crashing", async () => {
     const overrides: SessionOverrides = {};
     const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
+    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
     const settings = new RuntimeSettingsClass(
       {
         session: { session: undefined, overrides },
         appendEntry,
+        notify,
         saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
       },
       SPECS,
     );
     const ctx = makeUiCtx();
     await settings.command.handler("mode advisory", ctx);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] no active session (config not loaded)",
-      "warning",
-    );
+    expect(notify).toHaveBeenCalledWith("no active session (config not loaded)", "warning");
   });
 
   it("the settings menu and value picker apply the picked value", async () => {
@@ -166,6 +158,55 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.mode).toBe("strict");
   });
 
+  it("a second spec rides the same machinery (menu rows, direct form, footer)", async () => {
+    // The generic spec machinery's first real multi-spec consumer —
+    // nothing may assume a single setting.
+    const overrides: SessionOverrides = {};
+    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
+    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
+    const settings = new RuntimeSettingsClass(
+      {
+        session: {
+          session: { config: configSchema.parse({ provider: "test", model: "test" }) },
+          overrides,
+        },
+        appendEntry,
+        notify,
+        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
+      },
+      [
+        ...SPECS,
+        {
+          name: "notifyLevel",
+          values: ["info", "warning", "error", "off"],
+          description: "the minimum ambient notify level",
+          hiddenValue: "info",
+        },
+      ],
+    );
+    const ctx = makeUiCtx();
+    ctx.ui.select.mockResolvedValueOnce("notifyLevel — info (config)").mockResolvedValueOnce("off");
+    await settings.command.handler("", ctx);
+
+    // Menu rows list BOTH settings (plus the save verbs); picking the
+    // second spec and a value applies it like any other.
+    expect(ctx.ui.select).toHaveBeenCalledWith(
+      "ai-guard settings — pick a setting to adjust, or save the current config",
+      [
+        "mode — default (config)",
+        "notifyLevel — info (config)",
+        "save global config",
+        "save project config",
+      ],
+    );
+    expect(overrides.notifyLevel).toBe("off");
+    expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { notifyLevel: "off" });
+    expect(notify).toHaveBeenCalledWith("notifyLevel = off (session override)", "info");
+    // Footer fragments join per spec: only the deviation renders.
+    settings.syncFooter(ctx);
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "off (session)");
+  });
+
   it("cancelling the picker changes nothing", async () => {
     const { settings, overrides, appendEntry } = makeSettings();
     const ctx = makeUiCtx(undefined);
@@ -177,13 +218,13 @@ describe("RuntimeSettings — command", () => {
   });
 
   it("the picker paths require a dialog-capable UI; the direct form does not", async () => {
-    const { settings, overrides } = makeSettings();
+    const { settings, overrides, notify } = makeSettings();
     const noUi = makeUiCtx();
     noUi.hasUI = false;
 
     await settings.command.handler("mode", noUi);
-    expect(noUi.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] settings menu needs an interactive UI — use /ai-guard <setting> <value>",
+    expect(notify).toHaveBeenCalledWith(
+      "settings menu needs an interactive UI — use /ai-guard <setting> <value>",
       "error",
     );
     expect(overrides.mode).toBeUndefined();
@@ -253,20 +294,19 @@ describe("RuntimeSettings — shortcut", () => {
 
   it("without an active session warns instead of crashing", () => {
     const overrides: SessionOverrides = {};
+    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
     const settings = new RuntimeSettingsClass(
       {
         session: { session: undefined, overrides },
         appendEntry: () => {},
+        notify,
         saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
       },
       SPECS,
     );
     const ctx = makeUiCtx();
     expect(() => settings.shortcut.handler(ctx)).not.toThrow();
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] no active session (config not loaded)",
-      "warning",
-    );
+    expect(notify).toHaveBeenCalledWith("no active session (config not loaded)", "warning");
   });
 });
 
@@ -323,6 +363,7 @@ describe("RuntimeSettings — restore + footer", () => {
       {
         session: { session: undefined, overrides },
         appendEntry: () => {},
+        notify: () => {},
         saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
       },
       SPECS,
@@ -352,7 +393,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
         changed: boolean;
       }
     >((target) => ({ path: `/cfg-${target}.json`, created: false, changed: true }));
-    const { settings } = makeSettings({ mode: "advisory" }, saveConfig);
+    const { settings, notify } = makeSettings({ mode: "advisory" }, saveConfig);
     const ctx = makeUiCtx();
 
     await settings.command.handler("save-to-global-config", ctx);
@@ -364,8 +405,8 @@ describe("RuntimeSettings — save to config layer actions", () => {
     expect(target).toBe("global");
     expect(config.mode).toBe("advisory"); // override won over the snapshot
     expect(config.provider).toBe("test"); // other fields intact
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] saved to global config (cfg-global.json) — new sessions start from it; this session keeps current overrides",
+    expect(notify).toHaveBeenCalledWith(
+      "saved to global config (cfg-global.json) — new sessions start from it; this session keeps current overrides",
       "info",
     );
   });
@@ -390,7 +431,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("notifies a refusal and changes nothing when the save errors", async () => {
-    const { settings } = makeSettings({}, () => ({
+    const { settings, notify } = makeSettings({}, () => ({
       path: "/cfg.json",
       created: false,
       changed: false,
@@ -400,8 +441,8 @@ describe("RuntimeSettings — save to config layer actions", () => {
 
     await settings.command.handler("save-to-global-config", ctx);
 
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] could not save to global config — not valid JSONC",
+    expect(notify).toHaveBeenCalledWith(
+      "could not save to global config — not valid JSONC",
       "error",
     );
   });
@@ -497,7 +538,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("reports when the layer already matches (nothing written)", async () => {
-    const { settings } = makeSettings({}, () => ({
+    const { settings, notify } = makeSettings({}, () => ({
       path: "/cfg.json",
       created: false,
       changed: false,
@@ -506,25 +547,19 @@ describe("RuntimeSettings — save to config layer actions", () => {
 
     await settings.command.handler("save-to-global-config", ctx);
 
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] global config already matches — nothing written",
-      "info",
-    );
+    expect(notify).toHaveBeenCalledWith("global config already matches — nothing written", "info");
   });
 });
 
 describe("RuntimeSettings — picker stays plain for the highlighted value", () => {
   it("applies a plain permissive pick and notifies at warning level, undecorated", async () => {
-    const { settings, overrides } = makeSettings();
+    const { settings, overrides, notify } = makeSettings();
     const ctx = makeUiCtx("permissive — only clear high-danger requests are blocked");
     await settings.command.handler("mode", ctx);
     expect(overrides.mode).toBe("permissive");
     // The command surface is plain text — the warning-red emphasis is
     // footer-only. The severity bump stays.
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[ai-guard] mode = permissive (session override)",
-      "warning",
-    );
+    expect(notify).toHaveBeenCalledWith("mode = permissive (session override)", "warning");
   });
 });
 

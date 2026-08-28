@@ -84,19 +84,20 @@ See [`config/config.example.json`](config/config.example.json) for a complete ex
 
 ## Configuration
 
-| Field            | Type                                                                    | Default                                   | Description                                                                    |
-| ---------------- | ----------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
-| `provider`       | string                                                                  | required                                  | Model provider (e.g. `anthropic`)                                              |
-| `model`          | string                                                                  | required                                  | Model id (e.g. `claude-haiku-4-5`)                                             |
-| `reasoning`      | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"off"`                                   | Thinking level (pi-ai `ModelThinkingLevel`); `off` = disabled                  |
-| `timeoutMs`      | integer                                                                 | `15000`                                   | Model-call timeout (ms)                                                        |
-| `maxTokens`      | integer                                                                 | `4096`                                    | Reviewer reply budget; thinking blocks count against it on reasoning upstreams |
-| `transcript`     | object                                                                  | see below                                 | Transcript stripping config (see below)                                        |
-| `surfaces`       | string[]                                                                | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes         |
-| `instructions`   | string\|null                                                            | `null`                                    | Custom safety rules (replaces defaults; null = built-in)                       |
-| `mode`           | `"strict"\|"default"\|"advisory"\|"lenient"\|"permissive"`              | `"default"`                               | Leniency ladder for non-allow verdicts (see below)                             |
-| `circuitBreaker` | object                                                                  | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                             |
-| `cache`          | object                                                                  | `{maxEntries:128}`                        | Verdict cache (see below)                                                      |
+| Field            | Type                                                                    | Default                                   | Description                                                                                                          |
+| ---------------- | ----------------------------------------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `provider`       | string                                                                  | required                                  | Model provider (e.g. `anthropic`)                                                                                    |
+| `model`          | string                                                                  | required                                  | Model id (e.g. `claude-haiku-4-5`)                                                                                   |
+| `reasoning`      | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"off"`                                   | Thinking level (pi-ai `ModelThinkingLevel`); `off` = disabled                                                        |
+| `timeoutMs`      | integer                                                                 | `15000`                                   | Model-call timeout (ms)                                                                                              |
+| `maxTokens`      | integer                                                                 | `4096`                                    | Reviewer reply budget; thinking blocks count against it on reasoning upstreams                                       |
+| `transcript`     | object                                                                  | see below                                 | Transcript stripping config (see below)                                                                              |
+| `surfaces`       | string[]                                                                | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes                                               |
+| `instructions`   | string\|null                                                            | `null`                                    | Custom safety rules (replaces defaults; null = built-in)                                                             |
+| `mode`           | `"strict"\|"default"\|"advisory"\|"lenient"\|"permissive"`              | `"default"`                               | Leniency ladder for non-allow verdicts (see below)                                                                   |
+| `notifyLevel`    | `"info"\|"warning"\|"error"\|"off"`                                     | `"info"`                                  | Ambient-notify threshold — the minimum review-loop notify level that still notifies; command feedback is never gated |
+| `circuitBreaker` | object                                                                  | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                                                                   |
+| `cache`          | object                                                                  | `{maxEntries:128}`                        | Verdict cache (see below)                                                                                            |
 
 ### Transcript
 
@@ -132,6 +133,8 @@ A model deny that **holds or escalates** notifies in every mode — `reviewer de
 
 Every notify line follows one skeleton — event sentence, em-dash consequence, parenthesized qualifier (`(risk high)`, `(session override)`) — and state echoes (`mode = permissive (session override)`) are the one deliberate exception: they report a value, not an event.
 
+Ambient (review-loop) notices respect the `notifyLevel` threshold: `info` (the default) passes everything, `warning` silences the `reviewer asks` mirror (the only ambient info line — the approval dialog still pops with the request), `error` currently passes nothing new (no ambient line is error-level; the rung exists so the threshold chain never skips a level), and `off` silences every ambient line. **Command feedback is never gated** — the `/ai-guard` surface always answers, because silence on a command you just typed reads as breakage. The tradeoff of `warning`/`off` is explicit: model denies and clarifications reach only the agent and the audit log, and since denials have no host dialog, the operator sees nothing — an operator-owned risk, taken knowingly.
+
 Notes:
 
 - A link's `deny` is final — it short-circuits the chain and never reaches a prompt. A link's `defer` falls to the next authority: the interactive permission prompt in a TUI session, the denying terminal in a headless one.
@@ -150,14 +153,14 @@ Effective config layers, in precedence order: **session overrides** (the control
 
 Two session-scoped controls change the effective mode without touching the config file:
 
-- `/ai-guard` — opens the settings menu (each entry shows its current value and source); picking an entry opens its value picker. Direct forms: `/ai-guard mode strict|default|advisory|lenient|permissive` and `/ai-guard mode reset` (back to the config default). Argument completion is two-stage: setting names first, then the setting's values.
+- `/ai-guard` — opens the settings menu (each entry shows its current value and source); picking an entry opens its value picker. Direct forms: `/ai-guard mode strict|default|advisory|lenient|permissive`, `/ai-guard notifyLevel info|warning|error|off`, and `<setting> reset` (back to the config default). Argument completion is two-stage: setting names first, then the setting's values.
 - `/ai-guard save-to-global-config` / `/ai-guard save-to-project-config` — persist the current EFFECTIVE config (every field, session overrides included, so future command-configured settings ride along) into the global or project config file.
   - Leaves are written in place via JSONC edits: comments, formatting, and untouched keys survive; when the layer already matches, nothing is written.
   - The project target is refused for untrusted projects (that layer isn't honored there).
   - New sessions start from the saved layer; the current session keeps its overrides. A saved layer feeds new sessions but a higher-precedence layer (project > global) can still shadow it — check the layer order above when a saved value seems not to take effect. Both actions are the last picker entries.
 - `ctrl+alt+g` — cycle the casual subset `default → advisory → lenient → default` (one press = one notch looser; the wrap returns to the anchor). The extremes stay out of casual reach, mirroring Claude Code's Shift+Tab pattern: `strict` and `permissive` are set explicitly via the command or picker.
 
-The footer only shows deviations from the shipped baseline: nothing while the effective mode is `default`; `<value>` (e.g. `lenient`) from the config; `<value> (session)` while an override is active (including after resume). The footer renders `permissive` in warning red (command surfaces stay plain text). The pipeline picks up the change on the next ask without re-registering the chain link, and `ai_guard.decision` records carry the effective mode at decision time.
+The footer only shows deviations from the shipped baseline: nothing while the effective mode is `default` and `notifyLevel` is `info`; `<value>` (e.g. `lenient`) from the config; `<value> (session)` while an override is active (including after resume) — a non-default `notifyLevel` renders its fragment the same way (e.g. `off · lenient (session)`), so a silenced pane stays visible in the footer. The footer renders `permissive` in warning red (command surfaces stay plain text). The pipeline picks up the change on the next ask without re-registering the chain link, and `ai_guard.decision` records carry the effective mode at decision time.
 
 Overrides persist **per session**: each change is appended to pi's session file as a custom entry (custom entries never enter LLM context), so resuming a session restores the last policy set on its active branch — a `reset` persists too, a fresh session always starts from the config default, and tree navigation (`/tree` rewind/branch) re-derives the override from the new active branch.
 

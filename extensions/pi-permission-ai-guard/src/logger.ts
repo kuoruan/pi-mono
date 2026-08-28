@@ -17,6 +17,12 @@ import { EXTENSION_ID, LINK_NAME } from "./config-schema.ts";
  */
 export const NOTIFY_PREFIX = `[${LINK_NAME}]`;
 
+/**
+ * The TUI's notification levels (the ui.notify contract, stated directly
+ * rather than derived from upstream types — the seam owns its vocabulary).
+ */
+export type NotifyLevel = "info" | "warning" | "error";
+
 const PREFIX = `[${EXTENSION_ID}]`;
 
 export function warn(message: string): void {

@@ -224,9 +224,10 @@ describe("SessionLifecycle — notify bridge", () => {
     expect(calls.length).toBe(1);
 
     // The pipeline's notify dep calls through the ctx stored on the
-    // session (never destructured — the lazy getters stay intact).
+    // session (never destructured — the lazy getters stay intact), and the
+    // seam owns the prefix — copy writers stay bare.
     calls[0]!.notify!("reviewer denied this request", "warning");
-    expect(notify).toHaveBeenCalledWith("reviewer denied this request", "warning");
+    expect(notify).toHaveBeenCalledWith("[ai-guard] reviewer denied this request", "warning");
   });
 
   it("with a dialog-capable UI the escalation goes to notify, not the footer", async () => {
@@ -244,7 +245,7 @@ describe("SessionLifecycle — notify bridge", () => {
     );
     expect(setStatus).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledWith(
-      "reviewer could not complete the review (empty-reply) — deferring to you",
+      "[ai-guard] reviewer could not complete the review (empty-reply) — deferring to you",
       "warning",
     );
   });
@@ -285,5 +286,65 @@ describe("SessionLifecycle — notify bridge", () => {
     expect(() => calls[0]!.notify!("x", "warning")).not.toThrow();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("escalation message lost: x"));
     warnSpy.mockRestore();
+  });
+});
+
+describe("SessionLifecycle — notify level gate", () => {
+  const LEVEL_CASES = [
+    { threshold: "info", level: "info", passes: true },
+    { threshold: "info", level: "warning", passes: true },
+    { threshold: "warning", level: "info", passes: false },
+    { threshold: "warning", level: "warning", passes: true },
+    { threshold: "error", level: "warning", passes: false },
+    { threshold: "error", level: "error", passes: true },
+    { threshold: "off", level: "error", passes: false },
+  ] as const;
+
+  it("gates ambient traffic by the effective notifyLevel (config)", () => {
+    for (const { threshold, level, passes } of LEVEL_CASES) {
+      const { lifecycle, calls } = makeLifecycle();
+      const notify = vi.fn<() => void>();
+      lifecycle.onSessionStart(
+        makeSeed({
+          ctx: makeCtx(notify) as never,
+          config: configSchema.parse({ provider: "test", model: "test", notifyLevel: threshold }),
+        }),
+      );
+      calls[0]!.notify!("ambient line", level);
+      expect(notify, `threshold ${threshold}, level ${level}`).toHaveBeenCalledTimes(
+        passes ? 1 : 0,
+      );
+    }
+  });
+
+  it("a session override read per-call beats the config value", () => {
+    const { lifecycle, calls } = makeLifecycle();
+    const notify = vi.fn<() => void>();
+    lifecycle.onSessionStart(makeSeed({ ctx: makeCtx(notify) as never }));
+    // Config default is info; an override to warning must silence info
+    // on the very next call (no re-registration needed).
+    lifecycle.overrides.notifyLevel = "warning";
+    calls[0]!.notify!("info line", "info");
+    expect(notify).not.toHaveBeenCalled();
+    calls[0]!.notify!("warning line", "warning");
+    expect(notify).toHaveBeenCalledWith("[ai-guard] warning line", "warning");
+  });
+
+  it("the acceptance pair — off silences ambient, command feedback still answers", () => {
+    const { lifecycle, calls } = makeLifecycle();
+    const notify = vi.fn<() => void>();
+    lifecycle.onSessionStart(
+      makeSeed({
+        ctx: makeCtx(notify) as never,
+        config: configSchema.parse({ provider: "test", model: "test", notifyLevel: "off" }),
+      }),
+    );
+    // Ambient (pipeline): silenced.
+    calls[0]!.notify!("reviewer denied this request (risk high) — x", "warning");
+    expect(notify).not.toHaveBeenCalled();
+    // Feedback (settings surface): a synchronous answer to an explicit
+    // user action — never gated, prefix intact.
+    lifecycle.feedbackNotify("notifyLevel = off (session override)", "info");
+    expect(notify).toHaveBeenCalledWith("[ai-guard] notifyLevel = off (session override)", "info");
   });
 });

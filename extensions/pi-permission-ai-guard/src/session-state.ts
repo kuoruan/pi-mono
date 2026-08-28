@@ -14,7 +14,7 @@
 
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
-import type { AiGuardConfig, BreakerVerdict, Mode } from "./config-schema.ts";
+import type { AiGuardConfig, BreakerVerdict, Mode, NotifyThreshold } from "./config-schema.ts";
 import type { RiskLevel } from "./model-verdict.ts";
 
 /**
@@ -31,6 +31,8 @@ import type { RiskLevel } from "./model-verdict.ts";
 export interface SessionOverrides {
   /** Guard mode for this session; undefined = use the config's mode. */
   mode?: Mode;
+  /** Ambient-notify threshold for this session; undefined = config value. */
+  notifyLevel?: NotifyThreshold;
 }
 
 /** A cached verdict entry, keyed by commandHash. */
@@ -274,7 +276,10 @@ export function effectiveOverride<T extends OverridableKey>(
   config: AiGuardConfig | undefined,
   key: T,
 ): AiGuardConfig[T] | undefined {
-  return overrides[key] ?? config?.[key];
+  // The indexed-access read is sound (both interfaces key the same field
+  // name with the same value type) but TS cannot prove it across a generic
+  // key once more than one field exists — cast on the single read seam.
+  return (overrides[key] ?? config?.[key]) as AiGuardConfig[T] | undefined;
 }
 
 /**

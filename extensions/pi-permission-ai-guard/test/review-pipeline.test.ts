@@ -593,10 +593,7 @@ describe("createReviewPipeline — mode", () => {
     );
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "defer" });
     expect(notifications).toEqual([
-      [
-        "[ai-guard] reviewer denied this request (risk low) — unsafe — asking you instead",
-        "warning",
-      ],
+      ["reviewer denied this request (risk low) — unsafe — asking you instead", "warning"],
     ]);
   });
 
@@ -662,8 +659,9 @@ describe("createReviewPipeline — mode", () => {
     // The defer's reason becomes the deny's teaching reason — not a silent deny.
     expect(verdict).toEqual({ kind: "deny", reason: "needs the target path" });
     // The deny is mode-mapped (a synthesized teaching reason), not the
-    // model's own deny — Q5-A covers only model denies, so this stays
-    // silent (the ask did not hold or escalate; nothing reached the human).
+    // model's own deny — deny notifies cover only model denies, so this
+    // stays silent (the ask did not hold or escalate; nothing reached
+    // the human).
     expect(notifications).toEqual([]);
     const decision = reviewCalls.find((c) => c.event === DECISION_EVENT);
     expect(decision!.data.verdict).toBe("defer");
@@ -722,7 +720,7 @@ describe("createReviewPipeline — mode", () => {
     const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
     expect(verdict).toEqual({ kind: "deny", reason: "unsafe" });
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer denied this request (risk high) — unsafe", "warning"],
+      ["reviewer denied this request (risk high) — unsafe", "warning"],
     ]);
   });
 
@@ -1216,8 +1214,8 @@ describe("createReviewPipeline — mode edges", () => {
     expect(second).toEqual({ kind: "deny", reason: "unsafe" });
     expect(modelCalls).toBe(1);
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer denied this request (risk high) — unsafe", "warning"],
-      ["[ai-guard] reviewer denied this request (risk high) — unsafe", "warning"],
+      ["reviewer denied this request (risk high) — unsafe", "warning"],
+      ["reviewer denied this request (risk high) — unsafe", "warning"],
     ]);
   });
 
@@ -1323,10 +1321,7 @@ describe("createReviewPipeline — strict denies pre-call machinery failures", (
       );
       await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
       expect(notifications).toEqual([
-        [
-          "[ai-guard] reviewer could not complete the review (model-unresolved) — deferring to you",
-          "warning",
-        ],
+        ["reviewer could not complete the review (model-unresolved) — deferring to you", "warning"],
       ]);
     },
   );
@@ -1365,14 +1360,8 @@ describe("createReviewPipeline — strict denies pre-call machinery failures", (
     // Repeats do not collapse: a second failure re-explains itself.
     await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
     expect(notifications).toEqual([
-      [
-        "[ai-guard] reviewer could not complete the review (empty-reply) — deferring to you",
-        "warning",
-      ],
-      [
-        "[ai-guard] reviewer could not complete the review (empty-reply) — deferring to you",
-        "warning",
-      ],
+      ["reviewer could not complete the review (empty-reply) — deferring to you", "warning"],
+      ["reviewer could not complete the review (empty-reply) — deferring to you", "warning"],
     ]);
   });
 });
@@ -1452,7 +1441,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     );
     await expectVerdict(authorize, { value: "npm install x" }, { kind: "defer" });
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer asks — which package manager does this project use?", "info"],
+      ["reviewer asks — which package manager does this project use?", "info"],
     ]);
   });
 
@@ -1475,7 +1464,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     );
     await expectVerdict(authorize, { value: "npm install x" }, { kind: "defer" });
     expect(notifications).toHaveLength(1);
-    // Q4-B — the clarification goes out whole: the operator must be able to
+    // The clarification goes out whole: the operator must be able to
     // answer the question, and only a pathological ramble (240+) truncates.
     expect(notifications[0]![0]).not.toContain("\n");
     expect(notifications[0]![0]).toContain(
@@ -1551,7 +1540,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     // -visible copy, so every mode notifies a model deny that carries a
     // reason (the denied outcome adds no tail; the verb already says it).
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer denied this request (risk high) — unsafe", "warning"],
+      ["reviewer denied this request (risk high) — unsafe", "warning"],
     ]);
   });
 
@@ -1568,7 +1557,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     );
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "deny", reason: "unsafe" });
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer denied this request (risk low) — unsafe", "warning"],
+      ["reviewer denied this request (risk low) — unsafe", "warning"],
     ]);
   });
 
@@ -1585,7 +1574,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     );
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "deny", reason: "unsafe" });
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer denied this request (risk low) — unsafe", "warning"],
+      ["reviewer denied this request (risk low) — unsafe", "warning"],
     ]);
   });
 
@@ -1609,10 +1598,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       { kind: "deny", reason: "secrets in the command" },
     );
     expect(notifications).toEqual([
-      [
-        "[ai-guard] reviewer denied this request (risk critical) — secrets in the command",
-        "warning",
-      ],
+      ["reviewer denied this request (risk critical) — secrets in the command", "warning"],
     ]);
   });
 
@@ -1629,7 +1615,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     );
     await expectVerdict(authorize, { value: "npm install x" }, { kind: "allow" });
     expect(notifications).toEqual([
-      ["[ai-guard] lenient auto-approves uncertainty — soft denials still ask", "warning"],
+      ["lenient auto-approves uncertainty — soft denials still ask", "warning"],
     ]);
   });
 
@@ -1653,10 +1639,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     expect(record.mode).toBe("permissive");
     // Once per pipeline instance, warning-level.
     expect(notifications).toEqual([
-      [
-        "[ai-guard] permissive auto-approves non-allow verdicts — hard-tier denials still block",
-        "warning",
-      ],
+      ["permissive auto-approves non-allow verdicts — hard-tier denials still block", "warning"],
     ]);
   });
 
@@ -1838,8 +1821,8 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
     // Missing riskLevel is hard: the fresh ask and the cached replay both
     // name the block (repeats do not collapse).
     expect(notifications).toEqual([
-      ["[ai-guard] reviewer denied this request — unsafe", "warning"],
-      ["[ai-guard] reviewer denied this request — unsafe", "warning"],
+      ["reviewer denied this request — unsafe", "warning"],
+      ["reviewer denied this request — unsafe", "warning"],
     ]);
   });
 

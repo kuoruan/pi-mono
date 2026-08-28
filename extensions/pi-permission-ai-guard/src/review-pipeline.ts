@@ -25,7 +25,6 @@ import {
   modelReply,
   shortCircuit,
 } from "./decision-record.ts";
-import { NOTIFY_PREFIX } from "./logger.ts";
 import {
   type CompleteSimpleFn,
   type ModelCallContext,
@@ -125,7 +124,7 @@ export interface ReviewPipelineDeps {
  * @returns The notification message.
  */
 function machineryDeferNotice(kind: MachineryFailureKind): string {
-  return `${NOTIFY_PREFIX} reviewer could not complete the review (${kind}) — deferring to you`;
+  return `reviewer could not complete the review (${kind}) — deferring to you`;
 }
 
 function releaseMachineryGate(
@@ -193,15 +192,15 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         // A model deny that holds in every mode is the reviewer's hardest
         // call — v27 has no dialog for denials (the reason goes to the agent
         // and the audit log alone), so the notify line is the only human
-        // -visible copy. Fires for every mode (Q5-A): deny + model reason,
-        // regardless of tier. The permissive hard tier used to be the only
-        // carve-out; it is now just another lane of the same rule.
+        // -visible copy. Every mode notifies a deny that carries a model
+        // reason, regardless of tier; the permissive hard tier is just one
+        // lane of that rule, not a carve-out.
         //
         // The reason check is doctrine, not live defense: the parser
         // currently synthesizes GENERIC_DENY_REASON for a reason-less deny,
-        // so today this never evaluates false — but the Q5-A contract is
-        // "deny WITH a reason", and a future deny producer (e.g. a
-        // persisted cache) could reach here without one.
+        // so today this never evaluates false — but the contract is "deny
+        // WITH a reason", and a future deny producer (e.g. a persisted
+        // cache) could reach here without one.
         if (original.kind === "deny" && original.reason) {
           deps.notify(advisoryEscalationMessage(original, riskLevel, "denied"), "warning");
         }
@@ -234,7 +233,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
           mode === "lenient"
             ? "uncertainty — soft denials still ask"
             : "non-allow verdicts — hard-tier denials still block";
-        deps.notify(`${NOTIFY_PREFIX} ${mode} auto-approves ${loosened}`, "warning");
+        deps.notify(`${mode} auto-approves ${loosened}`, "warning");
       }
       return annotated;
     };
@@ -306,7 +305,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // by design: specific config beats the general mode).
       if (verdict.kind === "defer") {
         deps.notify(
-          `${NOTIFY_PREFIX} circuit breaker tripped — too many reviewer denials, deferring to you`,
+          `circuit breaker tripped — too many reviewer denials, deferring to you`,
           "warning",
         );
       }
@@ -464,7 +463,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       reviewOutcome.deferReason
     ) {
       deps.notify(
-        `${NOTIFY_PREFIX} reviewer asks — ${truncateMiddle(reviewOutcome.deferReason, NOTIFY_REASON_CEILING)}`,
+        `reviewer asks — ${truncateMiddle(reviewOutcome.deferReason, NOTIFY_REASON_CEILING)}`,
         "info",
       );
     } else if (

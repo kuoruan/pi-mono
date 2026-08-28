@@ -507,6 +507,7 @@ describe("createAiGuardExtension lifecycle", () => {
         reasoning: "off" as const,
         instructions: null,
         mode: "default" as const,
+        notifyLevel: "info" as const,
       },
       issues: [],
     }));
@@ -706,7 +707,8 @@ describe("createAiGuardExtension — save-to-config actions", () => {
       saveConfig,
     });
 
-    pi.fire("session_start", {}, makeSessionCtx());
+    const sessionCtx = makeSessionCtx();
+    pi.fire("session_start", {}, sessionCtx);
     const ctx = makeUiCtx();
     await pi.commands.get("ai-guard")!.handler("save-to-global-config", ctx);
 
@@ -717,12 +719,14 @@ describe("createAiGuardExtension — save-to-config actions", () => {
     expect(saveConfig.mock.calls[0]![1].mode).toBe("default");
     // Saving is a config-layer write; no session override is added.
     expect(pi.appendEntry).not.toHaveBeenCalled();
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("saved to global config"),
+    // Command feedback rides the session notify seam — the session ctx's
+    // notify carries it (prefix applied there), never the command ctx's
+    // ui, and no footer sync happens for a config-layer save.
+    expect(sessionCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("[ai-guard] saved to global config"),
       "info",
     );
-    // Config-layer saves don't change this session's effective state: no
-    // footer sync, no session override written.
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
     expect(ctx.ui.setStatus).not.toHaveBeenCalled();
   });
 
@@ -744,11 +748,15 @@ describe("createAiGuardExtension — save-to-config actions", () => {
     // ~/.pi/agent dir.
     const tmpCwd = mkdtempSync(join(tmpdir(), "ai-guard-untrusted-"));
     try {
-      pi.fire("session_start", {}, makeSessionCtx({ trusted: false, cwd: tmpCwd }));
+      const sessionCtx = makeSessionCtx({ trusted: false, cwd: tmpCwd });
+      pi.fire("session_start", {}, sessionCtx);
       const ctx = makeUiCtx();
       await pi.commands.get("ai-guard")!.handler("save-to-project-config", ctx);
 
-      expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("untrusted"), "error");
+      expect(sessionCtx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("[ai-guard] could not save to project config"),
+        "error",
+      );
       // Positive proof the guard never touched disk: the project dir must
       // not exist even transiently.
       expect(existsSync(join(tmpCwd, ".pi"))).toBe(false);

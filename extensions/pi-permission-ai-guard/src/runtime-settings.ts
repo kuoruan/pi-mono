@@ -28,7 +28,7 @@ import type {
 
 import type { ConfigLayerTarget, SaveConfigFn } from "./config-layer.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
-import { NOTIFY_PREFIX } from "./logger.ts";
+import type { NotifyLevel } from "./logger.ts";
 import { CYCLE_DESCRIPTION } from "./mode-table.ts";
 import {
   type SessionBranchReader,
@@ -131,6 +131,13 @@ export interface RuntimeSettingsDeps {
   /** Session-file append (persistence of setting changes). */
   appendEntry: (customType: string, data?: unknown) => void;
   /**
+   * The settings surface's notify: command feedback through the session's
+   * notify seam (prefix + disposed-runner guard live there). Feedback is a
+   * synchronous answer to an explicit user action, so no level gate ever
+   * applies (unlike the pipeline's ambient channel).
+   */
+  notify: (message: string, level?: NotifyLevel) => void;
+  /**
    * Persists the current effective config snapshot into a config layer
    * (the "save to global/project config" actions). In production this
    * targets the global or project config file; tests inject a stub.
@@ -229,7 +236,7 @@ export class RuntimeSettings {
     },
     handler: async (args, ctx) => {
       if (!this.#deps.session.session?.config) {
-        ctx.ui.notify(`${NOTIFY_PREFIX} no active session (config not loaded)`, "warning");
+        this.#deps.notify("no active session (config not loaded)", "warning");
         return;
       }
       const tokens = args.trim().split(/\s+/).filter(Boolean);
@@ -239,7 +246,7 @@ export class RuntimeSettings {
       if (tokens[0] !== undefined) {
         const verb = SAVE_VERBS.find((v) => v.text === tokens[0]);
         if (verb) {
-          this.#applyConfigSave(verb.target, ctx);
+          this.#applyConfigSave(verb.target);
           return;
         }
       }
@@ -247,8 +254,8 @@ export class RuntimeSettings {
       // The picker paths need a dialog-capable UI (TUI or RPC); the direct
       // `/ai-guard <setting> <value>` form works everywhere.
       if (tokens.length < 2 && !ctx.hasUI) {
-        ctx.ui.notify(
-          `${NOTIFY_PREFIX} settings menu needs an interactive UI — use /ai-guard <setting> <value>`,
+        this.#deps.notify(
+          "settings menu needs an interactive UI — use /ai-guard <setting> <value>",
           "error",
         );
         return;
@@ -258,8 +265,8 @@ export class RuntimeSettings {
       if (tokens[0] !== undefined) {
         const spec = this.#spec(tokens[0]);
         if (!spec) {
-          ctx.ui.notify(
-            `${NOTIFY_PREFIX} unknown setting "${tokens[0]}" (${this.#specs.map((s) => s.name).join(", ")})`,
+          this.#deps.notify(
+            `unknown setting "${tokens[0]}" (${this.#specs.map((s) => s.name).join(", ")})`,
             "error",
           );
           return;
@@ -268,10 +275,8 @@ export class RuntimeSettings {
           const value = tokens.slice(1).join(" ");
           const option = this.#optionByText(spec, value);
           if (!option) {
-            ctx.ui.notify(
-              `${NOTIFY_PREFIX} invalid value "${value}" for ${spec.name} — valid values are ${this.#options(
-                spec,
-              )
+            this.#deps.notify(
+              `invalid value "${value}" for ${spec.name} — valid values are ${this.#options(spec)
                 .map((o) => o.text)
                 .join("|")}`,
               "error",
@@ -297,7 +302,7 @@ export class RuntimeSettings {
       );
       const verb = choice ? SAVE_VERBS.find((v) => v.label === choice) : undefined;
       if (verb) {
-        this.#applyConfigSave(verb.target, ctx);
+        this.#applyConfigSave(verb.target);
         return;
       }
       const spec = choice ? this.#specs[labels.indexOf(choice)] : undefined;
@@ -313,9 +318,11 @@ export class RuntimeSettings {
     // cannot drift from the cycle it describes.
     description: `Cycle ai-guard mode: ${CYCLE_DESCRIPTION} (session-scoped)`,
     handler: (ctx) => {
-      const spec = this.#specs[0];
+      // The cycle anchors the MODE spec by name — specs is no longer a
+      // one-element array, and "first" was a silent single-spec assumption.
+      const spec = this.#spec("mode");
       if (!spec || !this.#deps.session.session?.config) {
-        ctx.ui.notify(`${NOTIFY_PREFIX} no active session (config not loaded)`, "warning");
+        this.#deps.notify("no active session (config not loaded)", "warning");
         return;
       }
       // The cycle visits the CASUAL subset only (cycleValues) — the
@@ -436,14 +443,13 @@ export class RuntimeSettings {
    * before, while new sessions start from the saved layer.
    *
    * @param target - Which layer to write (global / project).
-   * @param ctx - The command UI context (notify).
    */
-  #applyConfigSave(target: ConfigLayerTarget, ctx: AiGuardUiContext): void {
+  #applyConfigSave(target: ConfigLayerTarget): void {
     const sessionConfig = this.#deps.session.session?.config;
     if (!sessionConfig) {
       // Unreachable through the command (the handler guards up front) — a
       // silent no-op here would hide a future caller's bug, so surface it.
-      ctx.ui.notify(`${NOTIFY_PREFIX} no active session (config not loaded)`, "warning");
+      this.#deps.notify("no active session (config not loaded)", "warning");
       return;
     }
     // The single projection point: defined overrides win over the loaded
@@ -453,23 +459,20 @@ export class RuntimeSettings {
       effectiveConfig(sessionConfig, this.#deps.session.overrides),
     );
     if (result.error) {
-      ctx.ui.notify(
-        `${NOTIFY_PREFIX} could not save to ${target} config — ${result.error}`,
-        "error",
-      );
+      this.#deps.notify(`could not save to ${target} config — ${result.error}`, "error");
       return;
     }
     if (!result.changed) {
-      ctx.ui.notify(`${NOTIFY_PREFIX} ${target} config already matches — nothing written`, "info");
+      this.#deps.notify(`${target} config already matches — nothing written`, "info");
       return;
     }
     const created = result.created ? " (created)" : "";
-    ctx.ui.notify(
+    this.#deps.notify(
       // Layer semantics, one line under budget: what the save feeds (new
       // sessions) and what it does NOT touch (this session's overrides).
       // The rarest fact — a higher layer can still shadow the saved value —
       // lives in the README's save-verbs section, not here.
-      `${NOTIFY_PREFIX} saved to ${target} config (${basename(result.path)}${created}) — new sessions start from it; this session keeps current overrides`,
+      `saved to ${target} config (${basename(result.path)}${created}) — new sessions start from it; this session keeps current overrides`,
       "info",
     );
   }
@@ -530,8 +533,9 @@ export class RuntimeSettings {
     // The one write-side cast: every value reaches this seam through
     // spec.values (command validation and restoreSetting both check
     // membership), so a string spec value IS a legal value of the dual-typed
-    // field.
-    this.#deps.session.overrides[spec.name] = value as AiGuardConfig[typeof spec.name];
+    // field. With more than one spec the key is a union and TS cannot
+    // prove the value/key pair — erase through the string-keyed view.
+    (this.#deps.session.overrides as Record<string, string | undefined>)[spec.name] = value;
   }
 
   /**
@@ -549,13 +553,13 @@ export class RuntimeSettings {
     persistSetting(this.#deps.appendEntry, spec.name, value ?? null);
     const effective = this.#effective(spec);
     if (value === undefined) {
-      ctx.ui.notify(`${NOTIFY_PREFIX} ${spec.name} = ${effective} (config default)`, "info");
+      this.#deps.notify(`${spec.name} = ${effective} (config default)`, "info");
     } else {
       // Selecting the highlighted value deserves a warning-level notice
       // (plain text — the emphasis is footer-only).
       const highlighted = value === spec.highlightValue;
-      ctx.ui.notify(
-        `${NOTIFY_PREFIX} ${spec.name} = ${value} (session override)`,
+      this.#deps.notify(
+        `${spec.name} = ${value} (session override)`,
         highlighted ? "warning" : "info",
       );
     }

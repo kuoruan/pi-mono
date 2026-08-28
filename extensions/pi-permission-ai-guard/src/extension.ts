@@ -18,7 +18,7 @@ import {
   loadAiGuardConfig,
   persistConfigLayer,
 } from "./config-layer.ts";
-import { MODE_VALUES } from "./config-schema.ts";
+import { MODE_VALUES, NOTIFY_LEVEL_VALUES } from "./config-schema.ts";
 import { warn } from "./logger.ts";
 import { CYCLE_MODE_VALUES, EMPHASIZED_MODE, MODE_BLURBS } from "./mode-table.ts";
 import { type CompleteSimpleFn, createCompleteSimple } from "./model-review.ts";
@@ -63,6 +63,16 @@ const SETTINGS: readonly EnumSettingSpec[] = [
     highlightValue: EMPHASIZED_MODE,
     optionDetails: MODE_BLURBS,
   },
+  {
+    // The ambient-notify threshold. `info` is the shipped baseline — same
+    // footer rule as mode: only deviations render. No cycle membership
+    // (ctrl+alt+g stays mode-only), no highlight (a quieter pane is a
+    // preference, not a danger).
+    name: "notifyLevel",
+    values: [...NOTIFY_LEVEL_VALUES],
+    description: "the minimum ambient notify level (off = silence all review-loop notices)",
+    hiddenValue: "info",
+  },
 ];
 
 export function createAiGuardExtension(
@@ -96,6 +106,9 @@ export function createAiGuardExtension(
     {
       session: lifecycle,
       appendEntry: (type, data) => pi.appendEntry(type, data),
+      // Command feedback rides the session's notify seam (prefix +
+      // disposed-runner guard live there); feedback is never level-gated.
+      notify: lifecycle.feedbackNotify,
       // The production adapter is a pure pass-through: persistConfigLayer
       // owns the trust guard and the schema gate inside its interface.
       saveConfig:

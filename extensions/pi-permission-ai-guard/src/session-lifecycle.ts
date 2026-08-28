@@ -62,11 +62,16 @@ import {
 
 import { type LoadConfigResult } from "./config-layer.ts";
 import { LINK_NAME } from "./config-schema.ts";
-import { warn } from "./logger.ts";
+import { NOTIFY_PREFIX, warn, type NotifyLevel } from "./logger.ts";
 import { type CompleteSimpleFn, type ModelRegistryLike } from "./model-review.ts";
 import { type ReviewPipelineDeps } from "./review-pipeline.ts";
 import type { AiGuardUiContext } from "./runtime-settings.ts";
-import { CircuitBreaker, type SessionOverrides, VerdictCache } from "./session-state.ts";
+import {
+  CircuitBreaker,
+  effectiveOverride,
+  type SessionOverrides,
+  VerdictCache,
+} from "./session-state.ts";
 import type { SessionManagerLike } from "./transcript-stripper.ts";
 
 /** What a session_start hands the lifecycle: the session's own inputs. */
@@ -155,6 +160,17 @@ export function readSessionId(sessionManager: SessionManagerLike): string | null
 }
 
 /**
+ * Rank order of the TUI notify levels — the threshold comparison's
+ * arithmetic. Module-level: pure, no captured state.
+ *
+ * @param level - A TUI notify level.
+ * @returns The level's rank (higher = more severe).
+ */
+function notifyLevelRank(level: NotifyLevel): number {
+  return ["info", "warning", "error"].indexOf(level);
+}
+
+/**
  * Owns session identity and the authorizer registration.
  *
  * The interface is deliberately event-shaped: the extension wires pi's
@@ -175,6 +191,66 @@ export class SessionLifecycle {
   /** Allocated exactly once; reset in place, never re-created (see header). */
   readonly #overrides: SessionOverrides = {};
   readonly #deps: SessionLifecycleDeps;
+
+  /**
+   * The single notify primitive: prefix, session lookup, and the
+   * disposed-runner guard all live HERE — every notify in the extension
+   * routes through it, so no call site can forget the prefix or crash the
+   * verdict path. Best-effort by design: a lost message is warned, never
+   * thrown.
+   *
+   * @param message - The bare message (no prefix — this function owns it).
+   * @param level - The notification level.
+   */
+  #safeNotify(message: string, level?: NotifyLevel): void {
+    try {
+      const target = this.#session;
+      if (!target) return;
+      target.ctx.ui.notify(`${NOTIFY_PREFIX} ${message}`, level);
+    } catch (e) {
+      // The disposed-runner window is expected, but a lost escalation
+      // message must not be silent: in manual mode this notify is the
+      // only channel carrying the reviewer's reasoning to a human
+      // about to adjudicate.
+      warn(
+        `notify failed (${e instanceof Error ? e.message : String(e)}) — escalation message lost: ${message}`,
+      );
+    }
+  }
+
+  /**
+   * The pipeline's notify: ambient (review-loop) traffic, gated by the
+   * effective notifyLevel (config default + session override, read
+   * per-call so `/ai-guard notifyLevel …` takes effect on the next ask).
+   * `off` silences all ambient lines — the operator's explicit choice;
+   * the blindness tradeoff is documented in the README.
+   *
+   * @param message - The bare message.
+   * @param level - The notification level.
+   */
+  #ambientNotify = (message: string, level?: NotifyLevel): void => {
+    const session = this.#session;
+    if (!session) return;
+    const threshold = effectiveOverride(this.#overrides, session.config, "notifyLevel");
+    if (threshold === "off") return;
+    // Rank order mirrors the TUI levels; an unset level defaults to info
+    // (the host's own default for ui.notify).
+    if (threshold !== undefined && notifyLevelRank(level ?? "info") < notifyLevelRank(threshold))
+      return;
+    this.#safeNotify(message, level);
+  };
+
+  /**
+   * The settings surface's notify: command feedback — a synchronous
+   * answer to an explicit user action, so no level gate ever applies
+   * (silence on a command the user just typed reads as breakage).
+   *
+   * @param message - The bare message.
+   * @param level - The notification level.
+   */
+  readonly feedbackNotify = (message: string, level?: NotifyLevel): void => {
+    this.#safeNotify(message, level);
+  };
 
   /** @param deps - The pipeline factory and model-call function to register. */
   constructor(deps: SessionLifecycleDeps) {
@@ -303,29 +379,7 @@ export class SessionLifecycle {
         verdictCache: session.verdictCache,
         overrides: this.#overrides,
         completeSimple: this.#deps.completeSimple,
-        // Best-effort human notification for verdicts that escalate to the
-        // user — always the plain notify channel (a message the host
-        // renders), never the footer: escalation reasons are read as
-        // messages, not persistent status. Calls go through the stored
-        // event ctx (lazy getters); the try/catch covers the
-        // disposed-runner window between an authorize call in flight and
-        // session_shutdown — a notification must never take the verdict
-        // path down with it.
-        notify: (message, level) => {
-          try {
-            const target = this.#session;
-            if (!target) return;
-            target.ctx.ui.notify(message, level);
-          } catch (e) {
-            // The disposed-runner window is expected, but a lost escalation
-            // message must not be silent: in manual mode this notify is the
-            // only channel carrying the reviewer's reasoning to a human
-            // about to adjudicate.
-            warn(
-              `notify failed (${e instanceof Error ? e.message : String(e)}) — escalation message lost: ${message}`,
-            );
-          }
-        },
+        notify: this.#ambientNotify,
       };
       const authorize = this.#deps.createPipeline(deps);
       this.#dispose = service.registerAuthorizer(LINK_NAME, authorize);

@@ -35,6 +35,12 @@
       "default": "default",
       "description": "The leniency ladder for the reviewer's non-allow verdicts, strictest first. Hard-tier denies (riskLevel high|critical, or missing) always deny. Soft-tier denies (low|medium) and the model's own uncertainty map per mode: 'strict' — both deny, the reviewer's allow is the only pass; 'default' — deny soft denies, uncertainty asks; 'advisory' — both ask: you decide everything except the reviewer's hardest calls, which stay final; 'lenient' — soft denies ask, uncertainty passes; 'permissive' — both pass, only hard-tier denies block. Reviewer machinery failures never map to allow: they deny under strict and permissive, and defer otherwise."
     },
+    "notifyLevel": {
+      "type": "string",
+      "enum": ["info", "warning", "error", "off"],
+      "default": "info",
+      "description": "The minimum ambient (review-loop) notification level that still notifies the operator; 'off' silences all ambient notices. Command feedback (the /ai-guard surface) is never gated. With denials having no host dialog, 'off' or 'warning' means model denies (and clarifications, at 'warning') reach only the agent and the audit log."
+    },
     "circuitBreaker": {
       "type": "object",
       "properties": {

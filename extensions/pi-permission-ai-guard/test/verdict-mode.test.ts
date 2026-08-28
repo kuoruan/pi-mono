@@ -175,19 +175,19 @@ describe("machineryTarget", () => {
 describe("human-facing messages", () => {
   it("advisoryEscalationMessage carries the risk level and the deny reason", () => {
     expect(advisoryEscalationMessage(DENY, "high", "denied")).toBe(
-      "[ai-guard] reviewer denied this request (risk high) — secrets in the command",
+      "reviewer denied this request (risk high) — secrets in the command",
     );
     expect(advisoryEscalationMessage(DENY, undefined, "denied")).toBe(
-      "[ai-guard] reviewer denied this request — secrets in the command",
+      "reviewer denied this request — secrets in the command",
     );
     expect(advisoryEscalationMessage({ kind: "deny" }, "medium", "denied")).toBe(
-      "[ai-guard] reviewer denied this request (risk medium)",
+      "reviewer denied this request (risk medium)",
     );
   });
 
   it("advisoryEscalationMessage names the ask outcome when the mode softened the deny", () => {
     expect(advisoryEscalationMessage(DENY, "low", "asked")).toBe(
-      "[ai-guard] reviewer denied this request (risk low) — secrets in the command — asking you instead",
+      "reviewer denied this request (risk low) — secrets in the command — asking you instead",
     );
     // The denied outcome needs no tail — the fact sentence already says it.
     expect(advisoryEscalationMessage(DENY, "low", "denied")).not.toContain("instead");
