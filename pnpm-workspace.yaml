@@ -14,4 +14,4 @@ catalog:
   vitest: ^4.1.10
 
 minimumReleaseAgeExclude:
-  - "@gotgenes/pi-permission-system@27.0.1"
+  - "@gotgenes/pi-permission-system"

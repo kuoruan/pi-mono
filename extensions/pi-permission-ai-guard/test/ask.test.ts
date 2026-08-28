@@ -50,6 +50,54 @@ describe("resolveReviewTarget — surface matching", () => {
     ).toEqual({ reason: "surface-unmatched" });
   });
 
+  it('matches a directional member against its configured bare family (path_read under "path")', () => {
+    // pi-permission-system's directional path surfaces: a proven-direction
+    // access routes to `path_read`/`path_write`/`external_directory_read`/
+    // `external_directory_write`. A config naming the bare family reviews
+    // both directions.
+    expect(
+      resolveReviewTarget(makeDetails({ surface: "path_read", value: "x" }), {
+        surfaces: ["path"],
+      }),
+    ).toEqual({ surface: "path_read", target: "x" });
+    expect(
+      resolveReviewTarget(makeDetails({ surface: "external_directory_write", value: "x" }), {
+        surfaces: ["external_directory"],
+      }),
+    ).toEqual({ surface: "external_directory_write", target: "x" });
+  });
+
+  it("reviews exactly one direction when a directional member is configured explicitly", () => {
+    expect(
+      resolveReviewTarget(makeDetails({ surface: "path_write", value: "x" }), {
+        surfaces: ["path_read"],
+      }),
+    ).toEqual({ reason: "surface-unmatched" });
+    expect(
+      resolveReviewTarget(makeDetails({ surface: "path_read", value: "x" }), {
+        surfaces: ["path_read"],
+      }),
+    ).toEqual({ surface: "path_read", target: "x" });
+  });
+
+  it("a family exclude withholds the family's directional members too", () => {
+    const surfaces = ["*", "!path"];
+    expect(
+      resolveReviewTarget(makeDetails({ surface: "path_write", value: "x" }), { surfaces }),
+    ).toEqual({ reason: "surface-unmatched" });
+  });
+
+  it("a _read suffix over a non-directional name is its own surface (no family)", () => {
+    // An extension tool literally called my_tool_read must not inherit a
+    // match from a configured my_tool — the axis belongs to the path
+    // families alone.
+    expect(
+      resolveReviewTarget(makeDetails({ surface: "my_tool_read", value: "x" }), {
+        surfaces: ["my_tool"],
+      }),
+    ).toEqual({ reason: "surface-unmatched" });
+  });
+
   it("excludes surfaces matching !pattern even when * is present", () => {
     const surfaces = ["*", "!external_directory", "!path"];
     expect(

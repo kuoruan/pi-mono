@@ -229,6 +229,34 @@ function surfaceOf(details: PromptPermissionDetails): string | undefined {
 }
 
 /**
+ * The path surface families that carry the read/write capability axis in
+ * pi-permission-system (ADR 0013 §3): each has `_read`/`_write` directional
+ * members a proven-direction access routes to. Pinned here because the
+ * upstream family resolver is internal — if upstream adds a family, this
+ * set grows with it (a config naming the bare family keeps matching its
+ * future members; a config naming a directional member is exact).
+ */
+const DIRECTIONAL_SURFACE_FAMILIES: ReadonlySet<string> = new Set(["path", "external_directory"]);
+
+/**
+ * The family a surface belongs to: itself, unless it is a `_read`/`_write`
+ * member of a directional path family (`path_read` → `path`). A surface
+ * that merely ends in the suffix over a non-directional name (an extension
+ * tool called `my_tool_read`) is its own family.
+ *
+ * @param surface - The surface name to resolve.
+ * @returns The surface's family (itself unless a directional member).
+ */
+function surfaceFamilyOf(surface: string): string {
+  for (const suffix of ["_read", "_write"]) {
+    if (!surface.endsWith(suffix)) continue;
+    const family = surface.slice(0, -suffix.length);
+    if (DIRECTIONAL_SURFACE_FAMILIES.has(family)) return family;
+  }
+  return surface;
+}
+
+/**
  * Check whether `surface` matches the configured surfaces list.
  * Supports glob-style patterns where `*` matches any character sequence:
  *
@@ -241,17 +269,27 @@ function surfaceOf(details: PromptPermissionDetails): string | undefined {
  *   surfaces like `external_directory` and `path` that pi-permission-system's bounded-delegation
  *   checkpoint downgrades to `defer` regardless of the verdict. Empty array or excludes-only (no
  *   includes) = review nothing.
+ * - Directional members (`path_read`, `external_directory_write`, …) match their bare family:
+ *   configuring `"path"` reviews the path family in both directions; configuring a directional
+ *   member explicitly reviews that direction only.
  *
  * @param configured - The configured surface patterns (glob, with `!` negation).
  * @param surface - The surface to test.
  * @returns True if `surface` matches an included pattern and is not excluded.
  */
 function matchSurface(configured: readonly string[], surface: string): boolean {
+  // An ask may arrive on a directional member of a configured family — the
+  // family pattern matches it (the config named the whole family); the
+  // member itself matches too (the config may name a direction).
+  const family = surfaceFamilyOf(surface);
   const excludes = configured.filter((e) => e.startsWith("!"));
-  if (excludes.some((e) => globMatch(e.slice(1), surface))) {
+  const excluded = (s: string) => excludes.some((e) => globMatch(e.slice(1), s));
+  if (excluded(surface) || (family !== surface && excluded(family))) {
     return false;
   }
-  return configured.some((entry) => !entry.startsWith("!") && globMatch(entry, surface));
+  const included = (s: string) =>
+    configured.some((entry) => !entry.startsWith("!") && globMatch(entry, s));
+  return included(surface) || (family !== surface && included(family));
 }
 
 /**

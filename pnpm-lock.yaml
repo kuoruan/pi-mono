@@ -61,8 +61,8 @@ importers:
         specifier: ^0.84.1
         version: 0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3)
       '@gotgenes/pi-permission-system':
-        specifier: ^27.0.0
-        version: 27.0.1(@earendil-works/pi-coding-agent@0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
+        specifier: ^27.1.1
+        version: 27.1.1(@earendil-works/pi-coding-agent@0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
       '@tsconfig/node22':
         specifier: 'catalog:'
         version: 22.0.6
@@ -320,8 +320,8 @@ packages:
       '@modelcontextprotocol/sdk':
         optional: true
 
-  '@gotgenes/pi-permission-system@27.0.1':
-    resolution: {integrity: sha512-REdHoFr3+6peMDW+CJKINjfOFt8KVgoaw/2G47SWJaSFP8eocvJBiEW909KLeh3mt2rcKFc8Iw+8GKCMngoH+A==}
+  '@gotgenes/pi-permission-system@27.1.1':
+    resolution: {integrity: sha512-0E0pFdQofmpmnNyOf8ZMiGywqZvbQ5KOdw80Np+xgn0BLCSDCoXRet/Sjd6XKaEAuGdXVrrssN7cc6TSuWxz7A==}
     engines: {node: '>=22'}
     peerDependencies:
       '@earendil-works/pi-coding-agent': '>=0.79.0'
@@ -1536,8 +1536,8 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  node-addon-api@8.9.1:
-    resolution: {integrity: sha512-4eUQWVPCUUUiBjLnHS3cXWeC6ryoPUc0U3rP7IuzapoGbzMqd/r6KKO0clr0b+snQhsrueFEhCZDdK+LK7hxKg==}
+  node-addon-api@8.9.2:
+    resolution: {integrity: sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg==}
     engines: {node: ^18 || ^20 || >= 21}
 
   node-domexception@1.0.0:
@@ -1850,8 +1850,8 @@ packages:
     resolution: {integrity: sha512-d2H/t0eqRNM4w2WvmTdoeIvzAUSpK7JmATB8Nr2lb7nQ9BTIJVjbQ/TRFVEh2gUH1HwclPdoPtfMoFfetXaZnA==}
     engines: {node: '>= 8'}
 
-  web-tree-sitter@0.26.11:
-    resolution: {integrity: sha512-Q5Dm3YTIXSXuH6FxX6RuzX2Qwpc4DPGiYMU87Wg5Z8OIStiQFiUex4zMDc0vBTw78EphaYJacncJghCHzbZptg==}
+  web-tree-sitter@0.26.13:
+    resolution: {integrity: sha512-5bUZ7vbQ1kcondet96wzP974+JfCZDeQ7bTpacICm2nnvHpa5cO0ByRsoMcAhUP+743vpkb4m0BFlVSm+Ye9VA==}
 
   which@2.0.1:
     resolution: {integrity: sha512-N7GBZOTswtB9lkQBZA4+zAXrjEIWAUOB93AvzUiudRzRxhUdLURQ7D/gAIMY1gatT/LTbmbcv8SiYazy3eYB7w==}
@@ -2345,12 +2345,12 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@gotgenes/pi-permission-system@27.0.1(@earendil-works/pi-coding-agent@0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)':
+  '@gotgenes/pi-permission-system@27.1.1(@earendil-works/pi-coding-agent@0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)':
     dependencies:
       '@earendil-works/pi-coding-agent': 0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3)
       '@earendil-works/pi-tui': 0.84.1
       tree-sitter-bash: 0.25.1
-      web-tree-sitter: 0.26.11
+      web-tree-sitter: 0.26.13
       zod: 4.4.3
     transitivePeerDependencies:
       - tree-sitter
@@ -3314,7 +3314,7 @@ snapshots:
 
   nanoid@3.3.17: {}
 
-  node-addon-api@8.9.1: {}
+  node-addon-api@8.9.2: {}
 
   node-domexception@1.0.0: {}
 
@@ -3507,7 +3507,7 @@ snapshots:
 
   tree-sitter-bash@0.25.1:
     dependencies:
-      node-addon-api: 8.9.1
+      node-addon-api: 8.9.2
       node-gyp-build: 4.8.4
 
   ts-algebra@2.0.0: {}
@@ -3631,7 +3631,7 @@ snapshots:
 
   web-streams-polyfill@3.0.3: {}
 
-  web-tree-sitter@0.26.11: {}
+  web-tree-sitter@0.26.13: {}
 
   which@2.0.1:
     dependencies:
