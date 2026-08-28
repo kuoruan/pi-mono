@@ -129,6 +129,12 @@ function getProjectConfigPath(cwd: string): string {
   return join(getProjectConfigDir(cwd), CREATE_FILE_NAME);
 }
 
+/** A config-layer file, when both names exist the jsonc one wins (with a warning). */
+interface LayerFile {
+  path: string;
+  ambiguous: boolean;
+}
+
 /**
  * Locate the layer's config file. Discovery order: `config.jsonc` first,
  * then `config.json` (dual presence is ambiguous — `.jsonc` wins via the
@@ -139,11 +145,6 @@ function getProjectConfigPath(cwd: string): string {
  * @param dir - The layer directory.
  * @returns The resolved file, or undefined when no config exists yet.
  */
-/** A config-layer file, when both names exist the jsonc one wins (with a warning). */
-interface LayerFile {
-  path: string;
-  ambiguous: boolean;
-}
 
 /** A layer file read: parsed object, or a tagged failure to surface upstream. */
 type ReadLayerResult =

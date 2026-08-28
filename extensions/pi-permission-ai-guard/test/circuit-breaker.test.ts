@@ -1,18 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  CircuitBreaker,
-  VerdictCache,
-  accountModelOutcome,
-  consumeTrip,
-} from "#src/session-state.ts";
+import { CircuitBreaker, accountModelOutcome, consumeTrip } from "#src/circuit-breaker.ts";
 
 const cb = { consecutive: 3, total: 20, verdict: "deny" as const };
-const cc = { maxEntries: 3 };
-
-const deny = { kind: "deny" as const, reason: "dangerous" };
-const allow = { kind: "allow" as const };
-
 describe("CircuitBreaker", () => {
   it("does not trip below the consecutive threshold", () => {
     const s = new CircuitBreaker();
@@ -74,102 +64,6 @@ describe("CircuitBreaker", () => {
   });
 });
 
-describe("VerdictCache", () => {
-  it("returns disabled miss when maxEntries is 0", () => {
-    const s = new VerdictCache();
-    s.store("cmd1", "ctx1", { verdict: allow }, cc);
-    expect(s.lookup("cmd1", "ctx1", { maxEntries: 0 })).toEqual({
-      hit: false,
-      missReason: "disabled",
-    });
-  });
-
-  it("stores and looks up a verdict", () => {
-    const s = new VerdictCache();
-    s.store("cmd1", "ctx1", { verdict: allow }, cc);
-    expect(s.lookup("cmd1", "ctx1", cc)).toEqual({ hit: true, verdict: { kind: "allow" } });
-  });
-
-  it("misses with context-changed when contextHash differs", () => {
-    const s = new VerdictCache();
-    s.store("cmd1", "ctx1", { verdict: allow }, cc);
-    expect(s.lookup("cmd1", "ctx2", cc)).toEqual({
-      hit: false,
-      missReason: "context-changed",
-    });
-  });
-
-  it("misses with no-entry when commandHash differs", () => {
-    const s = new VerdictCache();
-    s.store("cmd1", "ctx1", { verdict: allow }, cc);
-    expect(s.lookup("cmd2", "ctx1", cc)).toEqual({ hit: false, missReason: "no-entry" });
-  });
-
-  it("evicts the least-recently-used entry when full", () => {
-    const s = new VerdictCache();
-    s.store("cmd1", "ctx1", { verdict: allow }, cc); // capacity 3
-    s.store("cmd2", "ctx2", { verdict: deny }, cc);
-    s.store("cmd3", "ctx3", { verdict: allow }, cc);
-    // Inserting a 4th evicts cmd1 (oldest)
-    s.store("cmd4", "ctx4", { verdict: allow }, cc);
-    expect(s.lookup("cmd1", "ctx1", cc)).toEqual({ hit: false, missReason: "no-entry" });
-    expect(s.lookup("cmd4", "ctx4", cc)).toEqual({ hit: true, verdict: { kind: "allow" } });
-  });
-
-  it("LRU refresh on lookup moves entry to end", () => {
-    const s = new VerdictCache();
-    s.store("cmd1", "ctx1", { verdict: allow }, cc);
-    s.store("cmd2", "ctx2", { verdict: deny }, cc);
-    s.store("cmd3", "ctx3", { verdict: allow }, cc);
-    // Lookup cmd1 → refreshes it to most-recently-used
-    s.lookup("cmd1", "ctx1", cc);
-    // Now cmd2 is the oldest; inserting a 4th evicts cmd2, not cmd1
-    s.store("cmd4", "ctx4", { verdict: allow }, cc);
-    expect(s.lookup("cmd2", "ctx2", cc)).toEqual({ hit: false, missReason: "no-entry" });
-    expect(s.lookup("cmd1", "ctx1", cc)).toEqual({ hit: true, verdict: { kind: "allow" } });
-  });
-
-  it("store on existing key refreshes LRU position", () => {
-    const s = new VerdictCache();
-    s.store("cmd1", "ctx1", { verdict: allow }, cc);
-    s.store("cmd2", "ctx2", { verdict: deny }, cc);
-    s.store("cmd3", "ctx3", { verdict: allow }, cc);
-    // Re-store cmd1 (update) → moves it to end
-    s.store("cmd1", "ctx1", { verdict: deny }, cc);
-    // Now cmd2 is oldest; inserting 4th evicts cmd2
-    s.store("cmd4", "ctx4", { verdict: allow }, cc);
-    expect(s.lookup("cmd2", "ctx2", cc)).toEqual({ hit: false, missReason: "no-entry" });
-    expect(s.lookup("cmd1", "ctx1", cc)).toEqual({ hit: true, verdict: deny });
-  });
-
-  it("caches deny verdicts too (caller decides what to store)", () => {
-    const s = new VerdictCache();
-    s.store("cmd1", "ctx1", { verdict: deny }, cc);
-    expect(s.lookup("cmd1", "ctx1", cc)).toEqual({
-      hit: true,
-      verdict: { kind: "deny", reason: "dangerous" },
-    });
-  });
-
-  it("store overwrites the contextHash: stale-context lookup misses (safe)", () => {
-    // Cache is keyed by command only, holding the LATEST context's verdict.
-    // Storing the same command under a new context overwrites — so a lookup
-    // with the old context misses and the caller re-runs the model (safe).
-    const s = new VerdictCache();
-    s.store("cmd1", "ctx1", { verdict: allow }, cc);
-    expect(s.lookup("cmd1", "ctx1", cc)).toEqual({ hit: true, verdict: { kind: "allow" } });
-    // Same command, new context → store overwrites
-    s.store("cmd1", "ctx2", { verdict: deny }, cc);
-    // Old context now misses (stale)
-    expect(s.lookup("cmd1", "ctx1", cc)).toEqual({ hit: false, missReason: "context-changed" });
-    // New context hits
-    expect(s.lookup("cmd1", "ctx2", cc)).toEqual({
-      hit: true,
-      verdict: { kind: "deny", reason: "dangerous" },
-    });
-  });
-});
-
 describe("breaker accounting steps", () => {
   it("consumeTrip combines the query and the visible reset in one step", () => {
     const s = new CircuitBreaker();
@@ -202,8 +96,9 @@ describe("breaker accounting steps", () => {
       tier: "total",
       totalNoticeDue: false,
     });
-    // A manual reset clears both tiers and re-arms the notice.
-    s.resetAll();
+    // A manual reset clears both tiers, re-arms the notice, and reports
+    // the tier it cleared (the resetBreaker seam's contract).
+    expect(s.resetAll(config)).toBe("total");
     expect(consumeTrip(s, config)).toEqual({ tripped: false });
     s.recordVerdict("deny");
     s.recordVerdict("deny");
@@ -212,6 +107,10 @@ describe("breaker accounting steps", () => {
       tier: "total",
       totalNoticeDue: true,
     });
+    // Resetting an already-clear breaker reports undefined (the "was
+    // tripped" copy omits its parenthetical).
+    s.resetAll(config);
+    expect(s.resetAll(config)).toBeUndefined();
   });
 
   it("accountModelOutcome records the model verdict and credits machinery denials only", () => {

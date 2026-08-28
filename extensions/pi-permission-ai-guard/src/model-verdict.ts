@@ -22,8 +22,8 @@ export type ModelCallDeferKind =
 export type VerdictLean = "allow" | "deny";
 
 /**
- * The valid lean values as a readonly set, derived from {@link VerdictLean}
- * so the runtime check and the type can never drift apart.
+ * The valid lean values as a readonly set (derived so check and type never drift — see
+ * {@link RISK_LEVELS}).
  */
 const VERDICT_LEANS: ReadonlySet<VerdictLean> = new Set<VerdictLean>(["allow", "deny"]);
 

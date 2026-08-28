@@ -83,18 +83,21 @@ function makeCtx(notify: (message: string, level?: string) => void) {
   return { ui: { notify } };
 }
 
-describe("SessionLifecycle — circuit breaker accessor", () => {
-  it("returns the live session's breaker (the same instance the pipeline holds)", () => {
+describe("SessionLifecycle — the resetBreaker seam", () => {
+  it("resets the live session's breaker and reports its tripped tier", () => {
     const { lifecycle, calls } = makeLifecycle();
     lifecycle.onSessionStart(makeSeed());
-    // The breaker the settings surface resets is the SAME object the
-    // pipeline's deps close over — identity, not a copy.
-    expect(lifecycle.circuitBreaker).toBe(calls[0]!.circuitBreaker);
+    // The breaker the seam resets is the SAME object the pipeline's deps
+    // close over — identity, not a copy.
+    const breaker = calls[0]!.circuitBreaker;
+    for (let i = 0; i < 3; i++) breaker.recordVerdict("deny");
+    expect(lifecycle.resetBreaker()).toBe("consecutive");
+    expect(breaker.isTripped({ consecutive: 3, total: 20, verdict: "deny" })).toBe(false);
   });
 
   it("throws a clear error between sessions (the surface guards first)", () => {
     const { lifecycle } = makeLifecycle();
-    expect(() => lifecycle.circuitBreaker).toThrow(/no active session/);
+    expect(() => lifecycle.resetBreaker()).toThrow(/no active session/);
   });
 });
 
@@ -310,6 +313,10 @@ describe("SessionLifecycle — notify level gate", () => {
     { threshold: "info", level: "warning", passes: true },
     { threshold: "warning", level: "info", passes: false },
     { threshold: "warning", level: "warning", passes: true },
+    // An error-grade ambient line (the total-tier trip) passes a
+    // `warning` threshold: silencing per-request noise must never silence
+    // the guard-down notice.
+    { threshold: "warning", level: "error", passes: true },
     { threshold: "error", level: "warning", passes: false },
     { threshold: "error", level: "error", passes: true },
     { threshold: "off", level: "error", passes: false },

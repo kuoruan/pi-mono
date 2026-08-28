@@ -10,6 +10,6 @@ The ladder's invariant — a terminal deny for `riskLevel` high|critical (or mis
 
 ## Consequences
 
-- Floor quality equals the reviewer's high/critical calibration quality; audit it via advisory-mode dialogs and the decision log.
+- Floor quality equals the reviewer's high/critical calibration quality; audit it via the decision log and the deny-hold notify lines. (Written as "advisory-mode dialogs" — the shadow-override mode of the time; that mode's semantics now live in `default`, which asks on soft denies.)
 - `permissive`'s hard deny now notifies a warning at the human — the mode's one intent-contradicting block names itself, like every other interruption with no user-visible agent action.
 - Revisiting this decision is a targeted migration to B, never a from-scratch redesign.

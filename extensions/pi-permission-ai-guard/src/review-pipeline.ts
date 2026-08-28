@@ -11,6 +11,7 @@ import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { Authorizer, AuthorizerLog, AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import { type DriftWarnState, openAsk } from "./ask.ts";
+import { accountModelOutcome, type CircuitBreaker, consumeTrip } from "./circuit-breaker.ts";
 import type { AiGuardConfig, Mode } from "./config-schema.ts";
 import {
   BREAKER_DENY_REASON,
@@ -35,24 +36,17 @@ import {
 import type { RiskLevel, VerdictLean } from "./model-verdict.ts";
 import { buildReviewPrompt, buildReviewSystemPrompt } from "./prompt.ts";
 import { reviewRequestCacheMaterial, type ReviewRequestContext } from "./review-request.ts";
-import {
-  accountModelOutcome,
-  type CircuitBreaker,
-  consumeTrip,
-  effectiveOverride,
-  type SessionOverrides,
-  type VerdictCache,
-} from "./session-state.ts";
+import { effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
 import { type SessionManagerLike, stripTranscript } from "./transcript-stripper.ts";
 import { normalizeAndRedactText, shortHash, truncateMiddle } from "./utils.ts";
+import type { VerdictCache } from "./verdict-cache.ts";
 import {
   applyVerdictMode,
   type MachineryFailureKind,
   machineryDenyReason,
   NOTIFY_REASON_CEILING,
   machineryTarget,
-  escalationMessage,
-  CLARIFICATION_SUPPRESSED_REASON,
+  resolveMapping,
 } from "./verdict-mode.ts";
 
 /**
@@ -94,27 +88,6 @@ export interface ReviewPipelineDeps {
 }
 
 /**
- * Release a pre-call machinery gate: the single disposal seam for the
- * four reviewer-failure gates that never hold a parsed verdict (no-target,
- * model-unresolved, transcript-error, auth-failed).
- *
- * Owns the whole disposition: the machinery lane lookup, the deny reason
- * (computed ONCE — the audit annotation and the returned verdict share
- * it), the breaker's recoverable-tier credit, the review-stream record
- * (mapped when the gate denies, plain when it defers), and the returned
- * verdict. The shared invariants — a broken reviewer never rubber-stamps,
- * every reviewer-relevant gate writes the review stream — live here
- * instead of being hand-copied per gate.
- *
- * @param mode - The effective mode (the machinery lane's only input).
- * @param kind - The classified machinery failure.
- * @param record - The gate's decision record (verdict "defer" — the
- *   review never opened).
- * @param breaker - The session circuit breaker (recoverable-tier credit).
- * @param log - The authorizer log pair (review stream).
- * @returns The verdict the gate emits.
- */
-/**
  * The human notice for a machinery-forced defer — the deferred ask lands on
  * the operator with no dialog context of its own, so the line names the
  * failure kind (doctrine symmetry with the breaker-trip notice). No
@@ -127,6 +100,28 @@ function machineryDeferNotice(kind: MachineryFailureKind): string {
   return `reviewer could not complete the review (${kind}) — deferring to you`;
 }
 
+/**
+ * Release a pre-call machinery gate: the single disposal seam for the
+ * four reviewer-failure gates that never hold a parsed verdict (no-target,
+ * model-unresolved, transcript-error, auth-failed).
+ *
+ * Owns the whole disposition: the machinery lane lookup, the deny reason
+ * (computed ONCE — the audit annotation and the returned verdict share
+ * it), the breaker's recoverable-tier credit, the review-stream record
+ * (mapped when the gate denies, plain when it defers), the forced-defer
+ * notice, and the returned verdict. The shared invariants — a broken
+ * reviewer never rubber-stamps, every reviewer-relevant gate writes the
+ * review stream — live here instead of being hand-copied per gate.
+ *
+ * @param mode - The effective mode (the machinery lane's only input).
+ * @param kind - The classified machinery failure.
+ * @param record - The gate's decision record (verdict "defer" — the
+ *   review never opened).
+ * @param breaker - The session circuit breaker (recoverable-tier credit).
+ * @param log - The authorizer log pair (review stream).
+ * @param notify - The pipeline's notify (the forced-defer notice).
+ * @returns The verdict the gate emits.
+ */
 function releaseMachineryGate(
   mode: Mode,
   kind: MachineryFailureKind,
@@ -153,7 +148,7 @@ function releaseMachineryGate(
  * `authorize` function is the upstream `Authorizer["authorize"]` seam — the
  * only interface callers (extension.ts) and tests cross.
  *
- * @param deps - The resolved session-state dependencies for the pipeline.
+ * @param deps - The resolved session dependencies for the pipeline.
  * @returns The `authorize` function implementing the review pipeline.
  */
 export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["authorize"] {
@@ -169,19 +164,18 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const { config } = deps;
     // Session-scoped override (/ai-guard, ctrl+alt+g) wins over the config
     // default — the typed per-field accessor spells the rule once (see
-    // effectiveOverride in session-state). Read per-call: the override
+    // effectiveOverride in session-overrides). Read per-call: the override
     // object is mutable session state.
     const mode = effectiveOverride(deps.overrides, config, "mode");
 
     // Per-call closure: the mode read here flows into every mapping
     // annotation below; noticeState/deps stay captured from the factory.
     // The mode mapping's shared footwork for the two gates that emit a real
-    // verdict (cache-hit and fresh model): annotate the record when the
-    // mapping changed the emitted kind, escalate to the human on
-    // deny→defer lanes (default/lenient), and fire the once-per-pipeline
-    // fail-open notice on the mapped allow. The per-call constants (mode,
-    // noticeState, deps) are closure-captured — only the per-verdict facts
-    // travel as parameters.
+    // verdict (cache-hit and fresh model): resolveMapping owns the deciding
+    // rule (annotation input + every notify owed); this closure performs
+    // the side effects — flip the notice state, send the notify, annotate
+    // the record. The per-call constants (mode, noticeState, deps) are
+    // closure-captured — only the per-verdict facts travel as parameters.
     const annotateAndEscalate = (
       record: DecisionRecordEntry,
       original: AuthorizerVerdict,
@@ -189,67 +183,20 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       riskLevel: RiskLevel | undefined,
       deferLean: VerdictLean | undefined,
     ): DecisionRecordEntry => {
-      if (emitted.kind === original.kind) {
-        // A model deny that holds in every mode is the reviewer's hardest
-        // call — v27 has no dialog for denials (the reason goes to the agent
-        // and the audit log alone), so the notify line is the only human
-        // -visible copy. Every mode notifies a deny that carries a model
-        // reason, regardless of tier; the permissive hard tier is just one
-        // lane of that rule, not a carve-out.
-        //
-        // The reason check is doctrine, not live defense: the parser
-        // currently synthesizes GENERIC_DENY_REASON for a reason-less deny,
-        // so today this never evaluates false — but the contract is "deny
-        // WITH a reason", and a future deny producer (e.g. a persisted
-        // cache) could reach here without one.
-        if (original.kind === "deny" && original.reason) {
-          deps.notify(escalationMessage(original, riskLevel, "denied"), "warning");
-        }
-        return record;
-      }
-      // The emittedReason tells audit readers what the agent actually
-      // received: deny→allow keeps the swallowed deny reason; defer→allow
-      // marks the swallowed clarification; defer→deny records the
-      // synthesized teaching reason the agent DID get (never a "suppressed"
-      // marker — nothing was suppressed on the way to a deny).
-      const emittedReason =
-        emitted.kind === "allow"
-          ? original.kind === "defer"
-            ? CLARIFICATION_SUPPRESSED_REASON
-            : original.kind === "deny"
-              ? original.reason
-              : undefined
-          : emitted.kind === "deny"
-            ? emitted.reason
-            : undefined;
-      const annotated = mapped(record, mode, emitted.kind, emittedReason);
-      if (emitted.kind === "defer") {
-        deps.notify(escalationMessage(original, riskLevel, "asked"), "warning");
-      } else if (
-        emitted.kind === "allow" &&
-        // A benign-leaned pass rides the model's own inclination — it is
-        // the reviewer saying "I would allow this", confirmed, not the
-        // mode overriding the reviewer's explicit verdict. It stays
-        // silent (the allow doctrine: allows never notify); the fail-open
-        // notice belongs to the mode going AGAINST the model — a swallowed
-        // deny, or auto-passed NEUTRAL uncertainty.
-        deferLean !== "allow" &&
-        !noticeState.shown
-      ) {
-        noticeState.shown = true;
-        // The copy names what the mode actually loosens — lenient only passes
-        // the reviewer's uncertainty; permissive passes everything but the
-        // hard tier.
-        const loosened =
-          mode === "lenient"
-            ? "uncertainty — soft denials still ask"
-            : "non-allow verdicts — hard-tier denials still block";
-        deps.notify(`${mode} auto-approves ${loosened}`, "warning");
-      }
-      return annotated;
+      const decision = resolveMapping({
+        original,
+        emitted,
+        riskLevel,
+        deferLean,
+        mode,
+        noticeShown: noticeState.shown,
+      });
+      if (decision.markNoticeShown) noticeState.shown = true;
+      if (decision.notice) deps.notify(decision.notice.message, decision.notice.level);
+      return decision.annotate
+        ? mapped(record, mode, emitted.kind, decision.emittedReason)
+        : record;
     };
-    // Once per pipeline instance (one per session): the annotation-drift
-    // integrity warning — injected state keeps buildAskContext pure.
 
     // surface-unmatched is expected config behavior (silent defer; outside
     // this link's jurisdiction). no-target is an unexpected ask — the
@@ -301,7 +248,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // Circuit breaker: a tripped breaker short-circuits without a model
     // call. The trip's consume (query + recoverable reset) is one visible
     // accounting step beside the breaker (see consumeTrip in
-    // session-state) — breaker trips are not recorded as model verdicts.
+    // circuit-breaker) — breaker trips are not recorded as model verdicts.
     const trip = consumeTrip(deps.circuitBreaker, config.circuitBreaker);
     if (trip.tripped) {
       const verdict =
@@ -328,9 +275,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // on the next allow, and their per-ask machinery notices already
       // speak on the defer lanes.
       if (trip.totalNoticeDue) {
+        // Error-grade: the guard's review function is DOWN for the session
+        // (every ask short-circuits), and recovery needs the operator's
+        // hand — the first ambient occupant of the error rung. Under
+        // notifyLevel gating this is deliberate: `warning` silences
+        // per-request noise but a total trip stays visible at `error`.
         deps.notify(
           `circuit breaker tripped — total tier reached, blocking all reviews until /ai-guard breaker reset or restart`,
-          "warning",
+          "error",
         );
       }
       return verdict;
@@ -515,7 +467,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // The per-ask accounting: the model's real verdict feeds the breaker,
     // and a machinery denial (the reviewer never produced a verdict) earns
     // a recoverable-tier credit — the doctrine lives beside the breaker
-    // (see accountModelOutcome in session-state).
+    // (see accountModelOutcome in circuit-breaker).
     accountModelOutcome(deps.circuitBreaker, reviewOutcome.verdict.kind, emitted);
     if (reviewOutcome.verdict.kind !== "defer") {
       deps.verdictCache.store(

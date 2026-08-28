@@ -60,19 +60,16 @@ import {
   getPermissionsService,
 } from "@gotgenes/pi-permission-system";
 
+import { type BreakerTier, CircuitBreaker } from "./circuit-breaker.ts";
 import { type LoadConfigResult } from "./config-layer.ts";
 import { LINK_NAME } from "./config-schema.ts";
 import { NOTIFY_PREFIX, warn, type NotifyLevel } from "./logger.ts";
 import { type CompleteSimpleFn, type ModelRegistryLike } from "./model-review.ts";
 import { type ReviewPipelineDeps } from "./review-pipeline.ts";
 import type { AiGuardUiContext } from "./runtime-settings.ts";
-import {
-  CircuitBreaker,
-  effectiveOverride,
-  type SessionOverrides,
-  VerdictCache,
-} from "./session-state.ts";
+import { effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
 import type { SessionManagerLike } from "./transcript-stripper.ts";
+import { VerdictCache } from "./verdict-cache.ts";
 
 /** What a session_start hands the lifecycle: the session's own inputs. */
 export interface SessionSeed {
@@ -241,9 +238,11 @@ export class SessionLifecycle {
   };
 
   /**
-   * The settings surface's notify: command feedback — a synchronous
-   * answer to an explicit user action, so no level gate ever applies
-   * (silence on a command the user just typed reads as breakage).
+   * The ungated notify: command feedback (a synchronous answer to an
+   * explicit user action — silence on a command the user just typed reads
+   * as breakage) AND the guard-absent errors (a fail-safe config start, a
+   * failed or stale registration) — neither may hide behind the
+   * notifyLevel threshold, unlike the pipeline's ambient channel.
    *
    * @param message - The bare message.
    * @param level - The notification level.
@@ -278,22 +277,20 @@ export class SessionLifecycle {
   }
 
   /**
-   * The session's circuit breaker — the `breaker reset` action's target.
-   * Allocated per session (fresh state on every session_start). Between
-   * shutdown and the next start there is nothing to reset; the settings
-   * surface's no-active-session guard fires first, so the undefined case
-   * is a typed floor that surfaces as a clear throw rather than a silent
-   * no-op.
+   * The `breaker reset` action's seam: clear the session's circuit
+   * breaker and report which tier was tripped at the moment of the reset —
+   * the UI formats the returned tier into its copy; the breaker's tier
+   * vocabulary crosses no further than this result.
    *
-   * @returns The live session's circuit breaker.
+   * @returns The tier that was tripped (undefined when already clear).
    * @throws When no session is active (the settings surface guards first).
    */
-  get circuitBreaker(): CircuitBreaker {
+  resetBreaker(): BreakerTier | undefined {
     const session = this.#session;
-    if (!session) {
+    if (!session?.config) {
       throw new Error("no active session — circuit breaker unavailable");
     }
-    return session.circuitBreaker;
+    return session.circuitBreaker.resetAll(session.config.circuitBreaker);
   }
 
   /**
@@ -315,6 +312,17 @@ export class SessionLifecycle {
       circuitBreaker: new CircuitBreaker(),
       verdictCache: new VerdictCache(),
     };
+    // A fail-safe session start (config failed validation) means the
+    // guard runs UNREVIEWED — the operator believes a reviewer stands in
+    // front of asks and none does. That is error-grade, and it rides the
+    // feedback channel (a direct answer to the session starting, not
+    // ambient review-loop traffic) so no notifyLevel threshold can hide it.
+    if (!seed.config) {
+      this.feedbackNotify(
+        "config failed to load — running in fail-safe mode with no auto-review; fix the config and restart the session",
+        "error",
+      );
+    }
     // Total in-place reset: clearing every key (not an enumerated field
     // list) makes "forgot to reset the second setting someday" impossible
     // by construction — a new session starts from the config values.
@@ -404,17 +412,21 @@ export class SessionLifecycle {
       this.#dispose = service.registerAuthorizer(LINK_NAME, authorize);
       this.#registered = true;
     } catch (e) {
-      // "already registered" is never benign in v27: every node owns its
-      // service, so a duplicate means a STALE registration survived
-      // disposal (the /reload dispose glitch) and still governs asks with
-      // the previous session's deps. Rare, but diagnostic — warn.
       if (isDuplicateAuthorizerError(e, LINK_NAME)) {
-        warn(
-          "Stale ai-guard registration survived disposal — asks are governed by the previous session's pipeline (deferring to the prompt)",
+        // "already registered" is never benign in v27: every node owns its
+        // service, so a duplicate means a STALE registration survived
+        // disposal (the /reload dispose glitch) and still governs asks
+        // with the previous session's deps.
+        this.feedbackNotify(
+          "stale ai-guard registration survived disposal — asks are governed by the previous session's pipeline (deferring to the prompt)",
+          "error",
         );
         return;
       }
-      warn(`Failed to register authorizer: ${e instanceof Error ? e.message : String(e)}`);
+      this.feedbackNotify(
+        `failed to register the reviewer — running with no auto-review: ${e instanceof Error ? e.message : String(e)}`,
+        "error",
+      );
     }
   }
 }

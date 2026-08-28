@@ -186,7 +186,7 @@ function mapLane(
     };
   }
   // Deny origin: deny passes through with its reason; defer drops the
-  // reason — the advisory escalation message re-surfaces it at the human.
+  // reason — the escalation message re-surfaces it at the human.
   if (target === "deny") {
     return verdict;
   }
@@ -274,4 +274,132 @@ export function escalationMessage(
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+/**
+ * What the pipeline owes after the mode maps a verdict: the decision
+ * record's annotation input and the operator notice. Pure — the
+ * once-per-pipeline fail-open notice state is READ as an input and
+ * returned as a {@link MappingDecision.markNoticeShown} signal; the
+ * caller performs the mutation.
+ */
+export interface MappingDecision {
+  /**
+   * The `emittedReason` for the decision record's mapping annotation:
+   * deny→allow keeps the swallowed deny reason; defer→allow marks the
+   * swallowed clarification; →deny records the synthesized teaching
+   * reason the agent DID get (never a "suppressed" marker — nothing was
+   * suppressed on the way to a deny). Undefined when the mapping
+   * introduced none.
+   */
+  emittedReason?: string;
+  /**
+   * Whether the emitted kind differs from the original — the record
+   * needs the `mapped()` annotation ({@link DecisionRecord.mapped}).
+   */
+  annotate: boolean;
+  /**
+   * The operator notice this mapping owes, rendered and leveled; null
+   * when silent. Three kinds: a model deny that HOLDS or escalates
+   * (v27 renders no dialog for denials — the notify line is the
+   * operator's only copy), a mapped defer (the "asking you instead"
+   * tail corrects the operator's read), and the once-per-pipeline
+   * fail-open notice (the mode auto-approving against the model's
+   * explicit verdict or its neutral uncertainty).
+   */
+  notice: { message: string; level: "warning" } | null;
+  /**
+   * Whether this decision consumes the once-per-pipeline fail-open
+   * notice state (the caller flips its `shown` flag).
+   */
+  markNoticeShown: boolean;
+}
+
+/**
+ * The mapping's consequence resolver — the deciding rule that used to
+ * live in the pipeline's closure, extracted as one pure function: given
+ * the original verdict, the emitted verdict, and the per-ask context
+ * (risk level, defer lean, mode, notice state), it decides the record
+ * annotation and every notify the mapping owes. The pipeline calls it
+ * and performs the side effects; the rule itself is testable in one
+ * place.
+ *
+ * The input is an object because `original` and `emitted` are adjacent
+ * same-typed parameters — positional calls could swap them silently; the
+ * lean:allow exemption note (a benign-leaned pass rides the model's own
+ * inclination — silent; the fail-open notice belongs to the mode going
+ * AGAINST the model) lives in the field docs above.
+ *
+ * @param input - The per-ask mapping context (verdicts, risk, lean, mode,
+ *   notice state), field-documented above.
+ * @returns The record-annotation and notify decision.
+ */
+export function resolveMapping(input: {
+  /** The model's (or cached) verdict. */
+  original: AuthorizerVerdict;
+  /** The verdict the mode mapping emitted. */
+  emitted: AuthorizerVerdict;
+  /** The model's risk assessment (escalation copy). */
+  riskLevel: RiskLevel | undefined;
+  /** The reviewer's lean on a fresh model defer. */
+  deferLean: VerdictLean | undefined;
+  /** The effective mode (names the policy in the fail-open copy). */
+  mode: Mode;
+  /** Whether the once-per-pipeline fail-open notice already fired. */
+  noticeShown: boolean;
+}): MappingDecision {
+  const { original, emitted, riskLevel, deferLean, mode, noticeShown } = input;
+  if (emitted.kind === original.kind) {
+    // The verdict held. A model deny that holds in every mode is the
+    // reviewer's hardest call — v27 has no dialog for denials (the
+    // reason goes to the agent and the audit log alone), so the notify
+    // line is the only human-visible copy. Every mode notifies a deny
+    // that carries a model reason, regardless of tier. The reason check
+    // is doctrine, not live defense: the parser synthesizes
+    // GENERIC_DENY_REASON for a reason-less deny, so today this never
+    // evaluates false — but the contract is "deny WITH a reason", and a
+    // future deny producer (e.g. a persisted cache) could reach here
+    // without one.
+    return original.kind === "deny" && original.reason
+      ? {
+          annotate: false,
+          notice: { message: escalationMessage(original, riskLevel, "denied"), level: "warning" },
+          markNoticeShown: false,
+        }
+      : { annotate: false, notice: null, markNoticeShown: false };
+  }
+  // The mapping changed the emitted kind: the record gets the mapping
+  // annotation, and the emittedReason tells audit readers what the agent
+  // actually received.
+  const emittedReason =
+    emitted.kind === "allow"
+      ? original.kind === "defer"
+        ? CLARIFICATION_SUPPRESSED_REASON
+        : original.kind === "deny"
+          ? original.reason
+          : undefined
+      : emitted.kind === "deny"
+        ? emitted.reason
+        : undefined;
+  let notice: MappingDecision["notice"] = null;
+  let markNoticeShown = false;
+  if (emitted.kind === "defer") {
+    // A mode-softened deny becomes the human's decision — the tail
+    // corrects the operator's read (the request was NOT denied; a dialog
+    // is coming).
+    notice = { message: escalationMessage(original, riskLevel, "asked"), level: "warning" };
+  } else if (emitted.kind === "allow" && deferLean !== "allow" && !noticeShown) {
+    // The fail-open notice: the mode passed something against the
+    // model's stance — a swallowed deny, or auto-passed NEUTRAL
+    // uncertainty. A benign-leaned pass is excluded (the reviewer saying
+    // "I would allow this", confirmed — allows never notify). Once per
+    // pipeline: the first occurrence teaches, the rest stay quiet.
+    markNoticeShown = true;
+    const loosened =
+      mode === "lenient"
+        ? "uncertainty — soft denials still ask"
+        : "non-allow verdicts — hard-tier denials still block";
+    notice = { message: `${mode} auto-approves ${loosened}`, level: "warning" };
+  }
+  return { annotate: true, emittedReason, notice, markNoticeShown };
 }

@@ -91,7 +91,7 @@ describe("config surface drift", () => {
     ]);
   });
 
-  it("the curated mode prose twins carry the final advisory wording, not the superseded one", () => {
+  it("the curated mode prose twins carry the final wording, not the superseded one", () => {
     const zodSource = readFileSync(new URL("../src/config-schema.ts", import.meta.url), "utf-8");
     const modeTableSource = readFileSync(new URL("../src/mode-table.ts", import.meta.url), "utf-8");
     const description = schemaJson.properties.mode.description as string;
@@ -100,8 +100,8 @@ describe("config surface drift", () => {
     // have different line-wrapping; only the phrase itself must not drift).
     const canonical = "judge every flag";
     // One pair per curated surface: the twins drift independently unless
-    // each is pinned separately (this test exists because the advisory
-    // prose once drifted this exact way).
+    // each is pinned separately (this test exists because the mode prose
+    // once drifted this exact way).
     expect(description).toContain(canonical);
     expect(description).not.toContain(stale);
     expect(zodSource).toContain(canonical);

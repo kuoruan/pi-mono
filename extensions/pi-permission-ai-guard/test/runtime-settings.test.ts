@@ -7,14 +7,17 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { BreakerTier } from "#src/circuit-breaker.ts";
+import type { SaveConfigFn } from "#src/config-layer.ts";
 import { MODE_VALUES, type AiGuardConfig, configSchema } from "#src/config-schema.ts";
 import { MODE_BLURBS } from "#src/mode-table.ts";
+import type { NotifyFn } from "#src/review-pipeline.ts";
 import {
   type EnumSettingSpec,
   type RuntimeSettings,
   RuntimeSettings as RuntimeSettingsClass,
 } from "#src/runtime-settings.ts";
-import { CircuitBreaker, type SessionOverrides } from "#src/session-state.ts";
+import type { SessionOverrides } from "#src/session-overrides.ts";
 
 const SPECS: readonly EnumSettingSpec[] = [
   {
@@ -53,37 +56,44 @@ function makeUiCtx(selectResult?: string) {
  *   echo reporting a change).
  * @returns The settings, the overrides object, and the append spy.
  */
-function makeSettings(
-  overridesInit: SessionOverrides = {},
-  saveConfig?: (
-    target: "global" | "project",
-    config: AiGuardConfig,
-  ) => {
-    path: string;
-    created: boolean;
-    changed: boolean;
-    error?: string;
-  },
-) {
+/** The seam-shaped stub options: what varies between settings tests. */
+interface MakeSettingsOptions {
+  /** Replaces the default spec list (the dual-spec menu test). */
+  specs?: readonly EnumSettingSpec[];
+  /** What the session's resetBreaker seam returns (default: not tripped). */
+  resetTier?: BreakerTier;
+  /** No live session (the no-session guard tests). */
+  noSession?: boolean;
+  /** Custom save-config stub (default: a path echo reporting a change). */
+  saveConfig?: SaveConfigFn;
+}
+
+function makeSettings(overridesInit: SessionOverrides = {}, options: MakeSettingsOptions = {}) {
   const overrides: SessionOverrides = { ...overridesInit };
   const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
-  const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
+  const notify = vi.fn<NotifyFn>();
+  // The resetBreaker seam stub: records the call, answers with the tier.
+  const resetBreaker = vi.fn<() => BreakerTier | undefined>(() => options.resetTier);
   const settings: RuntimeSettings = new RuntimeSettingsClass(
     {
       session: {
-        session: { config: configSchema.parse({ provider: "test", model: "test" }) },
+        session: options.noSession
+          ? undefined
+          : {
+              config: configSchema.parse({ provider: "test", model: "test" }),
+            },
         overrides,
-        circuitBreaker: new CircuitBreaker(),
+        resetBreaker,
       },
       appendEntry,
       notify,
       saveConfig:
-        saveConfig ??
+        options.saveConfig ??
         ((target) => ({ path: `/config-${target}.json`, created: false, changed: true })),
     },
-    SPECS,
+    options.specs ?? SPECS,
   );
-  return { settings, overrides, appendEntry, notify };
+  return { settings, overrides, appendEntry, notify, resetBreaker };
 }
 
 describe("RuntimeSettings — command", () => {
@@ -126,46 +136,22 @@ describe("RuntimeSettings — command", () => {
   });
 
   it("without an active session warns instead of crashing", async () => {
-    const overrides: SessionOverrides = {};
-    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
-    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
-    const settings = new RuntimeSettingsClass(
-      {
-        session: { session: undefined, overrides, circuitBreaker: new CircuitBreaker() },
-        appendEntry,
-        notify,
-        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
-      },
-      SPECS,
-    );
+    const { settings, notify } = makeSettings({}, { noSession: true });
     const ctx = makeUiCtx();
     await settings.command.handler("mode lenient", ctx);
     expect(notify).toHaveBeenCalledWith("no active session (config not loaded)", "warning");
   });
 
-  it("breaker reset clears both tiers and names what it does not touch", async () => {
-    const breaker = new CircuitBreaker();
-    const overrides: SessionOverrides = {};
-    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
-    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
-    const settings = new RuntimeSettingsClass(
-      {
-        session: {
-          session: { config: configSchema.parse({ provider: "test", model: "test" }) },
-          overrides,
-          circuitBreaker: breaker,
-        },
-        appendEntry,
-        notify,
-        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
-      },
-      SPECS,
+  it("breaker reset clears through the seam and names what it does not touch", async () => {
+    // The command's own behavior: it calls the seam once and formats the
+    // returned tier. The breaker's reset semantics live behind the seam
+    // (circuit-breaker tests) — here only the tier the seam reports.
+    const { settings, notify, resetBreaker, appendEntry, overrides } = makeSettings(
+      {},
+      { resetTier: "consecutive" },
     );
-    // A consecutive-tier trip (3 denies against consecutive:3/total:20) —
-    // the copy names the softer tier.
-    for (let i = 0; i < 3; i++) breaker.recordVerdict("deny");
     await settings.command.handler("breaker reset", makeUiCtx());
-    expect(breaker.isTripped({ consecutive: 3, total: 20, verdict: "deny" })).toBe(false);
+    expect(resetBreaker).toHaveBeenCalledOnce();
     expect(notify).toHaveBeenCalledWith(
       "circuit breaker cleared (was tripped) — verdict cache and overrides untouched; reviews resume immediately",
       "info",
@@ -175,33 +161,10 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.mode).toBeUndefined();
   });
 
-  it("breaker reset names the total tier when that is what was tripped", async () => {
-    const breaker = new CircuitBreaker();
-    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
-    // A total-tier trip — the accident scenario this copy was written
-    // for. The session's own breaker config sets total: 3 so three denies
-    // reach the hard tier (not just the consecutive one).
-    for (let i = 0; i < 3; i++) breaker.recordVerdict("deny");
-    const settings = new RuntimeSettingsClass(
-      {
-        session: {
-          session: {
-            config: configSchema.parse({
-              provider: "test",
-              model: "test",
-              circuitBreaker: { consecutive: 3, total: 3, verdict: "deny" },
-            }),
-          },
-          overrides: {},
-          circuitBreaker: breaker,
-        },
-        appendEntry: () => {},
-        notify,
-        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
-      },
-      SPECS,
-    );
-    expect(breaker.trippedTier({ consecutive: 3, total: 3, verdict: "deny" })).toBe("total");
+  it("breaker reset names the total tier when the seam reports it", async () => {
+    // The accident scenario this copy was written for: the total tier
+    // reached its hard cap.
+    const { settings, notify } = makeSettings({}, { resetTier: "total" });
     await settings.command.handler("breaker reset", makeUiCtx());
     expect(notify).toHaveBeenCalledWith(
       "circuit breaker cleared (was total-tier tripped) — verdict cache and overrides untouched; reviews resume immediately",
@@ -210,21 +173,7 @@ describe("RuntimeSettings — command", () => {
   });
 
   it("breaker reset on an un-tripped breaker still answers cleanly", async () => {
-    const breaker = new CircuitBreaker();
-    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
-    const settings = new RuntimeSettingsClass(
-      {
-        session: {
-          session: { config: configSchema.parse({ provider: "test", model: "test" }) },
-          overrides: {},
-          circuitBreaker: breaker,
-        },
-        appendEntry: () => {},
-        notify,
-        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
-      },
-      SPECS,
-    );
+    const { settings, notify } = makeSettings();
     await settings.command.handler("breaker reset", makeUiCtx());
     expect(notify).toHaveBeenCalledWith(
       "circuit breaker cleared — verdict cache and overrides untouched; reviews resume immediately",
@@ -233,25 +182,10 @@ describe("RuntimeSettings — command", () => {
   });
 
   it("the settings menu dispatches the breaker-reset entry", async () => {
-    const breaker = new CircuitBreaker();
-    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
-    const settings = new RuntimeSettingsClass(
-      {
-        session: {
-          session: { config: configSchema.parse({ provider: "test", model: "test" }) },
-          overrides: {},
-          circuitBreaker: breaker,
-        },
-        appendEntry: () => {},
-        notify,
-        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
-      },
-      SPECS,
-    );
-    for (let i = 0; i < 3; i++) breaker.recordVerdict("deny");
+    const { settings, notify, resetBreaker } = makeSettings({}, { resetTier: "consecutive" });
     const ctx = makeUiCtx("reset circuit breaker");
     await settings.command.handler("", ctx);
-    expect(breaker.isTripped({ consecutive: 3, total: 20, verdict: "deny" })).toBe(false);
+    expect(resetBreaker).toHaveBeenCalledOnce();
     expect(notify).toHaveBeenCalledWith(
       "circuit breaker cleared (was tripped) — verdict cache and overrides untouched; reviews resume immediately",
       "info",
@@ -282,29 +216,19 @@ describe("RuntimeSettings — command", () => {
   it("a second spec rides the same machinery (menu rows, direct form, footer)", async () => {
     // The generic spec machinery's first real multi-spec consumer —
     // nothing may assume a single setting.
-    const overrides: SessionOverrides = {};
-    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
-    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
-    const settings = new RuntimeSettingsClass(
+    const { settings, overrides, appendEntry, notify } = makeSettings(
+      {},
       {
-        session: {
-          session: { config: configSchema.parse({ provider: "test", model: "test" }) },
-          overrides,
-          circuitBreaker: new CircuitBreaker(),
-        },
-        appendEntry,
-        notify,
-        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
+        specs: [
+          ...SPECS,
+          {
+            name: "notifyLevel",
+            values: ["info", "warning", "error", "off"],
+            description: "the minimum ambient notify level",
+            hiddenValue: "info",
+          },
+        ],
       },
-      [
-        ...SPECS,
-        {
-          name: "notifyLevel",
-          values: ["info", "warning", "error", "off"],
-          description: "the minimum ambient notify level",
-          hiddenValue: "info",
-        },
-      ],
     );
     const ctx = makeUiCtx();
     ctx.ui.select.mockResolvedValueOnce("notifyLevel — info (config)").mockResolvedValueOnce("off");
@@ -426,17 +350,7 @@ describe("RuntimeSettings — shortcut", () => {
   });
 
   it("without an active session warns instead of crashing", () => {
-    const overrides: SessionOverrides = {};
-    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
-    const settings = new RuntimeSettingsClass(
-      {
-        session: { session: undefined, overrides, circuitBreaker: new CircuitBreaker() },
-        appendEntry: () => {},
-        notify,
-        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
-      },
-      SPECS,
-    );
+    const { settings, notify } = makeSettings({}, { noSession: true });
     const ctx = makeUiCtx();
     expect(() => settings.shortcut.handler(ctx)).not.toThrow();
     expect(notify).toHaveBeenCalledWith("no active session (config not loaded)", "warning");
@@ -491,16 +405,7 @@ describe("RuntimeSettings — restore + footer", () => {
   });
 
   it("syncFooter without an active session sets nothing", () => {
-    const overrides: SessionOverrides = {};
-    const settings = new RuntimeSettingsClass(
-      {
-        session: { session: undefined, overrides, circuitBreaker: new CircuitBreaker() },
-        appendEntry: () => {},
-        notify: () => {},
-        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
-      },
-      SPECS,
-    );
+    const { settings } = makeSettings({}, { noSession: true });
     const ctx = makeUiCtx();
     settings.syncFooter(ctx);
     expect(ctx.ui.setStatus).not.toHaveBeenCalled();
@@ -516,17 +421,12 @@ describe("RuntimeSettings — restore + footer", () => {
 
 describe("RuntimeSettings — save to config layer actions", () => {
   it("save-to-global snapshots the full effective config (overrides merged)", async () => {
-    const saveConfig = vi.fn<
-      (
-        target: "global" | "project",
-        config: AiGuardConfig,
-      ) => {
-        path: string;
-        created: boolean;
-        changed: boolean;
-      }
-    >((target) => ({ path: `/cfg-${target}.json`, created: false, changed: true }));
-    const { settings, notify } = makeSettings({ mode: "lenient" }, saveConfig);
+    const saveConfig = vi.fn<SaveConfigFn>((target) => ({
+      path: `/cfg-${target}.json`,
+      created: false,
+      changed: true,
+    }));
+    const { settings, notify } = makeSettings({ mode: "lenient" }, { saveConfig });
     const ctx = makeUiCtx();
 
     await settings.command.handler("save-to-global-config", ctx);
@@ -545,17 +445,12 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("save-to-project passes the project target through", async () => {
-    const saveConfig = vi.fn<
-      (
-        target: "global" | "project",
-        config: AiGuardConfig,
-      ) => {
-        path: string;
-        created: boolean;
-        changed: boolean;
-      }
-    >((target) => ({ path: `/cfg-${target}.json`, created: false, changed: true }));
-    const { settings } = makeSettings({}, saveConfig);
+    const saveConfig = vi.fn<SaveConfigFn>((target) => ({
+      path: `/cfg-${target}.json`,
+      created: false,
+      changed: true,
+    }));
+    const { settings } = makeSettings({}, { saveConfig });
     const ctx = makeUiCtx();
 
     await settings.command.handler("save-to-project-config", ctx);
@@ -564,12 +459,17 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("notifies a refusal and changes nothing when the save errors", async () => {
-    const { settings, notify } = makeSettings({}, () => ({
-      path: "/cfg.json",
-      created: false,
-      changed: false,
-      error: "not valid JSONC",
-    }));
+    const { settings, notify } = makeSettings(
+      {},
+      {
+        saveConfig: () => ({
+          path: "/cfg.json",
+          created: false,
+          changed: false,
+          error: "not valid JSONC",
+        }),
+      },
+    );
     const ctx = makeUiCtx();
 
     await settings.command.handler("save-to-global-config", ctx);
@@ -581,17 +481,12 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("a no-override session saves the config's own value — no dead key shadows", async () => {
-    const saveConfig = vi.fn<
-      (
-        target: "global" | "project",
-        config: AiGuardConfig,
-      ) => {
-        path: string;
-        created: boolean;
-        changed: boolean;
-      }
-    >(() => ({ path: "/cfg.json", created: false, changed: true }));
-    const { settings, overrides } = makeSettings({}, saveConfig);
+    const saveConfig = vi.fn<SaveConfigFn>(() => ({
+      path: "/cfg.json",
+      created: false,
+      changed: true,
+    }));
+    const { settings, overrides } = makeSettings({}, { saveConfig });
     settings.restore({ getBranch: () => [] });
     const ctx = makeUiCtx();
 
@@ -602,17 +497,12 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("save after an override reset carries the config value — the undefined-shadow is gone", async () => {
-    const saveConfig = vi.fn<
-      (
-        target: "global" | "project",
-        config: AiGuardConfig,
-      ) => {
-        path: string;
-        created: boolean;
-        changed: boolean;
-      }
-    >(() => ({ path: "/cfg.json", created: false, changed: true }));
-    const { settings, overrides } = makeSettings({ mode: "lenient" }, saveConfig);
+    const saveConfig = vi.fn<SaveConfigFn>(() => ({
+      path: "/cfg.json",
+      created: false,
+      changed: true,
+    }));
+    const { settings, overrides } = makeSettings({ mode: "lenient" }, { saveConfig });
     const ctx = makeUiCtx();
 
     await settings.command.handler("mode reset", ctx); // deletes the override
@@ -631,17 +521,12 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("the direct save form needs no picker UI — hasUI=false still saves", async () => {
-    const saveConfig = vi.fn<
-      (
-        target: "global" | "project",
-        config: AiGuardConfig,
-      ) => {
-        path: string;
-        created: boolean;
-        changed: boolean;
-      }
-    >(() => ({ path: "/cfg.json", created: false, changed: true }));
-    const { settings } = makeSettings({}, saveConfig);
+    const saveConfig = vi.fn<SaveConfigFn>(() => ({
+      path: "/cfg.json",
+      created: false,
+      changed: true,
+    }));
+    const { settings } = makeSettings({}, { saveConfig });
     const noUi = makeUiCtx();
     noUi.hasUI = false;
 
@@ -652,17 +537,12 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("the root menu applies a picked save action directly", async () => {
-    const saveConfig = vi.fn<
-      (
-        target: "global" | "project",
-        config: AiGuardConfig,
-      ) => {
-        path: string;
-        created: boolean;
-        changed: boolean;
-      }
-    >(() => ({ path: "/cfg.json", created: false, changed: true }));
-    const { settings } = makeSettings({}, saveConfig);
+    const saveConfig = vi.fn<SaveConfigFn>(() => ({
+      path: "/cfg.json",
+      created: false,
+      changed: true,
+    }));
+    const { settings } = makeSettings({}, { saveConfig });
     const ctx = makeUiCtx();
     ctx.ui.select.mockResolvedValueOnce("save project config");
     await settings.command.handler("", ctx);
@@ -671,11 +551,16 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("reports when the layer already matches (nothing written)", async () => {
-    const { settings, notify } = makeSettings({}, () => ({
-      path: "/cfg.json",
-      created: false,
-      changed: false,
-    }));
+    const { settings, notify } = makeSettings(
+      {},
+      {
+        saveConfig: () => ({
+          path: "/cfg.json",
+          created: false,
+          changed: false,
+        }),
+      },
+    );
     const ctx = makeUiCtx();
 
     await settings.command.handler("save-to-global-config", ctx);

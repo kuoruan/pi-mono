@@ -26,21 +26,17 @@ import type {
   RegisteredCommand,
 } from "@earendil-works/pi-coding-agent";
 
+import type { BreakerTier } from "./circuit-breaker.ts";
 import type { ConfigLayerTarget, SaveConfigFn } from "./config-layer.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
-import type { NotifyLevel } from "./logger.ts";
 import { CYCLE_DESCRIPTION } from "./mode-table.ts";
+import type { NotifyFn } from "./review-pipeline.ts";
+import { effectiveConfig, effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
 import {
   type SessionBranchReader,
   persistSetting,
   restoreSetting,
 } from "./session-settings-store.ts";
-import {
-  type CircuitBreaker,
-  effectiveConfig,
-  effectiveOverride,
-  type SessionOverrides,
-} from "./session-state.ts";
 
 /**
  * An enum-valued session setting overriding its same-named config field.
@@ -121,14 +117,33 @@ export type AiGuardShortcut = Omit<ExtensionShortcut, "shortcut" | "extensionPat
   handler: (ctx: AiGuardUiContext) => void;
 };
 
+/**
+ * A completion suggestion — one row of the command's argument completion.
+ * Structurally the host's AutocompleteItem (pi-tui via RegisteredCommand);
+ * the alignment is compile-checked where the command object satisfies
+ * `AiGuardCommand` (its `getArgumentCompletions` carries the host's own
+ * type, so a drift breaks the build rather than the runtime).
+ */
+export interface CompletionItem {
+  /** The value inserted when the suggestion is accepted. */
+  value: string;
+  /** The row's display text. */
+  label: string;
+}
+
 /** The settings' view of session state — {@link SessionLifecycle} satisfies this structurally. */
 export interface SettingsSessionSurface {
   /** The live session's config, or undefined when no session is active. */
   readonly session: { readonly config: AiGuardConfig | undefined } | undefined;
   /** The stable overrides object (single write path, stable identity). */
   readonly overrides: SessionOverrides;
-  /** The session's circuit breaker (the `breaker reset` action's target). */
-  readonly circuitBreaker: CircuitBreaker;
+  /**
+   * The `breaker reset` action's seam: clears the session's circuit
+   * breaker and reports which tier was tripped. The breaker's tier
+   * vocabulary crosses the seam only as this result — the surface never
+   * touches the breaker itself.
+   */
+  readonly resetBreaker: () => BreakerTier | undefined;
 }
 
 /** Injectable collaborators the settings surface persists through. */
@@ -143,7 +158,7 @@ export interface RuntimeSettingsDeps {
    * synchronous answer to an explicit user action, so no level gate ever
    * applies (unlike the pipeline's ambient channel).
    */
-  notify: (message: string, level?: NotifyLevel) => void;
+  notify: NotifyFn;
   /**
    * Persists the current effective config snapshot into a config layer
    * (the "save to global/project config" actions). In production this
@@ -220,7 +235,7 @@ export class RuntimeSettings {
     getArgumentCompletions: (prefix) => {
       const trimmed = prefix.replace(/^\s+/, "");
       const spaceAt = trimmed.indexOf(" ");
-      let items: { value: string; label: string }[];
+      let items: CompletionItem[];
       if (spaceAt < 0) {
         // First token: complete setting names followed by the action
         // verbs (save verbs + breaker reset).
@@ -523,8 +538,7 @@ export class RuntimeSettings {
       this.#deps.notify("no active session (config not loaded)", "warning");
       return;
     }
-    const tier = this.#deps.session.circuitBreaker.trippedTier(sessionConfig.circuitBreaker);
-    this.#deps.session.circuitBreaker.resetAll();
+    const tier = this.#deps.session.resetBreaker();
     const was =
       tier === "total"
         ? " (was total-tier tripped)"
@@ -560,7 +574,7 @@ export class RuntimeSettings {
   /**
    * The effective value: session override first, then config default —
    * the typed accessor's spelling (see effectiveOverride in
-   * session-state).
+   * session-overrides).
    *
    * @param spec - The setting to resolve.
    * @returns The effective value, or undefined without a config.

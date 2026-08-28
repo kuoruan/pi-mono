@@ -2,15 +2,13 @@
  * Decision record: the audit-log entry emitted at each decision gate in the
  * review pipeline.
  *
- * Previously each of the six gates (policy-decided, circuit-breaker,
- * model-unresolved, auth-failed, cache-hit, model) hand-built its own
- * `log.review(DECISION_EVENT, {...})` payload with a different ad-hoc shape.
- * The audit schema — which fields every decision record must carry — existed
- * only implicitly, duplicated across six literals. This module is the single
+ * Previously each gate (policy-decided, circuit-breaker, model-unresolved,
+ * auth-failed, transcript-error, no-target, cache-hit, model) hand-built its
+ * own `log.review(DECISION_EVENT, {...})` payload with a different ad-hoc
+ * shape. The audit schema — which fields every decision record must carry —
+ * existed only implicitly, duplicated across gate literals. This module is the single
  * source of truth: the shared fields are captured once in `DecisionBase`,
  * and each gate's constructor adds only what's specific to it.
- *
- * The event constants live here so callers don't redeclare them.
  *
  * Log-stream doctrine: the REVIEW stream (log.review, always on) carries one bounded decision
  * record per REVIEWER-RELEVANT gate — the model gate, the circuit breaker, and the reviewer's
@@ -373,8 +371,9 @@ export const DecisionRecord = {
  * MODEL's judgment (with its reason and riskLevel); `emittedVerdict` names
  * what the link actually returned, and `mode` names which mode
  * mapped it (the default/lenient lanes route flags to human review,
- * the strict lane tightens uncertainty to denial, the fail-open lanes
- * loosen both to allow — the annotation covers every direction).
+ * the strict lane tightens uncertainty to denial, permissive loosens both
+ * flags and uncertainty to allow, lenient only its benign/neutral
+ * uncertainty — the annotation covers every direction).
  *
  * @param record - The decision record for the model or cache-hit gate.
  * @param mode - The effective mode that triggered the mapping.

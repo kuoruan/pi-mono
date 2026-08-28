@@ -62,13 +62,13 @@ export interface NoTargetReason {
   surface: string | undefined;
 }
 
+/** The surface list a review scans — derived from the config contract, not re-declared. */
+export type SurfaceScope = Pick<AiGuardConfig, "surfaces">;
+
 /**
  * The result of {@link resolveReviewTarget}: either the resolved
  * `{ surface, target }`, or a tagged reason the ask did not qualify.
  */
-/** The surface list a review scans — derived from the config contract, not re-declared. */
-export type SurfaceScope = Pick<AiGuardConfig, "surfaces">;
-
 export type ReviewTargetResolution = ReviewTarget | SurfaceUnmatchedReason | NoTargetReason;
 
 /**
@@ -160,18 +160,6 @@ function flaggedElements(payload: PromptPayload): readonly string[] {
 }
 
 /**
- * The `kind`-dispatched evidence slots for an {@link AskContext}.
- *
- * `fullCommand` falls back to `request.value` when the upstream omits the
- * evidence entry (the full command equals the sub). For
- * `bash_external_directory` the command rides in `request.value` directly, so
- * `fullCommand` is that value and `flaggedElements` are the escaped paths.
- *
- * @param payload - The ask's payload.
- * @returns The `kind`-dispatched evidence slots ({fullCommand, flaggedElements, toolInputPreview,
- *   readPath, resolvedAlias}).
- */
-/**
  * The per-surface flagged fields a payload kind contributes to its
  * AskContext projection.
  */
@@ -183,6 +171,18 @@ interface FlaggedFields {
   resolvedAlias?: string;
 }
 
+/**
+ * The `kind`-dispatched evidence slots for an {@link AskContext}.
+ *
+ * `fullCommand` falls back to `request.value` when the upstream omits the
+ * evidence entry (the full command equals the sub). For
+ * `bash_external_directory` the command rides in `request.value` directly, so
+ * `fullCommand` is that value and `flaggedElements` are the escaped paths.
+ *
+ * @param payload - The ask's payload.
+ * @returns The `kind`-dispatched evidence slots ({fullCommand, flaggedElements, toolInputPreview,
+ *   readPath, resolvedAlias}).
+ */
 function flaggedFields(payload: PromptPayload): FlaggedFields {
   const flagged = flaggedElements(payload);
   const fullCommandEvidence = findEvidence(payload, "full command")?.text;

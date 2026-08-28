@@ -8,6 +8,7 @@ import type {
 } from "@gotgenes/pi-permission-system";
 import { describe, expect, it } from "vitest";
 
+import { CircuitBreaker } from "#src/circuit-breaker.ts";
 import { type AiGuardConfig, configSchema } from "#src/config-schema.ts";
 import {
   BREAKER_DENY_REASON,
@@ -15,8 +16,12 @@ import {
   DECISION_EVENT,
   MODEL_REPLY_EVENT,
 } from "#src/decision-record.ts";
-import { type ReviewPipelineDeps, createReviewPipeline } from "#src/review-pipeline.ts";
-import { CircuitBreaker, VerdictCache } from "#src/session-state.ts";
+import {
+  type NotifyFn,
+  type ReviewPipelineDeps,
+  createReviewPipeline,
+} from "#src/review-pipeline.ts";
+import { VerdictCache } from "#src/verdict-cache.ts";
 import { uncertainDenyReason } from "#src/verdict-mode.ts";
 
 /**
@@ -184,7 +189,7 @@ function makeRecordingLog(): {
  */
 function makeNotifySpy(): {
   notifications: [string, string | undefined][];
-  notify: (message: string, level?: "info" | "warning" | "error") => void;
+  notify: NotifyFn;
 } {
   const notifications: [string, string | undefined][] = [];
   const notify = (message: string, level?: string) => notifications.push([message, level]);
@@ -755,11 +760,11 @@ describe("createReviewPipeline — circuit breaker", () => {
     await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
     const tripNotices = notifications.filter(([m]) => m.includes("total tier reached"));
     expect(tripNotices).toHaveLength(1);
-    expect(tripNotices[0]![1]).toBe("warning");
+    expect(tripNotices[0]![1]).toBe("error");
     expect(tripNotices[0]![0]).toContain("breaker reset");
     // A manual reset re-arms the epoch notice (3 more denies → next trip
     // notifies again).
-    breaker.resetAll();
+    breaker.resetAll({ consecutive: 3, total: 3, verdict: "deny" });
     for (let i = 0; i < 3; i++)
       await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
     await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);

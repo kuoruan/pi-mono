@@ -137,8 +137,6 @@ function reportCallFailure(
   );
 }
 
-/** Enough for a JSON verdict with a short reason. */
-
 /**
  * Shared call scaffolding for {@link reviewModel}: builds the context +
  * options, runs `completeSimple`, and normalizes a thrown error into a defer

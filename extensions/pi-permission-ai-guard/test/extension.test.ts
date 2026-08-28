@@ -16,6 +16,7 @@ import type { ConfigEnv, ConfigLayerTarget, LoadConfigResult } from "#src/config
 import { type AiGuardConfig, configSchema } from "#src/config-schema.ts";
 import { createAiGuardExtension } from "#src/extension.ts";
 import type { ReviewPipelineDeps } from "#src/review-pipeline.ts";
+import type { CompletionItem } from "#src/runtime-settings.ts";
 import { SETTING_ENTRY_TYPE } from "#src/session-settings-store.ts";
 
 // vi.mock is hoisted ABOVE the static import above, so the mock factory
@@ -65,10 +66,7 @@ function makeMockPi() {
       description?: string;
       getArgumentCompletions?: (
         argumentPrefix: string,
-      ) =>
-        | { value: string; label: string }[]
-        | null
-        | Promise<{ value: string; label: string }[] | null>;
+      ) => CompletionItem[] | null | Promise<CompletionItem[] | null>;
       handler: (args: string, ctx: any) => Promise<void>;
     }
   >();
@@ -479,14 +477,47 @@ describe("createAiGuardExtension lifecycle", () => {
       loadConfig: () => ({ config: undefined, issues: [{ path: "$", message: "bad config" }] }),
     });
 
-    pi.fire("session_start", {}, makeSessionCtx());
+    const ctx = makeSessionCtx();
+    pi.fire("session_start", {}, ctx);
 
-    // Config is undefined → authorizer not registered (no config = no review)
+    // Config is undefined → authorizer not registered (no config = no
+    // review), and the fail-safe start notifies at error grade: the
+    // operator believes a reviewer stands in front of asks and none does.
     expect(mocks.registerAuthorizer).not.toHaveBeenCalled();
     expect(createPipeline).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("bad config"));
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("running in fail-safe mode with no auto-review"),
+      "error",
+    );
 
     warnSpy.mockRestore();
+  });
+
+  it("a repeated fail-safe session_start notifies again (each re-dispatch is a fresh absence)", () => {
+    const pi = makeMockPi();
+    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
+    mocks.getPermissionsService.mockReturnValue(fakeService);
+    const { createPipeline } = makeStubPipeline();
+
+    createAiGuardExtension(pi as any, {
+      createPipeline,
+      loadConfig: () => ({ config: undefined, issues: [] }),
+    });
+
+    // pi re-dispatches session_start on reload/fork without an
+    // intervening shutdown — no latch: every re-dispatch genuinely
+    // restarts an unreviewed session, so every one notifies.
+    const first = makeSessionCtx();
+    pi.fire("session_start", {}, first);
+    const second = makeSessionCtx();
+    pi.fire("session_start", {}, second);
+    expect(first.ui.notify).toHaveBeenCalledTimes(1);
+    expect(second.ui.notify).toHaveBeenCalledTimes(1);
+    expect(second.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("running in fail-safe mode with no auto-review"),
+      "error",
+    );
   });
 
   it("passes cwd and trustedProject from session context to config loader", () => {
@@ -522,7 +553,6 @@ describe("createAiGuardExtension lifecycle", () => {
   it("handles registerAuthorizer throwing without crashing", () => {
     const pi = makeMockPi();
     const { createPipeline } = makeStubPipeline();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const throwingRegister = vi.fn<(name: string, authorize: unknown) => never>(() => {
       throw new Error("registration failed");
     });
@@ -532,18 +562,19 @@ describe("createAiGuardExtension lifecycle", () => {
     createAiGuardExtension(pi as any, { createPipeline });
 
     // session_start calls tryRegister which calls registerAuthorizer.
-    // The throw must not propagate — it's caught and warned.
-    expect(() => pi.fire("session_start", {}, makeSessionCtx())).not.toThrow();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to register"));
-
-    warnSpy.mockRestore();
+    // The throw must not propagate — it's caught and notified at error
+    // grade: the guard is absent and the operator must see it.
+    const ctx = makeSessionCtx();
+    expect(() => pi.fire("session_start", {}, ctx)).not.toThrow();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("failed to register the reviewer"),
+      "error",
+    );
   });
 
   it("warns on 'already registered' (stale registration survived disposal)", () => {
     const pi = makeMockPi();
     const { createPipeline } = makeStubPipeline();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
     // The exact message AuthorizerRegistry.register throws.
     const duplicateRegister = vi.fn<(name: string, authorize: unknown) => never>(() => {
       throw new Error("An authorizer is already registered for 'ai-guard'.");
@@ -553,25 +584,21 @@ describe("createAiGuardExtension lifecycle", () => {
 
     createAiGuardExtension(pi as any, { createPipeline });
 
-    pi.fire("session_start", {}, makeSessionCtx());
+    const ctx = makeSessionCtx();
+    pi.fire("session_start", {}, ctx);
 
     // In v27 every node owns its service: a duplicate means a stale
     // registration survived disposal (/reload glitch) and still governs
-    // asks — rare but never benign, so it warns.
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Stale ai-guard registration survived disposal"),
+    // asks — rare but never benign, error-grade through notify.
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("stale ai-guard registration survived disposal"),
+      "error",
     );
-    expect(debugSpy).not.toHaveBeenCalled();
-
-    warnSpy.mockRestore();
-    debugSpy.mockRestore();
   });
 
   it("does not downgrade a similar-but-different 'already registered' error", () => {
     const pi = makeMockPi();
     const { createPipeline } = makeStubPipeline();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
     // Different link name in the message — must NOT match the downgrade.
     const similarRegister = vi.fn<(name: string, authorize: unknown) => never>(() => {
       throw new Error("An authorizer is already registered for 'other-link'.");
@@ -581,14 +608,15 @@ describe("createAiGuardExtension lifecycle", () => {
 
     createAiGuardExtension(pi as any, { createPipeline });
 
-    pi.fire("session_start", {}, makeSessionCtx());
+    const ctx = makeSessionCtx();
+    pi.fire("session_start", {}, ctx);
 
-    // Different name → stays a warning, not downgraded.
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to register"));
-    expect(debugSpy).not.toHaveBeenCalled();
-
-    warnSpy.mockRestore();
-    debugSpy.mockRestore();
+    // Different name → the generic registration-failure copy, not the
+    // stale-registration one.
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("failed to register the reviewer"),
+      "error",
+    );
   });
 });
 

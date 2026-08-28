@@ -13,7 +13,7 @@
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 
 import type { AiGuardConfig } from "./config-schema.ts";
-import type { SessionOverrides } from "./session-state.ts";
+import type { SessionOverrides } from "./session-overrides.ts";
 
 /** The persisted setting names — the field-name intersection both types share. */
 export type SettingName = keyof SessionOverrides & keyof AiGuardConfig;

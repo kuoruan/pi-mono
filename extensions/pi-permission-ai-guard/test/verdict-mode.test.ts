@@ -22,6 +22,7 @@ import {
   denyTier,
   machineryTarget,
   escalationMessage,
+  resolveMapping,
   machineryDenyReason,
 } from "#src/verdict-mode.ts";
 
@@ -309,6 +310,152 @@ describe("the ladder's structural invariant — contiguous bands in suspicion or
         (m) => applyVerdictMode(m, verdict, modelDefer, riskLevel).kind === "defer",
       );
       expect(asks, `${JSON.stringify(verdict)} lean=${modelDefer?.lean ?? "none"}`).toBe(true);
+    }
+  });
+});
+
+describe("resolveMapping — the mapping consequence rule", () => {
+  const SOFT = { kind: "deny", reason: "unsafe" } as const;
+  const HARD = { kind: "deny", reason: "unsafe" } as const;
+  const DEFER_V = { kind: "defer" } as const;
+  const ALLOW_V = { kind: "allow" } as const;
+
+  it("a verdict that holds never annotates; a deny with a reason notifies its held copy", () => {
+    const held = resolveMapping({
+      original: SOFT,
+      emitted: SOFT,
+      riskLevel: "low",
+      deferLean: undefined,
+      mode: "default",
+      noticeShown: false,
+    });
+    expect(held.annotate).toBe(false);
+    expect(held.emittedReason).toBeUndefined();
+    expect(held.markNoticeShown).toBe(false);
+    expect(held.notice).toEqual({
+      message: "reviewer denied this request (risk low) — unsafe",
+      level: "warning",
+    });
+  });
+
+  it("an allow that holds is fully silent", () => {
+    expect(
+      resolveMapping({
+        original: ALLOW_V,
+        emitted: ALLOW_V,
+        riskLevel: undefined,
+        deferLean: undefined,
+        mode: "lenient",
+        noticeShown: false,
+      }),
+    ).toEqual({
+      annotate: false,
+      notice: null,
+      markNoticeShown: false,
+    });
+  });
+
+  it("a mapped defer annotates and notifies the ask tail", () => {
+    const asked = resolveMapping({
+      original: SOFT,
+      emitted: DEFER_V,
+      riskLevel: "low",
+      deferLean: undefined,
+      mode: "default",
+      noticeShown: false,
+    });
+    expect(asked.annotate).toBe(true);
+    expect(asked.emittedReason).toBeUndefined();
+    expect(asked.notice).toEqual({
+      message: "reviewer denied this request (risk low) — unsafe — asking you instead",
+      level: "warning",
+    });
+  });
+
+  it("a defer→allow mapping marks the swallowed clarification and stays silent when benign-leaned", () => {
+    const leaned = resolveMapping({
+      original: DEFER_V,
+      emitted: ALLOW,
+      riskLevel: undefined,
+      deferLean: "allow",
+      mode: "lenient",
+      noticeShown: false,
+    });
+    expect(leaned.annotate).toBe(true);
+    expect(leaned.emittedReason).toBe("clarification-suppressed");
+    expect(leaned.notice).toBeNull();
+    expect(leaned.markNoticeShown).toBe(false);
+  });
+
+  it("a neutral defer→allow mapping fires the fail-open notice once and marks the state", () => {
+    const neutral = resolveMapping({
+      original: DEFER_V,
+      emitted: ALLOW,
+      riskLevel: undefined,
+      deferLean: undefined,
+      mode: "lenient",
+      noticeShown: false,
+    });
+    expect(neutral.markNoticeShown).toBe(true);
+    expect(neutral.notice).toEqual({
+      message: "lenient auto-approves uncertainty — soft denials still ask",
+      level: "warning",
+    });
+    // Already shown: silent, and the state is not re-marked.
+    const again = resolveMapping({
+      original: DEFER_V,
+      emitted: ALLOW,
+      riskLevel: undefined,
+      deferLean: undefined,
+      mode: "lenient",
+      noticeShown: true,
+    });
+    expect(again.markNoticeShown).toBe(false);
+    expect(again.notice).toBeNull();
+  });
+
+  it("a deny→allow mapping keeps the swallowed reason and fires the permissive fail-open copy", () => {
+    const swallowed = resolveMapping({
+      original: SOFT,
+      emitted: ALLOW,
+      riskLevel: "low",
+      deferLean: undefined,
+      mode: "permissive",
+      noticeShown: false,
+    });
+    expect(swallowed.annotate).toBe(true);
+    expect(swallowed.emittedReason).toBe("unsafe");
+    expect(swallowed.notice).toEqual({
+      message: "permissive auto-approves non-allow verdicts — hard-tier denials still block",
+      level: "warning",
+    });
+  });
+
+  it("a defer→deny mapping records the synthesized teaching reason, never a suppressed marker", () => {
+    const denied = resolveMapping({
+      original: DEFER_V,
+      emitted: { kind: "deny", reason: "needs the target" },
+      riskLevel: undefined,
+      deferLean: undefined,
+      mode: "strict",
+      noticeShown: false,
+    });
+    expect(denied.annotate).toBe(true);
+    expect(denied.emittedReason).toBe("needs the target");
+    expect(denied.notice).toBeNull();
+  });
+
+  it("a hard deny that holds notifies regardless of mode (the permissive lane is no carve-out)", () => {
+    for (const mode of MODE_VALUES) {
+      const held = resolveMapping({
+        original: HARD,
+        emitted: HARD,
+        riskLevel: "critical",
+        deferLean: undefined,
+        mode,
+        noticeShown: false,
+      });
+      expect(held.notice?.message).toContain("reviewer denied this request (risk critical)");
     }
   });
 });
