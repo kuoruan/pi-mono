@@ -151,6 +151,8 @@ function reportCallFailure(
  * @param userPrompt - The user prompt for the call.
  * @param timeoutMs - Per-call timeout in milliseconds.
  * @param maxTokens - Maximum tokens for the model reply.
+ * @param providerRetries - Pi-ai provider-layer retries for this call
+ *   (attempt 1 passes 1; the empty-reply retry passes 0 — see reviewModel).
  * @returns A `CallResult`: success with the reply, or failure with the classified defer reason.
  */
 async function executeCall(
@@ -159,6 +161,7 @@ async function executeCall(
   userPrompt: string,
   timeoutMs: number,
   maxTokens: number,
+  providerRetries: number,
 ): Promise<CallResult> {
   // The Authorizer callback receives no ExtensionContext, so the agent's
   // ctx.signal can't be threaded here; this timeout is the only abort source.
@@ -174,6 +177,13 @@ async function executeCall(
       apiKey: ctx.auth.apiKey,
       headers: ctx.auth.headers,
       maxTokens,
+      // Provider-level retry (429/408/409/5xx per pi-ai's classifier,
+      // backoff and retry-after honored) — the signal spans every attempt,
+      // so timeoutMs stays the TOTAL budget, retries included. The
+      // empty-reply retry in reviewModel passes 0: that call is itself the
+      // retry budget being spent, and a provider error there has none left
+      // (max 3 requests per review — see the retry loop in reviewModel).
+      maxRetries: providerRetries,
     };
     // reasoning: "off" → don't pass reasoning option → pi-ai sets
     // thinkingEnabled: false → sends thinking: {type: "disabled"}.
@@ -209,16 +219,75 @@ export async function reviewModel(
   userPrompt: string,
   timeoutMs: number,
 ): Promise<ReviewOutcome> {
-  const result = await executeCall(ctx, systemPrompt, userPrompt, timeoutMs, ctx.maxTokens);
+  // Attempt 1: provider-level retries enabled (maxRetries: 1 in pi-ai —
+  // its classifier, backoff, and retry-after handling apply; the signal
+  // spans them, so timeoutMs is the total budget). Up to 2 HTTP requests
+  // live inside this one executeCall.
+  const result = await executeCall(ctx, systemPrompt, userPrompt, timeoutMs, ctx.maxTokens, 1);
   if (!result.ok) {
+    // Provider errors do NOT re-fire here — pi-ai's retry budget is
+    // already spent inside executeCall; this loop only owns the
+    // empty-reply retry.
     return {
       verdict: { kind: "defer" },
       deferKind: result.deferKind,
       latencyMs: result.latencyMs,
     };
   }
+
+  // Empty-reply retry: a 200 with no usable text (e.g. an always-thinking
+  // upstream spending the whole budget on reasoning) is invisible to
+  // pi-ai's HTTP-layer retry — reviewModel owns it. Gate: only when the
+  // first attempt consumed less than half the window, so the retry always
+  // has at least half a window to run in; its budget is the REMAINING
+  // time (timeoutMs − elapsed), keeping timeoutMs a total-budget promise.
+  const retryOnEmpty = async (): Promise<CallResult> =>
+    executeCall(
+      ctx,
+      systemPrompt,
+      userPrompt,
+      // The retry's own budget: remaining window, min 1ms guard.
+      Math.max(1, timeoutMs - result.latencyMs),
+      ctx.maxTokens,
+      // No provider retry on the retry: this call IS the retry budget —
+      // a provider error here fails straight to call-failed (deliberately
+      // less robust than attempt 1, whose budget is spent).
+      0,
+    );
+
   // Parse the verdict from the model's text reply as JSON.
-  const text = contentText(result.reply.content, "");
+  let text = contentText(result.reply.content, "");
+  if (!text.trim() && result.latencyMs < timeoutMs / 2) {
+    // The first attempt's empty diagnostic goes to the debug stream here:
+    // the retry replaces the reply, and without this line the first
+    // stopReason/contentTypes would be lost (the review stream keeps the
+    // `attempts: 2` fact; this keeps the debug-level why).
+    logEmptyDiagnostic(ctx, result, 1);
+    const second = await retryOnEmpty();
+    if (second.ok) {
+      // Either attempt's usable text wins; the retry's latency
+      // accumulates into the reported latencyMs (the review's total cost).
+      const secondText = contentText(second.reply.content, "");
+      const base = {
+        ...result,
+        reply: second.reply,
+        latencyMs: result.latencyMs + second.latencyMs,
+      };
+      if (secondText.trim()) {
+        return { ...parseTextFallback(secondText, base.latencyMs), attempts: 2 };
+      }
+      return classifyEmptyReply(ctx, base, 2);
+    }
+    // The retry itself failed (provider error on a budgetless attempt, or
+    // its remaining-window timeout): classify from the SECOND failure —
+    // it is the freshest failure and the one the operator waited on.
+    return {
+      verdict: { kind: "defer" },
+      deferKind: second.deferKind,
+      latencyMs: result.latencyMs + second.latencyMs,
+      attempts: 2,
+    };
+  }
   if (text.trim()) {
     return parseTextFallback(text, result.latencyMs);
   }
@@ -229,11 +298,31 @@ export async function reviewModel(
   // the abort, resolves the stream with an empty AssistantMessage whose
   // stopReason is "aborted". Detect that here and classify as "timeout"
   // instead of "empty-reply" so the two root causes are distinguishable in
-  // telemetry.
-  const stopReason = result.reply.stopReason ?? null;
-  const isTimeout = stopReason === "aborted";
+  // telemetry. Local-timeout-classified outcomes never enter the retry
+  // loop (their latency already consumed the whole window); a server-side
+  // early abort can still retry — most of the window is unspent.
+  return classifyEmptyReply(ctx, result);
+}
+
+/**
+ * Log an empty-reply diagnostic to the debug stream — the why behind a
+ * textless reply (stopReason, content types, error message). Shared by
+ * the retry path (first attempt's diagnostic, before it is replaced) and
+ * {@link classifyEmptyReply}.
+ *
+ * @param ctx - The resolved model-call context (log target).
+ * @param result - The successful call whose reply carried no text.
+ * @param attempts - How many executeCall attempts produced this reply.
+ * @returns The diagnostic payload (also returned by the caller for the
+ * decision record).
+ */
+function logEmptyDiagnostic(
+  ctx: ModelCallContext,
+  result: CallResult & { ok: true },
+  attempts?: number,
+): ReviewOutcomeDiagnostic {
   const diagnostic: ReviewOutcomeDiagnostic = {
-    stopReason,
+    stopReason: result.reply.stopReason ?? null,
     rawStopReason: result.reply.rawStopReason ?? null,
     errorMessage: result.reply.errorMessage
       ? normalizeAndRedactText(result.reply.errorMessage)
@@ -246,18 +335,41 @@ export async function reviewModel(
         )
       : [],
   };
-
   ctx.log.debug(MODEL_REPLY_EVENT, {
     requestId: ctx.requestId,
     diagnostic: true,
     ...diagnostic,
     latencyMs: result.latencyMs,
+    ...(attempts === undefined ? {} : { attempts }),
   });
+  return diagnostic;
+}
+
+/**
+ * Classify an empty (no usable text) reply into the diagnostic defer
+ * outcome: timeout when the stream was aborted, empty-reply otherwise.
+ * Logs the debug diagnostic via {@link logEmptyDiagnostic}; shared by
+ * the first attempt and the empty-reply retry.
+ *
+ * @param ctx - The resolved model-call context (log target).
+ * @param result - The successful call whose reply carried no text.
+ * @param attempts - How many executeCall attempts produced this outcome.
+ * @returns The defer outcome with the empty-reply diagnostic attached.
+ */
+function classifyEmptyReply(
+  ctx: ModelCallContext,
+  result: CallResult & { ok: true },
+  attempts?: number,
+): ReviewOutcome {
+  const stopReason = result.reply.stopReason ?? null;
+  const isTimeout = stopReason === "aborted";
+  const diagnostic = logEmptyDiagnostic(ctx, result, attempts);
 
   return {
     verdict: { kind: "defer" },
     deferKind: isTimeout ? "timeout" : "empty-reply",
     latencyMs: result.latencyMs,
+    ...(attempts === undefined ? {} : { attempts }),
     // Ride the outcome into the decision record: the review log itself
     // then shows WHY the reply was empty, independent of the permission
     // system's debug-log toggle.

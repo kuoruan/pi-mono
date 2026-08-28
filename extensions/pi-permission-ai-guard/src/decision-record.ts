@@ -332,6 +332,9 @@ export const DecisionRecord = {
       modelCalled: true,
       modelId,
       latencyMs: reviewOutcome.latencyMs,
+      // Present only when the empty-reply retry fired (2 attempts); 1 is
+      // the silent default, keeping the record minimal for the common path.
+      attempts: reviewOutcome.attempts,
       strippedCount,
       verdict: reviewOutcome.verdict.kind,
       // Persist the sanitized model explanation for deny or defer. For

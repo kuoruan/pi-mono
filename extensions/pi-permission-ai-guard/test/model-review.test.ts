@@ -123,6 +123,75 @@ describe("reviewModel", () => {
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferKind).toBe("empty-reply");
+    // A fast empty reply retried and stayed empty — attempts reflects it.
+    expect(result.attempts).toBe(2);
+  });
+
+  it("retries a fast empty reply and adopts the second attempt's verdict", async () => {
+    const calls: { attempts: number }[] = [];
+    let nth = 0;
+    const completeSimple: CompleteSimpleFn = async (_model, _context, options) => {
+      calls.push({ attempts: options?.maxRetries ?? 0 });
+      nth++;
+      return nth === 1
+        ? makeReply([{ type: "thinking", thinking: "…" }], "stop")
+        : makeReply([{ type: "text", text: '{"verdict":"allow"}' }], "stop");
+    };
+    const ctx = makeContext(completeSimple);
+    const result = await reviewModel(ctx, "test", "test", 15000);
+    expect(result.verdict).toEqual({ kind: "allow" });
+    expect(result.attempts).toBe(2);
+    expect(calls.length).toBe(2);
+    // Attempt 1 rides pi-ai's provider retry; the empty-reply retry is
+    // budgetless (maxRetries 0) — see the max-3-requests contract.
+    expect(calls[0]!.attempts).toBe(1);
+    expect(calls[1]!.attempts).toBe(0);
+  });
+
+  it("does not retry a slow empty reply (half-window gate)", async () => {
+    let calls = 0;
+    const completeSimple: CompleteSimpleFn = async () => {
+      calls++;
+      // Consume more than half the 100ms window before answering empty.
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      return makeReply([], "stop");
+    };
+    const ctx = makeContext(completeSimple);
+    const result = await reviewModel(ctx, "test", "test", 100);
+    expect(result.deferKind).toBe("empty-reply");
+    expect(result.attempts).toBeUndefined();
+    expect(calls).toBe(1);
+  });
+
+  it("the retry's budget is the remaining window", async () => {
+    let nth = 0;
+    const completeSimple: CompleteSimpleFn = async (_model, _context, options) => {
+      nth++;
+      if (nth === 1) {
+        // ~200ms of the 1000ms window — comfortably under the half-window
+        // gate even on a loaded CI runner (generous margins: gate < 500,
+        // abort at ~800 vs natural end at 2200).
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return makeReply([], "stop");
+      }
+      // Honor the abort signal like a real provider would: the retry's
+      // budget (~800ms remaining) aborts this 2000ms sleep.
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(null), 2000);
+        options?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+      return makeReply([{ type: "text", text: '{"verdict":"allow"}' }], "stop");
+    };
+    const ctx = makeContext(completeSimple);
+    const result = await reviewModel(ctx, "test", "test", 1000);
+    // The retry hit its remaining-window budget: call failed via abort →
+    // timeout defer, with both attempts accounted.
+    expect(result.verdict).toEqual({ kind: "defer" });
+    expect(result.deferKind).toBe("timeout");
+    expect(result.attempts).toBe(2);
   });
 
   it("classifies abort-resolved empty reply as timeout, not empty-reply", async () => {

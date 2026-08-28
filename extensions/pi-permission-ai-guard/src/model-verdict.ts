@@ -20,8 +20,10 @@ export interface ReviewOutcome {
   deferKind?: ModelCallDeferKind;
   /** Model explanation for a defer verdict, retained for audit logging. */
   deferReason?: string;
-  /** Model call latency in milliseconds. */
+  /** Model call latency in milliseconds (cumulative across attempts). */
   latencyMs: number;
+  /** How many executeCall attempts produced this outcome (1, or 2 after the empty-reply retry). */
+  attempts?: number;
   /** Raw model reply (for debug logging). */
   rawReply?: string;
   /** Risk level from the model verdict, if provided. */
