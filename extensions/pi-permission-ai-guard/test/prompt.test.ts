@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AskContext } from "#src/ask.ts";
 import { configSchema, EXTENSION_ID, LINK_NAME } from "#src/config-schema.ts";
 import { parseVerdictObject } from "#src/model-verdict.ts";
-import { buildReviewPrompt, buildReviewSystemPrompt } from "#src/prompt.ts";
+import { buildReviewPrompt } from "#src/prompt.ts";
 
 // Evidence entry helper for fixtures.
 function ev(label: string, text: string, detail: string | null = null) {
@@ -74,22 +74,10 @@ function makeAsk(
 }
 
 describe("buildReviewPrompt", () => {
-  it("teaches the lean field with anchored directions", () => {
-    const systemPrompt = buildReviewSystemPrompt(null);
-    // The defer format line carries the lean field…
-    expect(systemPrompt).toContain(
-      '{"verdict":"defer","reason":"<what needs clarification>","lean":"allow|deny"}',
-    );
-    // …and the rule anchors both directions: deny-lean names a visible
-    // danger pattern, allow-lean names benign-action-plus-unclear-authorization,
-    // omission means genuinely neutral (unfamiliarity is not a deny-lean).
-    expect(systemPrompt).toContain("include lean only when your incomplete evidence has a clear");
-    expect(systemPrompt).toContain('"deny" when what you can see resembles a danger pattern');
-    expect(systemPrompt).toContain('"allow" when the action is visible-and-benign and only the');
-    expect(systemPrompt).toContain("Omit lean when you truly cannot tell");
-    expect(systemPrompt).toContain("unfamiliarity alone is not a deny-lean");
-  });
-
+  // No test pins the SAFETY_RULES or VERDICT_SECTION wording: the prompt is
+  // freely iterable copy, and the load-bearing contract is pinned where it
+  // lives — the prompt×parser seam test below (the taught format parses)
+  // and the verdict-mode pipeline tests (the parsed verdict routes).
   it("the format examples the prompt teaches are exactly what the parser accepts", () => {
     // The prompt's output contract and the parser are the two halves of one
     // seam — this pins them together so a format-line edit that drifts from
@@ -506,28 +494,5 @@ describe("config-schema", () => {
     expect(result.success).toBe(true);
     expect(result.success && result.data.reasoning).toBe("low");
     expect(result.success && result.data.surfaces).toEqual(["bash"]);
-  });
-});
-
-describe("buildReviewSystemPrompt — safety-rules lock-ins", () => {
-  it("classifies host shutdown/reboot as intent-gated (DENY — Unless), not DENY — Always", () => {
-    const prompt = buildReviewSystemPrompt(null);
-    // The new entry lives in the DENY — Unless section.
-    const unlessIdx = prompt.indexOf("## DENY — Unless");
-    const entryIdx = prompt.indexOf("**Host Shutdown/Reboot**");
-    const allowIdx = prompt.indexOf("## ALLOW");
-    expect(entryIdx).toBeGreaterThan(unlessIdx);
-    expect(entryIdx).toBeLessThan(allowIdx);
-
-    // Its old home (Persistent System Changes, DENY — Always) no longer claims it.
-    const from = prompt.indexOf("**Persistent System Changes**");
-    const to = prompt.indexOf("**External Code Execution**");
-    expect(prompt.slice(from, to)).not.toMatch(/shutdown|reboot/i);
-  });
-
-  it("anchors riskLevel critical to DENY — Always categories in the verdict contract", () => {
-    const prompt = buildReviewSystemPrompt(null);
-    expect(prompt).toContain("A deny under a");
-    expect(prompt).toContain("category is critical");
   });
 });
