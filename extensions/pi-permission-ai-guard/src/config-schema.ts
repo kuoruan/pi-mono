@@ -9,10 +9,10 @@ export const LINK_NAME = "ai-guard";
  * ladder, strictest first. Hard-tier denies (riskLevel high|critical, or
  * missing) always deny; the mode maps soft-tier denies (low|medium) and
  * the model's own uncertainty against the ladder. The ctrl+alt+g cycle
- * only visits the middle three (`default`, `advisory`, `lenient`); the
- * extremes are set explicitly (`/ai-guard mode strict|permissive`).
+ * visits `default`, `lenient`, and `permissive`; only `strict` is set
+ * explicitly (`/ai-guard mode strict`).
  */
-export const MODE_VALUES = ["strict", "default", "advisory", "lenient", "permissive"] as const;
+export const MODE_VALUES = ["strict", "default", "lenient", "permissive"] as const;
 
 /** How the link disposes model deny/defer verdicts (see the `mode` field comment). */
 export type Mode = (typeof MODE_VALUES)[number];
@@ -88,21 +88,17 @@ export const configSchema = z.object({
   // How the link disposes the reviewer's non-allow verdicts (the leniency
   // ladder, strictest first). Hard-tier denies (riskLevel high|critical,
   // or missing) always stay deny. Soft-tier denies (low|medium) and the
-  // model's own uncertainty map per mode:
-  // - "strict": both deny — the reviewer's allow is the only pass.
-  // - "default": deny soft denies; uncertainty passes to the next authority
-  //   (the interactive prompt in a TUI session; the denying terminal
-  //   headless). The shipped behavior.
-  // - "advisory": soft denies and uncertainty ask — you decide everything
-  //   except the reviewer's hardest calls, which stay final. Shadow/override
-  //   mode for onboarding a new reviewer or auditing a systematically
-  //   misjudging one.
-  // - "lenient": soft denies pass to the human; the model's uncertainty
-  //   passes (allow).
-  // - "permissive": both pass — only hard-tier denies block.
+  // model's own uncertainty (split by its lean field — benign-leaned
+  // doubts, neutral doubts, danger-leaned doubts) map per mode:
+  // - "strict": everything denies — the reviewer's allow is the only pass.
+  // - "default": you judge every flag but hard danger — soft denies and
+  //   every unresolved doubt (any lean) ask.
+  // - "lenient": benign and neutral doubts pass; soft denies and
+  //   danger-leaned doubts ask.
+  // - "permissive": everything passes except hard-tier denies.
   // Reviewer machinery failures never map to allow in any mode: they deny
   // under "strict" and "permissive" (a broken reviewer must not rubber-
-  // stamp), and defer under the other three.
+  // stamp), and defer under the other two.
   mode: z.enum(MODE_VALUES).default("default"),
 
   // Ambient (review-loop) notification threshold. Levels mirror the TUI's

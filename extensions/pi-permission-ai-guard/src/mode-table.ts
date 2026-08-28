@@ -20,8 +20,15 @@ import type { VerdictOrigin } from "./model-verdict.ts";
 export interface ModeLanes {
   /** Soft-tier deny (low|medium) target. */
   softDeny: AuthorizerVerdict["kind"];
-  /** The model's own uncertainty target. */
-  modelDefer: AuthorizerVerdict["kind"];
+  /**
+   * Model defer with a benign lean (the action is visible-and-benign, only the authorization link
+   * is unclear).
+   */
+  deferLeanAllow: AuthorizerVerdict["kind"];
+  /** Model defer with no directional lean (genuinely neutral). */
+  deferNeutral: AuthorizerVerdict["kind"];
+  /** Model defer with a danger lean (what is visible resembles a danger pattern). */
+  deferLeanDeny: AuthorizerVerdict["kind"];
   /**
    * Machinery-failure target — narrower by type: a broken reviewer never maps to allow. The
    * `permissive` value tightens back to `deny` — the ladder's one non-monotone cell, contract over
@@ -49,10 +56,33 @@ export interface ModeEntry {
   facts: ModeFacts;
 }
 
-/** The ladder table, strictest first. */
+/**
+ * The ladder table, strictest first.
+ *
+ * The defer lane splits by lean — the reviewer's directional inclination
+ * on an unresolved request. Doctrine: lean only moves a defer across the
+ * ask/allow boundary, in the lean's own direction — lenient passes the
+ * benign and neutral doubts (the reviewer already ran the full screen and
+ * found nothing dangerous, only an authorization link it cannot see),
+ * while its deny-leaning doubts still ask (a deny-leaning doubt is an
+ * active alarm, and the mode's blurb promises exactly those ask). default
+ * asks on every unresolved doubt AND every soft deny — an unresolved
+ * verdict always keeps an ask path somewhere in the ladder, so the intent
+ * question (the one thing the model structurally cannot see) can always
+ * reach the authorizer. The deny band is reachable only by decisive
+ * (hard-tier) denies; strict and permissive are lean-inert (their
+ * contracts are absolute). Read down any column and the three bands
+ * (allow / ask / deny) are contiguous in suspicion order.
+ */
 export const MODE_TABLE: Record<Mode, ModeEntry> = {
   strict: {
-    lanes: { softDeny: "deny", modelDefer: "deny", machinery: "deny" },
+    lanes: {
+      softDeny: "deny",
+      deferLeanAllow: "deny",
+      deferNeutral: "deny",
+      deferLeanDeny: "deny",
+      machinery: "deny",
+    },
     facts: {
       blurb: "the reviewer's allow is the only pass",
       inCycle: false,
@@ -60,23 +90,27 @@ export const MODE_TABLE: Record<Mode, ModeEntry> = {
     },
   },
   default: {
-    lanes: { softDeny: "deny", modelDefer: "defer", machinery: "defer" },
-    facts: {
-      blurb: "deny is final; uncertainty asks (the shipped behavior)",
-      inCycle: true,
-      emphasize: false,
+    lanes: {
+      softDeny: "defer",
+      deferLeanAllow: "defer",
+      deferNeutral: "defer",
+      deferLeanDeny: "defer",
+      machinery: "defer",
     },
-  },
-  advisory: {
-    lanes: { softDeny: "defer", modelDefer: "defer", machinery: "defer" },
     facts: {
-      blurb: "you decide everything except the reviewer's hardest calls",
+      blurb: "you judge every flag but hard danger",
       inCycle: true,
       emphasize: false,
     },
   },
   lenient: {
-    lanes: { softDeny: "defer", modelDefer: "allow", machinery: "defer" },
+    lanes: {
+      softDeny: "defer",
+      deferLeanAllow: "allow",
+      deferNeutral: "allow",
+      deferLeanDeny: "defer",
+      machinery: "defer",
+    },
     facts: {
       blurb: "only the reviewer's active alarms ask you",
       inCycle: true,
@@ -84,10 +118,20 @@ export const MODE_TABLE: Record<Mode, ModeEntry> = {
     },
   },
   permissive: {
-    lanes: { softDeny: "allow", modelDefer: "allow", machinery: "deny" },
+    lanes: {
+      softDeny: "allow",
+      deferLeanAllow: "allow",
+      deferNeutral: "allow",
+      deferLeanDeny: "allow",
+      machinery: "deny",
+    },
     facts: {
       blurb: "only clear high-danger requests are blocked",
-      inCycle: false,
+      // In the casual cycle by operator choice (4-mode ladder): the red
+      // footer emphasis is the guardrail — the mode is visible the moment
+      // it lands. Only strict (full fail-closed automation) stays
+      // explicit.
+      inCycle: true,
       emphasize: true,
     },
   },
@@ -95,8 +139,9 @@ export const MODE_TABLE: Record<Mode, ModeEntry> = {
 
 /**
  * The casual ctrl+alt+g cycle, derived from the table's inCycle flags in
- * ladder order (the community pattern: the extremes stay out of casual
- * reach — set explicitly via the command or picker).
+ * ladder order (default → lenient → permissive; the red footer makes the
+ * permissive stop visible — only strict, the full fail-closed automation
+ * rung, stays out of casual reach).
  */
 export const CYCLE_MODE_VALUES: readonly Mode[] = MODE_VALUES.filter(
   (m) => MODE_TABLE[m].facts.inCycle,
@@ -117,7 +162,7 @@ export const MODE_BLURBS: Readonly<Record<string, string>> = Object.fromEntries(
   MODE_VALUES.map((m) => [m, MODE_TABLE[m].facts.blurb]),
 );
 
-/** The generated shortcut description's cycle part ("default → advisory → lenient"). */
+/** The generated shortcut description's cycle part ("default → lenient → permissive"). */
 export const CYCLE_DESCRIPTION: string = CYCLE_MODE_VALUES.join(" → ");
 
 /**

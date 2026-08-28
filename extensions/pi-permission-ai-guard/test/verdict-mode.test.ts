@@ -21,7 +21,7 @@ import {
   applyVerdictMode,
   denyTier,
   machineryTarget,
-  advisoryEscalationMessage,
+  escalationMessage,
   machineryDenyReason,
 } from "#src/verdict-mode.ts";
 
@@ -57,20 +57,21 @@ describe("applyVerdictMode — mapping table", () => {
       ),
     ),
 
-    // Soft denies (low|medium) map down the ladder.
+    // Soft denies (low|medium) map down the ladder — default asks (the
+    // resting mode forwards every flag to the human; only hard-tier
+    // denies are final there).
     ...(
       [
         { mode: "strict", expected: DENY },
-        { mode: "default", expected: DENY },
-        { mode: "advisory", expected: { kind: "defer" } },
+        { mode: "default", expected: { kind: "defer" } },
         { mode: "lenient", expected: { kind: "defer" } },
         { mode: "permissive", expected: ALLOW },
       ] as const
     ).map(({ mode, expected }) => [mode, DENY, undefined, "low", expected] as Row),
 
     // The model's own uncertainty (model-defer): strict denies it, carrying
-    // the clarification request as the teaching reason; default/advisory
-    // ask; lenient/permissive pass.
+    // the clarification request as the teaching reason; default asks;
+    // lenient/permissive pass.
     [
       "strict",
       MODEL_DEFER,
@@ -82,9 +83,42 @@ describe("applyVerdictMode — mapping table", () => {
       },
     ],
     ["default", MODEL_DEFER, MODEL_DEFER_WITH_REASON, undefined, { kind: "defer" }],
-    ["advisory", MODEL_DEFER, MODEL_DEFER_WITH_REASON, undefined, { kind: "defer" }],
     ["lenient", MODEL_DEFER, MODEL_DEFER_WITH_REASON, undefined, { kind: "allow" }],
     ["permissive", MODEL_DEFER, MODEL_DEFER_WITH_REASON, undefined, { kind: "allow" }],
+
+    // The lean split: benign-leaned doubts pass in lenient but ASK in
+    // default (an unresolved verdict always keeps an ask path — the
+    // intent question must be able to reach the authorizer); deny at
+    // strict (a lean is not an allow); danger-leaned doubts ask everywhere
+    // below strict (lenient's auto-pass breaks); permissive is lean-inert
+    // (its contract is absolute).
+    ...(
+      [
+        {
+          lean: "allow",
+          expected: {
+            strict: { kind: "deny", reason: "which file does this target?" },
+            default: { kind: "defer" },
+            lenient: ALLOW,
+            permissive: ALLOW,
+          } as const,
+        },
+        {
+          lean: "deny",
+          expected: {
+            strict: { kind: "deny", reason: "which file does this target?" },
+            default: { kind: "defer" },
+            lenient: { kind: "defer" },
+            permissive: ALLOW,
+          } as const,
+        },
+      ] as const
+    ).flatMap(({ lean, expected }) =>
+      MODE_VALUES.map(
+        (m) =>
+          [m, MODEL_DEFER, { ...MODEL_DEFER_WITH_REASON, lean }, undefined, expected[m]] as Row,
+      ),
+    ),
 
     // A model defer without a clarification request: strict denies with
     // the generic uncertainty reason.
@@ -109,7 +143,6 @@ describe("applyVerdictMode — mapping table", () => {
         },
       },
       { mode: "default", expected: { kind: "defer" } },
-      { mode: "advisory", expected: { kind: "defer" } },
       { mode: "lenient", expected: { kind: "defer" } },
       {
         mode: "permissive",
@@ -167,41 +200,38 @@ describe("machineryTarget", () => {
     expect(machineryTarget("strict")).toBe("deny");
     expect(machineryTarget("permissive")).toBe("deny");
     expect(machineryTarget("default")).toBe("defer");
-    expect(machineryTarget("advisory")).toBe("defer");
     expect(machineryTarget("lenient")).toBe("defer");
   });
 });
 
 describe("human-facing messages", () => {
-  it("advisoryEscalationMessage carries the risk level and the deny reason", () => {
-    expect(advisoryEscalationMessage(DENY, "high", "denied")).toBe(
+  it("escalationMessage carries the risk level and the deny reason", () => {
+    expect(escalationMessage(DENY, "high", "denied")).toBe(
       "reviewer denied this request (risk high) — secrets in the command",
     );
-    expect(advisoryEscalationMessage(DENY, undefined, "denied")).toBe(
+    expect(escalationMessage(DENY, undefined, "denied")).toBe(
       "reviewer denied this request — secrets in the command",
     );
-    expect(advisoryEscalationMessage({ kind: "deny" }, "medium", "denied")).toBe(
+    expect(escalationMessage({ kind: "deny" }, "medium", "denied")).toBe(
       "reviewer denied this request (risk medium)",
     );
   });
 
-  it("advisoryEscalationMessage names the ask outcome when the mode softened the deny", () => {
-    expect(advisoryEscalationMessage(DENY, "low", "asked")).toBe(
+  it("escalationMessage names the ask outcome when the mode softened the deny", () => {
+    expect(escalationMessage(DENY, "low", "asked")).toBe(
       "reviewer denied this request (risk low) — secrets in the command — asking you instead",
     );
     // The denied outcome needs no tail — the fact sentence already says it.
-    expect(advisoryEscalationMessage(DENY, "low", "denied")).not.toContain("instead");
+    expect(escalationMessage(DENY, "low", "denied")).not.toContain("instead");
   });
 
-  it("advisoryEscalationMessage carries a sane reason whole; only a ramble hits the ceiling", () => {
+  it("escalationMessage carries a sane reason whole; only a ramble hits the ceiling", () => {
     // ~150 is the prompt's anchor for a concise sentence — comfortably
-    // under the 160 display ceiling.
+    // under the 200 display ceiling.
     const sane = "x".repeat(120);
-    expect(advisoryEscalationMessage({ kind: "deny", reason: sane }, "low", "denied")).toContain(
-      sane,
-    );
+    expect(escalationMessage({ kind: "deny", reason: sane }, "low", "denied")).toContain(sane);
     const ramble = "y".repeat(400);
-    const message = advisoryEscalationMessage({ kind: "deny", reason: ramble }, "low", "denied");
+    const message = escalationMessage({ kind: "deny", reason: ramble }, "low", "denied");
     expect(message).not.toContain("\n");
     expect(message).toContain("[...truncated...]");
     expect(message).toContain("yyy");
@@ -218,5 +248,67 @@ describe("human-facing messages", () => {
 
   it("CLARIFICATION_SUPPRESSED_REASON is the audit marker souping a swallowed clarification", () => {
     expect(CLARIFICATION_SUPPRESSED_REASON).toBe("clarification-suppressed");
+  });
+});
+
+describe("the ladder's structural invariant — contiguous bands in suspicion order", () => {
+  // The suspicion order: allow < defer+lean:allow < defer neutral <
+  // defer+lean:deny < soft deny < hard deny. Each mode's mapping must be
+  // three CONTIGUOUS bands (allow / ask / deny) on this line — a special
+  // case that fragments the bands (e.g. allow → ask → allow) is a
+  // structural break, not a tweak. Pinned so future lane edits that cut a
+  // band apart fail here instead of shipping.
+  const rank = { allow: 0, defer: 1, deny: 2 } as const;
+
+  // The six verdict states in suspicion order — shared by the band
+  // contiguity and the ask-path invariant (the last two, soft and hard
+  // deny, differ only in riskLevel).
+  const SUSPICION_ORDER_INPUTS: Array<
+    [AuthorizerVerdict, ModelDeferInfo | undefined, RiskLevel | undefined]
+  > = [
+    [{ kind: "allow" }, undefined, undefined],
+    [{ kind: "defer" }, { kind: "model-defer", lean: "allow" }, undefined],
+    [{ kind: "defer" }, { kind: "model-defer" }, undefined],
+    [{ kind: "defer" }, { kind: "model-defer", lean: "deny" }, undefined],
+    [{ kind: "deny", reason: "x" }, undefined, "low"],
+    [{ kind: "deny", reason: "x" }, undefined, "high"],
+  ];
+
+  function bandSequence(mode: Mode): number[] {
+    return SUSPICION_ORDER_INPUTS.map(
+      ([verdict, modelDefer, riskLevel]) =>
+        rank[applyVerdictMode(mode, verdict, modelDefer, riskLevel).kind],
+    );
+  }
+
+  it.each(MODE_VALUES)("%s's outputs are three contiguous bands", (mode) => {
+    const seq = bandSequence(mode);
+    // Contiguity = the distinct bands, in first-appearance order, are
+    // monotonically increasing — a band never REAPPEARS after a stricter
+    // one appeared (allow → ask → allow fragments the ladder; allow →
+    // deny straight is fine — the ask cut just sits outside this mode's
+    // range). The assertion names the sequence on failure.
+    const distinct: number[] = [];
+    for (const band of seq) {
+      if (distinct[distinct.length - 1] !== band) distinct.push(band);
+    }
+    expect(
+      distinct.every((b, i) => i === 0 || b > distinct[i - 1]!),
+      `${mode}: band sequence ${seq.join(" → ")}`,
+    ).toBe(true);
+  });
+
+  it("every unresolved verdict keeps an ask path in at least one mode", () => {
+    // The intent-check invariant: a defer (any lean) and a soft deny are
+    // UNRESOLVED judgments — each must ask the human in at least one
+    // mode, so the intent question can always reach the authorizer.
+    // Only decisive verdicts (allow, hard deny) may bypass every ask.
+    const unresolved = SUSPICION_ORDER_INPUTS.slice(1, 5);
+    for (const [verdict, modelDefer, riskLevel] of unresolved) {
+      const asks = MODE_VALUES.some(
+        (m) => applyVerdictMode(m, verdict, modelDefer, riskLevel).kind === "defer",
+      );
+      expect(asks, `${JSON.stringify(verdict)} lean=${modelDefer?.lean ?? "none"}`).toBe(true);
+    }
   });
 });

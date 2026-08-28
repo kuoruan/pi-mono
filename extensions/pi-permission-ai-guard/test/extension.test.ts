@@ -285,8 +285,8 @@ describe("createAiGuardExtension lifecycle", () => {
     const live = calls[0]!;
 
     // A session override reaches the pipeline's overrides object.
-    await pi.commands.get("ai-guard")!.handler("mode advisory", makeUiCtx());
-    expect(live.overrides.mode).toBe("advisory");
+    await pi.commands.get("ai-guard")!.handler("mode lenient", makeUiCtx());
+    expect(live.overrides.mode).toBe("lenient");
 
     // Re-dispatched session_start (no shutdown in between).
     pi.fire("session_start", {}, makeSessionCtx());
@@ -605,12 +605,12 @@ describe("createAiGuardExtension — /ai-guard command + ctrl+alt+g shortcut", (
     expect(deps.overrides.mode).toBeUndefined();
 
     const ctx = makeUiCtx();
-    await pi.commands.get("ai-guard")!.handler("mode advisory", ctx);
+    await pi.commands.get("ai-guard")!.handler("mode lenient", ctx);
 
     // The pipeline closed over this exact object at registration — the
     // override takes effect without re-registering the authorizer.
-    expect(deps.overrides.mode).toBe("advisory");
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "advisory (session)");
+    expect(deps.overrides.mode).toBe("lenient");
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "lenient (session)");
   });
 });
 
@@ -651,10 +651,10 @@ describe("createAiGuardExtension — official-pattern follow-ups", () => {
   it("session_tree re-derives the override from the new active branch", () => {
     const setStatus = vi.fn<() => void>();
     const { pi, calls } = setupExtension({
-      sessionManager: { getBranch: () => [settingEntry("advisory")] },
+      sessionManager: { getBranch: () => [settingEntry("lenient")] },
       ui: { setStatus },
     });
-    expect(calls[0]!.overrides.mode).toBe("advisory");
+    expect(calls[0]!.overrides.mode).toBe("lenient");
 
     // Rewind past the setting entry: the new active branch has none.
     const treeStatus = vi.fn<() => void>();

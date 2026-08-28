@@ -12,7 +12,7 @@
  * The doctrine stays local: hard-tier denies (riskLevel high|critical, or
  * missing) are terminal in every mode; reviewer machinery failures never
  * map to allow in ANY mode (a broken reviewer must not rubber-stamp) —
- * they deny under the two extremes and defer under the remaining three;
+ * they deny under the two extremes and defer under the remaining two;
  * allow is never transformed.
  *
  * Pure functions: the fresh-model path and the cache-hit path both run
@@ -23,7 +23,7 @@ import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import type { Mode } from "./config-schema.ts";
 import { MODE_TABLE, type ModeLanes } from "./mode-table.ts";
-import type { ModelCallDeferKind, RiskLevel, VerdictOrigin } from "./model-verdict.ts";
+import type { ModelCallDeferKind, RiskLevel, VerdictLean, VerdictOrigin } from "./model-verdict.ts";
 import { truncateMiddle } from "./utils.ts";
 
 /**
@@ -38,6 +38,12 @@ export interface ModelDeferInfo {
   kind?: ModelCallDeferKind;
   /** The clarification request attached to a model defer. */
   reason?: string;
+  /**
+   * The reviewer's directional inclination on a model defer — which way it
+   * would decide if forced. Undefined means neutral. Selects the defer
+   * lane; never surfaced to the human (anti-anchoring invariant).
+   */
+  lean?: VerdictLean;
 }
 
 /** A reviewer machinery failure, wherever it happens in the pipeline. */
@@ -115,10 +121,20 @@ export function applyVerdictMode(
     }
     return mapLane(lanes(policy).softDeny, verdict, "deny", undefined, policy);
   }
-  // Defer: the lane depends on WHO deferred — the model's own uncertainty
-  // maps per the ladder, machinery failures never map to allow.
-  const isModelDefer = modelDefer?.kind === "model-defer";
-  const lane = isModelDefer ? lanes(policy).modelDefer : lanes(policy).machinery;
+  // Defer: the lane depends on WHO deferred and, for the model's own
+  // uncertainty, which way it leans — machinery failures never map to
+  // allow, and the model's defer lane splits by lean (benign-leaned
+  // doubts pass in the middle modes, danger-leaned ones ask everywhere
+  // below strict).
+  if (modelDefer?.kind !== "model-defer") {
+    return mapLane(lanes(policy).machinery, verdict, "defer", modelDefer, policy);
+  }
+  const lane =
+    modelDefer.lean === "allow"
+      ? lanes(policy).deferLeanAllow
+      : modelDefer.lean === "deny"
+        ? lanes(policy).deferLeanDeny
+        : lanes(policy).deferNeutral;
   return mapLane(lane, verdict, "defer", modelDefer, policy);
 }
 
@@ -220,8 +236,8 @@ export const NOTIFY_REASON_CEILING = 200;
 export type EscalationOutcome = "denied" | "asked";
 
 /**
- * Surface the reviewer's reasoning when the advisory policy hands a model
- * deny to the human — the permission dialog renders only the request, so
+ * Surface the reviewer's reasoning when the mode hands a model deny to the
+ * human — the permission dialog renders only the request, so
  * without this the reviewer's judgment is audit-log-only.
  *
  * @param verdict - The model's verdict (a deny at every call site).
@@ -230,7 +246,7 @@ export type EscalationOutcome = "denied" | "asked";
  *   the tail appears only when it diverges from the fact sentence.
  * @returns The notification message.
  */
-export function advisoryEscalationMessage(
+export function escalationMessage(
   verdict: AuthorizerVerdict,
   riskLevel: RiskLevel | undefined,
   outcome: EscalationOutcome,

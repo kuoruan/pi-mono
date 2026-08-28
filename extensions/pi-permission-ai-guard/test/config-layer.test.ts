@@ -28,7 +28,7 @@ const fullConfig = configSchema.parse({
   cache: { maxEntries: 100 },
   circuitBreaker: { consecutive: 3, total: 20, verdict: "deny" },
   surfaces: ["bash"],
-  mode: "advisory",
+  mode: "lenient",
   instructions: null,
 });
 
@@ -248,12 +248,12 @@ describe("config loader — JSONC", () => {
   // the reviewer model
   "provider": "anthropic",
   "model": "claude-haiku-4-5", // cheap + fast
-  "mode": "advisory",
+  "mode": "lenient",
 }
 `,
     });
     const result = loadAiGuardConfig(env());
-    expect(result.config?.mode).toBe("advisory");
+    expect(result.config?.mode).toBe("lenient");
     expect(result.issues).toEqual([]);
   });
 
@@ -322,7 +322,7 @@ describe("persistConfigLayer", () => {
   // careful with models
   "provider": "anthropic",
   "model": "claude-haiku-4-5",
-  "mode": "advisory",
+  "mode": "lenient",
   "circuitBreaker": { "consecutive": 3 }
 }
 `;
@@ -356,7 +356,7 @@ describe("persistConfigLayer", () => {
     const result = persistConfigLayer({
       target: "global",
       env: env(),
-      config: { ...fullConfig, provider: "anthropic", mode: "advisory" },
+      config: { ...fullConfig, provider: "anthropic", mode: "lenient" },
     });
     expect(result.changed).toBe(true);
     const written = vol.readFileSync(
@@ -365,7 +365,7 @@ describe("persistConfigLayer", () => {
     ) as string;
     expect(written).toContain('"provider": "anthropic"');
     expect(JSON.parse(written)).toEqual(
-      configSchema.parse({ ...fullConfig, provider: "anthropic", mode: "advisory" }),
+      configSchema.parse({ ...fullConfig, provider: "anthropic", mode: "lenient" }),
     );
   });
 
@@ -428,7 +428,7 @@ describe("persistConfigLayer", () => {
     // A "successful" save here would still read back "manual" next load.
     vol.fromJSON({
       "/agent/extensions/pi-permission-ai-guard/config.json":
-        '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "strict", "mode": "advisory" }',
+        '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "strict", "mode": "lenient" }',
     });
     const result = persistConfigLayer({
       target: "global",
@@ -438,7 +438,7 @@ describe("persistConfigLayer", () => {
     expect(result.error).toContain("duplicate keys");
     expect(result.changed).toBe(false);
     expect(vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8")).toBe(
-      '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "strict", "mode": "advisory" }',
+      '{ "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "strict", "mode": "lenient" }',
     );
   });
 
@@ -607,13 +607,13 @@ describe("config file discovery — jsonc preferred", () => {
     const result = persistConfigLayer({
       target: "global",
       env: env(),
-      config: { ...fullConfig, mode: "advisory" },
+      config: { ...fullConfig, mode: "lenient" },
     });
     expect(result.path).toBe("/agent/extensions/pi-permission-ai-guard/config.jsonc");
     expect(result.changed).toBe(true);
     expect(
       vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.jsonc", "utf-8"),
-    ).toContain('"mode": "advisory"');
+    ).toContain('"mode": "lenient"');
     // the legacy json is untouched
     expect(
       JSON.parse(

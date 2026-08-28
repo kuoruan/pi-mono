@@ -95,8 +95,10 @@ describe("config surface drift", () => {
     const zodSource = readFileSync(new URL("../src/config-schema.ts", import.meta.url), "utf-8");
     const modeTableSource = readFileSync(new URL("../src/mode-table.ts", import.meta.url), "utf-8");
     const description = schemaJson.properties.mode.description as string;
-    const stale = "you decide everything the reviewer doesn't allow";
-    const canonical = "hardest calls";
+    const stale = "you decide everything";
+    // Short enough to sit on one line of the zod comment block (the twins
+    // have different line-wrapping; only the phrase itself must not drift).
+    const canonical = "judge every flag";
     // One pair per curated surface: the twins drift independently unless
     // each is pinned separately (this test exists because the advisory
     // prose once drifted this exact way).

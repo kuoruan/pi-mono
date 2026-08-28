@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AskContext } from "#src/ask.ts";
 import { configSchema, EXTENSION_ID, LINK_NAME } from "#src/config-schema.ts";
+import { parseVerdictObject } from "#src/model-verdict.ts";
 import { buildReviewPrompt, buildReviewSystemPrompt } from "#src/prompt.ts";
 
 // Evidence entry helper for fixtures.
@@ -73,6 +74,46 @@ function makeAsk(
 }
 
 describe("buildReviewPrompt", () => {
+  it("teaches the lean field with anchored directions", () => {
+    const systemPrompt = buildReviewSystemPrompt(null);
+    // The defer format line carries the lean field…
+    expect(systemPrompt).toContain(
+      '{"verdict":"defer","reason":"<what needs clarification>","lean":"allow|deny"}',
+    );
+    // …and the rule anchors both directions: deny-lean names a visible
+    // danger pattern, allow-lean names benign-action-plus-unclear-authorization,
+    // omission means genuinely neutral (unfamiliarity is not a deny-lean).
+    expect(systemPrompt).toContain("include lean only when your incomplete evidence has a clear");
+    expect(systemPrompt).toContain('"deny" when what you can see resembles a danger pattern');
+    expect(systemPrompt).toContain('"allow" when the action is visible-and-benign and only the');
+    expect(systemPrompt).toContain("Omit lean when you truly cannot tell");
+    expect(systemPrompt).toContain("unfamiliarity alone is not a deny-lean");
+  });
+
+  it("the format examples the prompt teaches are exactly what the parser accepts", () => {
+    // The prompt's output contract and the parser are the two halves of one
+    // seam — this pins them together so a format-line edit that drifts from
+    // the parser (or vice versa) fails here instead of at runtime.
+    const allow = parseVerdictObject(JSON.parse('{"verdict":"allow"}'), 100);
+    expect(allow.verdict).toEqual({ kind: "allow" });
+
+    const deny = parseVerdictObject(
+      JSON.parse('{"verdict":"deny","reason":"reads a secret from disk","riskLevel":"medium"}'),
+      100,
+    );
+    expect(deny.verdict).toEqual({ kind: "deny", reason: "reads a secret from disk" });
+    expect(deny.riskLevel).toBe("medium");
+
+    const defer = parseVerdictObject(
+      JSON.parse('{"verdict":"defer","reason":"which target?","lean":"deny"}'),
+      100,
+    );
+    expect(defer.verdict).toEqual({ kind: "defer" });
+    expect(defer.deferKind).toBe("model-defer");
+    expect(defer.deferReason).toBe("which target?");
+    expect(defer.lean).toBe("deny");
+  });
+
   it("builds prompt with trusted intent and tool calls", () => {
     const transcript = {
       trustedIntent: ["fix the bug", "run tests"],

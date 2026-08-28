@@ -22,7 +22,7 @@ const SPECS: readonly EnumSettingSpec[] = [
     values: [...MODE_VALUES],
     description: "what happens to the reviewer's denials and uncertainty",
     hiddenValue: "default",
-    cycleValues: ["default", "advisory", "lenient"],
+    cycleValues: ["default", "lenient", "permissive"],
     highlightValue: "permissive",
     optionDetails: MODE_BLURBS,
   },
@@ -90,12 +90,12 @@ describe("RuntimeSettings — command", () => {
   it("the direct form applies a value: override + persist + notify + footer", async () => {
     const { settings, overrides, appendEntry, notify } = makeSettings();
     const ctx = makeUiCtx();
-    await settings.command.handler("mode advisory", ctx);
+    await settings.command.handler("mode lenient", ctx);
 
-    expect(overrides.mode).toBe("advisory");
-    expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: "advisory" });
-    expect(notify).toHaveBeenCalledWith("mode = advisory (session override)", "info");
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "advisory (session)");
+    expect(overrides.mode).toBe("lenient");
+    expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { mode: "lenient" });
+    expect(notify).toHaveBeenCalledWith("mode = lenient (session override)", "info");
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "lenient (session)");
   });
 
   it("reset clears the override, persists null, and shows the config default", async () => {
@@ -119,7 +119,7 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.mode).toBeUndefined();
     expect(appendEntry).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledWith(
-      'invalid value "yolo" for mode — valid values are strict|default|advisory|lenient|permissive|reset',
+      'invalid value "yolo" for mode — valid values are strict|default|lenient|permissive|reset',
       "error",
     );
     expect(notify).toHaveBeenCalledWith('unknown setting "surfaces" (mode)', "error");
@@ -139,7 +139,7 @@ describe("RuntimeSettings — command", () => {
       SPECS,
     );
     const ctx = makeUiCtx();
-    await settings.command.handler("mode advisory", ctx);
+    await settings.command.handler("mode lenient", ctx);
     expect(notify).toHaveBeenCalledWith("no active session (config not loaded)", "warning");
   });
 
@@ -352,8 +352,8 @@ describe("RuntimeSettings — command", () => {
     );
     expect(overrides.mode).toBeUndefined();
 
-    await settings.command.handler("mode advisory", noUi);
-    expect(overrides.mode).toBe("advisory");
+    await settings.command.handler("mode lenient", noUi);
+    expect(overrides.mode).toBe("lenient");
   });
 });
 
@@ -367,7 +367,6 @@ describe("RuntimeSettings — completions", () => {
     expect(completions("mode ")).toEqual([
       { value: "strict", label: "strict" },
       { value: "default", label: "default" },
-      { value: "advisory", label: "advisory" },
       { value: "lenient", label: "lenient" },
       { value: "permissive", label: "permissive" },
       { value: "reset", label: "reset" },
@@ -400,21 +399,21 @@ describe("RuntimeSettings — shortcut", () => {
     const { settings, overrides } = makeSettings();
     const ctx = makeUiCtx();
 
-    // The cycle visits only the casual subset (default → advisory →
-    // lenient), one press loosens one notch, and the wrap returns to
-    // default — the extremes stay reachable via the command only.
-    settings.shortcut.handler(ctx);
-    expect(overrides.mode).toBe("advisory");
+    // The cycle visits the casual subset (default → lenient →
+    // permissive), one press loosens one notch, and the wrap returns to
+    // default — only strict stays reachable via the command.
     settings.shortcut.handler(ctx);
     expect(overrides.mode).toBe("lenient");
+    settings.shortcut.handler(ctx);
+    expect(overrides.mode).toBe("permissive");
     settings.shortcut.handler(ctx);
     expect(overrides.mode).toBe("default");
   });
 
   it("cycles from an override, one notch looser", () => {
-    const { settings, overrides } = makeSettings({ mode: "advisory" });
+    const { settings, overrides } = makeSettings({ mode: "lenient" });
     settings.shortcut.handler(makeUiCtx());
-    expect(overrides.mode).toBe("lenient");
+    expect(overrides.mode).toBe("permissive");
   });
 
   it("a value outside the cycle subset anchors to the subset start", () => {
@@ -455,7 +454,7 @@ describe("RuntimeSettings — restore + footer", () => {
   });
 
   it("restore with no entries clears any stale override", () => {
-    const { settings, overrides } = makeSettings({ mode: "advisory" });
+    const { settings, overrides } = makeSettings({ mode: "lenient" });
     settings.restore({ getBranch: () => [] });
     expect(overrides.mode).toBeUndefined();
   });
@@ -527,7 +526,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
         changed: boolean;
       }
     >((target) => ({ path: `/cfg-${target}.json`, created: false, changed: true }));
-    const { settings, notify } = makeSettings({ mode: "advisory" }, saveConfig);
+    const { settings, notify } = makeSettings({ mode: "lenient" }, saveConfig);
     const ctx = makeUiCtx();
 
     await settings.command.handler("save-to-global-config", ctx);
@@ -537,7 +536,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
     expect(saveConfig).toHaveBeenCalledTimes(1);
     const [target, config] = saveConfig.mock.calls[0]!;
     expect(target).toBe("global");
-    expect(config.mode).toBe("advisory"); // override won over the snapshot
+    expect(config.mode).toBe("lenient"); // override won over the snapshot
     expect(config.provider).toBe("test"); // other fields intact
     expect(notify).toHaveBeenCalledWith(
       "saved to global config (cfg-global.json) — new sessions start from it; this session keeps current overrides",
@@ -613,7 +612,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
         changed: boolean;
       }
     >(() => ({ path: "/cfg.json", created: false, changed: true }));
-    const { settings, overrides } = makeSettings({ mode: "advisory" }, saveConfig);
+    const { settings, overrides } = makeSettings({ mode: "lenient" }, saveConfig);
     const ctx = makeUiCtx();
 
     await settings.command.handler("mode reset", ctx); // deletes the override
@@ -624,7 +623,7 @@ describe("RuntimeSettings — save to config layer actions", () => {
   });
 
   it("reset deletes the override key outright (present ⇒ defined invariant)", () => {
-    const { settings, overrides } = makeSettings({ mode: "advisory" });
+    const { settings, overrides } = makeSettings({ mode: "lenient" });
     const ctx = makeUiCtx();
     void settings.command.handler("mode reset", ctx);
     expect("mode" in overrides).toBe(false);

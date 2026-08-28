@@ -32,7 +32,7 @@ import {
   type ResolvedRequestAuth,
   reviewModel,
 } from "./model-review.ts";
-import type { RiskLevel } from "./model-verdict.ts";
+import type { RiskLevel, VerdictLean } from "./model-verdict.ts";
 import { buildReviewPrompt, buildReviewSystemPrompt } from "./prompt.ts";
 import { reviewRequestCacheMaterial, type ReviewRequestContext } from "./review-request.ts";
 import {
@@ -51,7 +51,7 @@ import {
   machineryDenyReason,
   NOTIFY_REASON_CEILING,
   machineryTarget,
-  advisoryEscalationMessage,
+  escalationMessage,
   CLARIFICATION_SUPPRESSED_REASON,
 } from "./verdict-mode.ts";
 
@@ -178,7 +178,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // The mode mapping's shared footwork for the two gates that emit a real
     // verdict (cache-hit and fresh model): annotate the record when the
     // mapping changed the emitted kind, escalate to the human on
-    // deny→defer lanes (advisory/lenient), and fire the once-per-pipeline
+    // deny→defer lanes (default/lenient), and fire the once-per-pipeline
     // fail-open notice on the mapped allow. The per-call constants (mode,
     // noticeState, deps) are closure-captured — only the per-verdict facts
     // travel as parameters.
@@ -187,6 +187,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       original: AuthorizerVerdict,
       emitted: AuthorizerVerdict,
       riskLevel: RiskLevel | undefined,
+      deferLean: VerdictLean | undefined,
     ): DecisionRecordEntry => {
       if (emitted.kind === original.kind) {
         // A model deny that holds in every mode is the reviewer's hardest
@@ -202,7 +203,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         // WITH a reason", and a future deny producer (e.g. a persisted
         // cache) could reach here without one.
         if (original.kind === "deny" && original.reason) {
-          deps.notify(advisoryEscalationMessage(original, riskLevel, "denied"), "warning");
+          deps.notify(escalationMessage(original, riskLevel, "denied"), "warning");
         }
         return record;
       }
@@ -223,8 +224,18 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
             : undefined;
       const annotated = mapped(record, mode, emitted.kind, emittedReason);
       if (emitted.kind === "defer") {
-        deps.notify(advisoryEscalationMessage(original, riskLevel, "asked"), "warning");
-      } else if (emitted.kind === "allow" && !noticeState.shown) {
+        deps.notify(escalationMessage(original, riskLevel, "asked"), "warning");
+      } else if (
+        emitted.kind === "allow" &&
+        // A benign-leaned pass rides the model's own inclination — it is
+        // the reviewer saying "I would allow this", confirmed, not the
+        // mode overriding the reviewer's explicit verdict. It stays
+        // silent (the allow doctrine: allows never notify); the fail-open
+        // notice belongs to the mode going AGAINST the model — a swallowed
+        // deny, or auto-passed NEUTRAL uncertainty.
+        deferLean !== "allow" &&
+        !noticeState.shown
+      ) {
         noticeState.shown = true;
         // The copy names what the mode actually loosens — lenient only passes
         // the reviewer's uncertainty; permissive passes everything but the
@@ -395,6 +406,8 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         lookup.verdict,
         emitted,
         lookup.riskLevel,
+        // Cached verdicts are allow/deny only — no defer, so no lean.
+        undefined,
       );
       // Replay gate: the verdict was already recorded at its model gate —
       // debug stream only (see the log-stream doctrine in
@@ -460,10 +473,11 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       {
         kind: reviewOutcome.deferKind,
         reason: reviewOutcome.deferReason,
+        lean: reviewOutcome.lean,
       },
       reviewOutcome.riskLevel,
     );
-    // model-defer in default/advisory passes through to the human — but
+    // model-defer in default (any lean) and lenient (deny-leaning) asks — but
     // the upstream defer verdict carries no reason field, so the dialog
     // alone would never show WHAT the reviewer wants clarified. Mirror it
     // via the escalation channel (notify), symmetric with strict's
@@ -494,6 +508,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       reviewOutcome.verdict,
       emitted,
       reviewOutcome.riskLevel,
+      reviewOutcome.lean,
     );
     log.review(DECISION_EVENT, record);
 

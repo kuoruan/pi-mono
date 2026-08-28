@@ -57,6 +57,28 @@ describe("parseVerdictObject", () => {
     expect(missing.deferReason).toBeUndefined();
   });
 
+  it("retains a valid lean on a defer verdict", () => {
+    const allowLean = parseVerdictObject({ verdict: "defer", lean: "allow" }, 100);
+    expect(allowLean.lean).toBe("allow");
+
+    const denyLean = parseVerdictObject(
+      { verdict: "defer", reason: "what does this script do?", lean: "deny" },
+      100,
+    );
+    expect(denyLean.lean).toBe("deny");
+  });
+
+  it("degrades an invalid or absent lean to neutral — never invalidating the defer", () => {
+    // A defer is a valid verdict regardless of its bonus field; "maybe",
+    // a number, or an omission all mean neutral.
+    for (const bad of ["maybe", "unsure", "", "ALLOW", 1, null, undefined]) {
+      const result = parseVerdictObject({ verdict: "defer", lean: bad }, 100);
+      expect(result.verdict).toEqual({ kind: "defer" });
+      expect(result.deferKind).toBe("model-defer");
+      expect(result.lean).toBeUndefined();
+    }
+  });
+
   it("preserves complete model explanations for deny and defer", () => {
     const longReason = "x".repeat(201);
     const deny = parseVerdictObject({ verdict: "deny", reason: longReason }, 100);

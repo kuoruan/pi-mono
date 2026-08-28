@@ -31,26 +31,31 @@ The link's ruling: `allow`, `deny` (with optional teaching `reason`), or `defer`
 **Defer**:
 The fail-safe outcome. A missing model, invalid config, model timeout, unparseable reply, or unsure verdict all defer. Deferring means the ask falls through to the normal permission prompt.
 
+**Lean**:
+The reviewer's directional inclination on a defer — which way it would decide if forced to pick now (`allow` or `deny`; omitted means genuinely neutral). A routing signal only: it selects the defer's lane in the mode ladder and never surfaces to the human (dialogs and notify lines carry the clarification question, not the lean — the ask is the operator's judgment moment, and the model's own inclination must not anchor it). Lives in the audit record (`lean: "allow" | "deny" | null`). An invalid value degrades to neutral — a defer is never invalidated by its lean.
+
+**Suspicion order**:
+The total order the ladder is drawn on: `allow` < `defer` (lean: allow) < `defer` (neutral) < `defer` (lean: deny) < `deny` (soft) < `deny` (hard). Each mode is two cut lines on this order — an auto-pass band, an ask band, a terminal-deny band — and the bands are contiguous in every mode (a pinned structural invariant, not a coincidence). Lean moves a defer across only the ask↔allow boundary, in the lean's own direction; below strict, the deny band is reachable only by decisive (hard-tier) denies, and the two extremes (`strict`, `permissive`) are lean-inert. An unresolved verdict always keeps an ask path somewhere in the ladder (`default` asks on every defer) — the intent question can always reach the authorizer.
+
 **Mode**:
-The leniency ladder for the reviewer's non-allow verdicts, strictest first. Denies split by tier: the **hard tier** (riskLevel high|critical, or missing) is terminal in EVERY mode — the reviewer's hard stops are never loosened. The **soft tier** (low|medium) and the model's own uncertainty map against the ladder:
+The leniency ladder for the reviewer's non-allow verdicts, strictest first. Denies split by tier: the **hard tier** (riskLevel high|critical, or missing) is terminal in EVERY mode — the reviewer's hard stops are never loosened. The **soft tier** (low/medium) and the model's own uncertainty (split by its lean) map against the ladder:
 
-- `strict`: both deny — the reviewer's `allow` is the only pass.
-- `default`: soft denies deny; uncertainty asks (the shipped behavior).
-- `advisory`: both ask — you decide everything except the reviewer's hardest calls, which stay final. The shadow/override mode for onboarding a new reviewer or auditing a systematically misjudging one.
-- `lenient`: soft denies ask; uncertainty passes (allow).
-- `permissive`: both pass — only hard-tier denies block.
+- `strict`: everything denies — the reviewer's `allow` is the only pass.
+- `default`: you judge every flag but hard danger — soft denies and every unresolved doubt (any lean) ask. The resting mode and the onboarding posture: watch the reviewer work, then loosen.
+- `lenient`: benign and neutral doubts pass; soft denies and danger-leaned doubts ask.
+- `permissive`: everything passes except hard-tier denies.
 
-Reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies, no review target) never map to allow in any mode — a broken reviewer must not rubber-stamp: they deny under `strict` (fail-closed by doctrine) and `permissive` (allow needs a verdict), and defer under the other three.
+Reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies, no review target) never map to allow in any mode — a broken reviewer must not rubber-stamp: they deny under `strict` (fail-closed by doctrine) and `permissive` (allow needs a verdict), and defer under the other two.
 
 The `permissive` deny is the ladder's one non-monotone cell (`lenient` defers, `permissive` denies): a defer would need a dialog the yolo contract forbids, and a broken reviewer must not rubber-stamp. Contract over monotonicity, stated as an exception.
 
 A machinery-forced defer notifies its classified cause, repeatedly when the failure repeats (no dedup: the same kind can recur for different underlying reasons, and each interruption lands on its own dialog).
 
-The model's judgment is always recorded; the mode maps only what the link emits. The ctrl+alt+g cycle visits only the middle three (`default → advisory → lenient`); the extremes are set explicitly via `/ai-guard mode <value>` or the picker.
+The model's judgment is always recorded; the mode maps only what the link emits. The ctrl+alt+g cycle visits `default → lenient → permissive`; only `strict` is set explicitly via `/ai-guard mode strict` (full fail-closed automation deserves a deliberate choice — the red footer makes the permissive stop visible).
 
 Session overrides persist in the pi session file and restore on resume; a fresh session starts from the config default. The save actions (`save-to-global-config` / `save-to-project-config`) persist the current effective config — every field, session overrides included — into a config layer, so a saved field shadows the layers beneath it.
 
-The five-mode ladder is the monotone closure of the two soft lanes (nine combinations, filtered by "defer never judged stricter than a weak deny"); the fail-open cells formerly rejected (defer becoming allow) were reopened deliberately on new evidence — the operator's experienced reviewer failure modes and the explicit product intent to offer fail-open policies.
+The four-mode ladder is drawn on the suspicion order (two cut lines per mode): the ask sets nest strictly (default ⊃ lenient ⊃ permissive asks nothing), and every unresolved verdict keeps an ask path in at least one mode. The fail-open cells (defer passing silently in lenient) are deliberate — the operator's explicit product intent to offer fail-open rungs.
 
 ### Session state
 

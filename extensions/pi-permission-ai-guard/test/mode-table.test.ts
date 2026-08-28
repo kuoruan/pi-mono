@@ -30,8 +30,8 @@ describe("MODE_TABLE", () => {
 });
 
 describe("derived cycle facts", () => {
-  it("the casual cycle is the middle three, in ladder order", () => {
-    expect(CYCLE_MODE_VALUES).toEqual(["default", "advisory", "lenient"]);
+  it("the casual cycle visits default, lenient, and permissive, in ladder order", () => {
+    expect(CYCLE_MODE_VALUES).toEqual(["default", "lenient", "permissive"]);
   });
 
   it("exactly one value renders in warning red, and it is permissive", () => {
@@ -40,12 +40,13 @@ describe("derived cycle facts", () => {
   });
 
   it("the cycle description is generated from the cycle values", () => {
-    expect(CYCLE_DESCRIPTION).toBe("default → advisory → lenient");
+    expect(CYCLE_DESCRIPTION).toBe("default → lenient → permissive");
   });
 
-  it("the casual cycle never includes the two extremes", () => {
+  it("the casual cycle never includes strict (the fail-closed automation rung)", () => {
     expect(CYCLE_MODE_VALUES).not.toContain("strict");
-    expect(CYCLE_MODE_VALUES).not.toContain("permissive");
+    // permissive joined the cycle by operator choice — the red footer
+    // emphasis is the guardrail that makes the stop visible.
   });
 });
 

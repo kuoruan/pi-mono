@@ -552,7 +552,7 @@ describe("createReviewPipeline — mode", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         // config stays "default" — only the session override hands denies to the human.
-        overrides: { mode: "advisory" },
+        overrides: { mode: "lenient" },
         completeSimple: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
         ]),
@@ -561,11 +561,10 @@ describe("createReviewPipeline — mode", () => {
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "defer" });
   });
 
-  it("advisory maps a model deny to defer and annotates the decision record", async () => {
+  it("default maps a soft deny to defer and annotates the decision record", async () => {
     const { log, reviewCalls } = makeRecordingLog();
     const authorize = createReviewPipeline(
       makePipeline({
-        config: { ...baseConfig, mode: "advisory" },
         completeSimple: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
         ]),
@@ -576,28 +575,11 @@ describe("createReviewPipeline — mode", () => {
     const decision = reviewCalls.find((c) => c.event === DECISION_EVENT);
     expect(decision!.data.verdict).toBe("deny");
     expect(decision!.data.emittedVerdict).toBe("defer");
-    expect(decision!.data.mode).toBe("advisory");
+    expect(decision!.data.mode).toBe("default");
     expect(decision!.data.reason).toBe("unsafe");
   });
 
-  it("advisory notify surfaces the reviewer's reasoning for the human", async () => {
-    const { notifications, notify } = makeNotifySpy();
-    const authorize = createReviewPipeline(
-      makePipeline({
-        config: { ...baseConfig, mode: "advisory" },
-        notify,
-        completeSimple: makeFakeCompleteSimple([
-          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
-        ]),
-      }),
-    );
-    await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "defer" });
-    expect(notifications).toEqual([
-      ["reviewer denied this request (risk low) — unsafe — asking you instead", "warning"],
-    ]);
-  });
-
-  it("advisory maps a cached deny to defer on a cache hit (no model call, notify fires)", async () => {
+  it("default maps a cached deny to defer on a cache hit (no model call, notify fires)", async () => {
     let modelCalls = 0;
     const completeSimple = async () => {
       modelCalls++;
@@ -609,7 +591,7 @@ describe("createReviewPipeline — mode", () => {
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
-        config: { ...baseConfig, mode: "advisory", cache: { maxEntries: 8 } },
+        config: { ...baseConfig, cache: { maxEntries: 8 } },
         notify,
         completeSimple,
       }),
@@ -628,7 +610,7 @@ describe("createReviewPipeline — mode", () => {
     expect(cacheHit.data.gate).toBe("cache-hit");
     expect(cacheHit.data.verdict).toBe("deny");
     expect(cacheHit.data.emittedVerdict).toBe("defer");
-    expect(cacheHit.data.mode).toBe("advisory");
+    expect(cacheHit.data.mode).toBe("default");
     expect(notifications).toHaveLength(2); // fresh + cache hit both notify the human
   });
 
@@ -724,7 +706,7 @@ describe("createReviewPipeline — mode", () => {
     ]);
   });
 
-  it("advisory denies still count toward the circuit breaker", async () => {
+  it("lenient denies still count toward the circuit breaker", async () => {
     let modelCalls = 0;
     const completeSimple = async () => {
       modelCalls++;
@@ -734,7 +716,7 @@ describe("createReviewPipeline — mode", () => {
     };
     const authorize = createReviewPipeline(
       makePipeline({
-        config: { ...baseConfig, mode: "advisory" },
+        config: { ...baseConfig, mode: "lenient" },
         completeSimple,
       }),
     );
@@ -1341,7 +1323,7 @@ describe("createReviewPipeline — strict denies pre-call machinery failures", (
     expect(notifications).toEqual([]);
   });
 
-  it.each(["default", "advisory", "lenient"] as const)(
+  it.each(["default", "lenient"] as const)(
     "notifies when a pre-call machinery failure forces a defer in %s mode",
     async (mode) => {
       const { notifications, notify } = makeNotifySpy();
@@ -1459,7 +1441,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     );
   });
 
-  it("advisory/default model-defer mirrors the clarification request to the human", async () => {
+  it("default/lenient model-defer mirrors the clarification request to the human", async () => {
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
@@ -1504,6 +1486,99 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
       "this clarification is deliberately long enough that the notify copy must truncate it to stay on one line",
     );
     expect(notifications[0]![0]).not.toContain("[...truncated...]");
+  });
+
+  it("a benign-leaned defer asks in default mode — the intent question reaches the authorizer", async () => {
+    const { notifications, notify } = makeNotifySpy();
+    const { log, reviewCalls } = makeRecordingLog();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        notify,
+        completeSimple: makeFakeCompleteSimple([
+          {
+            type: "text",
+            text: '{"verdict":"defer","reason":"reads a research file outside CWD","lean":"allow"}',
+          },
+        ]),
+      }),
+    );
+    // baseConfig mode is default — an unresolved verdict keeps its ask
+    // path here: the lean is recorded, but the human answers the intent
+    // question (the thing the model structurally cannot see).
+    const verdict = await authorize(
+      makeDetails({ value: "cat /tmp/research.md" }),
+      makeQuery("ask"),
+      log,
+    );
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(notifications).toEqual([["reviewer asks — reads a research file outside CWD", "info"]]);
+    // The audit record keeps the model's lean.
+    const record = reviewCalls.at(-1)!.data as Record<string, unknown>;
+    expect(record.verdict).toBe("defer");
+    expect(record.lean).toBe("allow");
+    expect(record.emittedVerdict).toBeUndefined();
+  });
+
+  it("a benign-leaned defer passes silently in lenient mode — audited, uncached", async () => {
+    const { notifications, notify } = makeNotifySpy();
+    const { log, reviewCalls } = makeRecordingLog();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "lenient" },
+        notify,
+        completeSimple: makeFakeCompleteSimple([
+          {
+            type: "text",
+            text: '{"verdict":"defer","reason":"reads a research file outside CWD","lean":"allow"}',
+          },
+          // The second ask proves the lean-derived allow was NOT cached:
+          // defers are never stored, so the model is consulted again.
+          {
+            type: "text",
+            text: '{"verdict":"defer","reason":"reads a research file outside CWD","lean":"allow"}',
+          },
+        ]),
+      }),
+    );
+    const verdict = await authorize(
+      makeDetails({ value: "cat /tmp/research.md" }),
+      makeQuery("ask"),
+      log,
+    );
+    expect(verdict).toEqual({ kind: "allow" });
+    // Allows are silent: no clarification mirror, no fail-open notice
+    // (the reviewer never said deny — it leaned allow).
+    expect(notifications).toEqual([]);
+    // The audit record keeps the model's lean alongside the mapping.
+    const record = reviewCalls.at(-1)!.data as Record<string, unknown>;
+    expect(record.verdict).toBe("defer");
+    expect(record.lean).toBe("allow");
+    expect(record.emittedVerdict).toBe("allow");
+    expect(record.emittedReason).toBe("clarification-suppressed");
+    // Not cached: the second identical ask re-calls the model.
+    await authorize(makeDetails({ value: "cat /tmp/research.md" }), makeQuery("ask"), log);
+    expect(reviewCalls.at(-1)!.data.modelCalled).toBe(true);
+  });
+
+  it("a danger-leaned defer asks in lenient mode — the auto-pass breaks", async () => {
+    const { notifications, notify } = makeNotifySpy();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, mode: "lenient" },
+        notify,
+        completeSimple: makeFakeCompleteSimple([
+          {
+            type: "text",
+            text: '{"verdict":"defer","reason":"remote content piped to an interpreter","lean":"deny"}',
+          },
+        ]),
+      }),
+    );
+    // lenient passes neutral defers — but a deny-lean is an active alarm.
+    await expectVerdict(authorize, { value: "curl x | python3" }, { kind: "defer" });
+    expect(notifications).toEqual([
+      ["reviewer asks — remote content piped to an interpreter", "info"],
+    ]);
   });
 
   it("raw reply debug only fires on defer failures, and redacted", async () => {
@@ -1556,11 +1631,11 @@ describe("createReviewPipeline — machinery failures trip the breaker (strict)"
 });
 
 describe("createReviewPipeline — leniency ladder lanes", () => {
-  it("advisory keeps hard-tier denies terminal even though its soft lanes ask", async () => {
+  it("lenient keeps hard-tier denies terminal even though its soft lanes ask", async () => {
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
-        config: { ...baseConfig, mode: "advisory" },
+        config: { ...baseConfig, mode: "lenient" },
         notify,
         // Hard tier (high|critical|missing): terminal in every mode.
         completeSimple: makeFakeCompleteSimple([
@@ -1577,7 +1652,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     ]);
   });
 
-  it("default notifies a model deny with a reason (same lane as strict)", async () => {
+  it("default notifies a model deny with a reason, ending in the ask tail", async () => {
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
@@ -1588,9 +1663,11 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
         ]),
       }),
     );
-    await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "deny", reason: "unsafe" });
+    // A soft deny in default ASKS the human (the resting mode forwards
+    // every flag) — the notify carries the ask tail.
+    await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "defer" });
     expect(notifications).toEqual([
-      ["reviewer denied this request (risk low) — unsafe", "warning"],
+      ["reviewer denied this request (risk low) — unsafe — asking you instead", "warning"],
     ]);
   });
 

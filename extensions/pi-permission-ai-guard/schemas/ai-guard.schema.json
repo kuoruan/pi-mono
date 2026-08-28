@@ -31,9 +31,9 @@
     },
     "mode": {
       "type": "string",
-      "enum": ["strict", "default", "advisory", "lenient", "permissive"],
+      "enum": ["strict", "default", "lenient", "permissive"],
       "default": "default",
-      "description": "The leniency ladder for the reviewer's non-allow verdicts, strictest first. Hard-tier denies (riskLevel high|critical, or missing) always deny. Soft-tier denies (low|medium) and the model's own uncertainty map per mode: 'strict' — both deny, the reviewer's allow is the only pass; 'default' — deny soft denies, uncertainty asks; 'advisory' — both ask: you decide everything except the reviewer's hardest calls, which stay final; 'lenient' — soft denies ask, uncertainty passes; 'permissive' — both pass, only hard-tier denies block. Reviewer machinery failures never map to allow: they deny under strict and permissive, and defer otherwise."
+      "description": "The leniency ladder for the reviewer's non-allow verdicts, strictest first. Hard-tier denies (riskLevel high|critical, or missing) always deny. Soft-tier denies (low/medium) and the model's own uncertainty (split by its lean: benign-leaned, neutral, danger-leaned) map per mode: 'strict' — everything denies, the reviewer's allow is the only pass; 'default' — you judge every flag but hard danger (soft denies and every unresolved doubt ask); 'lenient' — benign and neutral doubts pass, soft denies and danger-leaned doubts ask; 'permissive' — everything passes except hard-tier denies. Reviewer machinery failures never map to allow: they deny under strict and permissive, and defer otherwise."
     },
     "notifyLevel": {
       "type": "string",

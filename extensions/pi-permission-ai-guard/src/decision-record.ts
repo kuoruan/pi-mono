@@ -346,6 +346,9 @@ export const DecisionRecord = {
           ? reviewOutcome.verdict.reason
           : reviewOutcome.deferReason,
       deferKind: reviewOutcome.deferKind ?? null,
+      // The reviewer's directional inclination on a defer (audit-only; the
+      // lean routes, it never surfaces — null when neutral or not a defer).
+      lean: reviewOutcome.lean ?? null,
       riskLevel: reviewOutcome.riskLevel ?? null,
       // Empty-reply diagnostics ride along so the review log stands alone.
       diagnostic: reviewOutcome.diagnostic ?? null,
@@ -369,7 +372,7 @@ export const DecisionRecord = {
  * verdict to a different emitted kind. The record's `verdict` keeps the
  * MODEL's judgment (with its reason and riskLevel); `emittedVerdict` names
  * what the link actually returned, and `mode` names which mode
- * mapped it (the advisory/lenient lanes tighten denial to human review,
+ * mapped it (the default/lenient lanes route flags to human review,
  * the strict lane tightens uncertainty to denial, the fail-open lanes
  * loosen both to allow — the annotation covers every direction).
  *

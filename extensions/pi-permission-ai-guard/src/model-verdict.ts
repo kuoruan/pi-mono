@@ -12,6 +12,36 @@ export type ModelCallDeferKind =
   | "call-failed"
   | "model-defer";
 
+/**
+ * The reviewer's directional inclination on a defer verdict: which way it
+ * would decide if forced to pick now. Absent means genuinely neutral.
+ * Routing-only signal — never surfaced to the human (dialogs and notify
+ * lines carry the clarification question, not the lean), so it cannot
+ * anchor the operator's judgment.
+ */
+export type VerdictLean = "allow" | "deny";
+
+/**
+ * The valid lean values as a readonly set, derived from {@link VerdictLean}
+ * so the runtime check and the type can never drift apart.
+ */
+const VERDICT_LEANS: ReadonlySet<VerdictLean> = new Set<VerdictLean>(["allow", "deny"]);
+
+/**
+ * Parse the lean field off a defer verdict. Tolerant by doctrine: the
+ * verdict itself parsed cleanly, so a bonus field's invalid value
+ * ("maybe", "unsure", a number) degrades to neutral — a defer is never
+ * invalidated by its lean.
+ *
+ * @param value - The raw `lean` field from the model's JSON reply.
+ * @returns The lean when valid, or undefined (neutral).
+ */
+function parseLean(value: unknown): VerdictLean | undefined {
+  return typeof value === "string" && VERDICT_LEANS.has(value as VerdictLean)
+    ? (value as VerdictLean)
+    : undefined;
+}
+
 /** Result of a model review call. */
 export interface ReviewOutcome {
   /** The verdict (allow / deny / defer). */
@@ -20,6 +50,12 @@ export interface ReviewOutcome {
   deferKind?: ModelCallDeferKind;
   /** Model explanation for a defer verdict, retained for audit logging. */
   deferReason?: string;
+  /**
+   * The reviewer's directional inclination on a defer (which way it would
+   * decide if forced); undefined means neutral. Present only on
+   * model-defer outcomes.
+   */
+  lean?: VerdictLean;
   /** Model call latency in milliseconds (cumulative across attempts). */
   latencyMs: number;
   /** How many executeCall attempts produced this outcome (1, or 2 after the empty-reply retry). */
@@ -272,6 +308,7 @@ export function parseVerdictObject(
       verdict: { kind: "defer" },
       deferKind: "model-defer",
       deferReason: normalizeReason(args.reason),
+      lean: parseLean(args.lean),
       latencyMs,
       riskLevel,
       rawReply: raw,
