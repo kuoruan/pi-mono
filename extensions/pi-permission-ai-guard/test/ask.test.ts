@@ -98,6 +98,28 @@ describe("resolveReviewTarget — surface matching", () => {
     ).toEqual({ reason: "surface-unmatched" });
   });
 
+  it("a family-member glob (path_*) reviews proven-direction access but not the bare family", () => {
+    // The fourth granularity: the string glob naturally covers the
+    // directional members while the required `_` suffix keeps the
+    // direction-unknown bare family out — pinned so a glob-engine tweak
+    // (e.g. letting `*` match empty) cannot silently widen it.
+    const surfaces = ["path_*"];
+    expect(
+      resolveReviewTarget(makeDetails({ surface: "path_read", value: "x" }), { surfaces }),
+    ).toEqual({ surface: "path_read", target: "x" });
+    expect(
+      resolveReviewTarget(makeDetails({ surface: "path_write", value: "x" }), { surfaces }),
+    ).toEqual({ surface: "path_write", target: "x" });
+    expect(resolveReviewTarget(makeDetails({ surface: "path", value: "x" }), { surfaces })).toEqual(
+      { reason: "surface-unmatched" },
+    );
+    expect(
+      resolveReviewTarget(makeDetails({ surface: "external_directory_read", value: "x" }), {
+        surfaces,
+      }),
+    ).toEqual({ reason: "surface-unmatched" });
+  });
+
   it("excludes surfaces matching !pattern even when * is present", () => {
     const surfaces = ["*", "!external_directory", "!path"];
     expect(
