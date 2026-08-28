@@ -191,7 +191,7 @@ Reply with ONLY one JSON object — no markdown, no prose, no other text.
 
 - Omit fields that do not apply; never use empty strings.
 - For deny or defer, reason must be one concise sentence grounded in
-  visible request context.
+  visible request context, at most ~150 characters.
 - A deny reason must state what makes the request dangerous. If your
   assessment concludes the request is safe, the verdict is allow — never
   a deny with a safety conclusion.

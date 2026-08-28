@@ -1498,7 +1498,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     await expectVerdict(authorize, { value: "npm install x" }, { kind: "defer" });
     expect(notifications).toHaveLength(1);
     // The clarification goes out whole: the operator must be able to
-    // answer the question, and only a pathological ramble (240+) truncates.
+    // answer the question, and only a runaway ramble (200+) truncates.
     expect(notifications[0]![0]).not.toContain("\n");
     expect(notifications[0]![0]).toContain(
       "this clarification is deliberately long enough that the notify copy must truncate it to stay on one line",

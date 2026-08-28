@@ -205,12 +205,13 @@ export function machineryDenyReason(
 }
 
 /**
- * Defensive ceiling for model reasons in notify copies — a sane reason or
- * clarifying question never reaches this; it only guards a runaway model
- * from flooding the operator's message pane. The audit record keeps the
- * full text regardless.
+ * Defensive ceiling for model reasons in notify copies. The prompt
+ * anchors reasons at ~150 characters (a concise sentence); the ceiling is
+ * the hard display bound when a model runs long — 200 keeps the head+tail
+ * view readable while preserving the conclusion and the evidence tail.
+ * The audit record keeps the full text regardless.
  */
-export const NOTIFY_REASON_CEILING = 240;
+export const NOTIFY_REASON_CEILING = 200;
 
 /**
  * What actually happened to the request the reviewer denied: the deny held

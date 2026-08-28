@@ -194,7 +194,9 @@ describe("human-facing messages", () => {
   });
 
   it("advisoryEscalationMessage carries a sane reason whole; only a ramble hits the ceiling", () => {
-    const sane = "x".repeat(200);
+    // ~150 is the prompt's anchor for a concise sentence — comfortably
+    // under the 160 display ceiling.
+    const sane = "x".repeat(120);
     expect(advisoryEscalationMessage({ kind: "deny", reason: sane }, "low", "denied")).toContain(
       sane,
     );
