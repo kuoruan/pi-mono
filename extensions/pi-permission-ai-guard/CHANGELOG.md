@@ -1,5 +1,72 @@
 # pi-permission-ai-guard
 
+## 0.8.0
+
+### Minor Changes
+
+- f7da78d: BREAKING: adopt pi-permission-system v27; the v26 peer range is dropped — consumers must upgrade.
+
+  - Session-keyed permission services: the link registers once per session on the node's own service, with the `permissions:ready` payload as the official session-id source; hosts without a session id keep deferring (see ADR 0001).
+  - One extension instance per session node (each node has its own lifecycle) — subagent children register their own link instead of reusing the parent's.
+
+- 41098f8: Give the circuit breaker an operator-visible trip and a manual reset.
+
+  - The total tier's first trip notifies the operator once per trip epoch: `circuit breaker tripped — total tier reached, blocking all reviews until /ai-guard breaker reset or restart`. Until now a total-tier trip was silent — the operator only discovered it from mysteriously denied commands (a heavy session with a deny-leaning reviewer burns the model-deny budget by volume, not failure). The notice rides the ambient channel at error grade: `notifyLevel` `off` silences it and consumes the once-per-epoch notice; the `error` threshold keeps it visible while silencing everything else.
+  - `/ai-guard breaker reset` (also the settings menu's last entry) clears both tiers. A pure counter reset: the verdict cache, mode, notifyLevel, and every session override survive it, and the confirmation notice says so. A session restart clears the breaker either way.
+  - Consecutive-tier trips stay quiet (they self-heal on the next allow; their per-ask machinery notices already speak on the defer lanes).
+
+- 019de3b: Reviewer defers carry a `lean` — the reviewer's directional inclination — and the mode ladder routes on it.
+
+  - The reviewer's defer output format includes an optional `lean: "allow" | "deny"` (omitted = neutral; the prompt anchors both directions: deny-lean names a visible danger pattern, allow-lean names a benign action with an unclear authorization link).
+  - `lenient` passes benign- and neutral-leaned defers but asks on danger-leaned ones (a deny-leaning doubt is an active alarm); every other mode treats the lean states as the suspicion order dictates — lean only moves a defer across the ask↔allow boundary, never into or out of the deny band.
+  - Lean is a routing signal only — never shown in dialogs or notify lines (anti-anchoring: the ask is the operator's judgment moment). It lives in the `ai_guard.decision` audit record (`lean: "allow" | "deny" | null`).
+  - Benign-leaned passes are silent (the model's own inclination confirmed; allows never notify) and never cached (defers are never stored — identical asks re-review fresh).
+  - Invalid lean values degrade to neutral; a defer is never invalidated by its lean. The breaker counts the model's verdict (a defer feeds no tier).
+
+- 3460b98: Add a `maxTokens` config option (default 4096) — the reviewer reply budget now leaves reasoning upstreams enough headroom that a thinking block can finish before the verdict JSON, instead of truncating mid-think into the empty-reply machinery failure.
+- c6b3911: Add a four-mode leniency ladder — `strict`, `default`, `lenient`, `permissive` — deciding who adjudicates the reviewer's non-allow verdicts.
+
+  - `strict`: the reviewer's allow is the only pass (fail-closed automation).
+  - `default`: you judge every flag but hard danger — soft denials and every unresolved doubt ask you.
+  - `lenient`: only the reviewer's active alarms ask you (soft denials and deny-leaning doubts); benign and neutral doubts pass.
+  - `permissive`: only hard-tier denials block, and each such block notifies the operator.
+
+  Hard-tier denials (riskLevel high|critical, or missing) stay terminal in every mode. Reviewer machinery failures never map to allow: they deny under `strict` and `permissive`, defer under the other two, and every forced deferral announces its classified cause to the operator.
+
+  The ctrl+alt+g cycle visits `default → lenient → permissive`; only `strict` is set explicitly.
+
+- 2141200: Make operator notices honest about outcomes, complete in content, and consistent in shape.
+
+  - A model deny that holds or escalates notifies in every mode: v27 renders no dialog for denials (the reason goes to the agent and the audit log only), so the notify line is the operator's only copy. A mode-softened deny ends `— asking you instead`; a deny that holds needs no tail. `permissive` swallows soft denies whole (zero-interruption contract) — only its hard-tier blocks notify.
+  - Model reasons and clarifications go out whole in notify lines, with a 200-char defensive ceiling (`NOTIFY_REASON_CEILING`) that bounds the display when a model runs long; the prompt anchors reasons at ~150 characters (a concise sentence), and the audit record keeps the full text either way.
+  - The reviewer prompt binds reason to verdict: a deny reason must state what makes the request dangerous; an assessment that concludes the request is safe must be an `allow`.
+  - Truncation markers are single-line everywhere (`[...truncated...]`, no embedded newlines) — notify lines never break into multi-line artifacts, and transcript entries keep the stripper's single-line doctrine.
+  - Notify copy follows one skeleton (event sentence + em-dash consequence + parenthesized qualifier; state echoes stay `key = value (source)`), and the save-success line stays within it: the shadow-layer fact lives in the README (a saved layer can still be shadowed by a higher-precedence one).
+
+- 61c0530: Centralize the notify seam and add an ambient-notify threshold.
+
+  - All notify traffic routes through one session seam: the `[ai-guard]` prefix, the disposed-runner guard, and the level gate live in a single place — copy writers emit bare messages and no call site can forget the prefix or crash the verdict path. Command feedback (`/ai-guard` answers) rides the same primitive ungated.
+  - New `notifyLevel` config field (`info | warning | error | off`, default `info`) gates ambient (review-loop) notices by threshold: `warning` silences the `reviewer asks` mirror, `error` keeps only the total-tier breaker trip (the one ambient error line), `off` silences every ambient line. Command feedback is never gated — silence on a typed command reads as breakage. A non-default value renders a footer fragment (e.g. `off · lenient (session)`), so a silenced pane stays visible.
+  - `notifyLevel` is also a `/ai-guard` runtime setting (picker entry, direct form, session-scoped override that survives resume; `ctrl+alt+g` stays mode-only).
+  - Guard-absent errors ride the ungated feedback channel at error grade: a fail-safe config start (no auto-review), a failed authorizer registration, and a stale registration surviving disposal each notify the operator directly — the guard being absent or mis-slotted must never hide behind a level threshold or a console log.
+
+- cc95814: Track pi-permission-system 27.1 and teach the surface matcher the directional path families.
+
+  - Dependency floor raised to `^27.1.1`. The 27.1 additions are compile-compatible (optional `floorExemption` audit field; the prompt payload's `kind` stays coarse), so no code change was required for the upgrade itself.
+  - Surface matching now knows the read/write capability axis: `path` and `external_directory` have `_read`/`_write` directional members that a proven-direction access routes to. Four granularities: the bare family (`"path"`) reviews both directions plus direction-unknown access; a member glob (`"path_*"`) reviews proven-direction access only; a directional member (`"path_read"`) reviews exactly that direction; a family exclude (`"!path"`) withholds its directional members too. A `_read` suffix over any other name stays its own surface.
+
+- c46418f: Add a `/ai-guard` runtime settings command: a mode picker with per-mode descriptions, a ctrl+alt+g shortcut cycling `default → lenient → permissive`, and save actions that persist the effective config (every field, session overrides included) into the global or project config — in-place JSONC leaf edits that preserve comments and formatting, refused for untrusted projects. Session overrides persist into pi's session file (custom entries, never LLM context) and restore on resume. The footer renders only deviations from the `default` baseline, with `permissive` in warning red.
+- 2cad5a6: Retry upstream failures once per mechanism per review, budgeted inside `timeoutMs` (the total-budget promise — a review never exceeds one timeout window).
+
+  - Provider errors (408/409/429/5xx and connection-level failures, per pi-ai's classifier, backoff and `retry-after` honored) retry inside pi-ai's provider layer; the timeout signal spans every attempt, so retries can never outlive the window.
+  - Empty replies (a 200 with no usable text — an always-thinking upstream can spend the whole budget on reasoning) retry at the review layer, but only when the first attempt consumed less than half the window; the retry's budget is the remaining time, and it carries no provider-layer retry of its own — three requests is the hard ceiling per review.
+  - The decision record gains `attempts: 2` on retried reviews; `latencyMs` is cumulative across attempts.
+
+### Patch Changes
+
+- 344c9e4: Restructure SAFETY_RULES: split fused entries into distinct concepts (Visible Evidence, Network & Browser, Bounded Load Tests, Loopback Servers), extract the fetch-to-inspect carve-out from External Code Execution, and anchor regenerable build artifacts and obfuscated-payload examples.
+- 55030a3: Reclassify host shutdown/reboot from DENY-Always (Persistent System Changes) to its own intent-gated DENY-Unless entry, so an explicitly authorized shutdown or reboot is allowed instead of being denied regardless of intent.
+
 ## 0.7.0
 
 ### Minor Changes
