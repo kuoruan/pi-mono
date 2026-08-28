@@ -157,6 +157,7 @@ Two session-scoped controls change the effective mode without touching the confi
 
 - `/ai-guard` — opens the settings menu (each entry shows its current value and source); picking an entry opens its value picker. Direct forms: `/ai-guard mode strict|default|advisory|lenient|permissive`, `/ai-guard notifyLevel info|warning|error|off`, and `<setting> reset` (back to the config default). Argument completion is two-stage: setting names first, then the setting's values.
 - `/ai-guard save-to-global-config` / `/ai-guard save-to-project-config` — persist the current EFFECTIVE config (every field, session overrides included, so future command-configured settings ride along) into the global or project config file.
+- `/ai-guard breaker reset` — clear the circuit breaker's two tiers (the total tier's permanence otherwise lasts the whole session). Pure counter reset: the verdict cache and every override are untouched, and reviews resume immediately. The settings menu carries the same action as its last entry.
   - Leaves are written in place via JSONC edits: comments, formatting, and untouched keys survive; when the layer already matches, nothing is written.
   - The project target is refused for untrusted projects (that layer isn't honored there).
   - New sessions start from the saved layer; the current session keeps its overrides. A saved layer feeds new sessions but a higher-precedence layer (project > global) can still shadow it — check the layer order above when a saved value seems not to take effect. Both actions are the last picker entries.
@@ -171,7 +172,9 @@ Overrides persist **per session**: each change is appended to pi's session file 
 Two-tier, fail-safe:
 
 - `circuitBreaker.consecutive` — **recoverable** tier: when a deny streak hits the threshold, the breaker trips, returns `circuitBreaker.verdict`, and resets the consecutive counter so the model gets another chance on the next ask.
-- `circuitBreaker.total` — **hard** tier: once a session accumulates that many model denials, the breaker stays tripped permanently (the counter never resets). Together they tighten progressively — repeated abuse walks a recoverable trip toward the permanent one.
+- `circuitBreaker.total` — **hard** tier: once a session accumulates that many model denials, the breaker stays tripped permanently (the counter never resets on its own — only `/ai-guard breaker reset` or a session restart clears it). Together they tighten progressively — repeated abuse walks a recoverable trip toward the permanent one.
+
+The hard tier's permanence is deliberate (a degraded reviewer must not keep rubber-stamping), and a heavy session can legitimately reach it — a long working session with a deny-leaning reviewer burns the model-deny budget by volume, not by failure. Two escape hatches honor that: the first total-tier trip notifies the operator once (`circuit breaker tripped — total tier reached, blocking all reviews until /ai-guard breaker reset or restart`; re-armed after each reset — the notice rides the ambient channel, so `notifyLevel` `error`/`off` silences it and consumes the once-per-epoch notice), and `/ai-guard breaker reset` (also the settings menu's last entry) clears both tiers — a pure counter reset that touches nothing else: the verdict cache, mode, notifyLevel, and every session override survive it, and reviews resume immediately. A session restart clears the breaker either way.
 
 What feeds the counters:
 

@@ -278,6 +278,25 @@ export class SessionLifecycle {
   }
 
   /**
+   * The session's circuit breaker — the `breaker reset` action's target.
+   * Allocated per session (fresh state on every session_start). Between
+   * shutdown and the next start there is nothing to reset; the settings
+   * surface's no-active-session guard fires first, so the undefined case
+   * is a typed floor that surfaces as a clear throw rather than a silent
+   * no-op.
+   *
+   * @returns The live session's circuit breaker.
+   * @throws When no session is active (the settings surface guards first).
+   */
+  get circuitBreaker(): CircuitBreaker {
+    const session = this.#session;
+    if (!session) {
+      throw new Error("no active session — circuit breaker unavailable");
+    }
+    return session.circuitBreaker;
+  }
+
+  /**
    * A session started (or re-dispatched without shutdown on reload/fork):
    * replace the session state, reset the overrides in place, and register
    * against the fresh deps.

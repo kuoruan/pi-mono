@@ -176,12 +176,42 @@ describe("breaker accounting steps", () => {
     const config = { consecutive: 2, total: 20, verdict: "deny" as const };
     s.recordVerdict("deny");
     s.recordVerdict("deny");
-    // Below threshold: reports false and never mutates.
-    expect(consumeTrip(s, { ...config, consecutive: 3 })).toBe(false);
+    // Below threshold: reports not-tripped and never mutates.
+    expect(consumeTrip(s, { ...config, consecutive: 3 })).toEqual({ tripped: false });
     expect(s.isTripped({ ...config, consecutive: 3 })).toBe(false);
-    // At threshold: reports true once and consumes the recoverable tier.
-    expect(consumeTrip(s, config)).toBe(true);
-    expect(consumeTrip(s, config)).toBe(false); // window reset
+    // At threshold: names the tier and consumes the recoverable tier.
+    expect(consumeTrip(s, config)).toEqual({
+      tripped: true,
+      tier: "consecutive",
+      totalNoticeDue: false,
+    });
+    expect(consumeTrip(s, config)).toEqual({ tripped: false }); // window reset
+  });
+
+  it("the total tier claims its one-time notice and resetAll re-arms it", () => {
+    const s = new CircuitBreaker();
+    const config = { consecutive: 3, total: 2, verdict: "deny" as const };
+    s.recordVerdict("deny");
+    s.recordVerdict("deny");
+    const first = consumeTrip(s, config);
+    expect(first).toEqual({ tripped: true, tier: "total", totalNoticeDue: true });
+    // The persistent total tier: still tripped on every ask, but the
+    // notice fired once per epoch.
+    expect(consumeTrip(s, config)).toEqual({
+      tripped: true,
+      tier: "total",
+      totalNoticeDue: false,
+    });
+    // A manual reset clears both tiers and re-arms the notice.
+    s.resetAll();
+    expect(consumeTrip(s, config)).toEqual({ tripped: false });
+    s.recordVerdict("deny");
+    s.recordVerdict("deny");
+    expect(consumeTrip(s, config)).toEqual({
+      tripped: true,
+      tier: "total",
+      totalNoticeDue: true,
+    });
   });
 
   it("accountModelOutcome records the model verdict and credits machinery denials only", () => {

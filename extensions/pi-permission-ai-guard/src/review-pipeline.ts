@@ -291,7 +291,8 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // call. The trip's consume (query + recoverable reset) is one visible
     // accounting step beside the breaker (see consumeTrip in
     // session-state) — breaker trips are not recorded as model verdicts.
-    if (consumeTrip(deps.circuitBreaker, config.circuitBreaker)) {
+    const trip = consumeTrip(deps.circuitBreaker, config.circuitBreaker);
+    if (trip.tripped) {
       const verdict =
         config.circuitBreaker.verdict === "deny"
           ? {
@@ -306,6 +307,18 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       if (verdict.kind === "defer") {
         deps.notify(
           `circuit breaker tripped — too many reviewer denials, deferring to you`,
+          "warning",
+        );
+      }
+      // The total tier is a persistent session-level state the operator
+      // otherwise only discovers from mysteriously denied commands — name
+      // the state change once (the breaker re-arms the notice after a
+      // manual reset). Consecutive-tier trips stay quiet: they self-heal
+      // on the next allow, and their per-ask machinery notices already
+      // speak on the defer lanes.
+      if (trip.totalNoticeDue) {
+        deps.notify(
+          `circuit breaker tripped — total tier reached, blocking all reviews until /ai-guard breaker reset or restart`,
           "warning",
         );
       }

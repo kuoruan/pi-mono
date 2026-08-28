@@ -14,7 +14,7 @@ import {
   type RuntimeSettings,
   RuntimeSettings as RuntimeSettingsClass,
 } from "#src/runtime-settings.ts";
-import type { SessionOverrides } from "#src/session-state.ts";
+import { CircuitBreaker, type SessionOverrides } from "#src/session-state.ts";
 
 const SPECS: readonly EnumSettingSpec[] = [
   {
@@ -73,6 +73,7 @@ function makeSettings(
       session: {
         session: { config: configSchema.parse({ provider: "test", model: "test" }) },
         overrides,
+        circuitBreaker: new CircuitBreaker(),
       },
       appendEntry,
       notify,
@@ -130,7 +131,7 @@ describe("RuntimeSettings — command", () => {
     const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
     const settings = new RuntimeSettingsClass(
       {
-        session: { session: undefined, overrides },
+        session: { session: undefined, overrides, circuitBreaker: new CircuitBreaker() },
         appendEntry,
         notify,
         saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
@@ -140,6 +141,121 @@ describe("RuntimeSettings — command", () => {
     const ctx = makeUiCtx();
     await settings.command.handler("mode advisory", ctx);
     expect(notify).toHaveBeenCalledWith("no active session (config not loaded)", "warning");
+  });
+
+  it("breaker reset clears both tiers and names what it does not touch", async () => {
+    const breaker = new CircuitBreaker();
+    const overrides: SessionOverrides = {};
+    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
+    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
+    const settings = new RuntimeSettingsClass(
+      {
+        session: {
+          session: { config: configSchema.parse({ provider: "test", model: "test" }) },
+          overrides,
+          circuitBreaker: breaker,
+        },
+        appendEntry,
+        notify,
+        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
+      },
+      SPECS,
+    );
+    // A consecutive-tier trip (3 denies against consecutive:3/total:20) —
+    // the copy names the softer tier.
+    for (let i = 0; i < 3; i++) breaker.recordVerdict("deny");
+    await settings.command.handler("breaker reset", makeUiCtx());
+    expect(breaker.isTripped({ consecutive: 3, total: 20, verdict: "deny" })).toBe(false);
+    expect(notify).toHaveBeenCalledWith(
+      "circuit breaker cleared (was tripped) — verdict cache and overrides untouched; reviews resume immediately",
+      "info",
+    );
+    // A pure counter reset: nothing persisted, no override touched.
+    expect(appendEntry).not.toHaveBeenCalled();
+    expect(overrides.mode).toBeUndefined();
+  });
+
+  it("breaker reset names the total tier when that is what was tripped", async () => {
+    const breaker = new CircuitBreaker();
+    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
+    // A total-tier trip — the accident scenario this copy was written
+    // for. The session's own breaker config sets total: 3 so three denies
+    // reach the hard tier (not just the consecutive one).
+    for (let i = 0; i < 3; i++) breaker.recordVerdict("deny");
+    const settings = new RuntimeSettingsClass(
+      {
+        session: {
+          session: {
+            config: configSchema.parse({
+              provider: "test",
+              model: "test",
+              circuitBreaker: { consecutive: 3, total: 3, verdict: "deny" },
+            }),
+          },
+          overrides: {},
+          circuitBreaker: breaker,
+        },
+        appendEntry: () => {},
+        notify,
+        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
+      },
+      SPECS,
+    );
+    expect(breaker.trippedTier({ consecutive: 3, total: 3, verdict: "deny" })).toBe("total");
+    await settings.command.handler("breaker reset", makeUiCtx());
+    expect(notify).toHaveBeenCalledWith(
+      "circuit breaker cleared (was total-tier tripped) — verdict cache and overrides untouched; reviews resume immediately",
+      "info",
+    );
+  });
+
+  it("breaker reset on an un-tripped breaker still answers cleanly", async () => {
+    const breaker = new CircuitBreaker();
+    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
+    const settings = new RuntimeSettingsClass(
+      {
+        session: {
+          session: { config: configSchema.parse({ provider: "test", model: "test" }) },
+          overrides: {},
+          circuitBreaker: breaker,
+        },
+        appendEntry: () => {},
+        notify,
+        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
+      },
+      SPECS,
+    );
+    await settings.command.handler("breaker reset", makeUiCtx());
+    expect(notify).toHaveBeenCalledWith(
+      "circuit breaker cleared — verdict cache and overrides untouched; reviews resume immediately",
+      "info",
+    );
+  });
+
+  it("the settings menu dispatches the breaker-reset entry", async () => {
+    const breaker = new CircuitBreaker();
+    const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
+    const settings = new RuntimeSettingsClass(
+      {
+        session: {
+          session: { config: configSchema.parse({ provider: "test", model: "test" }) },
+          overrides: {},
+          circuitBreaker: breaker,
+        },
+        appendEntry: () => {},
+        notify,
+        saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
+      },
+      SPECS,
+    );
+    for (let i = 0; i < 3; i++) breaker.recordVerdict("deny");
+    const ctx = makeUiCtx("reset circuit breaker");
+    await settings.command.handler("", ctx);
+    expect(breaker.isTripped({ consecutive: 3, total: 20, verdict: "deny" })).toBe(false);
+    expect(notify).toHaveBeenCalledWith(
+      "circuit breaker cleared (was tripped) — verdict cache and overrides untouched; reviews resume immediately",
+      "info",
+    );
   });
 
   it("the settings menu and value picker apply the picked value", async () => {
@@ -152,8 +268,13 @@ describe("RuntimeSettings — command", () => {
     await settings.command.handler("", ctx);
 
     expect(ctx.ui.select).toHaveBeenCalledWith(
-      "ai-guard settings — pick a setting to adjust, or save the current config",
-      ["mode — default (config)", "save global config", "save project config"],
+      "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
+      [
+        "mode — default (config)",
+        "save global config",
+        "save project config",
+        "reset circuit breaker",
+      ],
     );
     expect(overrides.mode).toBe("strict");
   });
@@ -169,6 +290,7 @@ describe("RuntimeSettings — command", () => {
         session: {
           session: { config: configSchema.parse({ provider: "test", model: "test" }) },
           overrides,
+          circuitBreaker: new CircuitBreaker(),
         },
         appendEntry,
         notify,
@@ -191,12 +313,13 @@ describe("RuntimeSettings — command", () => {
     // Menu rows list BOTH settings (plus the save verbs); picking the
     // second spec and a value applies it like any other.
     expect(ctx.ui.select).toHaveBeenCalledWith(
-      "ai-guard settings — pick a setting to adjust, or save the current config",
+      "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
       [
         "mode — default (config)",
         "notifyLevel — info (config)",
         "save global config",
         "save project config",
+        "reset circuit breaker",
       ],
     );
     expect(overrides.notifyLevel).toBe("off");
@@ -259,6 +382,17 @@ describe("RuntimeSettings — completions", () => {
     expect(completions("nope")).toBeNull();
     expect(completions("nope ")).toBeNull();
   });
+
+  it("completes the breaker reset action alongside the verbs", () => {
+    const { settings } = makeSettings();
+    const completions = settings.command.getArgumentCompletions;
+    expect(completions("bre")).toEqual([
+      { value: "breaker", label: "breaker — reset the circuit breaker" },
+    ]);
+    expect(completions("breaker ")).toEqual([{ value: "reset", label: "reset" }]);
+    expect(completions("breaker re")).toEqual([{ value: "reset", label: "reset" }]);
+    expect(completions("breaker nope")).toBeNull();
+  });
 });
 
 describe("RuntimeSettings — shortcut", () => {
@@ -297,7 +431,7 @@ describe("RuntimeSettings — shortcut", () => {
     const notify = vi.fn<(message: string, level?: "info" | "warning" | "error") => void>();
     const settings = new RuntimeSettingsClass(
       {
-        session: { session: undefined, overrides },
+        session: { session: undefined, overrides, circuitBreaker: new CircuitBreaker() },
         appendEntry: () => {},
         notify,
         saveConfig: () => ({ path: "/config.json", created: false, changed: true }),
@@ -361,7 +495,7 @@ describe("RuntimeSettings — restore + footer", () => {
     const overrides: SessionOverrides = {};
     const settings = new RuntimeSettingsClass(
       {
-        session: { session: undefined, overrides },
+        session: { session: undefined, overrides, circuitBreaker: new CircuitBreaker() },
         appendEntry: () => {},
         notify: () => {},
         saveConfig: () => ({ path: "/config.json", created: false, changed: true }),

@@ -83,6 +83,21 @@ function makeCtx(notify: (message: string, level?: string) => void) {
   return { ui: { notify } };
 }
 
+describe("SessionLifecycle — circuit breaker accessor", () => {
+  it("returns the live session's breaker (the same instance the pipeline holds)", () => {
+    const { lifecycle, calls } = makeLifecycle();
+    lifecycle.onSessionStart(makeSeed());
+    // The breaker the settings surface resets is the SAME object the
+    // pipeline's deps close over — identity, not a copy.
+    expect(lifecycle.circuitBreaker).toBe(calls[0]!.circuitBreaker);
+  });
+
+  it("throws a clear error between sessions (the surface guards first)", () => {
+    const { lifecycle } = makeLifecycle();
+    expect(() => lifecycle.circuitBreaker).toThrow(/no active session/);
+  });
+});
+
 describe("SessionLifecycle — session identity + registration guard", () => {
   it("registers the authorizer on the session's own keyed service", () => {
     const { lifecycle, calls } = makeLifecycle();

@@ -751,6 +751,39 @@ describe("createReviewPipeline — mode", () => {
 });
 
 describe("createReviewPipeline — circuit breaker", () => {
+  it("the total-tier trip notifies the operator once per epoch", async () => {
+    const { notifications, notify } = makeNotifySpy();
+    const breaker = new CircuitBreaker();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        circuitBreaker: breaker,
+        verdictCache: new VerdictCache(),
+        notify,
+        config: { ...baseConfig, circuitBreaker: { consecutive: 3, total: 3, verdict: "deny" } },
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
+        ]),
+      }),
+    );
+    // 3 denies reach the total threshold — the 4th and 5th asks trip on
+    // the total tier; the notice fires on the 4th only.
+    for (let i = 0; i < 3; i++)
+      await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
+    await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
+    await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
+    const tripNotices = notifications.filter(([m]) => m.includes("total tier reached"));
+    expect(tripNotices).toHaveLength(1);
+    expect(tripNotices[0]![1]).toBe("warning");
+    expect(tripNotices[0]![0]).toContain("breaker reset");
+    // A manual reset re-arms the epoch notice (3 more denies → next trip
+    // notifies again).
+    breaker.resetAll();
+    for (let i = 0; i < 3; i++)
+      await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
+    await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
+    expect(notifications.filter(([m]) => m.includes("total tier reached"))).toHaveLength(2);
+  });
+
   it("short-circuits to deny after consecutive threshold (default)", async () => {
     let modelCalled = 0;
     const breaker = new CircuitBreaker();

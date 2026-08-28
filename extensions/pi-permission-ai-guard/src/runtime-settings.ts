@@ -35,7 +35,12 @@ import {
   persistSetting,
   restoreSetting,
 } from "./session-settings-store.ts";
-import { effectiveConfig, effectiveOverride, type SessionOverrides } from "./session-state.ts";
+import {
+  type CircuitBreaker,
+  effectiveConfig,
+  effectiveOverride,
+  type SessionOverrides,
+} from "./session-state.ts";
 
 /**
  * An enum-valued session setting overriding its same-named config field.
@@ -122,6 +127,8 @@ export interface SettingsSessionSurface {
   readonly session: { readonly config: AiGuardConfig | undefined } | undefined;
   /** The stable overrides object (single write path, stable identity). */
   readonly overrides: SessionOverrides;
+  /** The session's circuit breaker (the `breaker reset` action's target). */
+  readonly circuitBreaker: CircuitBreaker;
 }
 
 /** Injectable collaborators the settings surface persists through. */
@@ -182,6 +189,9 @@ const SAVE_VERBS = [
   { text: "save-to-project-config", label: "save project config", target: "project" as const },
 ];
 
+/** The picker label for the breaker-reset action (direct form: `breaker reset`). */
+const BREAKER_RESET_LABEL = "reset circuit breaker";
+
 /**
  * Owns the runtime settings surface for the given specs.
  *
@@ -212,7 +222,8 @@ export class RuntimeSettings {
       const spaceAt = trimmed.indexOf(" ");
       let items: { value: string; label: string }[];
       if (spaceAt < 0) {
-        // First token: complete setting names followed by the save verbs.
+        // First token: complete setting names followed by the action
+        // verbs (save verbs + breaker reset).
         items = [
           ...this.#specs
             .filter((s) => s.name.startsWith(trimmed))
@@ -221,11 +232,18 @@ export class RuntimeSettings {
               label: s.description ? `${s.name} — ${s.description}` : s.name,
             })),
           ...SAVE_VERBS.map((v) => ({ value: v.text, label: v.label })),
+          ...(trimmed === "" || "breaker".startsWith(trimmed)
+            ? [{ value: "breaker", label: "breaker — reset the circuit breaker" }]
+            : []),
         ].filter((i) => i.value.startsWith(trimmed));
       } else {
-        // Second token: complete the named setting's values (and the reset action).
+        // Second token: complete the named setting's values (and the
+        // breaker's reset action).
         const name = trimmed.slice(0, spaceAt);
         const valuePrefix = trimmed.slice(spaceAt + 1);
+        if (name === "breaker") {
+          return "reset".startsWith(valuePrefix) ? [{ value: "reset", label: "reset" }] : null;
+        }
         const spec = this.#spec(name);
         if (!spec) return null;
         items = this.#options(spec)
@@ -240,6 +258,15 @@ export class RuntimeSettings {
         return;
       }
       const tokens = args.trim().split(/\s+/).filter(Boolean);
+
+      // Action verbs are surface-level, not setting values: they dispatch
+      // before the setting path. `breaker reset` is two tokens because it
+      // reads as a phrase; it is NOT the setting form (`breaker` is not a
+      // spec name).
+      if (tokens[0] === "breaker" && tokens[1] === "reset") {
+        this.#applyBreakerReset();
+        return;
+      }
 
       // Save verbs are surface-level actions, not setting values: they
       // dispatch before the setting path and need no picker UI.
@@ -291,18 +318,22 @@ export class RuntimeSettings {
       }
 
       // No args: settings menu, then the picked setting's value picker —
-      // or one of the save actions, which apply directly. Labels are plain
-      // text (only the FOOTER renders the highlighted value in color), so
-      // resolution is a plain match.
+      // or one of the save/reset actions, which apply directly. Labels
+      // are plain text (only the FOOTER renders the highlighted value in
+      // color), so resolution is a plain match.
       const specLabels = this.#specs.map((s) => this.#label(s));
-      const labels = [...specLabels, ...SAVE_VERBS.map((v) => v.label)];
+      const labels = [...specLabels, ...SAVE_VERBS.map((v) => v.label), BREAKER_RESET_LABEL];
       const choice = await ctx.ui.select(
-        "ai-guard settings — pick a setting to adjust, or save the current config",
+        "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
         labels,
       );
       const verb = choice ? SAVE_VERBS.find((v) => v.label === choice) : undefined;
       if (verb) {
         this.#applyConfigSave(verb.target);
+        return;
+      }
+      if (choice === BREAKER_RESET_LABEL) {
+        this.#applyBreakerReset();
         return;
       }
       const spec = choice ? this.#specs[labels.indexOf(choice)] : undefined;
@@ -473,6 +504,35 @@ export class RuntimeSettings {
       // The rarest fact — a higher layer can still shadow the saved value —
       // lives in the README's save-verbs section, not here.
       `saved to ${target} config (${basename(result.path)}${created}) — new sessions start from it; this session keeps current overrides`,
+      "info",
+    );
+  }
+
+  /**
+   * The breaker-reset action (`/ai-guard breaker reset`): both tiers to
+   * zero, notice re-armed. Pure counter mutation — the verdict cache and
+   * every session override (mode, notifyLevel) are untouched, and the
+   * confirmation says so (a later cached deny after a reset must not read
+   * as "the reset didn't work").
+   */
+  #applyBreakerReset(): void {
+    const sessionConfig = this.#deps.session.session?.config;
+    if (!sessionConfig) {
+      // Unreachable through the command (the handler guards up front) — a
+      // silent no-op here would hide a future caller's bug, so surface it.
+      this.#deps.notify("no active session (config not loaded)", "warning");
+      return;
+    }
+    const tier = this.#deps.session.circuitBreaker.trippedTier(sessionConfig.circuitBreaker);
+    this.#deps.session.circuitBreaker.resetAll();
+    const was =
+      tier === "total"
+        ? " (was total-tier tripped)"
+        : tier === "consecutive"
+          ? " (was tripped)"
+          : "";
+    this.#deps.notify(
+      `circuit breaker cleared${was} — verdict cache and overrides untouched; reviews resume immediately`,
       "info",
     );
   }

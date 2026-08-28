@@ -47,7 +47,7 @@ export interface CacheEntry {
 export interface CircuitBreakerConfig {
   /** Recoverable tier: trip after this many consecutive denies (resets on trip). */
   consecutive: number;
-  /** Hard session cap: trip after this many total denies (never resets). */
+  /** Hard session cap: trip after this many total denies (never resets on its own). */
   total: number;
   /** Verdict to return when the breaker trips. */
   verdict: BreakerVerdict;
@@ -74,12 +74,13 @@ export type CacheLookupResult =
  * Circuit breaker: trips after too many deny verdicts in one session.
  *
  * `consecutive` is a recoverable tier (resets on trip so the model gets
- * another chance); `total` is a hard session cap (never resets, so once
- * tripped it stays tripped).
+ * another chance); `total` is a hard session cap (never resets on its own —
+ * only resetAll or a fresh session clears it).
  */
 export class CircuitBreaker {
   private consecutiveDenies = 0;
   private totalDenies = 0;
+  private totalTripNoticeClaimed = false;
 
   /**
    * Pure query: would the breaker trip on the next verdict? No counters
@@ -90,7 +91,34 @@ export class CircuitBreaker {
    * @returns True if either tier is at its threshold.
    */
   isTripped(cb: CircuitBreakerConfig): boolean {
-    return this.totalDenies >= cb.total || this.consecutiveDenies >= cb.consecutive;
+    return this.trippedTier(cb) !== undefined;
+  }
+
+  /**
+   * Pure query: WHICH tier is tripped — the hard session cap takes
+   * precedence (both at threshold means the persistent state is the one
+   * the operator must hear about).
+   *
+   * @param cb - The circuit-breaker thresholds to check against.
+   * @returns `"total"` or `"consecutive"` when tripped, else undefined.
+   */
+  trippedTier(cb: CircuitBreakerConfig): "total" | "consecutive" | undefined {
+    if (this.totalDenies >= cb.total) return "total";
+    if (this.consecutiveDenies >= cb.consecutive) return "consecutive";
+    return undefined;
+  }
+
+  /**
+   * Claim the one-time total-tier trip notice: true exactly once per
+   * total-trip epoch ({@link resetAll} re-arms it), so a persistent trip
+   * notifies once instead of on every ask.
+   *
+   * @returns True when the caller owes the operator the notice.
+   */
+  claimTotalTripNotice(): boolean {
+    if (this.totalTripNoticeClaimed) return false;
+    this.totalTripNoticeClaimed = true;
+    return true;
   }
 
   /**
@@ -101,6 +129,19 @@ export class CircuitBreaker {
    */
   resetConsecutive(): void {
     this.consecutiveDenies = 0;
+  }
+
+  /**
+   * Manual full reset (`/ai-guard breaker reset`): both tiers to zero and
+   * the total-trip notice re-armed. Pure in-memory counter mutation — no
+   * persistence, no session-file interaction; resume builds a fresh
+   * breaker either way (a new session gets fresh state regardless of any
+   * prior manual reset).
+   */
+  resetAll(): void {
+    this.consecutiveDenies = 0;
+    this.totalDenies = 0;
+    this.totalTripNoticeClaimed = false;
   }
 
   /**
@@ -142,21 +183,35 @@ export class CircuitBreaker {
 }
 
 /**
+ * The result of {@link consumeTrip}: which tier tripped, and whether the
+ * one-time total-tier operator notice is due.
+ */
+export type TripResult =
+  | { tripped: false }
+  | { tripped: true; tier: "consecutive" | "total"; totalNoticeDue: boolean };
+
+/**
  * The breaker gate's accounting step: consume a trip — one visible call
  * combining the pure query and the explicit recoverable-tier reset, so
  * the side effect stays at this single point instead of being split
- * across the pipeline's condition and its body.
+ * across the pipeline's condition and its body. The discriminated result
+ * tells the caller WHICH tier tripped and whether the one-time total-tier
+ * operator notice is due (set once per total-trip epoch — cleared by a
+ * reset — so a persistent trip notifies once, not on every ask).
  *
  * @param breaker - The session breaker.
  * @param cb - The thresholds.
- * @returns True when the trip fired (the caller short-circuits the ask).
+ * @returns The trip result: tier + notice-due when tripped, or
+ *   `{ tripped: false }` when the breaker lets the ask through.
  */
-export function consumeTrip(breaker: CircuitBreaker, cb: CircuitBreakerConfig): boolean {
-  if (!breaker.isTripped(cb)) {
-    return false;
+export function consumeTrip(breaker: CircuitBreaker, cb: CircuitBreakerConfig): TripResult {
+  const tier = breaker.trippedTier(cb);
+  if (!tier) {
+    return { tripped: false };
   }
   breaker.resetConsecutive();
-  return true;
+  const totalNoticeDue = tier === "total" && breaker.claimTotalTripNotice();
+  return { tripped: true, tier, totalNoticeDue };
 }
 
 /**
