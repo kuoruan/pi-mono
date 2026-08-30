@@ -61,8 +61,8 @@ importers:
         specifier: ^0.84.1
         version: 0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3)
       '@gotgenes/pi-permission-system':
-        specifier: ^27.1.1
-        version: 27.1.1(@earendil-works/pi-coding-agent@0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
+        specifier: ^28.0.0
+        version: 28.0.0(@earendil-works/pi-coding-agent@0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
       '@tsconfig/node22':
         specifier: 'catalog:'
         version: 22.0.6
@@ -320,8 +320,8 @@ packages:
       '@modelcontextprotocol/sdk':
         optional: true
 
-  '@gotgenes/pi-permission-system@27.1.1':
-    resolution: {integrity: sha512-0E0pFdQofmpmnNyOf8ZMiGywqZvbQ5KOdw80Np+xgn0BLCSDCoXRet/Sjd6XKaEAuGdXVrrssN7cc6TSuWxz7A==}
+  '@gotgenes/pi-permission-system@28.0.0':
+    resolution: {integrity: sha512-guUImoTSTs1mO5UJu3by8hpmGzSmm35zHqpRSpob0SXmXSwI6zdyLihW9aVOWFr1M4ZmeWLBCP1SpC07BznA0Q==}
     engines: {node: '>=22'}
     peerDependencies:
       '@earendil-works/pi-coding-agent': '>=0.79.0'
@@ -333,6 +333,9 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+
+  '@jridgewell/sourcemap-codec@1.6.0':
+    resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
@@ -1888,6 +1891,9 @@ packages:
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
+  zod@4.5.2:
+    resolution: {integrity: sha512-XkYXCol10+ba/6F/cueWV+TezUeOqXW0hdeJt5CdXjTYeAgAQg5N03RQdJ80mhfFE72+pblvYMW4wy2Qp4Qbrg==}
+
 snapshots:
 
   '@anthropic-ai/sdk@0.91.1(zod@4.4.3)':
@@ -2345,13 +2351,13 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@gotgenes/pi-permission-system@27.1.1(@earendil-works/pi-coding-agent@0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)':
+  '@gotgenes/pi-permission-system@28.0.0(@earendil-works/pi-coding-agent@0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)':
     dependencies:
       '@earendil-works/pi-coding-agent': 0.84.1(supports-color@7.2.0)(ws@8.21.2)(zod@4.4.3)
       '@earendil-works/pi-tui': 0.84.1
       tree-sitter-bash: 0.25.1
       web-tree-sitter: 0.26.13
-      zod: 4.4.3
+      zod: 4.5.2
     transitivePeerDependencies:
       - tree-sitter
 
@@ -2360,10 +2366,13 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
+  '@jridgewell/sourcemap-codec@1.6.0':
+    optional: true
+
   '@jridgewell/trace-mapping@0.3.31':
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
-      '@jridgewell/sourcemap-codec': 1.5.5
+      '@jridgewell/sourcemap-codec': 1.6.0
     optional: true
 
   '@jsonjoy.com/base64@1.1.2(tslib@2.8.1)':
@@ -2559,8 +2568,8 @@ snapshots:
     dependencies:
       '@opentelemetry/semantic-conventions': 1.43.0
       ws: 8.21.2
-      zod: 4.4.3
-      zod-to-json-schema: 3.25.2(zod@4.4.3)
+      zod: 4.5.2
+      zod-to-json-schema: 3.25.2(zod@4.5.2)
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
     transitivePeerDependencies:
@@ -3646,8 +3655,10 @@ snapshots:
 
   yaml@2.9.0: {}
 
-  zod-to-json-schema@3.25.2(zod@4.4.3):
+  zod-to-json-schema@3.25.2(zod@4.5.2):
     dependencies:
-      zod: 4.4.3
+      zod: 4.5.2
 
   zod@4.4.3: {}
+
+  zod@4.5.2: {}
