@@ -1,6 +1,6 @@
 {
   "name": "pi-permission-ai-guard",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Token-optimized LLM permission reviewer — a pi-permission-system Authorizer chain link",
   "keywords": [
     "access-control",
