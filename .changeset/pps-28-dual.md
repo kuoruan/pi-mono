@@ -1,5 +1,5 @@
 ---
-"pi-permission-ai-guard": minor
+"pi-permission-ai-guard": patch
 ---
 
 Track pi-permission-system 28 with a dual-version peer range.

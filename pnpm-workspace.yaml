@@ -7,11 +7,12 @@ allowBuilds:
   tree-sitter-bash: false
 
 catalog:
-  "@tsconfig/node22": ^22.0.5
+  "@tsconfig/node22": ^22.0.6
   "@types/node": ^22.20.1
-  memfs: ^4.68.1
+  memfs: ^4.68.2
   typescript: ^7.0.2
-  vitest: ^4.1.10
+  vitest: ^4.1.11
 
 minimumReleaseAgeExclude:
   - "@gotgenes/pi-permission-system"
+  - zod
