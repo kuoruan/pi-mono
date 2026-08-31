@@ -158,6 +158,13 @@ function parseRiskLevel(value: unknown): RiskLevel | undefined {
 }
 
 /**
+ * An attempted verdict object's signature: a `verdict:` key (quoted or
+ * not) — how a malformed verdict attempt is told from unrelated brace
+ * noise.
+ */
+const VERDICT_KEY_PROBE = /["']?verdict["']?\s*:/i;
+
+/**
  * Does a failed JSON fragment look like an attempted verdict object?
  *
  * Matches an unquoted-or-quoted `verdict` key (e.g. `{verdict:`, `{"verdict":`).
@@ -168,7 +175,7 @@ function parseRiskLevel(value: unknown): RiskLevel | undefined {
  * @returns True if the fragment carries a `verdict:` key.
  */
 function looksLikeVerdictAttempt(fragment: string): boolean {
-  return /["']?verdict["']?\s*:/i.test(fragment);
+  return VERDICT_KEY_PROBE.test(fragment);
 }
 
 /**

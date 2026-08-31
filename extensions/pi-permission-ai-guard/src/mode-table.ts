@@ -166,15 +166,6 @@ export const MODE_BLURBS: Readonly<Record<string, string>> = Object.fromEntries(
 export const CYCLE_DESCRIPTION: string = CYCLE_MODE_VALUES.join(" → ");
 
 /**
- * The config surprise warnings: mode × breaker-verdict combinations where
- * the breaker can interrupt the human (the reviewer-untrusted escape
- * valve) — legal but worth surfacing. Owned by the ladder module: the
- * generic JSONC layer should not carry ladder semantics.
- *
- * @param config - The validated config.
- * @returns Warning issues, if any (path is always "mode").
- */
-/**
  * A ladder-owned config surprise warning. Deliberately NOT the loader's
  * `ConfigIssue` — importing it here would create a type-level edge back
  * into the consuming layer (the loader imports the ladder, never the
@@ -187,6 +178,15 @@ export interface ModeWarning {
   message: string;
 }
 
+/**
+ * The config surprise warnings: mode × breaker-verdict combinations where
+ * the breaker can interrupt the human (the reviewer-untrusted escape
+ * valve) — legal but worth surfacing. Owned by the ladder module: the
+ * generic JSONC layer should not carry ladder semantics.
+ *
+ * @param config - The validated config.
+ * @returns Warning issues, if any (path is always "mode").
+ */
 export function modeWarnings(config: AiGuardConfig): ModeWarning[] {
   if (
     (config.mode === "strict" || config.mode === "permissive") &&

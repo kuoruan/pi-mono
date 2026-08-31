@@ -71,18 +71,22 @@ const GENERIC_ASSIGNMENT_PATTERN =
   /(password|passwd|passphrase|token|secret|api_key|apikey|credential|authorization|private_key|privatekey|aws_secret_access_key|aws_access_key_id)(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
 
 /**
+ * The format characters that can deceive a reader: zero-width joiner-ish
+ * forms (200B–200D, 2060, FEFF) plus the bidi directional controls
+ * (202A–202E overrides and 2066–2069 isolates) that visually reorder
+ * surrounding text — an RLO can make a command read as its reverse in a
+ * prompt, a notify line, or the audit log.
+ */
+const FORMAT_CHARACTERS = /[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]+/gu;
+
+/**
  * Remove invisible characters that can obscure prompt-injection payloads.
  *
  * @param text - Text from which to remove zero-width characters.
  * @returns The text without zero-width characters.
  */
 function stripZeroWidthChars(text: string): string {
-  // The set covers the format characters that can deceive a reader:
-  // zero-width joiner-ish forms (200B–200D, 2060, FEFF) plus the bidi
-  // directional controls (202A–202E overrides and 2066–2069 isolates)
-  // that visually reorder surrounding text — an RLO can make a command
-  // read as its reverse in a prompt, a notify line, or the audit log.
-  return text.replace(/[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]+/gu, "");
+  return text.replace(FORMAT_CHARACTERS, "");
 }
 
 /**
@@ -248,6 +252,12 @@ export function textFromContent(content: unknown): string {
 }
 
 /**
+ * Every regex metacharacter — globMatch escapes a pattern's literal segments through this class
+ * before joining.
+ */
+const REGEX_METACHARACTERS = /[.*+?^${}()|[\]\\]/g;
+
+/**
  * Glob match: `*` matches any character sequence, other chars match literally.
  *
  * @param pattern - The glob pattern (with `*` wildcards).
@@ -260,7 +270,7 @@ export function globMatch(pattern: string, text: string): boolean {
     "^" +
       pattern
         .split("*")
-        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .map((part) => part.replace(REGEX_METACHARACTERS, "\\$&"))
         .join(".*") +
       "$",
   );
