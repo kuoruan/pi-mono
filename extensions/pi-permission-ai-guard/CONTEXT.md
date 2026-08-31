@@ -108,7 +108,7 @@ The user-message portion of the stripped transcript. The only authorization sign
 - `getPermissionsService(sessionId)` — the session-keyed service locator
 - `permissions:ready` — fires at least once per session, may repeat
 
-All from `@gotgenes/pi-permission-system` (peer range `^27.1.1 || ^28.0.0` — the v27↔v28 API surface we consume is identical; v28 adds decision attribution upstream):
+All from `@gotgenes/pi-permission-system` (peer range `^27.1.1 || ^28.0.0 || ^29.0.0` — the API surface we consume is identical across the three majors; v28 adds decision attribution and v29 removes the process-root slot this extension never referenced):
 
 - **Registration** — the extension registers an `"ai-guard"` chain link via `service.registerAuthorizer` on the session's OWN permissions node: the service is fetched from the session-keyed locator, registered exactly once per session (whichever of session_start / permissions:ready comes first; ready repeats are no-ops), and released on session_shutdown.
 - **One instance per node** — this rests on the v27 host contract of one extension instance per session node (each node has its own ExtensionContext — upstream ADR 0012); nodes never share an instance.
