@@ -205,6 +205,22 @@ describe("reviewModel", () => {
     expect(result.deferKind).toBe("timeout");
   });
 
+  it("classifies error-resolved empty reply as call-failed, not empty-reply", async () => {
+    // Provider errors (rate limits, proxy/WAF blocks) resolve as non-thrown
+    // responses with stopReason "error" — infrastructure failure, not
+    // model behavior. The bucket must say so: "call-failed" joins the
+    // thrown path, and "empty-reply" stays reserved for genuine model
+    // silence (a completed reply that chose to say nothing).
+    const completeSimple = async (): Promise<AssistantMessage> => makeReply([], "error");
+    const ctx = makeContext(completeSimple);
+    const result = await reviewModel(ctx, "test", "test", 15000);
+    expect(result.verdict).toEqual({ kind: "defer" });
+    expect(result.deferKind).toBe("call-failed");
+    // A fast error-resolved reply still retried (transient errors deserve
+    // it) and stayed failed — attempts reflects both.
+    expect(result.attempts).toBe(2);
+  });
+
   it("defers on timeout", async () => {
     const ctx = makeContext(timeoutCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 50);

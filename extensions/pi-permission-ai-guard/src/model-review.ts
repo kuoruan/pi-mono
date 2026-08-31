@@ -360,12 +360,23 @@ function classifyEmptyReply(
   attempts?: number,
 ): ReviewOutcome {
   const stopReason = result.reply.stopReason ?? null;
-  const isTimeout = stopReason === "aborted";
+  // Taxonomy of the textless reply, from the stop reason alone:
+  // - "aborted"  → timeout (the abort signal fired; pi-ai resolves the
+  //   stream instead of throwing)
+  // - "error"    → call-failed (a provider error — rate limit, proxy/WAF
+  //   block — resolved as a response rather than thrown; same bucket as
+  //   the thrown path in executeCall, so "call-failed" reads as one
+  //   thing: infrastructure, not model behavior)
+  // - anything else → empty-reply (the model completed and chose to say
+  //   nothing — the genuine model-silence pathology the empty-reply
+  //   retry exists for)
+  const deferKind: ModelCallDeferKind =
+    stopReason === "aborted" ? "timeout" : stopReason === "error" ? "call-failed" : "empty-reply";
   const diagnostic = logEmptyDiagnostic(ctx, result, attempts);
 
   return {
     verdict: { kind: "defer" },
-    deferKind: isTimeout ? "timeout" : "empty-reply",
+    deferKind,
     latencyMs: result.latencyMs,
     ...(attempts === undefined ? {} : { attempts }),
     // Ride the outcome into the decision record: the review log itself
