@@ -183,12 +183,31 @@ function settingEntry(mode: string | null, parentId: string | null = null, id = 
  * @param sessionCtxOverrides - Extra makeSessionCtx overrides (sessionManager fixtures, ui).
  * @returns The mock pi and the captured pipeline deps.
  */
-function setupExtension(sessionCtxOverrides: Parameters<typeof makeSessionCtx>[0] = {}) {
+
+/**
+ * Construct the extension without firing session_start — the base for
+ * lifecycle tests that assert on construction state or drive events by
+ * hand. `setupExtension` (below) builds on this and fires session_start.
+ *
+ * @param service - The permissions service to install (the standard
+ *   fakeService by default; `null` for the no-service state).
+ * @param deps - Extra createAiGuardExtension deps (loadConfig, saveConfig).
+ * @returns The mock pi, the stub pipeline's captured calls, and its
+ *   createPipeline (for "not called" assertions).
+ */
+function installExtension(
+  service: unknown = { registerAuthorizer: mocks.registerAuthorizer },
+  deps: Record<string, unknown> = {},
+) {
   const pi = makeMockPi();
-  const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-  mocks.getPermissionsService.mockReturnValue(fakeService);
+  if (service !== null) mocks.getPermissionsService.mockReturnValue(service);
   const { createPipeline, calls } = makeStubPipeline();
-  createAiGuardExtension(pi as any, { createPipeline });
+  createAiGuardExtension(pi as any, { createPipeline, ...deps });
+  return { pi, calls, createPipeline };
+}
+
+function setupExtension(sessionCtxOverrides: Parameters<typeof makeSessionCtx>[0] = {}) {
+  const { pi, calls } = installExtension();
   pi.fire("session_start", {}, makeSessionCtx(sessionCtxOverrides));
   return { pi, calls };
 }
@@ -213,12 +232,7 @@ beforeEach(() => {
 
 describe("createAiGuardExtension lifecycle", () => {
   it("registers authorizer when session_start fires and permissions service is available", () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension();
 
     // Before session_start: no registration
     expect(mocks.registerAuthorizer).not.toHaveBeenCalled();
@@ -235,10 +249,7 @@ describe("createAiGuardExtension lifecycle", () => {
     // session_start fires before the permission service is published:
     // tryRegister finds no service and skips. permissions:ready then
     // fires and completes registration.
-    const pi = makeMockPi();
-    const { createPipeline } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension(null);
 
     // No service yet → session_start does not register.
     pi.fire("session_start", {}, makeSessionCtx());
@@ -252,11 +263,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("does not register when permissions service is unavailable", () => {
-    const pi = makeMockPi();
-    mocks.getPermissionsService.mockReturnValue(undefined);
-    const { createPipeline } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension(null);
     pi.fire("session_start", {}, makeSessionCtx());
     pi.fireEvent("permissions:ready");
 
@@ -271,12 +278,7 @@ describe("createAiGuardExtension lifecycle", () => {
     // reset, per-session breaker/cache are fresh (no leak), and runtime
     // writes after the re-dispatch land on the object the live pipeline
     // reads.
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline, calls } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, calls } = installExtension();
 
     pi.fire("session_start", {}, makeSessionCtx());
     expect(mocks.registerAuthorizer).toHaveBeenCalledTimes(1);
@@ -305,12 +307,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("permissions:ready after registration is a no-op (register once per session)", () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension();
 
     // session_start → register
     pi.fire("session_start", {}, makeSessionCtx());
@@ -328,15 +325,9 @@ describe("createAiGuardExtension lifecycle", () => {
     // touched by permissions:ready — v27 ready only completes a missing
     // registration; it must not rebuild the session (loadConfig would run
     // again, resetting breaker counts and cache entries).
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
-
     let loadCalls = 0;
     const config = configSchema.parse({ provider: "test", model: "test" });
-    createAiGuardExtension(pi as any, {
-      createPipeline,
+    const { pi } = installExtension(undefined, {
       loadConfig: () => {
         loadCalls++;
         return { config, issues: [] };
@@ -353,12 +344,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("permissions:ready is a no-op when not yet registered and no session", () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension();
 
     // permissions:ready before session_start → no session → no registration.
     pi.fireEvent("permissions:ready");
@@ -367,12 +353,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("session_shutdown disposes and resets all state", () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension();
 
     // session_start → register
     pi.fire("session_start", {}, makeSessionCtx());
@@ -390,35 +371,24 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("session_shutdown does not throw when no registration was active", () => {
-    const pi = makeMockPi();
-    const { createPipeline } = makeStubPipeline();
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension(null);
 
     expect(() => pi.fire("session_shutdown", {}, makeSessionCtx())).not.toThrow();
   });
 
   it("subscribes to permissions:ready channel on construction", () => {
-    const pi = makeMockPi();
-    const { createPipeline } = makeStubPipeline();
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension(null);
     expect(pi.events.on).toHaveBeenCalledWith("permissions:ready", expect.any(Function));
   });
 
   it("subscribes to session_start and session_shutdown on construction", () => {
-    const pi = makeMockPi();
-    const { createPipeline } = makeStubPipeline();
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension(null);
     expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
     expect(pi.on).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
   });
 
   it("hosts without a session id register once the ready payload carries one", () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension();
 
     // Host floor without getSessionId: the fallback self-read maps to null
     // → not registered yet.
@@ -436,12 +406,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("a throwing getSessionId is not fatal — the ready payload id still registers", () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi, createPipeline } = installExtension();
 
     expect(() =>
       pi.fire(
@@ -466,14 +431,8 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("config load failures are warned and block registration", () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    createAiGuardExtension(pi as any, {
-      createPipeline,
+    const { pi, createPipeline } = installExtension(undefined, {
       loadConfig: () => ({ config: undefined, issues: [{ path: "$", message: "bad config" }] }),
     });
 
@@ -495,13 +454,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("a repeated fail-safe session_start notifies again (each re-dispatch is a fresh absence)", () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
-
-    createAiGuardExtension(pi as any, {
-      createPipeline,
+    const { pi } = installExtension(undefined, {
       loadConfig: () => ({ config: undefined, issues: [] }),
     });
 
@@ -521,10 +474,6 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("passes cwd and trustedProject from session context to config loader", () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    const { createPipeline } = makeStubPipeline();
     const loadConfig = vi.fn<(env: ConfigEnv) => LoadConfigResult>(() => ({
       config: {
         provider: "test",
@@ -543,7 +492,7 @@ describe("createAiGuardExtension lifecycle", () => {
       issues: [],
     }));
 
-    createAiGuardExtension(pi as any, { createPipeline, loadConfig });
+    const { pi } = installExtension(undefined, { loadConfig });
 
     pi.fire("session_start", {}, makeSessionCtx({ cwd: "/my-project", trusted: false }));
 
@@ -551,15 +500,10 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("handles registerAuthorizer throwing without crashing", () => {
-    const pi = makeMockPi();
-    const { createPipeline } = makeStubPipeline();
     const throwingRegister = vi.fn<(name: string, authorize: unknown) => never>(() => {
       throw new Error("registration failed");
     });
-    const fakeService = { registerAuthorizer: throwingRegister };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi } = installExtension({ registerAuthorizer: throwingRegister });
 
     // session_start calls tryRegister which calls registerAuthorizer.
     // The throw must not propagate — it's caught and notified at error
@@ -573,16 +517,11 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("warns on 'already registered' (stale registration survived disposal)", () => {
-    const pi = makeMockPi();
-    const { createPipeline } = makeStubPipeline();
     // The exact message AuthorizerRegistry.register throws.
     const duplicateRegister = vi.fn<(name: string, authorize: unknown) => never>(() => {
       throw new Error("An authorizer is already registered for 'ai-guard'.");
     });
-    const fakeService = { registerAuthorizer: duplicateRegister };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi } = installExtension({ registerAuthorizer: duplicateRegister });
 
     const ctx = makeSessionCtx();
     pi.fire("session_start", {}, ctx);
@@ -597,16 +536,11 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("does not downgrade a similar-but-different 'already registered' error", () => {
-    const pi = makeMockPi();
-    const { createPipeline } = makeStubPipeline();
     // Different link name in the message — must NOT match the downgrade.
     const similarRegister = vi.fn<(name: string, authorize: unknown) => never>(() => {
       throw new Error("An authorizer is already registered for 'other-link'.");
     });
-    const fakeService = { registerAuthorizer: similarRegister };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-
-    createAiGuardExtension(pi as any, { createPipeline });
+    const { pi } = installExtension({ registerAuthorizer: similarRegister });
 
     const ctx = makeSessionCtx();
     pi.fire("session_start", {}, ctx);
@@ -662,10 +596,7 @@ describe("createAiGuardExtension — mode session persistence", () => {
 
   it("session_shutdown clears the footer status", () => {
     const setStatus = vi.fn<() => void>();
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
-    createAiGuardExtension(pi as any, { createPipeline: makeStubPipeline().createPipeline });
+    const { pi } = installExtension();
 
     pi.fire("session_start", {}, makeSessionCtx({ ui: { setStatus } }));
     expect(setStatus).toHaveBeenCalledWith("ai-guard", undefined);
@@ -714,9 +645,6 @@ describe("createAiGuardExtension — official-pattern follow-ups", () => {
 
 describe("createAiGuardExtension — save-to-config actions", () => {
   it("save-to-global snapshots the effective config through the wired save function", async () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
     const saveConfig = vi.fn<
       (
         target: ConfigLayerTarget,
@@ -728,9 +656,7 @@ describe("createAiGuardExtension — save-to-config actions", () => {
       }
     >((target) => ({ path: `/agent/config-${target}.json`, created: false, changed: true }));
     const config = configSchema.parse({ provider: "test", model: "test" });
-
-    createAiGuardExtension(pi as any, {
-      createPipeline: makeStubPipeline().createPipeline,
+    const { pi } = installExtension(undefined, {
       loadConfig: () => ({ config, issues: [] }),
       saveConfig,
     });
@@ -759,15 +685,10 @@ describe("createAiGuardExtension — save-to-config actions", () => {
   });
 
   it("production wiring: an untrusted session's save-to-project is refused by the real persist", async () => {
-    const pi = makeMockPi();
-    const fakeService = { registerAuthorizer: mocks.registerAuthorizer };
-    mocks.getPermissionsService.mockReturnValue(fakeService);
     const config = configSchema.parse({ provider: "test", model: "test" });
-
-    createAiGuardExtension(pi as any, {
-      createPipeline: makeStubPipeline().createPipeline,
+    // No saveConfig injected: the production persistConfigLayer runs.
+    const { pi } = installExtension(undefined, {
       loadConfig: () => ({ config, issues: [] }),
-      // No saveConfig injected: the production persistConfigLayer runs.
     });
 
     // Point the session cwd at a throwaway tmp dir: the guard must refuse

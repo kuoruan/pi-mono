@@ -1257,77 +1257,65 @@ describe("createReviewPipeline — mode edges", () => {
   });
 });
 
-describe("createReviewPipeline — strict denies pre-call machinery failures", () => {
-  it("denies with the classified reason when the model can't resolve in strict mode", async () => {
-    const { notifications, notify } = makeNotifySpy();
-    const authorize = createReviewPipeline(
-      makePipeline({
-        config: { ...baseConfig, mode: "strict" },
-        registry: defaultRegistry({ find: () => undefined }),
-        notify,
+describe("createReviewPipeline — pre-call machinery failures by mode", () => {
+  // One lane per failure kind: how the injected deps break the pre-call
+  // gates (model resolution, auth, transcript stripping).
+  const FAILURE_INJECTIONS = {
+    "model-unresolved": () => ({ registry: defaultRegistry({ find: () => undefined }) }),
+    "auth-failed": () => ({
+      registry: defaultRegistry({
+        getApiKeyAndHeaders: async () => ({ ok: false, error: "no key" }),
       }),
-    );
-    await expectVerdict(
-      authorize,
-      { value: "npm test" },
-      {
-        kind: "deny",
-        reason:
-          "reviewer could not complete the review (model-unresolved) — strict mode denied the request",
-      },
-    );
-    expect(notifications).toEqual([]);
-  });
-
-  it("denies with the classified reason when auth fails in strict mode", async () => {
-    const { notifications, notify } = makeNotifySpy();
-    const authorize = createReviewPipeline(
-      makePipeline({
-        config: { ...baseConfig, mode: "strict" },
-        registry: defaultRegistry({
-          getApiKeyAndHeaders: async () => ({ ok: false, error: "no key" }),
-        }),
-        notify,
-      }),
-    );
-    await expectVerdict(
-      authorize,
-      { value: "npm test" },
-      {
-        kind: "deny",
-        reason:
-          "reviewer could not complete the review (auth-failed) — strict mode denied the request",
-      },
-    );
-    expect(notifications).toEqual([]);
-  });
-
-  it("denies with the classified reason when transcript stripping throws in strict mode", async () => {
-    const { notifications, notify } = makeNotifySpy();
-    const authorize = createReviewPipeline(
-      makePipeline({
-        config: { ...baseConfig, mode: "strict" },
-        sessionManager: {
-          getSessionId: () => "s1",
-          buildContextEntries: () => {
-            throw new Error("boom");
-          },
+    }),
+    "transcript-error": () => ({
+      sessionManager: {
+        getSessionId: () => "s1",
+        buildContextEntries: () => {
+          throw new Error("boom");
         },
-        notify,
-      }),
-    );
-    await expectVerdict(
-      authorize,
-      { value: "npm test" },
-      {
-        kind: "deny",
-        reason:
-          "reviewer could not complete the review (transcript-error) — strict mode denied the request",
       },
-    );
-    expect(notifications).toEqual([]);
-  });
+    }),
+  } as const;
 
+  // strict and permissive are the fail-closed stops: the mode denies what
+  // would fall to the human, silently (the human asked for exactly this).
+  it.each(
+    (
+      [
+        { mode: "strict", failure: "model-unresolved" },
+        { mode: "strict", failure: "auth-failed" },
+        { mode: "strict", failure: "transcript-error" },
+        { mode: "permissive", failure: "model-unresolved" },
+      ] as const
+    ).map(({ mode, failure }) => ({
+      mode,
+      failure,
+      inject: FAILURE_INJECTIONS[failure],
+    })),
+  )(
+    "$mode denies a pre-call machinery failure ($failure) and stays silent",
+    async ({ mode, failure, inject }) => {
+      const { notifications, notify } = makeNotifySpy();
+      const authorize = createReviewPipeline(
+        makePipeline({
+          config: { ...baseConfig, mode },
+          notify,
+          ...inject(),
+        }),
+      );
+      await expectVerdict(
+        authorize,
+        { value: "npm test" },
+        {
+          kind: "deny",
+          reason: `reviewer could not complete the review (${failure}) — ${mode} mode denied the request`,
+        },
+      );
+      expect(notifications).toEqual([]);
+    },
+  );
+
+  // default and lenient defer the same failure to the human and say why.
   it.each(["default", "lenient"] as const)(
     "notifies when a pre-call machinery failure forces a defer in %s mode",
     async (mode) => {
@@ -1345,27 +1333,6 @@ describe("createReviewPipeline — strict denies pre-call machinery failures", (
       ]);
     },
   );
-
-  it("permissive denies a pre-call machinery failure and stays silent (fail-closed stop)", async () => {
-    const { notifications, notify } = makeNotifySpy();
-    const authorize = createReviewPipeline(
-      makePipeline({
-        config: { ...baseConfig, mode: "permissive" },
-        registry: defaultRegistry({ find: () => undefined }),
-        notify,
-      }),
-    );
-    await expectVerdict(
-      authorize,
-      { value: "npm test" },
-      {
-        kind: "deny",
-        reason:
-          "reviewer could not complete the review (model-unresolved) — permissive mode denied the request",
-      },
-    );
-    expect(notifications).toEqual([]);
-  });
 
   it("notifies when an in-call machinery failure (empty reply) forces a defer — every time", async () => {
     const { notifications, notify } = makeNotifySpy();

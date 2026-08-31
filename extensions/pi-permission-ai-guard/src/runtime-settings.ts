@@ -268,10 +268,7 @@ export class RuntimeSettings {
       return items.length > 0 ? items : null;
     },
     handler: async (args, ctx) => {
-      if (!this.#deps.session.session?.config) {
-        this.#deps.notify("no active session (config not loaded)", "warning");
-        return;
-      }
+      if (!this.#guardSessionConfig()) return;
       const tokens = args.trim().split(/\s+/).filter(Boolean);
 
       // Action verbs are surface-level, not setting values: they dispatch
@@ -367,10 +364,7 @@ export class RuntimeSettings {
       // The cycle anchors the MODE spec by name — specs is no longer a
       // one-element array, and "first" was a silent single-spec assumption.
       const spec = this.#spec("mode");
-      if (!spec || !this.#deps.session.session?.config) {
-        this.#deps.notify("no active session (config not loaded)", "warning");
-        return;
-      }
+      if (!spec || !this.#guardSessionConfig()) return;
       // The cycle visits the CASUAL subset only (cycleValues) — the
       // command and picker cover the full value set.
       const values = spec.cycleValues ?? spec.values;
@@ -491,13 +485,8 @@ export class RuntimeSettings {
    * @param target - Which layer to write (global / project).
    */
   #applyConfigSave(target: ConfigLayerTarget): void {
-    const sessionConfig = this.#deps.session.session?.config;
-    if (!sessionConfig) {
-      // Unreachable through the command (the handler guards up front) — a
-      // silent no-op here would hide a future caller's bug, so surface it.
-      this.#deps.notify("no active session (config not loaded)", "warning");
-      return;
-    }
+    const sessionConfig = this.#guardSessionConfig();
+    if (!sessionConfig) return;
     // The single projection point: defined overrides win over the loaded
     // snapshot — whatever key the overrides layer carries now or later.
     const result = this.#deps.saveConfig(
@@ -531,13 +520,7 @@ export class RuntimeSettings {
    * as "the reset didn't work").
    */
   #applyBreakerReset(): void {
-    const sessionConfig = this.#deps.session.session?.config;
-    if (!sessionConfig) {
-      // Unreachable through the command (the handler guards up front) — a
-      // silent no-op here would hide a future caller's bug, so surface it.
-      this.#deps.notify("no active session (config not loaded)", "warning");
-      return;
-    }
+    if (!this.#guardSessionConfig()) return;
     const tier = this.#deps.session.resetBreaker();
     const was =
       tier === "total"
@@ -549,6 +532,26 @@ export class RuntimeSettings {
       `circuit breaker cleared${was} — verdict cache and overrides untouched; reviews resume immediately`,
       "info",
     );
+  }
+
+  /**
+   * The shared no-session guard: stands guard at the settings entry
+   * points, WARNS the operator through notify when the session config is
+   * absent (the side effect is the contract — the name says guard, not
+   * read), and reports absence. Unreachable through the command (the
+   * handler guards up front) at the apply call sites — a silent no-op
+   * there would hide a future caller's bug, so the apply methods keep the
+   * guard through this method.
+   *
+   * @returns The live session config, or undefined with a warning sent.
+   */
+  #guardSessionConfig(): AiGuardConfig | undefined {
+    const config = this.#deps.session.session?.config;
+    if (!config) {
+      this.#deps.notify("no active session (config not loaded)", "warning");
+      return undefined;
+    }
+    return config;
   }
 
   /**
