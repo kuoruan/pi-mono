@@ -1,5 +1,22 @@
 # pi-permission-ai-guard
 
+## 0.8.2
+
+### Patch Changes
+
+- bd6baee: Harden the audit and sanitize surfaces found by the full-package review.
+
+  - The decision record's `target` field now goes through the same normalize-and-redact as every other untrusted field — a credential inside a reviewed command no longer lands unredacted in the always-on review log.
+  - The sanitizer strips bidi directional controls (U+202A–202E, U+2066–2069): an RLO can make a command visually read as its reverse in a prompt, notify line, or audit record.
+  - The registration-failure notice drops its structural colon (the TUI's own level prefix would double it); a skeleton test now scans every static notify literal so the colon-free shape cannot drift back.
+
+- 7916ed0: Classify provider errors resolved as non-thrown replies as `call-failed`.
+
+  pi-ai surfaces some provider failures (rate limits, proxy/WAF blocks) as responses with `stopReason: "error"` rather than thrown errors — these previously landed in the `empty-reply` bucket, mixing infrastructure failures with the genuine model-silence pathology the empty-reply retry targets. The retry still fires for fast error-resolved replies (transient errors deserve it); only the classification moves, so the decision log and the machinery-defer notice name the cause honestly — 405 storms now read as `call-failed`, and `empty-reply` counts only real model silence.
+
+- edf600b: Single-source the pre-call machinery-failure kinds: the four kind values (`model-unresolved`, `auth-failed`, `transcript-error`, `no-target`) live as one object constant in the new machinery-failure taxonomy module (which also owns the unified `MachineryFailureKind` union), every pipeline spelling site references the constant, `shortCircuit`'s reason is typed by the pre-call kind union, and `ask.ts` derives its `no-target` discriminant from the same value.
+- 0ef2bf3: Track pi-permission-system 29: the peer range accepts `^27.1.1 || ^28.0.0 || ^29.0.0`. v29 removes the deprecated process-root service slot — APIs this extension never referenced — so the breaking removal is a no-op; the suite passes under all three resolved majors. Development resolves `^29.0.0`.
+
 ## 0.8.1
 
 ### Patch Changes
