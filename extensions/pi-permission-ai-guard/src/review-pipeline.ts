@@ -224,7 +224,16 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const { surface, target, ask } = opened;
 
     const { requestId } = details;
-    const base = { requestId, surface, target };
+    // The record's target carries the raw command — sanitize it like every
+    // other untrusted field (prompt, rawReply, defer reason): a credential
+    // inside the command must not land unredacted in the always-on review
+    // log (normalizeAndRedactText: zero-width/control strip + secret
+    // redaction; see the twin call on the prompt side).
+    const base = {
+      requestId,
+      surface,
+      target: normalizeAndRedactText(target),
+    };
     const request: ReviewRequestContext = { ask, target };
 
     // Policy gate: defer when the deterministic engine already decided —

@@ -77,7 +77,12 @@ const GENERIC_ASSIGNMENT_PATTERN =
  * @returns The text without zero-width characters.
  */
 function stripZeroWidthChars(text: string): string {
-  return text.replace(/[\u200B-\u200D\u2060\uFEFF]+/gu, "");
+  // The set covers the format characters that can deceive a reader:
+  // zero-width joiner-ish forms (200B–200D, 2060, FEFF) plus the bidi
+  // directional controls (202A–202E overrides and 2066–2069 isolates)
+  // that visually reorder surrounding text — an RLO can make a command
+  // read as its reverse in a prompt, a notify line, or the audit log.
+  return text.replace(/[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]+/gu, "");
 }
 
 /**
@@ -129,8 +134,9 @@ const STRIP_CONTROL_PATTERN =
 /**
  * Sanitize untrusted text before embedding it in prompts.
  *
- * Strips zero-width characters (ZWSP, ZWNJ, ZWJ, WJ, BOM) that bypass
- * `\s` matching and can obscure injection payloads, then collapses all
+ * Strips zero-width and bidi-directional characters (ZWSP, ZWNJ, ZWJ,
+ * WJ, BOM, RLO/PDF, LRI/PDI isolates) that bypass `\s` matching, obscure
+ * injection payloads, or visually reorder text, then collapses all
  * whitespace to single spaces and trims — preventing section header
  * injection via newlines.
  *

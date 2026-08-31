@@ -424,7 +424,7 @@ export class SessionLifecycle {
         return;
       }
       this.feedbackNotify(
-        `failed to register the reviewer — running with no auto-review: ${e instanceof Error ? e.message : String(e)}`,
+        `failed to register the reviewer — running with no auto-review (${e instanceof Error ? e.message : String(e)})`,
         "error",
       );
     }

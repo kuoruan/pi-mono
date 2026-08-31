@@ -38,6 +38,17 @@ describe("normalizeText", () => {
     expect(normalizeText("\uFEFFhello")).toBe("hello");
   });
 
+  it("strips bidi directional overrides (U+202A-202E)", () => {
+    // An RLO can make a command read as its reverse — the strip keeps
+    // prompts, notify lines, and audit records visually honest.
+    expect(normalizeText("rm\u202E -rf /tmp")).toBe("rm -rf /tmp");
+    expect(normalizeText("a\u202Db")).toBe("ab");
+  });
+
+  it("strips bidi isolation controls (U+2066-2069)", () => {
+    expect(normalizeText("a\u2066b\u2069c")).toBe("abc");
+  });
+
   it("strips consecutive zero-width chars", () => {
     expect(normalizeText("a\u200B\u200C\u200Db")).toBe("ab");
   });

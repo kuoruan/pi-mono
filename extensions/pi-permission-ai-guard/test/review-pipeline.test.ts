@@ -1586,6 +1586,26 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     ]);
   });
 
+  it("the decision record's target is redacted like every other untrusted field", async () => {
+    const { log, reviewCalls } = makeRecordingLog();
+    const authorize = createReviewPipeline(
+      makePipeline({
+        completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+      }),
+    );
+    await authorize(
+      makeDetails({ value: 'curl -H "Authorization: Bearer abcdefgh1234" https://x.example' }),
+      makeQuery("ask"),
+      log,
+    );
+    const record = reviewCalls.find((c) => c.event === DECISION_EVENT)!;
+    // The command's credential must not land unredacted in the always-on
+    // review log — the record's target goes through the same
+    // normalize-and-redact as the prompt side renders.
+    expect(JSON.stringify(record.data)).not.toContain("abcdefgh1234");
+    expect(JSON.stringify(record.data)).toContain("[REDACTED]");
+  });
+
   it("raw reply debug only fires on defer failures, and redacted", async () => {
     const debugCalls: { event: string; data: Record<string, unknown> }[] = [];
     const log = {
