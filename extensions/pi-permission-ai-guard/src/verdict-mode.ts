@@ -22,6 +22,7 @@
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import type { Mode } from "./config-schema.ts";
+import type { MachineryFailureKind } from "./machinery-kinds.ts";
 import { MODE_TABLE, type ModeLanes } from "./mode-table.ts";
 import type { ModelCallDeferKind, RiskLevel, VerdictLean, VerdictOrigin } from "./model-verdict.ts";
 import { truncateMiddle } from "./utils.ts";
@@ -45,14 +46,6 @@ export interface ModelDeferInfo {
    */
   lean?: VerdictLean;
 }
-
-/** A reviewer machinery failure, wherever it happens in the pipeline. */
-export type MachineryFailureKind =
-  | ModelCallDeferKind
-  | "model-unresolved"
-  | "auth-failed"
-  | "transcript-error"
-  | "no-target";
 
 /**
  * The two deny tiers the ladder splits a deny into — hard (terminal in

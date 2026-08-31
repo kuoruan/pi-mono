@@ -18,11 +18,14 @@ import { describe, expect, it } from "vitest";
 import { configSchema } from "#src/config-schema.ts";
 import { effectiveConfig, effectiveOverride } from "#src/session-overrides.ts";
 
-/** A minimal valid config — the schema's own defaults define the base. */
+/**
+ * A minimal valid config — the schema's own defaults define the base.
+ *
+ * @returns A parsed, valid AiGuardConfig.
+ */
 function makeConfig() {
   return configSchema.parse({ provider: "test", model: "test" });
 }
-
 describe("effectiveOverride — the per-field rule", () => {
   it("a defined override beats the config value", () => {
     const config = makeConfig();

@@ -171,20 +171,6 @@ function settingEntry(mode: string | null, parentId: string | null = null, id = 
 }
 
 /**
- * UI context mock for command/shortcut handlers (notify, setStatus, select).
- *
- * @returns A mock `ctx.ui` with spies for the three methods the handlers use.
- */
-/**
- * Create the extension with a stub pipeline, fire session_start, and return
- * the mock pi + the captured pipeline deps — the shared setup for the
- * settings/persistence/tree follow-up describes.
- *
- * @param sessionCtxOverrides - Extra makeSessionCtx overrides (sessionManager fixtures, ui).
- * @returns The mock pi and the captured pipeline deps.
- */
-
-/**
  * Construct the extension without firing session_start — the base for
  * lifecycle tests that assert on construction state or drive events by
  * hand. `setupExtension` (below) builds on this and fires session_start.
@@ -206,12 +192,25 @@ function installExtension(
   return { pi, calls, createPipeline };
 }
 
+/**
+ * Create the extension with a stub pipeline, fire session_start, and return
+ * the mock pi + the captured pipeline deps — the shared setup for the
+ * settings/persistence/tree follow-up describes.
+ *
+ * @param sessionCtxOverrides - Extra makeSessionCtx overrides (sessionManager fixtures, ui).
+ * @returns The mock pi and the captured pipeline deps.
+ */
 function setupExtension(sessionCtxOverrides: Parameters<typeof makeSessionCtx>[0] = {}) {
   const { pi, calls } = installExtension();
   pi.fire("session_start", {}, makeSessionCtx(sessionCtxOverrides));
   return { pi, calls };
 }
 
+/**
+ * UI context mock for command/shortcut handlers (notify, setStatus, select).
+ *
+ * @returns A mock `ctx.ui` with spies for the three methods the handlers use.
+ */
 function makeUiCtx() {
   return {
     hasUI: true,

@@ -30,6 +30,7 @@ import type {
 
 import type { AiGuardConfig } from "./config-schema.ts";
 import { warn } from "./logger.ts";
+import { PRE_CALL_MACHINERY_KINDS } from "./machinery-kinds.ts";
 import { globMatch } from "./utils.ts";
 
 /**
@@ -57,7 +58,8 @@ export interface SurfaceUnmatchedReason {
 
 /** The surface matched but no review target could be extracted (logged defer). */
 export interface NoTargetReason {
-  reason: "no-target";
+  /** The no-target machinery kind — derived from the single-sourced value. */
+  reason: typeof PRE_CALL_MACHINERY_KINDS.noTarget;
   /** The resolved surface, so the caller need not recompute it for logging. */
   surface: string | undefined;
 }
@@ -367,7 +369,7 @@ export function resolveReviewTarget(
   if (!matchSurface(config.surfaces, surface)) return { reason: "surface-unmatched" };
 
   const target = extractTarget(details);
-  if (!target) return { reason: "no-target", surface };
+  if (!target) return { reason: PRE_CALL_MACHINERY_KINDS.noTarget, surface };
 
   return { surface, target };
 }

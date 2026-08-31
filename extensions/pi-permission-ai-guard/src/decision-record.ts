@@ -28,6 +28,7 @@ import type {
 } from "@gotgenes/pi-permission-system";
 
 import type { BreakerVerdict } from "./config-schema.ts";
+import { PRE_CALL_MACHINERY_KINDS, type PreCallMachineryKind } from "./machinery-kinds.ts";
 import type { ModelCallDeferKind, ReviewOutcome } from "./model-verdict.ts";
 import { normalizeAndRedactText } from "./utils.ts";
 
@@ -73,8 +74,8 @@ export interface ShortCircuitRecord {
   requestId: string;
   /** The tool surface, or undefined if not yet resolved. */
   surface: string | undefined;
-  /** Why the ask short-circuited (e.g. "no-target", "transcript-error"). */
-  reason: string;
+  /** Why the ask short-circuited — a pre-call machinery kind (single-sourced). */
+  reason: PreCallMachineryKind;
   /** Extra context (e.g. the transcript error message). */
   [k: string]: unknown;
 }
@@ -223,11 +224,11 @@ export const DecisionRecord = {
   modelUnresolved(base: DecisionBase, modelId: string): DecisionRecordEntry {
     return {
       ...base,
-      gate: "model-unresolved",
+      gate: PRE_CALL_MACHINERY_KINDS.modelUnresolved,
       modelCalled: false,
       verdict: "defer",
       modelId,
-      deferKind: "model-unresolved",
+      deferKind: PRE_CALL_MACHINERY_KINDS.modelUnresolved,
     };
   },
 
@@ -246,10 +247,10 @@ export const DecisionRecord = {
       requestId,
       surface,
       target: undefined,
-      gate: "no-target",
+      gate: PRE_CALL_MACHINERY_KINDS.noTarget,
       modelCalled: false,
       verdict: "defer",
-      deferKind: "no-target",
+      deferKind: PRE_CALL_MACHINERY_KINDS.noTarget,
     };
   },
 
@@ -262,10 +263,10 @@ export const DecisionRecord = {
   transcriptError(base: DecisionBase): DecisionRecordEntry {
     return {
       ...base,
-      gate: "transcript-error",
+      gate: PRE_CALL_MACHINERY_KINDS.transcriptError,
       modelCalled: false,
       verdict: "defer",
-      deferKind: "transcript-error",
+      deferKind: PRE_CALL_MACHINERY_KINDS.transcriptError,
     };
   },
 
@@ -280,11 +281,11 @@ export const DecisionRecord = {
   authFailed(base: DecisionBase, modelId: string, error: string): DecisionRecordEntry {
     return {
       ...base,
-      gate: "auth-failed",
+      gate: PRE_CALL_MACHINERY_KINDS.authFailed,
       modelCalled: false,
       verdict: "defer",
       modelId,
-      deferKind: "auth-failed",
+      deferKind: PRE_CALL_MACHINERY_KINDS.authFailed,
       error,
     };
   },
@@ -399,14 +400,14 @@ export function mapped(
  *
  * @param requestId - The ask's request id.
  * @param surface - The tool surface, or undefined if not yet resolved.
- * @param reason - Why the ask short-circuited.
+ * @param reason - Why the ask short-circuited (a pre-call machinery kind).
  * @param extra - Additional context fields to merge into the record.
  * @returns A short-circuit debug record.
  */
 export function shortCircuit(
   requestId: string,
   surface: string | undefined,
-  reason: string,
+  reason: PreCallMachineryKind,
   extra?: Record<string, unknown>,
 ): ShortCircuitRecord {
   return { requestId, surface, reason, ...extra };

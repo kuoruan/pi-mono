@@ -27,6 +27,11 @@ import {
   shortCircuit,
 } from "./decision-record.ts";
 import {
+  type MachineryFailureKind,
+  PRE_CALL_MACHINERY_KINDS,
+  type PreCallMachineryKind,
+} from "./machinery-kinds.ts";
+import {
   type CompleteSimpleFn,
   type ModelCallContext,
   type ModelRegistryLike,
@@ -42,7 +47,6 @@ import { normalizeAndRedactText, shortHash, truncateMiddle } from "./utils.ts";
 import type { VerdictCache } from "./verdict-cache.ts";
 import {
   applyVerdictMode,
-  type MachineryFailureKind,
   machineryDenyReason,
   NOTIFY_REASON_CEILING,
   machineryTarget,
@@ -114,7 +118,8 @@ function machineryDeferNotice(kind: MachineryFailureKind): string {
  * review stream — live here instead of being hand-copied per gate.
  *
  * @param mode - The effective mode (the machinery lane's only input).
- * @param kind - The classified machinery failure.
+ * @param kind - The classified machinery failure (pre-call: the review
+ *   never opened).
  * @param record - The gate's decision record (verdict "defer" — the
  *   review never opened).
  * @param breaker - The session circuit breaker (recoverable-tier credit).
@@ -124,7 +129,7 @@ function machineryDeferNotice(kind: MachineryFailureKind): string {
  */
 function releaseMachineryGate(
   mode: Mode,
-  kind: MachineryFailureKind,
+  kind: PreCallMachineryKind,
   record: DecisionRecordEntry,
   breaker: CircuitBreaker,
   log: AuthorizerLog,
@@ -203,16 +208,16 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // REVIEW FAILED to open, so it follows the machinery lane.
     const opened = openAsk(details, config, deps.cwd, driftState);
     if ("reason" in opened) {
-      if (opened.reason === "no-target") {
+      if (opened.reason === PRE_CALL_MACHINERY_KINDS.noTarget) {
         log.debug(
           SHORT_CIRCUIT_EVENT,
-          shortCircuit(details.requestId, opened.surface, "no-target"),
+          shortCircuit(details.requestId, opened.surface, PRE_CALL_MACHINERY_KINDS.noTarget),
         );
         // The review failed to open — a machinery-lane gate (a permanent
         // property of the ask's shape, not a transient reviewer failure).
         return releaseMachineryGate(
           mode,
-          "no-target",
+          PRE_CALL_MACHINERY_KINDS.noTarget,
           DecisionRecord.noTarget(details.requestId, opened.surface),
           deps.circuitBreaker,
           log,
@@ -315,7 +320,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       const record = DecisionRecord.modelUnresolved(base, modelId);
       return releaseMachineryGate(
         mode,
-        "model-unresolved",
+        PRE_CALL_MACHINERY_KINDS.modelUnresolved,
         record,
         deps.circuitBreaker,
         log,
@@ -334,14 +339,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     } catch (e) {
       log.debug(
         SHORT_CIRCUIT_EVENT,
-        shortCircuit(requestId, surface, "transcript-error", {
+        shortCircuit(requestId, surface, PRE_CALL_MACHINERY_KINDS.transcriptError, {
           error: normalizeAndRedactText(e instanceof Error ? e.message : String(e)),
         }),
       );
       const record = DecisionRecord.transcriptError(base);
       return releaseMachineryGate(
         mode,
-        "transcript-error",
+        PRE_CALL_MACHINERY_KINDS.transcriptError,
         record,
         deps.circuitBreaker,
         log,
@@ -388,7 +393,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       const record = DecisionRecord.authFailed(base, modelId, normalizeAndRedactText(auth.error));
       return releaseMachineryGate(
         mode,
-        "auth-failed",
+        PRE_CALL_MACHINERY_KINDS.authFailed,
         record,
         deps.circuitBreaker,
         log,
