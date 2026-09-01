@@ -214,6 +214,61 @@ export function machineryDenyReason(
 }
 
 /**
+ * Which kind of deny a terminal reason comes from — selects the agent
+ * instruction variant.
+ *
+ * - `"content"`: the review COMPLETED and judged the request itself dangerous (a model deny, or
+ *   `strict`'s mapping of the reviewer's own uncertain defer). The agent's correct move is to stop
+ *   pursuing this action and let the user re-request it explicitly.
+ * - `"machinery"`: the review FAILED (a reviewer-machinery denial — e.g. an unresolved model, auth
+ *   failure, unparseable reply, timeout, or the breaker; the full taxonomy lives in
+ *   machinery-kinds). The request was never judged; retrying later is legitimate.
+ */
+export type DenyInstructionSource = "content" | "machinery";
+
+/** The behavioral instruction for a content deny (the request was judged). */
+const CONTENT_DENY_INSTRUCTION =
+  "Automatic review denied this, not the user. Do not rephrase, retry, or work around it; if the user wants it, they should ask explicitly.";
+
+/** The behavioral instruction for a machinery deny (the review failed). */
+const MACHINERY_DENY_INSTRUCTION =
+  "Automatic review failed (the reviewer, not the request). Retry later, or ask the user to request it explicitly if urgent.";
+
+/**
+ * Append the agent-facing behavioral instruction to a terminal deny reason.
+ *
+ * A deny that terminates the chain is the last word the agent hears; the
+ * teaching reason alone says WHAT was dangerous but not what to do about
+ * it. The instruction names the denier (not a human click — the agent must
+ * not attribute the refusal to the user and argue around it) and the
+ * legitimate path (stop pursuing / retry later, user re-requests
+ * explicitly). Two variants, because the agent's correct move differs:
+ * content denies must not be retried or rephrased; machinery denies were
+ * never judged and may legitimately be retried later.
+ *
+ * Applies ONLY to the returned verdict's reason — the audit record's
+ * `emittedReason` and the operator notify lines keep the un-instructed
+ * mapping reason (the instruction is agent-channel copy, not an audit
+ * fact, and a line addressed to the agent would read as noise to the
+ * operator).
+ *
+ * @param reason - The mapped deny reason (the teaching reason), or
+ *   undefined when the deny carries none (the instruction still stands
+ *   alone — the agent needs the behavioral guidance regardless).
+ * @param source - Which kind of deny produced the reason.
+ * @returns The reason with the instruction appended (or the instruction
+ *   alone when no reason was present).
+ */
+export function withAgentInstruction(
+  reason: string | undefined,
+  source: DenyInstructionSource,
+): string {
+  const instruction =
+    source === "machinery" ? MACHINERY_DENY_INSTRUCTION : CONTENT_DENY_INSTRUCTION;
+  return reason ? `${reason} — ${instruction}` : instruction;
+}
+
+/**
  * Defensive ceiling for model reasons in notify copies. The prompt
  * anchors reasons at ~150 characters (a concise sentence); the ceiling is
  * the hard display bound when a model runs long — 200 keeps the head+tail

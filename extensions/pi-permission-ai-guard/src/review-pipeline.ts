@@ -51,6 +51,7 @@ import {
   NOTIFY_REASON_CEILING,
   machineryTarget,
   resolveMapping,
+  withAgentInstruction,
 } from "./verdict-mode.ts";
 
 /**
@@ -145,7 +146,10 @@ function releaseMachineryGate(
   breaker.recordDenyEquivalent();
   const reason = machineryDenyReason(kind, mode);
   log.review(DECISION_EVENT, mapped(record, mode, "deny", reason));
-  return { kind: "deny", reason };
+  // The audit annotation keeps the un-instructed reason; the returned
+  // verdict carries the agent instruction (a machinery denial was never
+  // judged — retrying later is legitimate).
+  return { kind: "deny", reason: withAgentInstruction(reason, "machinery") };
 }
 
 /**
@@ -299,6 +303,16 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
           "error",
         );
       }
+      // A breaker deny is a machinery denial (the reviewer is untrusted,
+      // the request was never judged) — the returned reason carries the
+      // machinery instruction; the audit record above keeps the bare
+      // BREAKER_DENY_REASON.
+      if (verdict.kind === "deny") {
+        return {
+          kind: "deny",
+          reason: withAgentInstruction(verdict.reason, "machinery"),
+        };
+      }
       return verdict;
     }
 
@@ -379,6 +393,16 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // debug stream only (see the log-stream doctrine in
       // decision-record.ts).
       log.debug(DECISION_EVENT, record);
+      // A cached deny replays the model's own reason (defers are never
+      // stored, so a mapping-synthesized machinery reason is unreachable
+      // here) — the content instruction, appended exactly once (the cache
+      // holds the un-instructed original; each hit re-appends).
+      if (emitted.kind === "deny") {
+        return {
+          kind: "deny",
+          reason: withAgentInstruction(emitted.reason, "content"),
+        };
+      }
       return emitted;
     }
     // Cache miss: record the miss reason for telemetry.
@@ -492,6 +516,23 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       );
     }
 
+    // The returned deny carries the agent instruction; the audit record
+    // (annotated above) and the cache (stored above) keep the un-instructed
+    // reason. Source discrimination: a machinery-defer mapped to deny by
+    // strict/permissive carries a mapping-synthesized machinery reason
+    // (the review failed — retry-later copy); a model deny, or strict's
+    // mapping of the reviewer's own uncertain model-defer, carries content
+    // copy (the review completed — the agent must stop pursuing).
+    if (emitted.kind === "deny") {
+      const source =
+        reviewOutcome.verdict.kind === "defer" && reviewOutcome.deferKind !== "model-defer"
+          ? "machinery"
+          : "content";
+      return {
+        kind: "deny",
+        reason: withAgentInstruction(emitted.reason, source),
+      };
+    }
     return emitted;
   };
 }

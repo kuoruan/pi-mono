@@ -22,7 +22,7 @@ import {
   createReviewPipeline,
 } from "#src/review-pipeline.ts";
 import { VerdictCache } from "#src/verdict-cache.ts";
-import { uncertainDenyReason } from "#src/verdict-mode.ts";
+import { uncertainDenyReason, withAgentInstruction } from "#src/verdict-mode.ts";
 
 /**
  * Minimal bash PromptPayload for a fixture (pi-permission-system 26.0+).
@@ -200,19 +200,36 @@ function makeNotifySpy(): {
  * Authorize a default ask against a policy-ask query and assert the
  * emitted verdict — the common three-liner collapsed to one call.
  *
+ * A `deny` expectation asserts the reason as `baseReason — instruction`:
+ * terminal denies carry the agent-facing instruction appended by the
+ * pipeline (the audit/notify copies keep the bare reason).
+ *
  * @param authorize - The pipeline's authorize function.
  * @param details - `makeDetails` overrides for the ask.
- * @param expected - The expected emitted verdict.
+ * @param expected - The expected emitted verdict (`reason` on a deny is
+ *   the base reason the instruction is appended to).
  * @param state - The policy state the query reports (default "ask").
+ * @param denySource - The expected instruction variant for a deny
+ *   (default `"content"`; `"machinery"` for reviewer-failure denies).
  */
 async function expectVerdict(
   authorize: ReturnType<typeof createReviewPipeline>,
   details: Record<string, unknown>,
   expected: { kind: string; reason?: string },
   state: PermissionCheckResult["state"] = "ask",
+  denySource: "content" | "machinery" = "content",
 ): Promise<void> {
   const verdict = await authorize(makeDetails(details), makeQuery(state), noLog);
-  expect(verdict).toEqual(expected);
+  // A deny's expectation is the base reason with the agent instruction
+  // appended (terminal denies carry it); anything else asserts as-is.
+  const expectedVerdict =
+    expected.kind === "deny"
+      ? {
+          kind: "deny",
+          reason: withAgentInstruction(expected.reason, denySource),
+        }
+      : expected;
+  expect(verdict).toEqual(expectedVerdict);
 }
 
 /**
@@ -400,7 +417,10 @@ describe("createReviewPipeline — verdicts", () => {
       }),
     );
     const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "deny", reason: "unsafe" });
+    expect(verdict).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction("unsafe", "content"),
+    });
   });
 
   it("persists deny reason in the ai_guard.decision audit record", async () => {
@@ -644,7 +664,10 @@ describe("createReviewPipeline — mode", () => {
     );
     const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), log);
     // The defer's reason becomes the deny's teaching reason — not a silent deny.
-    expect(verdict).toEqual({ kind: "deny", reason: "needs the target path" });
+    expect(verdict).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction("needs the target path", "content"),
+    });
     // The deny is mode-mapped (a synthesized teaching reason), not the
     // model's own deny — deny notifies cover only model denies, so this
     // stays silent (the ask did not hold or escalate; nothing reached
@@ -668,7 +691,10 @@ describe("createReviewPipeline — mode", () => {
       }),
     );
     const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "deny", reason: uncertainDenyReason("strict") });
+    expect(verdict).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction(uncertainDenyReason("strict"), "content"),
+    });
   });
 
   it("strict denies machinery failures — nothing falls to the user", async () => {
@@ -688,6 +714,8 @@ describe("createReviewPipeline — mode", () => {
         kind: "deny",
         reason: "reviewer could not complete the review (no-json) — strict mode denied the request",
       },
+      "ask",
+      "machinery",
     );
     // A deny needs no human interruption — no notify.
     expect(notifications).toEqual([]);
@@ -705,7 +733,10 @@ describe("createReviewPipeline — mode", () => {
       }),
     );
     const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "deny", reason: "unsafe" });
+    expect(verdict).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction("unsafe", "content"),
+    });
     expect(notifications).toEqual([
       ["reviewer denied this request (risk high) — unsafe", "warning"],
     ]);
@@ -732,7 +763,10 @@ describe("createReviewPipeline — mode", () => {
 
     // 3 consecutive model denies (even though all mapped to defers) trip the breaker.
     const fourth = await authorize(makeDetails({ value: "cmd-3" }), makeQuery("ask"), noLog);
-    expect(fourth).toEqual({ kind: "deny", reason: BREAKER_DENY_REASON });
+    expect(fourth).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction(BREAKER_DENY_REASON, "machinery"),
+    });
     expect(modelCalls).toBe(3); // breaker short-circuited without a model call
   });
 });
@@ -792,7 +826,10 @@ describe("createReviewPipeline — circuit breaker", () => {
     await authorize(makeDetails({ value: "rm -rf x" }), makeQuery("ask"), noLog);
     await authorize(makeDetails({ value: "rm -rf x" }), makeQuery("ask"), noLog);
     const verdict = await authorize(makeDetails({ value: "rm -rf x" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "deny", reason: expect.any(String) });
+    expect(verdict).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction(BREAKER_DENY_REASON, "machinery"),
+    });
     expect(modelCalled).toBe(3); // the 4th was short-circuited
   });
 
@@ -905,7 +942,10 @@ describe("createReviewPipeline — circuit breaker", () => {
       }),
     );
     const verdict = await authorize(makeDetails({ value: "rm" }), makeQuery("ask"), noLog);
-    expect(verdict).toEqual({ kind: "deny", reason: BREAKER_DENY_REASON });
+    expect(verdict).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction(BREAKER_DENY_REASON, "machinery"),
+    });
     expect(notifications).toHaveLength(0);
   });
 });
@@ -1224,14 +1264,20 @@ describe("createReviewPipeline — mode edges", () => {
       }),
     );
     const first = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
-    expect(first).toEqual({ kind: "deny", reason: "unsafe" });
+    expect(first).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction("unsafe", "content"),
+    });
 
     // Cache hit: the stored model deny re-maps through auto (identity for
     // denies) without a model call — and both passes notify: v27 has no
     // dialog for denials, so the notify line is the operator's only copy
     // (repeats do not collapse).
     const second = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
-    expect(second).toEqual({ kind: "deny", reason: "unsafe" });
+    expect(second).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction("unsafe", "content"),
+    });
     expect(modelCalls).toBe(1);
     expect(notifications).toEqual([
       ["reviewer denied this request (risk high) — unsafe", "warning"],
@@ -1310,6 +1356,8 @@ describe("createReviewPipeline — pre-call machinery failures by mode", () => {
           kind: "deny",
           reason: `reviewer could not complete the review (${failure}) — ${mode} mode denied the request`,
         },
+        "ask",
+        "machinery",
       );
       expect(notifications).toEqual([]);
     },
@@ -1366,6 +1414,8 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
         reason:
           "reviewer could not complete the review (no-target) — strict mode denied the request",
       },
+      "ask",
+      "machinery",
     );
   });
 
@@ -1787,6 +1837,8 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
         reason:
           "reviewer could not complete the review (no-json) — permissive mode denied the request",
       },
+      "ask",
+      "machinery",
     );
     expect(notifications).toEqual([]);
     // The machinery deny counted into the recoverable consecutive tier.
@@ -1918,7 +1970,10 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
     );
     await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
     const second = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
-    expect(second).toEqual({ kind: "deny", reason: "unsafe" });
+    expect(second).toEqual({
+      kind: "deny",
+      reason: withAgentInstruction("unsafe", "content"),
+    });
     expect(modelCalls).toBe(1);
     // Missing riskLevel is hard: the fresh ask and the cached replay both
     // name the block (repeats do not collapse).
