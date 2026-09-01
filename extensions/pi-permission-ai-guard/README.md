@@ -8,6 +8,8 @@ It is a consumer of [`@gotgenes/pi-permission-system`](https://github.com/gotgen
 
 Each model review call sends **only stripped context** (user messages + tool call names), not the full transcript. This substantially reduces token consumption by discarding assistant text and tool results — the token-heaviest parts of a transcript — with minimal impact on verdict quality.
 
+Two structural choices distinguish the reviewer from a plain classifier: the verdict **lean never feeds back** into the model's own context (each review is stateless — an agent cannot anchor the reviewer toward its own history), and both ladder extremes are **lean-inert** (`strict` denies every non-allow, `permissive` passes everything short of a hard deny or a reviewer failure — the lean only routes the middle rungs). These are deliberate mitigations for the classifier drift documented in Anthropic's [auto-mode writeup](https://www.anthropic.com/engineering/claude-code-auto-mode), where consent-shaped evidence in history was the top failure mode — structure instead of prompt-tuning.
+
 ## How it works
 
 The reviewer runs a short, cheap decision on each ask and defers at the first miss:
