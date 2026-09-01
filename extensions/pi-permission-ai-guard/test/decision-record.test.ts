@@ -34,13 +34,19 @@ const allGates: Array<{ name: string; record: DecisionRecordEntry }> = [
   { name: "cacheHit", record: DecisionRecord.cacheHit(base, { kind: "allow" }) },
   {
     name: "model",
-    record: DecisionRecord.model(base, "anthropic/test", 3, {
-      verdict: { kind: "deny", reason: "unsafe" },
-      latencyMs: 42,
-      deferKind: undefined,
-      riskLevel: "high",
-      rawReply: '{"verdict":"deny"}',
-    }),
+    record: DecisionRecord.model(
+      base,
+      "anthropic/test",
+      3,
+      {
+        verdict: { kind: "deny", reason: "unsafe" },
+        latencyMs: 42,
+        deferKind: undefined,
+        riskLevel: "high",
+        rawReply: '{"verdict":"deny"}',
+      },
+      "ctxh1",
+    ),
   },
 ];
 
@@ -115,100 +121,154 @@ describe("DecisionRecord — per-gate shape", () => {
 
   it("model attaches rawReply for any defer path that has one", () => {
     // no-json → rawReply attached
-    const noJson = DecisionRecord.model(base, "anthropic/haiku", 2, {
-      verdict: { kind: "defer" },
-      latencyMs: 10,
-      deferKind: "no-json",
-      rawReply: "garbage",
-    });
+    const noJson = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      {
+        verdict: { kind: "defer" },
+        latencyMs: 10,
+        deferKind: "no-json",
+        rawReply: "garbage",
+      },
+      "ctxh1",
+    );
     expect(noJson.gate).toBe("model");
     expect(noJson.modelCalled).toBe(true);
     expect(noJson.rawReply).toBe("garbage");
 
     // invalid-verdict-value (JSON parsed but verdict illegal) → rawReply attached
-    const invalid = DecisionRecord.model(base, "anthropic/haiku", 2, {
-      verdict: { kind: "defer" },
-      latencyMs: 10,
-      deferKind: "invalid-verdict-value",
-      rawReply: '{"verdict":"maybe"}',
-    });
+    const invalid = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      {
+        verdict: { kind: "defer" },
+        latencyMs: 10,
+        deferKind: "invalid-verdict-value",
+        rawReply: '{"verdict":"maybe"}',
+      },
+      "ctxh1",
+    );
     expect(invalid.rawReply).toBe('{"verdict":"maybe"}');
 
     // clean verdict → rawReply is a sentinel (NOT null, to distinguish from
     // the throw-based absence) — the parsed JSON is already in structured fields
-    const clean = DecisionRecord.model(base, "anthropic/haiku", 2, {
-      verdict: { kind: "allow" },
-      latencyMs: 10,
-      rawReply: '{"verdict":"allow"}',
-    });
+    const clean = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      {
+        verdict: { kind: "allow" },
+        latencyMs: 10,
+        rawReply: '{"verdict":"allow"}',
+      },
+      "ctxh1",
+    );
     expect(clean.rawReply).toBe("(clean verdict, rawReply omitted)");
     expect(clean.riskLevel).toBe(null);
     expect(clean.deferKind).toBe(null);
 
     // clean deny → same sentinel as clean allow, but the deny reason is
     // persisted in the structured `reason` field
-    const cleanDeny = DecisionRecord.model(base, "anthropic/haiku", 2, {
-      verdict: { kind: "deny", reason: "unsafe" },
-      latencyMs: 10,
-      rawReply: '{"verdict":"deny"}',
-    });
+    const cleanDeny = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      {
+        verdict: { kind: "deny", reason: "unsafe" },
+        latencyMs: 10,
+        rawReply: '{"verdict":"deny"}',
+      },
+      "ctxh1",
+    );
     expect(cleanDeny.rawReply).toBe("(clean verdict, rawReply omitted)");
     expect(cleanDeny.reason).toBe("unsafe");
 
     // empty-reply outcome carries diagnostics → persisted (null when absent)
-    const withDiagnostic = DecisionRecord.model(base, "anthropic/haiku", 2, {
-      verdict: { kind: "defer" },
-      latencyMs: 10,
-      deferKind: "empty-reply",
-      diagnostic: {
-        stopReason: "end_turn",
-        rawStopReason: "end_turn",
-        contentTypes: [],
-        errorMessage: null,
+    const withDiagnostic = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      {
+        verdict: { kind: "defer" },
+        latencyMs: 10,
+        deferKind: "empty-reply",
+        diagnostic: {
+          stopReason: "end_turn",
+          rawStopReason: "end_turn",
+          contentTypes: [],
+          errorMessage: null,
+        },
       },
-    });
+      "ctxh1",
+    );
     expect(withDiagnostic.diagnostic).toEqual({
       stopReason: "end_turn",
       rawStopReason: "end_turn",
       contentTypes: [],
       errorMessage: null,
     });
-    const withoutDiagnostic = DecisionRecord.model(base, "anthropic/haiku", 2, {
-      verdict: { kind: "defer" },
-      latencyMs: 10,
-      deferKind: "timeout",
-    });
+    const withoutDiagnostic = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      {
+        verdict: { kind: "defer" },
+        latencyMs: 10,
+        deferKind: "timeout",
+      },
+      "ctxh1",
+    );
     expect(withoutDiagnostic.diagnostic).toBeNull();
 
     // throw-based defer (timeout) → no rawReply on outcome → null (genuine
     // absence, distinct from the clean-verdict sentinel)
-    const timeout = DecisionRecord.model(base, "anthropic/haiku", 2, {
-      verdict: { kind: "defer" },
-      latencyMs: 10,
-      deferKind: "timeout",
-    });
+    const timeout = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      {
+        verdict: { kind: "defer" },
+        latencyMs: 10,
+        deferKind: "timeout",
+      },
+      "ctxh1",
+    );
     expect(timeout.rawReply).toBe(null);
 
     // model-defer → explanation is persisted for audit alongside its
     // classification; raw reply remains available for debugging.
-    const modelDefer = DecisionRecord.model(base, "anthropic/haiku", 2, {
-      verdict: { kind: "defer" },
-      latencyMs: 10,
-      deferKind: "model-defer",
-      deferReason: "The target is not specific enough.",
-      rawReply: '{"verdict":"defer"}',
-    });
+    const modelDefer = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      {
+        verdict: { kind: "defer" },
+        latencyMs: 10,
+        deferKind: "model-defer",
+        deferReason: "The target is not specific enough.",
+        rawReply: '{"verdict":"defer"}',
+      },
+      "ctxh1",
+    );
     expect(modelDefer.reason).toBe("The target is not specific enough.");
     expect(modelDefer.rawReply).toBe('{"verdict":"defer"}');
   });
 
   it("model passes through riskLevel + latencyMs + strippedCount", () => {
-    const r = DecisionRecord.model(base, "anthropic/haiku", 5, {
-      verdict: { kind: "deny", reason: "unsafe" },
-      latencyMs: 250,
-      deferKind: undefined,
-      riskLevel: "critical",
-    });
+    const r = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      5,
+      {
+        verdict: { kind: "deny", reason: "unsafe" },
+        latencyMs: 250,
+        deferKind: undefined,
+        riskLevel: "critical",
+      },
+      "ctxh1",
+    );
     expect(r.latencyMs).toBe(250);
     expect(r.strippedCount).toBe(5);
     expect(r.riskLevel).toBe("critical");
@@ -218,19 +278,31 @@ describe("DecisionRecord — per-gate shape", () => {
   });
 
   it("model omits reason for allow and defer-without-explanation verdicts", () => {
-    const allow = DecisionRecord.model(base, "anthropic/haiku", 1, {
-      verdict: { kind: "allow" },
-      latencyMs: 10,
-      rawReply: '{"verdict":"allow"}',
-    });
+    const allow = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      1,
+      {
+        verdict: { kind: "allow" },
+        latencyMs: 10,
+        rawReply: '{"verdict":"allow"}',
+      },
+      "ctxh1",
+    );
     expect(allow.reason).toBeUndefined();
 
-    const defer = DecisionRecord.model(base, "anthropic/haiku", 1, {
-      verdict: { kind: "defer" },
-      latencyMs: 10,
-      deferKind: "no-json",
-      rawReply: "garbage",
-    });
+    const defer = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      1,
+      {
+        verdict: { kind: "defer" },
+        latencyMs: 10,
+        deferKind: "no-json",
+        rawReply: "garbage",
+      },
+      "ctxh1",
+    );
     expect(defer.reason).toBeUndefined();
   });
 });
@@ -252,5 +324,24 @@ describe("DecisionRecord — debug helpers", () => {
     const r = modelReply("req-1", "anthropic/haiku", "raw text");
     expect(r.modelId).toBe("anthropic/haiku");
     expect(r.rawReply).toBe("raw text");
+  });
+});
+
+describe("DecisionRecord.model — contextHash", () => {
+  it("records the trusted-intent context fingerprint on the model gate", () => {
+    const record = DecisionRecord.model(
+      base,
+      "anthropic/test",
+      2,
+      {
+        verdict: { kind: "allow" },
+        latencyMs: 5,
+        deferKind: undefined,
+        riskLevel: "low",
+        rawReply: undefined,
+      },
+      "ab12cd",
+    );
+    expect(record.contextHash).toBe("ab12cd");
   });
 });

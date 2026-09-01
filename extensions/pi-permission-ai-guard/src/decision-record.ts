@@ -317,6 +317,10 @@ export const DecisionRecord = {
    * @param modelId - The reviewer model id that was called.
    * @param strippedCount - Number of transcript lines stripped before the call.
    * @param reviewOutcome - The full-review call outcome (verdict, latency, raw reply, etc.).
+   * @param contextHash - The trusted-intent context fingerprint (same value
+   *   as the verdict-cache key's context hash) — lets audit readers tell
+   *   same-context repetitions (routine) from cross-context ones (each
+   *   occurrence was a separate judgment call).
    * @returns A decision record for the model gate.
    */
   model(
@@ -324,6 +328,7 @@ export const DecisionRecord = {
     modelId: string,
     strippedCount: number,
     reviewOutcome: ReviewOutcome,
+    contextHash: string,
   ): DecisionRecordEntry {
     return {
       ...base,
@@ -335,6 +340,7 @@ export const DecisionRecord = {
       // the silent default, keeping the record minimal for the common path.
       attempts: reviewOutcome.attempts,
       strippedCount,
+      contextHash,
       verdict: reviewOutcome.verdict.kind,
       // Persist the sanitized model explanation for deny or defer. For
       // defer, `deferKind` carries the classification (timeout / model-defer

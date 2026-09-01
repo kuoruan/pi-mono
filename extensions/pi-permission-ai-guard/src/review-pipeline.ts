@@ -494,7 +494,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       deps.notify(machineryDeferNotice(reviewOutcome.deferKind), "warning");
     }
     const record = annotateAndEscalate(
-      DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome),
+      DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome, contextHash),
       reviewOutcome.verdict,
       emitted,
       reviewOutcome.riskLevel,
