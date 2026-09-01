@@ -113,9 +113,11 @@ describe("buildReviewPrompt", () => {
       ask: makeAsk({ value: "npm test", fullCommand: "npm test" }),
     });
 
-    expect(prompt).toContain("Trusted user intent:");
-    expect(prompt).toContain("- fix the bug");
+    // Layered intent: the LAST message is the anchor; earlier ones are context.
+    expect(prompt).toContain("Latest user request (the authorization anchor):");
     expect(prompt).toContain("- run tests");
+    expect(prompt).toContain("Earlier user messages (context, not the anchor):");
+    expect(prompt).toContain("- fix the bug");
     expect(prompt).toContain("Untrusted tool calls");
     expect(prompt).toContain("- bash: ls");
     expect(prompt).toContain("- edit: file.ts");
@@ -132,6 +134,30 @@ describe("buildReviewPrompt", () => {
     );
     expect(prompt).toContain("Trusted user intent: (none found)");
     expect(prompt).toContain("Untrusted tool calls: (none found)");
+  });
+
+  it("renders a single user message as the anchor with no earlier section", () => {
+    const prompt = buildReviewPrompt(
+      { trustedIntent: ["only message"], toolCalls: [], strippedCount: 0 },
+      { target: "ls", ask: makeAsk({ value: "ls" }) },
+    );
+    expect(prompt).toContain("Latest user request (the authorization anchor):");
+    expect(prompt).toContain("- only message");
+    expect(prompt).not.toContain("Earlier user messages");
+  });
+
+  it("anchors the chronologically latest message (array is chronological)", () => {
+    const prompt = buildReviewPrompt(
+      { trustedIntent: ["first", "second", "third"], toolCalls: [], strippedCount: 0 },
+      { target: "ls", ask: makeAsk({ value: "ls" }) },
+    );
+    // "third" is the anchor; "first"/"second" ride the earlier section.
+    const anchorIdx = prompt.indexOf("Latest user request (the authorization anchor):");
+    const earlierIdx = prompt.indexOf("Earlier user messages (context, not the anchor):");
+    expect(earlierIdx).toBeGreaterThan(anchorIdx);
+    expect(prompt.slice(anchorIdx, earlierIdx)).toContain("- third");
+    expect(prompt.slice(earlierIdx)).toContain("- first");
+    expect(prompt.slice(earlierIdx)).toContain("- second");
   });
 
   it("includes action text with bash label for bash surface", () => {

@@ -44,6 +44,8 @@ permission request and decide whether it should run.
 - **Intent-Based Routing**:
   - If trusted intent is "(none found)": DEFER everything outside ALLOW,
     unless a DENY — Always category applies.
+  - The latest user request is the authorization anchor; earlier user
+    messages are context, not additional authorization.
   - For DENY — Unless: clear matching intent → ALLOW; retained evidence
     clearly outside scope → DENY; otherwise → DEFER.
   - Uncertain → DEFER. "(none found)" is insufficient evidence,
@@ -297,11 +299,22 @@ function buildPermissionRequestSection(request: ReviewRequestContext): string {
 function buildTranscriptSections(transcript: StrippedTranscript): string[] {
   const sections: string[] = [];
 
-  // 1. Trusted user intent — the only carrier of authorization.
-  if (transcript.trustedIntent.length > 0) {
-    sections.push("Trusted user intent:");
-    for (const msg of transcript.trustedIntent) {
-      sections.push(`- ${normalizeAndRedactText(msg)}`);
+  // 1. Trusted user intent — the only carrier of authorization. The LATEST
+  // user message is the authorization anchor (the request the agent is
+  // currently acting on); earlier messages are context. The anchor is
+  // rendered as its own section so the model never has to guess which
+  // message carries the current authorization.
+  const intent = transcript.trustedIntent;
+  if (intent.length > 0) {
+    const anchor = intent[intent.length - 1] ?? "";
+    sections.push("Latest user request (the authorization anchor):");
+    sections.push(`- ${normalizeAndRedactText(anchor)}`);
+    const earlier = intent.slice(0, -1);
+    if (earlier.length > 0) {
+      sections.push("Earlier user messages (context, not the anchor):");
+      for (const msg of earlier) {
+        sections.push(`- ${normalizeAndRedactText(msg)}`);
+      }
     }
   } else {
     sections.push("Trusted user intent: (none found)");

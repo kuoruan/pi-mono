@@ -21,9 +21,10 @@ import {
 
 export interface StrippedTranscript {
   /**
-   * Trusted user messages (most recent first, up to maxUserMessages).
-   * Sanitized (zero-width chars stripped, whitespace collapsed) + secrets
-   * redacted, so the array is safe to log.
+   * Trusted user messages in chronological order (the most recent N are
+   * retained, up to maxUserMessages). Sanitized (zero-width chars
+   * stripped, whitespace collapsed) + secrets redacted, so the array is
+   * safe to log.
    */
   trustedIntent: string[];
   /** Untrusted tool calls: "toolName: truncatedArgs" (most recent, up to maxToolCalls) */
