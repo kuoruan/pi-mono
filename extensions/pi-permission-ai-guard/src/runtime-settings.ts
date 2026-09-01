@@ -29,8 +29,10 @@ import type {
 import type { BreakerTier } from "./circuit-breaker.ts";
 import type { ConfigLayerTarget, SaveConfigFn } from "./config-layer.ts";
 import type { AiGuardConfig } from "./config-schema.ts";
+import type { LogEntry } from "./decision-log-reader.ts";
 import { CYCLE_DESCRIPTION } from "./mode-table.ts";
-import type { NotifyFn } from "./review-pipeline.ts";
+import { buildReportCandidates } from "./report.ts";
+import type { DenyRecord, NotifyFn } from "./review-pipeline.ts";
 import { effectiveConfig, effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
 import {
   type SessionBranchReader,
@@ -134,7 +136,9 @@ export interface CompletionItem {
 /** The settings' view of session state — {@link SessionLifecycle} satisfies this structurally. */
 export interface SettingsSessionSurface {
   /** The live session's config, or undefined when no session is active. */
-  readonly session: { readonly config: AiGuardConfig | undefined } | undefined;
+  readonly session:
+    | { readonly config: AiGuardConfig | undefined; readonly denyHistory: readonly DenyRecord[] }
+    | undefined;
   /** The stable overrides object (single write path, stable identity). */
   readonly overrides: SessionOverrides;
   /**
@@ -165,6 +169,14 @@ export interface RuntimeSettingsDeps {
    * targets the global or project config file; tests inject a stub.
    */
   saveConfig: SaveConfigFn;
+  /**
+   * Reads the permission-review log's tail for the report command —
+   * injected (production reads the real file; tests inject fixtures).
+   * Returns undefined when the log cannot be read.
+   */
+  readDecisionLog: (home: string) => LogEntry[] | undefined;
+  /** The user's home directory (log path resolution). */
+  home: string;
 }
 
 /**
@@ -250,6 +262,12 @@ export class RuntimeSettings {
           ...(trimmed === "" || "breaker".startsWith(trimmed)
             ? [{ value: "breaker", label: "breaker — reset the circuit breaker" }]
             : []),
+          ...(trimmed === "" || "report".startsWith(trimmed)
+            ? [{ value: "report", label: "report — repeated-ask rule suggestions" }]
+            : []),
+          ...(trimmed === "" || "denied".startsWith(trimmed)
+            ? [{ value: "denied", label: "denied — this session's model denies" }]
+            : []),
         ].filter((i) => i.value.startsWith(trimmed));
       } else {
         // Second token: complete the named setting's values (and the
@@ -288,6 +306,16 @@ export class RuntimeSettings {
           this.#applyConfigSave(verb.target);
           return;
         }
+      }
+
+      // Read-only report actions — same surface level as the save verbs.
+      if (tokens[0] === "report") {
+        await this.#applyReport(ctx);
+        return;
+      }
+      if (tokens[0] === "denied") {
+        await this.#applyDenied(ctx);
+        return;
       }
 
       // The picker paths need a dialog-capable UI (TUI or RPC); the direct
@@ -530,6 +558,92 @@ export class RuntimeSettings {
           : "";
     this.#deps.notify(
       `circuit breaker cleared${was} — verdict cache and overrides untouched; reviews resume immediately`,
+      "info",
+    );
+  }
+
+  /**
+   * The report action: aggregate the review log's repeated same-context
+   * asks and offer copy-paste permission-rule fragments — evidence for the
+   * operator, never an applied rule. Reads the log tail read-only.
+   *
+   * @param ctx - The command context (notify + optional picker).
+   */
+  async #applyReport(ctx: AiGuardUiContext): Promise<void> {
+    const entries = this.#deps.readDecisionLog(this.#deps.home);
+    if (entries === undefined) {
+      this.#deps.notify("no review log found — nothing to report yet", "info");
+      return;
+    }
+    const candidates = buildReportCandidates(entries);
+    if (candidates.length === 0) {
+      this.#deps.notify("no repeated same-context asks found in the recent review log", "info");
+      return;
+    }
+    // Summary lines first (feedback channel — a direct answer to the typed
+    // command, never level-gated), then the picker for the fragment.
+    const top = candidates.slice(0, 5);
+    for (const c of top) {
+      this.#deps.notify(`${c.occurrences}× ${c.target} (${c.surface})`, "info");
+    }
+    if (!ctx.hasUI) {
+      this.#deps.notify("pass a picker-capable UI to browse the suggested rule fragments", "info");
+      return;
+    }
+    const labels = candidates
+      .slice(0, 10)
+      .map((c) => `${c.occurrences}× ${c.target} (${c.surface})`);
+    const choice = await ctx.ui.select(
+      "ai-guard report — pick a suggestion to view its rule",
+      labels,
+    );
+    if (choice === undefined) return;
+    const picked = candidates.slice(0, 10).find((c, i) => labels[i] === choice);
+    if (!picked) return;
+    this.#deps.notify(
+      `suggested rule (confirm, then paste into pi-permission-system config) — ${picked.suggestedRule}`,
+      "info",
+    );
+  }
+
+  /**
+   * The denied panel: this session's model-gate denies, most recent
+   * first — what the reviewer itself refused. Read-only memory, no log
+   * dependency (the panel is session-scoped by construction).
+   *
+   * @param ctx - The command context (notify + optional picker).
+   */
+  async #applyDenied(ctx: AiGuardUiContext): Promise<void> {
+    const history = this.#deps.session.session?.denyHistory ?? [];
+    if (history.length === 0) {
+      this.#deps.notify("no model-gate denies in this session", "info");
+      return;
+    }
+    if (!ctx.hasUI) {
+      this.#deps.notify(
+        `pass a picker-capable UI to browse the ${history.length} deny record(s)`,
+        "info",
+      );
+      return;
+    }
+    const recent = history.toReversed();
+    // Labels carry a millisecond timestamp so repeated (target, surface)
+    // pairs stay distinguishable and the picked record maps back exactly
+    // (two model roundtrips cannot land in the same millisecond).
+    const labels = recent.map(
+      (d) =>
+        `deny${d.riskLevel ? ` (${d.riskLevel})` : ""} — ${d.target} [${d.surface}] (${d.timestamp.slice(11, 23)})`,
+    );
+    const choice = await ctx.ui.select(
+      "ai-guard denied — pick a record to view its reason",
+      labels,
+    );
+    if (choice === undefined) return;
+    const picked = labels.indexOf(choice);
+    const record = recent[picked];
+    if (!record) return;
+    this.#deps.notify(
+      `${record.timestamp} — ${record.surface} ${record.target}${record.reason ? ` — ${record.reason}` : ""}`,
       "info",
     );
   }

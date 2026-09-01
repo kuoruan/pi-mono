@@ -62,6 +62,27 @@ import {
 export type NotifyFn = ExtensionUIContext["notify"];
 
 /**
+ * One model-gate deny recorded for the session's denied panel — what the
+ * reviewer itself judged dangerous (mapping artifacts and machinery
+ * denials are not recorded; the panel answers "what did the reviewer
+ * refuse").
+ */
+export interface DenyRecord {
+  /** The ask's request id. */
+  requestId: string;
+  /** The tool surface. */
+  surface: string;
+  /** The reviewed value. */
+  target: string;
+  /** The model's deny reason (the teaching reason, un-instructed). */
+  reason: string | undefined;
+  /** The model-assessed risk level, when the model supplied one. */
+  riskLevel: string | undefined;
+  /** ISO timestamp of the decision. */
+  timestamp: string;
+}
+
+/**
  * Resolved session state, captured once at construction. Not a lazy
  * dependency bag — every field is a direct value the pipeline closes over.
  */
@@ -82,6 +103,8 @@ export interface ReviewPipelineDeps {
   overrides: SessionOverrides;
   /** Model call function (wrapped provider.streamSimple().result()). */
   completeSimple: CompleteSimpleFn;
+  /** Session model-gate deny log (the /ai-guard denied panel's data). */
+  denyHistory: DenyRecord[];
   /**
    * Human notification for verdicts that escalate to the user — REQUIRED:
    * production always wires the lifecycle's notify bridge (the plain
@@ -501,6 +524,23 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       reviewOutcome.lean,
     );
     log.review(DECISION_EVENT, record);
+
+    // The denied panel's data: record what the MODEL denied (the review's
+    // own judgment — mapping artifacts and machinery denials are absent by
+    // design; the panel answers "what did the reviewer refuse"). The
+    // teaching reason, un-instructed, exactly as the audit record holds it;
+    // the target rides through the record's redacted form (a credential in
+    // the command must not echo to the terminal via the panel's notify).
+    if (reviewOutcome.verdict.kind === "deny") {
+      deps.denyHistory.push({
+        requestId,
+        surface,
+        target: base.target,
+        reason: reviewOutcome.verdict.reason,
+        riskLevel: reviewOutcome.riskLevel ?? undefined,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     // The per-ask accounting: the model's real verdict feeds the breaker,
     // and a machinery denial (the reviewer never produced a verdict) earns

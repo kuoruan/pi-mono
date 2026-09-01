@@ -159,6 +159,8 @@ Two session-scoped controls change the effective mode without touching the confi
 - `/ai-guard` — the settings menu; direct forms `/ai-guard mode <v>`, `/ai-guard notifyLevel <v>`, `<setting> reset`.
 - `/ai-guard save-to-global-config` / `/ai-guard save-to-project-config` — persist the current EFFECTIVE config (session overrides included) into a config file via JSONC-preserving edits (project target refused for untrusted projects). New sessions start from the saved layer; the current session keeps its overrides; a higher-precedence layer can still shadow it.
 - `/ai-guard breaker reset` — clear both breaker tiers. Pure counter reset: cache and overrides untouched; reviews resume immediately.
+- `/ai-guard report` — suggest permission-rule fragments for repeatedly-reviewed asks (same ask 3+ times, one context, no denies) — copy-paste evidence, never an applied rule.
+- `/ai-guard denied` — list this session's model denies; pick one to see its full reason.
 - `ctrl+alt+g` — cycle `default → lenient → permissive → default`. Only `strict` stays out of casual reach.
 
 The footer shows deviations from the baseline only (`off · lenient (session)`) and renders `permissive` in warning red, so a silenced pane stays visible. Overrides persist per session in pi's session file (never LLM context): resume restores them, `/tree` navigation re-derives from the active branch, and a fresh session starts from the config default.

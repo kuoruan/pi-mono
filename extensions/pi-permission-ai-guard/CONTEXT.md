@@ -70,6 +70,9 @@ Per-session LRU keyed by a review request snapshot (a decision-relevant projecti
 - The gate label `surface` is not in the key — it is an administrative label the model is told to ignore, so two asks sharing kind + content but differing only in surface reach the same verdict and intentionally collide. The same doctrine covers the other administrative labels: the key holds only decision-relevant facts, and the exclusion set is exhaustive — a fact is never excluded silently.
 - Only commands that reached the model (policy `ask`) are cached; defer is never cached.
 
+**Deny history**:
+Session-memory list of what the reviewer itself refused (`/ai-guard denied` reads it) — model-gate denies only: mapping artifacts (mode-softened denies, `strict`'s defer→deny) and machinery denials are absent by design, and a cached deny replays without a new entry. Each record carries the teaching reason un-instructed (exactly as the audit record holds it) and the redacted target form (a credential in the command must not echo to the terminal via the panel's notify).
+
 ### Review
 
 **Full review**:
@@ -102,6 +105,9 @@ The audit-log entry emitted at each decision gate (policy-decided, circuit-break
 
 - **Review stream** (always on): reviewer-relevant gates — model, circuit-breaker, no-target, model-unresolved, auth-failed, transcript-error — write to `permission-review.jsonl`.
 - **Debug stream** (written only while the permission system's `debugLog` is on): pass-through gates (policy-decided, cache-hit) and every verbose/diagnostic payload (raw replies on defer failures only, call errors, cache-miss telemetry, transcript short-circuits, empty-reply stop-reason details).
+
+**Policy suggestion**:
+A report candidate for a deterministic permission rule: the same ask (surface + target) reached the model ≥3 times, every occurrence in one trusted-intent context (same `contextHash`), with no terminal deny anywhere. Evidence, never authorization — the report renders copy-paste rule fragments; adopting one is the operator's explicit action in the permission system's config.
 
 ### Transcript
 

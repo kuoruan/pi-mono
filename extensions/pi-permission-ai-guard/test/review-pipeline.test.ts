@@ -266,6 +266,7 @@ function makePipeline(overrides: Partial<ReviewPipelineDeps> = {}): ReviewPipeli
     cwd: "/project",
     circuitBreaker: new CircuitBreaker(),
     verdictCache: new VerdictCache(),
+    denyHistory: [],
     overrides: {},
     completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
     // Required in production (the lifecycle's notify bridge); tests that

@@ -4,6 +4,9 @@
  * and expose the runtime settings surface ({@link RuntimeSettings}).
  */
 
+import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   type Authorizer,
@@ -19,6 +22,7 @@ import {
   persistConfigLayer,
 } from "./config-layer.ts";
 import { MODE_VALUES, NOTIFY_LEVEL_VALUES } from "./config-schema.ts";
+import { readDecisionLog } from "./decision-log-reader.ts";
 import { warn } from "./logger.ts";
 import { CYCLE_MODE_VALUES, EMPHASIZED_MODE, MODE_BLURBS } from "./mode-table.ts";
 import { type CompleteSimpleFn, createCompleteSimple } from "./model-review.ts";
@@ -75,6 +79,43 @@ const SETTINGS: readonly EnumSettingSpec[] = [
   },
 ];
 
+/**
+ * Read the last `lineCount` lines of a UTF-8 file, or undefined when
+ * unreadable (missing file, permission) — the report command's only file
+ * access. Tail-bounded in BOTH the parse window and memory: only the
+ * final chunk of the file is read (the log grows without rotation, so a
+ * whole-file read would grow with it). The chunk assumes ~1KB per line —
+ * when a pathological long line exceeds the chunk, the window silently
+ * shrinks (conservative: fewer entries, never wrong ones).
+ *
+ * @param path - The file path.
+ * @param lineCount - How many trailing lines to return.
+ * @returns The trailing lines, or undefined when the file cannot be read.
+ */
+function readLogFileTail(path: string, lineCount: number): string[] | undefined {
+  try {
+    const { size } = statSync(path);
+    // A generous per-line allowance: 1KB × the window. When the whole file
+    // is smaller, read it all (the bound holds trivially).
+    const chunkBytes = Math.min(size, lineCount * 1024);
+    const start = size - chunkBytes;
+    const fd = openSync(path, "r");
+    try {
+      const buffer = Buffer.alloc(chunkBytes);
+      readSync(fd, buffer, 0, chunkBytes, start);
+      const lines = buffer.toString("utf8").split("\n");
+      // The first line is usually mid-line (the chunk starts at a byte
+      // offset); drop it unless the read starts at the file's beginning.
+      const usable = start > 0 ? lines.slice(1) : lines;
+      return usable.slice(-lineCount);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 export function createAiGuardExtension(
   pi: ExtensionAPI,
   dependencies: AiGuardDependencies = {},
@@ -122,6 +163,10 @@ export function createAiGuardExtension(
           }
           return persistConfigLayer({ target, env: sessionEnv, config });
         }),
+      // The report command's log read: production reads the real review
+      // log's tail (read-only; the reader's invariants forbid writes).
+      readDecisionLog: (home) => readDecisionLog(home, { readTailLines: readLogFileTail }),
+      home: homedir(),
     },
     SETTINGS,
   );

@@ -65,7 +65,7 @@ import { type LoadConfigResult } from "./config-layer.ts";
 import { LINK_NAME } from "./config-schema.ts";
 import { NOTIFY_PREFIX, warn, type NotifyLevel } from "./logger.ts";
 import { type CompleteSimpleFn, type ModelRegistryLike } from "./model-review.ts";
-import { type ReviewPipelineDeps } from "./review-pipeline.ts";
+import { type DenyRecord, type ReviewPipelineDeps } from "./review-pipeline.ts";
 import type { AiGuardUiContext } from "./runtime-settings.ts";
 import { effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
 import type { SessionManagerLike } from "./transcript-stripper.ts";
@@ -105,6 +105,8 @@ export interface SessionState extends SessionSeed {
   circuitBreaker: CircuitBreaker;
   /** Per-session verdict cache — avoids re-reviewing identical commands. */
   verdictCache: VerdictCache;
+  /** Per-session model-gate denies (the /ai-guard denied panel's data). */
+  denyHistory: DenyRecord[];
 }
 
 /** Injectable collaborators the lifecycle registers the pipeline with. */
@@ -311,6 +313,7 @@ export class SessionLifecycle {
       ...seed,
       circuitBreaker: new CircuitBreaker(),
       verdictCache: new VerdictCache(),
+      denyHistory: [],
     };
     // A fail-safe session start (config failed validation) means the
     // guard runs UNREVIEWED — the operator believes a reviewer stands in
@@ -404,6 +407,7 @@ export class SessionLifecycle {
         cwd: session.cwd,
         circuitBreaker: session.circuitBreaker,
         verdictCache: session.verdictCache,
+        denyHistory: session.denyHistory,
         overrides: this.#overrides,
         completeSimple: this.#deps.completeSimple,
         notify: this.#ambientNotify,

@@ -277,6 +277,7 @@ function buildHarness(
     cwd: process.cwd(),
     circuitBreaker: new CircuitBreaker(),
     verdictCache: new VerdictCache(),
+    denyHistory: [],
     overrides: {},
     completeSimple: createCompleteSimple(() => registry),
     // CLI: escalation messages surface on the console — no TUI footer here.
