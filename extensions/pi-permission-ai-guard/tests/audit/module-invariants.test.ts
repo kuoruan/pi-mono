@@ -3,10 +3,10 @@
  * tests' whole point is to TRIP on a future edit — see the module
  * docblocks for the doctrines they pin):
  *
- * - Report.ts + decision-log-reader.ts import no `node:fs` — the reader's file access is injected
- *   through the `ReadTailLines` seam (the production adapter is log-tail-fs.ts); the format owner
- *   stays pure.
- * - None of the three references a write-family call — the report command produces evidence, never an
+ * - Report.ts + decision-log-reader.ts + decision-record.ts import no `node:fs` — the reader's file
+ *   access is injected through the `ReadTailLines` seam (the production adapter is log-tail-fs.ts);
+ *   the format owners stay pure.
+ * - None of the four references a write-family call — the report command produces evidence, never an
  *   applied rule; the reader and the tail adapter read, never write.
  *
  * The `#src` alias resolves each scanned file (no ../ chains — a moved
@@ -45,7 +45,11 @@ const BANNED_WRITE_CALLS = [
 
 describe("audit module invariants (source scan)", () => {
   it("report.ts and decision-log-reader.ts import no node:fs (file access is injected)", () => {
-    for (const name of ["#src/audit/report.ts", "#src/audit/decision-log-reader.ts"]) {
+    for (const name of [
+      "#src/audit/report.ts",
+      "#src/audit/decision-log-reader.ts",
+      "#src/audit/decision-record.ts",
+    ]) {
       const src = srcText(name);
       expect(src.includes('from "node:fs"'), `${name} must not import node:fs`).toBe(false);
     }
@@ -55,6 +59,7 @@ describe("audit module invariants (source scan)", () => {
     for (const name of [
       "#src/audit/report.ts",
       "#src/audit/decision-log-reader.ts",
+      "#src/audit/decision-record.ts",
       "#src/audit/log-tail-fs.ts",
       // The tail adapter is the one permitted fs reader — read-only by
       // the same invariant.

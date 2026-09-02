@@ -59,7 +59,7 @@ function main(): void {
       file: { type: "string", default: reviewLogPath(homedir()) },
     },
   });
-  const path = values.file ?? reviewLogPath(homedir());
+  const path = values.file;
   const records = readLogLines(path, { readTailLines: readTailLinesFromFile });
   if (records === undefined) {
     console.error(`cannot read ${path} — pass --file /path/to/review.jsonl`);
@@ -74,7 +74,7 @@ function main(): void {
     const key = d.lean ?? "absent";
     leanCount.set(key, (leanCount.get(key) ?? 0) + 1);
   }
-  const neutral = (leanCount.get("absent") ?? 0) + 0; // absent = genuinely neutral
+  const neutral = leanCount.get("absent") ?? 0; // absent = genuinely neutral
   const neutralShare = defers.length > 0 ? (neutral / defers.length) * 100 : 0;
   console.log("── model defers (lean distribution) ──");
   console.log(`model gates: ${modelGates.length}, defers: ${defers.length}`);

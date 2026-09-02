@@ -17,6 +17,7 @@ import {
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
 import {
+  type DenyRecord,
   type NotifyFn,
   type ReviewPipelineDeps,
   createReviewPipeline,
@@ -570,6 +571,101 @@ describe("createReviewPipeline — verdicts", () => {
     // …but the redacted text must still BE there (kept-but-redacted, not
     // dropped entirely — the defer-failure raw reply is the replay material).
     expect(raw).toBeTruthy();
+  });
+});
+
+describe("createReviewPipeline — deny history (the /ai-guard denied panel's data)", () => {
+  // Write-side doctrine: ONLY fresh model-gate denies are recorded.
+  // Mapping artifacts (mode-softened denies), machinery denials, and
+  // cached-deny replays are absent by design — the panel answers "what
+  // did the reviewer itself refuse", and each exclusion below is one of
+  // those rules. (The read side — the panel — is pinned in
+  // runtime-settings tests; this block pins what lands in the array.)
+
+  it("records a fresh model deny with its teaching reason (un-instructed)", async () => {
+    const denyHistory: DenyRecord[] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        denyHistory,
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
+        ]),
+      }),
+    );
+    await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
+    expect(denyHistory).toHaveLength(1);
+    expect(denyHistory[0]).toMatchObject({
+      surface: "bash",
+      target: "rm -rf /",
+      reason: "unsafe",
+      riskLevel: "high",
+    });
+  });
+
+  it("records an allow or defer not at all", async () => {
+    const denyHistory: DenyRecord[] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({ denyHistory }), // default fake replies allow
+    );
+    await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
+    expect(denyHistory).toHaveLength(0);
+  });
+
+  it("does not record a cached-deny replay", async () => {
+    // Same ask twice with cache enabled: the deny is recorded on the
+    // fresh review, the cache hit replays the verdict without a new entry.
+    const denyHistory: DenyRecord[] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        denyHistory,
+        config: { ...baseConfig, cache: { maxEntries: 8 } },
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
+        ]),
+      }),
+    );
+    await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
+    await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
+    expect(denyHistory).toHaveLength(1);
+  });
+
+  it("does not record a machinery denial (strict mode's fail-closed deny)", async () => {
+    // strict maps a machinery failure to deny — a mapping artifact, not
+    // the reviewer's own judgment; the panel stays out of it.
+    const denyHistory: DenyRecord[] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        denyHistory,
+        config: { ...baseConfig, mode: "strict" },
+        completeSimple: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
+      }),
+    );
+    await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
+    expect(denyHistory).toHaveLength(0);
+  });
+
+  it("does not record a mode-softened deny (default's deny→defer mapping)", async () => {
+    // The write side keys on the RAW model verdict: a fresh soft deny
+    // under default is recorded once (the model refused — the emitted
+    // defer is the mapping artifact, not the reviewer's judgment). The
+    // cached replay emits defer again without re-entering the model
+    // gate, so it adds no entry.
+    const denyHistory: DenyRecord[] = [];
+    const authorize = createReviewPipeline(
+      makePipeline({
+        denyHistory,
+        config: { ...baseConfig, mode: "default", cache: { maxEntries: 8 } },
+        completeSimple: makeFakeCompleteSimple([
+          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
+        ]),
+      }),
+    );
+    // Fresh soft deny under default → emitted defer, but the model's own
+    // deny is still what the reviewer refused → recorded once.
+    await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
+    // Cached replay → emitted defer again, no new entry.
+    await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
+    expect(denyHistory).toHaveLength(1);
   });
 });
 

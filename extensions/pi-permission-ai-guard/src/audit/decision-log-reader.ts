@@ -4,8 +4,8 @@
  * decision events, keyed by requestId) to in-process consumers — the
  * `/ai-guard report` candidate signal and the `/ai-guard denied` panel.
  *
- * MODULE INVARIANTS (pinned by test/decision-log-reader.test.ts and the
- * source-scan lint test):
+ * MODULE INVARIANTS (pinned by the source-scan test in
+ * tests/audit/module-invariants.test.ts):
  *
  * - **Never writes**: this module performs zero writes anywhere — no config, no session file, no log
  *   mutation. Reading the log is its entire effect on the world.
@@ -92,6 +92,9 @@ export function readLogLines(
   for (const line of lines) {
     if (!line.trim()) continue;
     try {
+      // Parse-boundary cast: the output is unknown and consumers narrow by
+      // `event` (the loose LogEntry union) — the tolerance policy of this
+      // module, not a shape guarantee.
       entries.push(JSON.parse(line) as LogEntry);
     } catch {
       // Corrupt line — skip; the log is append-only and best-effort.

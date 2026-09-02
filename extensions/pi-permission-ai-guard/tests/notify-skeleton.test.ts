@@ -18,7 +18,7 @@ const NOTIFY_SOURCES = [
 ] as const;
 
 /** The notify call prefixes whose first argument this test scans. */
-const CALL_RE = /(?:deps\.notify|feedbackNotify|this\.#deps\.notify|this\.#panels\.notify)\(/g;
+const CALL_RE = /(?:deps\.notify|feedbackNotify|this\.#deps\.notify)\(/g;
 
 /**
  * Extract the static text of a notify call's first argument, or undefined

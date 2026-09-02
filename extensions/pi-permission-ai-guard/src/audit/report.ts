@@ -86,8 +86,13 @@ export function buildReportCandidates(
   entries: LogEntry[],
   minOccurrences: number = DEFAULT_MIN_OCCURRENCES,
 ): ReportCandidate[] {
-  // Model-gate records only — the review evidence lives there.
-  const modelGates = entries.filter((e) => e.event === "ai_guard.decision" && e.gate === "model");
+  // Model-gate records only — the review evidence lives there. A model
+  // deny is also terminal for its group (the reviewer refused — the
+  // signal's own "the operator let it pass" semantics, held here rather
+  // than trusted from upstream's terminal-deny records).
+  const modelGates = entries.filter(
+    (e) => e.event === "ai_guard.decision" && e.gate === "model" && e.verdict !== "deny",
+  );
 
   // Terminal denies by requestId — an operator refusal disqualifies the group.
   const deniedRequestIds = new Set(

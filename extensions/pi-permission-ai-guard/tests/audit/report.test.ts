@@ -21,6 +21,7 @@ function model(opts: {
   surface?: string;
   target?: string;
   contextHash?: string;
+  verdict?: string;
 }): LogEntry {
   return {
     event: "ai_guard.decision",
@@ -29,6 +30,7 @@ function model(opts: {
     surface: opts.surface ?? "bash",
     target: opts.target ?? "git status",
     contextHash: "contextHash" in opts ? opts.contextHash : "ctxh1",
+    ...(opts.verdict !== undefined ? { verdict: opts.verdict } : {}),
   };
 }
 
@@ -114,6 +116,17 @@ describe("buildReportCandidates", () => {
       model({ requestId: "r3", target: "ls", contextHash: "ctxh1" }),
       terminal("permission_request.blocked", "r2"),
     ];
+    expect(buildReportCandidates(entries)).toHaveLength(0);
+  });
+
+  it("excludes groups whose model verdict was deny (the reviewer refused — held here, not trusted from upstream records)", () => {
+    const entries = [
+      model({ requestId: "r1", target: "ls", contextHash: "ctxh1" }),
+      model({ requestId: "r2", target: "ls", contextHash: "ctxh1", verdict: "deny" }),
+      model({ requestId: "r3", target: "ls", contextHash: "ctxh1" }),
+    ];
+    // No permission_request.denied record is present — the model deny
+    // itself disqualifies the group even if upstream never wrote one.
     expect(buildReportCandidates(entries)).toHaveLength(0);
   });
 

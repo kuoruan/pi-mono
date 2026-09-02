@@ -221,7 +221,7 @@ export class SessionLifecycle {
   /**
    * The pipeline's notify: ambient (review-loop) traffic, gated by the
    * effective notifyLevel (config default + session override, read
-   * per-call so `/ai-guard notifyLevel …` takes effect on the next ask).
+   * per-call so `/ai-guard notify-level …` takes effect on the next ask).
    * `off` silences all ambient lines — the operator's explicit choice;
    * the blindness tradeoff is documented in the README.
    *

@@ -134,7 +134,6 @@ export function createAiGuardExtension(
       // reader's invariants forbid writes) and the session's live deny
       // history, read through an accessor because the array is recreated
       // at each session_start, after this wiring runs once.
-      notify: lifecycle.feedbackNotify,
       readDecisionLog: (home: string) =>
         readDecisionLog(home, { readTailLines: readTailLinesFromFile }),
       home: homedir(),

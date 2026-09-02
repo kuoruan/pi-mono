@@ -4,7 +4,7 @@
  * file access is injected; this module IS the injection.
  *
  * MODULE INVARIANT: read-only — never writes, never creates, never deletes
- * (pinned by the source-scan test in report.test.ts).
+ * (pinned by the source-scan test in tests/audit/module-invariants.test.ts).
  */
 
 import { closeSync, openSync, readSync, statSync } from "node:fs";

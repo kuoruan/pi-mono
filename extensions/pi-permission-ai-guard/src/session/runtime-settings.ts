@@ -38,6 +38,8 @@ import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import { CYCLE_DESCRIPTION } from "#src/config/mode-table.ts";
 import type { BreakerTier } from "#src/review/circuit-breaker.ts";
 import type { DenyRecord, NotifyFn } from "#src/review/review-pipeline.ts";
+import { NOTIFY_REASON_CEILING } from "#src/review/verdict-mode.ts";
+import { truncateMiddle } from "#src/utils.ts";
 
 import { effectiveConfig, effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
 import {
@@ -186,12 +188,10 @@ export interface RuntimeSettingsDeps {
  * The read-only panels' collaborators (`report`, `denied`): the review-log read and the session's
  * deny history. Kept apart from {@link
  * RuntimeSettingsDeps} so the settings seam carries no report
- * facts — `denyHistory` is read through an accessor because the live array is recreated at each
- * session_start, after this object is wired once.
+ * facts (panel feedback rides the shared `notify` seam) — `denyHistory` is read through an accessor
+ * because the live array is recreated at each session_start, after this object is wired once.
  */
 export interface PanelDeps {
-  /** Panel feedback rides the same ungated command channel. */
-  notify: NotifyFn;
   /**
    * Reads the permission-review log's tail for the report command —
    * injected (production reads the real file; tests inject fixtures).
@@ -698,38 +698,33 @@ export class RuntimeSettings {
   async #applyReport(ctx: AiGuardUiContext): Promise<void> {
     const entries = this.#panels.readDecisionLog(this.#panels.home);
     if (entries === undefined) {
-      this.#panels.notify("no review log found — nothing to report yet", "info");
+      this.#deps.notify("no review log found — nothing to report yet", "info");
       return;
     }
     const candidates = buildReportCandidates(entries);
     if (candidates.length === 0) {
-      this.#panels.notify("no repeated same-context asks found in the recent review log", "info");
+      this.#deps.notify("no repeated same-context asks found in the recent review log", "info");
       return;
     }
     // Summary lines first (feedback channel — a direct answer to the typed
     // command, never level-gated), then the picker for the fragment.
-    const top = candidates.slice(0, 5);
-    for (const c of top) {
-      this.#panels.notify(`${c.occurrences}× ${c.target} (${c.surface})`, "info");
+    const top = candidates.slice(0, 10);
+    for (const c of top.slice(0, 5)) {
+      this.#deps.notify(`${c.occurrences}× ${c.target} (${c.surface})`, "info");
     }
     if (!ctx.hasUI) {
-      this.#panels.notify(
-        "pass a picker-capable UI to browse the suggested rule fragments",
-        "info",
-      );
+      this.#deps.notify("pass a picker-capable UI to browse the suggested rule fragments", "info");
       return;
     }
-    const labels = candidates
-      .slice(0, 10)
-      .map((c) => `${c.occurrences}× ${c.target} (${c.surface})`);
+    const labels = top.map((c) => `${c.occurrences}× ${c.target} (${c.surface})`);
     const choice = await ctx.ui.select(
       "ai-guard report — pick a suggestion to view its rule",
       labels,
     );
     if (choice === undefined) return;
-    const picked = candidates.slice(0, 10).find((c, i) => labels[i] === choice);
+    const picked = top.find((c, i) => labels[i] === choice);
     if (!picked) return;
-    this.#panels.notify(
+    this.#deps.notify(
       `suggested rule (confirm, then paste into pi-permission-system config) — ${picked.suggestedRule}`,
       "info",
     );
@@ -745,11 +740,11 @@ export class RuntimeSettings {
   async #applyDenied(ctx: AiGuardUiContext): Promise<void> {
     const history = this.#panels.readDenyHistory();
     if (history.length === 0) {
-      this.#panels.notify("no model-gate denies in this session", "info");
+      this.#deps.notify("no model-gate denies in this session", "info");
       return;
     }
     if (!ctx.hasUI) {
-      this.#panels.notify(
+      this.#deps.notify(
         `pass a picker-capable UI to browse the ${history.length} deny record(s)`,
         "info",
       );
@@ -771,10 +766,12 @@ export class RuntimeSettings {
     const picked = labels.indexOf(choice);
     const record = recent[picked];
     if (!record) return;
-    this.#panels.notify(
-      `${record.timestamp} — ${record.surface} ${record.target}${record.reason ? ` — ${record.reason}` : ""}`,
-      "info",
-    );
+    // The reason's notify copy rides the 200-char ceiling like every
+    // other model-reason line (the audit record keeps the full text).
+    const reason = record.reason
+      ? ` — ${truncateMiddle(record.reason, NOTIFY_REASON_CEILING)}`
+      : "";
+    this.#deps.notify(`${record.timestamp} — ${record.surface} ${record.target}${reason}`, "info");
   }
 
   /**
