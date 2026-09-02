@@ -513,7 +513,11 @@ export function resolveMapping(input: MappingInput): MappingDecision {
       : emitted.kind === "deny"
         ? emitted.reason
         : undefined;
-  let notice: MappingDecision["notice"] = deferNotice;
+  // The changed-kind branch never owes a defer notice: deferNotice
+  // requires emitted AND original to both be defers, which a changed
+  // kind excludes by definition — the two defer notices ride the held
+  // branch above only.
+  let notice: MappingDecision["notice"] = null;
   let markNoticeShown = false;
   if (emitted.kind === "defer") {
     // A mode-softened deny becomes the human's decision — the tail
