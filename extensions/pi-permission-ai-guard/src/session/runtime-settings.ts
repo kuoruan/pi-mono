@@ -456,6 +456,27 @@ export class RuntimeSettings {
   }
 
   /**
+   * The spec's display word — the command word re-segmented into a
+   * lowercase space-separated phrase (kebab, snake, and camelCase inputs
+   * all tokenize), for read-only surfaces (menu rows, picker titles,
+   * change notices) so a verb reads as the phrase the other menu rows use
+   * ("notify level", like "save config") — including when the spec has no
+   * commandName and the word falls back to the camelCase persistence key
+   * ("notifyLevel" displays as "notify level" too). Typed surfaces
+   * (completion, dispatch, error listings) keep the raw command word.
+   *
+   * @param spec - The setting whose display word is wanted.
+   * @returns The display phrase.
+   */
+  #displayWord(spec: EnumSettingSpec): string {
+    return this.#commandWord(spec)
+      .replace(/[-_]+/g, " ")
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .toLowerCase()
+      .trim();
+  }
+
+  /**
    * The setting's table row: `<word> [value|reset]` dispatches to the
    * option machinery, a bare `<word>` opens the value picker (the
    * direct form works everywhere; the picker needs a dialog UI).
@@ -589,7 +610,7 @@ export class RuntimeSettings {
     const override = this.#readOverride(spec);
     // Plain text — the warning-red emphasis is footer-only.
     const value = override ?? this.#effective(spec);
-    const word = this.#commandWord(spec);
+    const word = this.#displayWord(spec);
     return override ? `${word} — ${value} (session)` : `${word} — ${value} (config)`;
   }
 
@@ -864,7 +885,7 @@ export class RuntimeSettings {
     // Persist into the session file so the override survives resume.
     persistSetting(this.#deps.appendEntry, spec.name, value ?? null);
     const effective = this.#effective(spec);
-    const word = this.#commandWord(spec);
+    const word = this.#displayWord(spec);
     if (value === undefined) {
       this.#deps.notify(`${word} = ${effective} (config default)`, "info");
     } else {
@@ -907,7 +928,7 @@ export class RuntimeSettings {
    * @param ctx - The command UI context.
    */
   async #pickValue(spec: EnumSettingSpec, ctx: AiGuardUiContext): Promise<void> {
-    const title = `${this.#commandWord(spec)} — current: ${this.#label(spec)}`;
+    const title = `${this.#displayWord(spec)} — current: ${this.#label(spec)}`;
     // Picker lines carry the per-value detail (`strict — the reviewer's
     // allow is the only pass`) — plain text, resolved by item so the
     // pretty line never has to be parsed back.

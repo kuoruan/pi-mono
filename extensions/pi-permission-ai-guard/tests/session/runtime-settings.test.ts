@@ -252,7 +252,9 @@ describe("RuntimeSettings — command", () => {
       },
     );
     const ctx = makeUiCtx();
-    ctx.ui.select.mockResolvedValueOnce("notifyLevel — info (config)").mockResolvedValueOnce("off");
+    ctx.ui.select
+      .mockResolvedValueOnce("notify level — info (config)")
+      .mockResolvedValueOnce("off");
     await settings.command.handler("", ctx);
 
     // Menu rows list BOTH settings (plus the save verbs); picking the
@@ -261,14 +263,14 @@ describe("RuntimeSettings — command", () => {
       "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
       [
         "mode — default (config)",
-        "notifyLevel — info (config)",
+        "notify level — info (config)",
         "save config",
         "reset circuit breaker",
       ],
     );
     expect(overrides.notifyLevel).toBe("off");
     expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { notifyLevel: "off" });
-    expect(notify).toHaveBeenCalledWith("notifyLevel = off (session override)", "info");
+    expect(notify).toHaveBeenCalledWith("notify level = off (session override)", "info");
     // Footer fragments join per spec: only the deviation renders.
     settings.syncFooter(ctx);
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "off (session)");
@@ -307,7 +309,7 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.notifyLevel).toBe("warning");
     expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { notifyLevel: "warning" });
     // The change notification speaks the verb.
-    expect(notify).toHaveBeenCalledWith("notify-level = warning (session override)", "info");
+    expect(notify).toHaveBeenCalledWith("notify level = warning (session override)", "info");
 
     // The old camelCase word is no longer a verb (one word per setting —
     // the shipped surface is the kebab form only).
@@ -322,18 +324,50 @@ describe("RuntimeSettings — command", () => {
     // The menu row and the value picker title speak the verb too.
     const menuCtx = makeUiCtx();
     menuCtx.ui.select
-      .mockResolvedValueOnce("notify-level — warning (session)")
+      .mockResolvedValueOnce("notify level — warning (session)")
       .mockResolvedValueOnce("off");
     await settings.command.handler("", menuCtx);
     expect(menuCtx.ui.select).toHaveBeenCalledWith(
       "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
-      ["notify-level — warning (session)", "save config", "reset circuit breaker"],
+      ["notify level — warning (session)", "save config", "reset circuit breaker"],
     );
     expect(menuCtx.ui.select).toHaveBeenCalledWith(
-      "notify-level — current: notify-level — warning (session)",
+      "notify level — current: notify level — warning (session)",
       ["info", "warning", "error", "off", "reset"],
     );
     expect(overrides.notifyLevel).toBe("off");
+  });
+
+  it("the display word tokenizes any command word — kebab, camelCase fallback, and snake alike", async () => {
+    // No commandName: the word falls back to the camelCase persistence key
+    // and the display surface still gets a lowercase phrase.
+    const { settings, notify } = makeSettings(
+      {},
+      {
+        specs: [
+          {
+            name: "denyHistory",
+            values: ["on", "off"],
+            description: "a camelCase fallback spec",
+          },
+        ],
+      },
+    );
+    const ctx = makeUiCtx();
+    await settings.command.handler("denyHistory on", ctx);
+    expect(notify).toHaveBeenCalledWith("deny history = on (session override)", "info");
+
+    // A snake_case word would tokenize too (no current spec uses one — the
+    // tokenizer owns the shape, not the convention).
+    const snake = makeSettings(
+      {},
+      {
+        specs: [{ name: "risk_mode", values: ["on", "off"], description: "a snake spec" }],
+      },
+    );
+    const snakeCtx = makeUiCtx();
+    await snake.settings.command.handler("risk_mode off", snakeCtx);
+    expect(snake.notify).toHaveBeenCalledWith("risk mode = off (session override)", "info");
   });
 
   it("cancelling the picker changes nothing", async () => {
