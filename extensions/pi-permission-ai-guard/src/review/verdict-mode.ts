@@ -245,13 +245,20 @@ export function machineryDenyReason(
  */
 export type DenyInstructionSource = "content" | "machinery";
 
-/** The behavioral instruction for a content deny (the request was judged). */
+/**
+ * The behavioral instruction for a content deny (the request was judged).
+ * No trailing period — the host's agent-side reason render appends its
+ * own, and a trailing period here would double up.
+ */
 const CONTENT_DENY_INSTRUCTION =
-  "Automatic review denied this, not the user. Do not rephrase, retry, or work around it; if the user wants it, they should ask explicitly.";
+  "Automatic review denied this, not the user. Do not rephrase, retry, or work around it; if the user wants it, they should ask explicitly";
 
-/** The behavioral instruction for a machinery deny (the review failed). */
+/**
+ * The behavioral instruction for a machinery deny (the review failed).
+ * No trailing period — same double-up guard as the content variant.
+ */
 const MACHINERY_DENY_INSTRUCTION =
-  "Automatic review failed (the reviewer, not the request). Retry later, or ask the user to request it explicitly if urgent.";
+  "Automatic review failed (the reviewer, not the request). Retry later, or ask the user to request it explicitly if urgent";
 
 /**
  * Append the agent-facing behavioral instruction to a terminal deny reason.
@@ -265,6 +272,11 @@ const MACHINERY_DENY_INSTRUCTION =
  * content denies must not be retried or rephrased; machinery denies were
  * never judged and may legitimately be retried later.
  *
+ * The instruction comes FIRST — it is the behavioral directive, and the
+ * host's agent-side render already fronts its own attribution sentence
+ * ("The '…' authorizer denied this … Reason: …"), so instruction-then-
+ * reason reads as "what to do — why" inside that frame.
+ *
  * Applies ONLY to the returned verdict's reason — the audit record's
  * `emittedReason` and the operator notify lines keep the un-instructed
  * mapping reason (the instruction is agent-channel copy, not an audit
@@ -275,7 +287,7 @@ const MACHINERY_DENY_INSTRUCTION =
  *   undefined when the deny carries none (the instruction still stands
  *   alone — the agent needs the behavioral guidance regardless).
  * @param source - Which kind of deny produced the reason.
- * @returns The reason with the instruction appended (or the instruction
+ * @returns The instruction followed by the reason (or the instruction
  *   alone when no reason was present).
  */
 export function withAgentInstruction(
@@ -284,7 +296,7 @@ export function withAgentInstruction(
 ): string {
   const instruction =
     source === "machinery" ? MACHINERY_DENY_INSTRUCTION : CONTENT_DENY_INSTRUCTION;
-  return reason ? `${reason} — ${instruction}` : instruction;
+  return reason ? `${instruction} — ${reason}` : instruction;
 }
 
 /**

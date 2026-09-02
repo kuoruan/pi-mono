@@ -482,29 +482,29 @@ describe("resolveMapping — the mapping consequence rule", () => {
 });
 
 describe("withAgentInstruction", () => {
-  it("appends the content instruction to a judged deny's reason", () => {
+  it("prepends the content instruction to a judged deny's reason", () => {
     const reason = withAgentInstruction("unsafe", "content");
     expect(reason).toBe(
-      "unsafe — Automatic review denied this, not the user. Do not rephrase, retry, or work around it; if the user wants it, they should ask explicitly.",
+      "Automatic review denied this, not the user. Do not rephrase, retry, or work around it; if the user wants it, they should ask explicitly — unsafe",
     );
   });
 
-  it("appends the machinery instruction to a review-failure deny's reason", () => {
+  it("prepends the machinery instruction to a review-failure deny's reason", () => {
     const reason = withAgentInstruction(
       "reviewer could not complete the review (no-json) — strict mode denied the request",
       "machinery",
     );
     expect(reason).toBe(
-      "reviewer could not complete the review (no-json) — strict mode denied the request — Automatic review failed (the reviewer, not the request). Retry later, or ask the user to request it explicitly if urgent.",
+      "Automatic review failed (the reviewer, not the request). Retry later, or ask the user to request it explicitly if urgent — reviewer could not complete the review (no-json) — strict mode denied the request",
     );
   });
 
-  it("the instruction stands alone when the deny carries no reason", () => {
+  it("the instruction stands alone (period-free — the host render appends its own) when the deny carries no reason", () => {
     expect(withAgentInstruction(undefined, "content")).toBe(
-      "Automatic review denied this, not the user. Do not rephrase, retry, or work around it; if the user wants it, they should ask explicitly.",
+      "Automatic review denied this, not the user. Do not rephrase, retry, or work around it; if the user wants it, they should ask explicitly",
     );
     expect(withAgentInstruction(undefined, "machinery")).toBe(
-      "Automatic review failed (the reviewer, not the request). Retry later, or ask the user to request it explicitly if urgent.",
+      "Automatic review failed (the reviewer, not the request). Retry later, or ask the user to request it explicitly if urgent",
     );
   });
 
