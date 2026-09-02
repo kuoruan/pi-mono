@@ -6,9 +6,9 @@ It is a consumer of [`@gotgenes/pi-permission-system`](https://github.com/gotgen
 
 ## Why
 
-Each model review call sends **only stripped context** (user messages + tool call names), not the full transcript. This substantially reduces token consumption by discarding assistant text and tool results — the token-heaviest parts of a transcript — with minimal impact on verdict quality.
+Each model review call sends **only stripped context** (user messages + tool call names), not the full transcript — assistant text and tool results, the token-heaviest parts, are discarded, with minimal impact on verdict quality.
 
-Two structural choices distinguish the reviewer from a plain classifier: the verdict **lean never feeds back** into the model's own context (each review is stateless — an agent cannot anchor the reviewer toward its own history), and both ladder extremes are **lean-inert** (`strict` denies every non-allow, `permissive` passes everything short of a hard deny or a reviewer failure — the lean only routes the middle rungs). These are deliberate mitigations for the classifier drift documented in Anthropic's [auto-mode writeup](https://www.anthropic.com/engineering/claude-code-auto-mode), where consent-shaped evidence in history was the top failure mode — structure instead of prompt-tuning.
+Two structural choices distinguish the reviewer from a plain classifier: the verdict **lean never feeds back** into the model's own context (each review is stateless — an agent cannot anchor the reviewer toward its own history), and both ladder extremes are **lean-inert** (`strict` denies every non-allow, `permissive` passes everything short of a hard deny or a reviewer failure — the lean only routes the middle rungs). These mitigate the classifier drift documented in Anthropic's [auto-mode writeup](https://www.anthropic.com/engineering/claude-code-auto-mode), where consent-shaped evidence in history was the top failure mode — structure instead of prompt-tuning.
 
 ## How it works
 
@@ -19,14 +19,14 @@ The reviewer runs a short, cheap decision on each ask and defers at the first mi
 3. Policy gate: query the deterministic engine at gate parity — if the policy already says `allow` or `deny`, defer. This link only adds value when the engine is undecided (`ask`).
 4. Circuit breaker: a tripped breaker short-circuits without a model call.
 5. Resolve the model (fails fast on a config error).
-6. Strip transcript (token-optimized): the stripped transcript feeds both the verdict cache's context fingerprint and the model review prompt.
-7. Verdict cache lookup: a repeated ask in a stable conversation hits the cache and skips the model.
+6. Strip transcript (token-optimized): feeds both the verdict cache's context fingerprint and the review prompt.
+7. Verdict cache lookup: a repeated ask in a stable conversation skips the model.
 8. Resolve auth — after the cache, so a cached repeat ask survives an auth flap.
-9. Build prompt (redaction happens here — credentials in the command/intent are scrubbed before the prompt is built).
+9. Build prompt (credentials in the command/intent are redacted here).
 10. Model review: JSON verdict.
 11. Record the verdict into the breaker counters and cache.
 
-Fail-safe by construction: a missing model, invalid config, model timeout, unparseable reply, or an unsure verdict all resolve to `defer`. This list is representative, not exhaustive — any unexpected error path also defers. Deferring means the ask falls through to the normal permission prompt.
+Fail-safe by construction: a missing model, invalid config, model timeout, unparseable reply, or an unsure verdict — any unexpected error path — resolves to `defer`, and the ask falls through to the normal permission prompt.
 
 Upstream failures retry once per mechanism, budgeted inside `timeoutMs`: provider errors retry in pi-ai's provider layer; an empty reply retries at the review layer when at least half the window remains. Three requests is the hard ceiling; `attempts: 2` on the decision record marks a retried review.
 
@@ -41,32 +41,32 @@ Upstream failures retry once per mechanism, budgeted inside `timeoutMs`: provide
 | tool result               | **Delete**                 | Untrusted (injection entry), token-heaviest                         |
 | ask_user_question result  | Keep (trusted intent)      | User's structured answers                                           |
 
-## Install
+## Setup
 
-**Prerequisite:** [`pi-permission-system`](https://github.com/gotgenes/pi-packages) >= 27.1.1 installed and active — this extension is a link in its authorizer chain and does nothing on its own.
+Two extensions, two config files: **pi-permission-system** owns the policy and the chain (its config names the link); **this extension** declares the reviewer model and behavior.
 
-```bash
-pi install npm:pi-permission-ai-guard
-```
+1. Install [pi-permission-system](https://github.com/gotgenes/pi-packages) (>= 27.1.1) and configure its permission policy — see its [Quick Start](https://github.com/gotgenes/pi-packages/blob/main/packages/pi-permission-system/README.md#quick-start).
 
-Or add to `settings.json`:
+   ```bash
+   pi install npm:@gotgenes/pi-permission-system
+   ```
 
-```json
-{ "packages": ["npm:pi-permission-ai-guard"] }
-```
+2. Install this extension:
 
-## Configure
+   ```bash
+   pi install npm:pi-permission-ai-guard
+   ```
 
-Two config files are involved: pi-permission-system's config names the chain link, and this extension's config declares the model and review behavior. This extension reads `config.jsonc` or `config.json` (JSONC — comments and trailing commas are fine); when both exist, `config.jsonc` wins.
+   Or add to `settings.json`: `{ "packages": ["npm:pi-permission-ai-guard"] }`.
 
-1. In **pi-permission-system** config, name the link in `authorizerChain`:
+3. **Name the link** in pi-permission-system's config — installing the extension registers the link, but a link decides nothing until you name it (the chain is opt-in):
 
    ```jsonc
    // ~/.pi/agent/extensions/pi-permission-system/config.json
    { "authorizerChain": ["ai-guard"] }
    ```
 
-2. In **this** extension's config, declare the model and review behavior:
+4. Declare the reviewer in this extension's config (`config.jsonc` or `config.json`, JSONC — comments and trailing commas are fine; when both exist, `config.jsonc` wins):
 
    ```jsonc
    // ~/.pi/agent/extensions/pi-permission-ai-guard/config.jsonc
@@ -75,18 +75,21 @@ Two config files are involved: pi-permission-system's config names the chain lin
      "model": "claude-haiku-4-5",
      "reasoning": "off",
      "timeoutMs": 15000,
-     "transcript": {
-       "maxUserMessages": 5,
-       "maxToolCalls": 10,
-       "maxCharsPerEntry": 1000,
-     },
      "surfaces": ["bash", "mcp", "skill"],
    }
    ```
 
 See [`config/config.example.json`](config/config.example.json) for a complete example.
 
-> **Where to put hard-deny rules:** secrets, dangerous commands, and safe auto-allow patterns belong in **pi-permission-system's** rule config (deny / allow rules), not in this extension. The AI-guard link only runs the model when the deterministic engine is undecided (`ask`) — it queries the engine at gate parity and defers whenever the engine already decided `allow` or `deny`. Configure `.env`/`~/.ssh`/`rm -rf` style blocks as pi-permission-system rules so the chain (and this link) honors them without a model call.
+Chain facts that shape how this link behaves:
+
+- **Only `ask` reaches the chain** — a request the deterministic policy already decided (`allow`/`deny`) never consults the link.
+- **Config order fixes chain order**, never registration order; a missing link is skipped fail-safe — absence means more prompting, never less.
+- **The chain owner caps a link's `allow` on the `external_directory`/`path` surface families to `defer`** — reviewing those surfaces can deny or defer, never allow. The default `surfaces` list stays clear of them.
+- **A subagent's ask is reviewed one hop up** — by the chain of the session serving it, so your links review subagent asks in the session you are watching.
+- The chain ends at the default terminal: the interactive prompt (or a headless deny).
+
+> **Where to put hard-deny rules:** secrets, dangerous commands, and safe auto-allow patterns belong in **pi-permission-system's** rule config, not here. The link queries the engine at gate parity and defers whenever the engine already decided — a deterministic block costs no model call and holds in every mode.
 
 ## Configuration
 
@@ -107,15 +110,13 @@ See [`config/config.example.json`](config/config.example.json) for a complete ex
 
 ### Transcript
 
-Controls how much context is kept for the model review. Only trusted user messages (including `ask_user_question` answers) and tool call names+args are kept; assistant text, tool results, and compaction summaries are stripped.
+Caps for the stripped transcript (see the stripping table above). Defaults follow a recency principle; the three caps bound the worst case (~15KB) — there is deliberately no fourth, total-budget field.
 
 | Field              | Default | Description                              |
 | ------------------ | ------- | ---------------------------------------- |
 | `maxUserMessages`  | `5`     | Max trusted-intent entries (most recent) |
 | `maxToolCalls`     | `10`    | Max tool calls (most recent)             |
 | `maxCharsPerEntry` | `1000`  | Truncate each entry to this many chars   |
-
-Defaults follow a recency principle; the three caps bound the worst case (~15KB) — there is deliberately no fourth, total-budget field.
 
 ### Mode
 
@@ -153,8 +154,6 @@ Mapped verdicts still count toward the breaker and still store in the cache (the
 ### Runtime control
 
 Effective config layers, in precedence order: **session overrides** (the controls below) > **project config** (trusted projects) > **global config**. Saving writes UPWARD into a layer; a saved field then shadows the layers beneath it.
-
-Two session-scoped controls change the effective mode without touching the config file:
 
 - `/ai-guard` — the settings menu; direct forms `/ai-guard mode <v>`, `/ai-guard notify-level <v>`, `<setting> reset`.
 - `/ai-guard save-config <global|project>` (a bare `save-config` opens a target picker) — persist the current EFFECTIVE config (session overrides included) into a config layer via JSONC-preserving edits (project target refused for untrusted projects). New sessions start from the saved layer; the current session keeps its overrides; a higher-precedence layer can still shadow it.
