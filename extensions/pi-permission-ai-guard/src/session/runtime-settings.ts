@@ -54,15 +54,13 @@ import {
  * (compile-checked) so the spec's reads and writes are real fields.
  */
 export interface EnumSettingSpec {
-  /** Setting name — persistence key, overrides key, config key. */
-  readonly name: keyof SessionOverrides & keyof AiGuardConfig;
   /**
-   * The command word (first token) when it differs from the persistence
-   * key — the /ai-guard verb table is uniformly kebab-case (`notify-level`),
-   * while config fields may be camelCase (`notifyLevel`). Absent = the
-   * setting's own name (single-word settings need no alias).
+   * Setting name — persistence key, overrides key, config key. The typed
+   * command verb is its kebab-case form (`notifyLevel` → `/ai-guard
+   * notify-level warning`, see {@link verbWord}), and read-only display
+   * surfaces re-segment it into a phrase (see {@link displayPhrase}).
    */
-  readonly commandName?: string;
+  readonly name: keyof SessionOverrides & keyof AiGuardConfig;
   /** Valid values, in shortcut-cycle order. */
   readonly values: readonly string[];
   /**
@@ -264,6 +262,38 @@ interface CommandEntry {
   readonly run: (args: readonly string[], ctx: AiGuardUiContext) => void | Promise<void>;
 }
 
+/**
+ * Re-segment a setting's name into its kebab-case command verb
+ * ("notifyLevel" → "notify-level"). Derived, not declared: any future
+ * multi-word field gets its verb automatically.
+ *
+ * @param name - The setting's name (persistence/overrides/config key).
+ * @returns The kebab-case command verb.
+ */
+export function verbWord(name: string): string {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[_]+/g, "-")
+    .toLowerCase();
+}
+
+/**
+ * Re-segment a setting's name into a lowercase space-separated phrase —
+ * kebab, snake, and camelCase inputs all tokenize ("notifyLevel" →
+ * "notify level", "risk_mode" → "risk mode"). Feeds the read-only display
+ * surfaces; the typed surfaces keep the verb (see {@link verbWord}).
+ *
+ * @param name - The setting's name (persistence/overrides/config key).
+ * @returns The display phrase.
+ */
+export function displayPhrase(name: string): string {
+  return name
+    .replace(/[-_]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .trim();
+}
+
 /** The settings-menu row for the save verb (its picker asks the target). */
 const SAVE_MENU_LABEL = "save config";
 
@@ -446,34 +476,18 @@ export class RuntimeSettings {
   }
 
   /**
-   * The spec's command word — the kebab verb (falls back to the name).
-   *
-   * @param spec - The setting whose command word is wanted.
-   * @returns The command word.
-   */
-  #commandWord(spec: EnumSettingSpec): string {
-    return spec.commandName ?? spec.name;
-  }
-
-  /**
-   * The spec's display word — the command word re-segmented into a
-   * lowercase space-separated phrase (kebab, snake, and camelCase inputs
-   * all tokenize), for read-only surfaces (menu rows, picker titles,
-   * change notices) so a verb reads as the phrase the other menu rows use
-   * ("notify level", like "save config") — including when the spec has no
-   * commandName and the word falls back to the camelCase persistence key
-   * ("notifyLevel" displays as "notify level" too). Typed surfaces
-   * (completion, dispatch, error listings) keep the raw command word.
+   * The spec's display word — its name re-segmented into a lowercase
+   * space-separated phrase (see {@link displayPhrase}), for read-only
+   * surfaces (menu rows, picker titles, change notices) so a setting
+   * reads as the phrase the other menu rows use ("notify level", like
+   * "save config"). Typed surfaces (completion, dispatch, error
+   * listings) keep the raw name — the verb IS the config field's name.
    *
    * @param spec - The setting whose display word is wanted.
    * @returns The display phrase.
    */
   #displayWord(spec: EnumSettingSpec): string {
-    return this.#commandWord(spec)
-      .replace(/[-_]+/g, " ")
-      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-      .toLowerCase()
-      .trim();
+    return displayPhrase(spec.name);
   }
 
   /**
@@ -485,7 +499,7 @@ export class RuntimeSettings {
    * @returns The command-table entry for the setting.
    */
   #settingEntry(spec: EnumSettingSpec): CommandEntry {
-    const word = this.#commandWord(spec);
+    const word = verbWord(spec.name);
     return {
       name: word,
       completionLabel: spec.description ? `${word} — ${spec.description}` : word,
@@ -817,7 +831,7 @@ export class RuntimeSettings {
    * @returns The matching spec, or undefined.
    */
   #spec(word: string): EnumSettingSpec | undefined {
-    return this.#specs.find((s) => this.#commandWord(s) === word);
+    return this.#specs.find((s) => verbWord(s.name) === word);
   }
 
   /**

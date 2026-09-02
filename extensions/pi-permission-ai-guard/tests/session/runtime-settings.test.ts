@@ -14,9 +14,11 @@ import { MODE_BLURBS } from "#src/config/mode-table.ts";
 import type { BreakerTier } from "#src/review/circuit-breaker.ts";
 import type { DenyRecord, NotifyFn } from "#src/review/review-pipeline.ts";
 import {
+  displayPhrase,
   type EnumSettingSpec,
   type RuntimeSettings,
   RuntimeSettings as RuntimeSettingsClass,
+  verbWord,
 } from "#src/session/runtime-settings.ts";
 import type { SessionOverrides } from "#src/session/session-overrides.ts";
 
@@ -276,18 +278,18 @@ describe("RuntimeSettings — command", () => {
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", "off (session)");
   });
 
-  it("a commandName spec decouples the verb from the persistence key (kebab verbs, camelCase config)", async () => {
-    // The shipped notifyLevel setting rides this: the /ai-guard verb is
-    // `notify-level` (uniform kebab verb table) while the overrides key,
-    // the persisted key, and the config field stay `notifyLevel` (the
-    // config contract). Every surface is pinned here.
+  it("the verb is the field's kebab form — typed surfaces say notify-level, display surfaces say notify level", async () => {
+    // The shipped notifyLevel setting: the typed verb is the field name's
+    // kebab form, derived rather than declared; the overrides key, the
+    // persisted key, and the config field stay the camelCase field name;
+    // read-only surfaces re-segment into a phrase. Every surface is
+    // pinned here.
     const { settings, overrides, appendEntry, notify } = makeSettings(
       {},
       {
         specs: [
           {
             name: "notifyLevel",
-            commandName: "notify-level",
             values: ["info", "warning", "error", "off"],
             description: "the ambient notify threshold",
             hiddenValue: "info",
@@ -303,16 +305,16 @@ describe("RuntimeSettings — command", () => {
       { value: "notify-level", label: "notify-level — the ambient notify threshold" },
     ]);
 
-    // The direct form dispatches on the verb…
+    // The direct form dispatches on the kebab verb…
     await settings.command.handler("notify-level warning", ctx);
-    // …while the overrides key and the persisted key stay camelCase.
+    // …while the overrides key and the persisted key stay the field name.
     expect(overrides.notifyLevel).toBe("warning");
     expect(appendEntry).toHaveBeenCalledWith("ai-guard-setting", { notifyLevel: "warning" });
-    // The change notification speaks the verb.
+    // …and the change notification speaks the display phrase.
     expect(notify).toHaveBeenCalledWith("notify level = warning (session override)", "info");
 
-    // The old camelCase word is no longer a verb (one word per setting —
-    // the shipped surface is the kebab form only).
+    // The raw camelCase field name is NOT the verb (the verb is the kebab
+    // form — one word per setting).
     const before = overrides.notifyLevel;
     await settings.command.handler("notifyLevel error", makeUiCtx());
     expect(overrides.notifyLevel).toBe(before);
@@ -321,7 +323,7 @@ describe("RuntimeSettings — command", () => {
       "error",
     );
 
-    // The menu row and the value picker title speak the verb too.
+    // The menu row and the value picker title speak the phrase too.
     const menuCtx = makeUiCtx();
     menuCtx.ui.select
       .mockResolvedValueOnce("notify level — warning (session)")
@@ -338,36 +340,26 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.notifyLevel).toBe("off");
   });
 
-  it("the display word tokenizes any command word — kebab, camelCase fallback, and snake alike", async () => {
-    // No commandName: the word falls back to the camelCase persistence key
-    // and the display surface still gets a lowercase phrase.
-    const { settings, notify } = makeSettings(
-      {},
-      {
-        specs: [
-          {
-            name: "denyHistory",
-            values: ["on", "off"],
-            description: "a camelCase fallback spec",
-          },
-        ],
-      },
-    );
-    const ctx = makeUiCtx();
-    await settings.command.handler("denyHistory on", ctx);
-    expect(notify).toHaveBeenCalledWith("deny history = on (session override)", "info");
+  it("verbWord kebabizes any word shape — camelCase, snake, and kebab alike", () => {
+    // Derived, not declared: a future multi-word field name gets its verb
+    // automatically, in the ecosystem's uniform command shape.
+    expect(verbWord("notifyLevel")).toBe("notify-level");
+    expect(verbWord("notify-level")).toBe("notify-level");
+    expect(verbWord("risk_mode")).toBe("risk-mode");
+    expect(verbWord("api2Key")).toBe("api2-key");
+    expect(verbWord("mode")).toBe("mode");
+  });
 
-    // A snake_case word would tokenize too (no current spec uses one — the
-    // tokenizer owns the shape, not the convention).
-    const snake = makeSettings(
-      {},
-      {
-        specs: [{ name: "risk_mode", values: ["on", "off"], description: "a snake spec" }],
-      },
-    );
-    const snakeCtx = makeUiCtx();
-    await snake.settings.command.handler("risk_mode off", snakeCtx);
-    expect(snake.notify).toHaveBeenCalledWith("risk mode = off (session override)", "info");
+  it("displayPhrase tokenizes any word shape — kebab, camelCase, and snake alike", () => {
+    // The tokenizer owns the shape, not the convention: a hypothetical
+    // multi-word field name displays as a phrase whatever its casing.
+    // (EnumSettingSpec.name is compile-checked against real config
+    // fields, so the exotic shapes ride the pure function directly.)
+    expect(displayPhrase("notifyLevel")).toBe("notify level");
+    expect(displayPhrase("notify-level")).toBe("notify level");
+    expect(displayPhrase("risk_mode")).toBe("risk mode");
+    expect(displayPhrase("api2Key")).toBe("api2 key");
+    expect(displayPhrase("mode")).toBe("mode");
   });
 
   it("cancelling the picker changes nothing", async () => {

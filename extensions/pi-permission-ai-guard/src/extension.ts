@@ -73,7 +73,6 @@ const SETTINGS: readonly EnumSettingSpec[] = [
     // (ctrl+alt+g stays mode-only), no highlight (a quieter pane is a
     // preference, not a danger).
     name: "notifyLevel",
-    commandName: "notify-level",
     values: [...NOTIFY_LEVEL_VALUES],
     description: "the ambient notify threshold",
     hiddenValue: "info",

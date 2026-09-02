@@ -155,7 +155,7 @@ Mapped verdicts still count toward the breaker and still store in the cache (the
 
 Effective config layers, in precedence order: **session overrides** (the controls below) > **project config** (trusted projects) > **global config**. Saving writes UPWARD into a layer; a saved field then shadows the layers beneath it.
 
-- `/ai-guard` — the settings menu; direct forms `/ai-guard mode <v>`, `/ai-guard notify-level <v>`, `<setting> reset`.
+- `/ai-guard` — the settings menu; direct forms `/ai-guard mode <v>`, `/ai-guard notify-level <v>`, `<setting> reset` (a setting's verb is its config field's kebab form — the command shape used across pi's built-ins; menus show the phrase form, `notify level`).
 - `/ai-guard save-config <global|project>` (a bare `save-config` opens a target picker) — persist the current EFFECTIVE config (session overrides included) into a config layer via JSONC-preserving edits (project target refused for untrusted projects). New sessions start from the saved layer; the current session keeps its overrides; a higher-precedence layer can still shadow it.
 - `/ai-guard breaker reset` — clear both trip tiers. Pure counter reset: cache and overrides untouched; reviews resume immediately.
 - `/ai-guard report` — suggest permission-rule fragments for repeatedly-reviewed asks (same ask 3+ times, one context, no denies) — copy-paste evidence, never an applied rule.
