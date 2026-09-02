@@ -38,9 +38,8 @@ import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import { CYCLE_DESCRIPTION } from "#src/config/mode-table.ts";
 import type { BreakerTier } from "#src/review/circuit-breaker.ts";
 import type { DenyRecord, NotifyFn } from "#src/review/review-pipeline.ts";
-import { NOTIFY_REASON_CEILING } from "#src/review/verdict-mode.ts";
-import { truncateMiddle } from "#src/utils.ts";
 
+import { type RecordDetail, showRecordDetail } from "./record-detail.ts";
 import { effectiveConfig, effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
 import {
   type SessionBranchReader,
@@ -106,8 +105,8 @@ export interface EnumSettingSpec {
  * narrow shape keeps test fixtures light.
  */
 export interface AiGuardUiContext {
-  /** Picker / notify / footer-status surface. */
-  ui: Pick<ExtensionUIContext, "select" | "notify" | "setStatus">;
+  /** Picker / notify / footer-status / overlay-dialog surface. */
+  ui: Pick<ExtensionUIContext, "select" | "notify" | "setStatus" | "custom">;
   /** Whether dialog-capable UI is available (TUI/RPC) — gates the picker paths. */
   hasUI: boolean;
 }
@@ -741,7 +740,8 @@ export class RuntimeSettings {
       return;
     }
     // Summary lines first (feedback channel — a direct answer to the typed
-    // command, never level-gated), then the picker for the fragment.
+    // command, never level-gated), then the standard list, then the
+    // overlay detail for the picked suggestion.
     const top = candidates.slice(0, 10);
     for (const c of top.slice(0, 5)) {
       this.#deps.notify(`${c.occurrences}× ${c.target} (${c.surface})`, "info");
@@ -757,10 +757,19 @@ export class RuntimeSettings {
       (c) => `${c.occurrences}× ${c.target} (${c.surface})`,
     );
     if (!picked) return;
-    this.#deps.notify(
-      `suggested rule (confirm, then paste into pi-permission-system config) — ${picked.suggestedRule}`,
-      "info",
-    );
+    const detail: RecordDetail = {
+      title: `suggested rule · ${picked.occurrences}× · ${picked.surface}`,
+      command: picked.target,
+      body: [
+        {
+          kind: "text",
+          text: "reviewed 3+ times in one context with no terminal deny — confirm, then paste into pi-permission-system config",
+          tone: "muted",
+        },
+        { kind: "emphasis", text: picked.suggestedRule },
+      ],
+    };
+    await showRecordDetail(ctx.ui.custom, detail);
   }
 
   /**
@@ -784,10 +793,10 @@ export class RuntimeSettings {
       return;
     }
     const recent = history.toReversed();
-    // Labels carry a millisecond timestamp so repeated (target, surface)
-    // pairs stay distinguishable — the pick-item seam's uniqueness
-    // discipline (two model roundtrips cannot land in the same
-    // millisecond).
+    // The list line is a scan index (metadata + truncated command, the
+    // pick seam's uniqueness discipline); the overlay detail is the
+    // reading surface — the command and the reason whole, no notify
+    // ceiling (the old single-line echo truncated at 200).
     const record = await this.#pickItem(
       ctx,
       "ai-guard denied — pick a record to view its reason",
@@ -796,12 +805,20 @@ export class RuntimeSettings {
         `deny${d.riskLevel ? ` (${d.riskLevel})` : ""} — ${d.target} [${d.surface}] (${d.timestamp.slice(11, 23)})`,
     );
     if (!record) return;
-    // The reason's notify copy rides the 200-char ceiling like every
-    // other model-reason line (the audit record keeps the full text).
-    const reason = record.reason
-      ? ` — ${truncateMiddle(record.reason, NOTIFY_REASON_CEILING)}`
-      : "";
-    this.#deps.notify(`${record.timestamp} — ${record.surface} ${record.target}${reason}`, "info");
+    const detail: RecordDetail = {
+      title: `model deny · ${record.timestamp}`,
+      command: record.target,
+      body: [
+        ...(record.reason
+          ? [{ kind: "text" as const, text: record.reason, tone: "text" as const }]
+          : [{ kind: "text" as const, text: "no reason recorded", tone: "muted" as const }]),
+        ...(record.riskLevel
+          ? [{ kind: "field" as const, label: "risk level", value: record.riskLevel }]
+          : []),
+        { kind: "field" as const, label: "request id", value: record.requestId },
+      ],
+    };
+    await showRecordDetail(ctx.ui.custom, detail);
   }
 
   /**

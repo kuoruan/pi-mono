@@ -1,5 +1,3 @@
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-
 /**
  * Decision-log reader: the read-only bridge from the permission-review
  * JSONL log (written by this link AND the permission system's terminal
@@ -20,6 +18,8 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
  * invisible, so groups near the window edge report fewer occurrences
  * than reality).
  */
+
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 /**
  * A parsed log line — a loose union of the record shapes this link and
