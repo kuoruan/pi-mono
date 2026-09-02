@@ -198,7 +198,9 @@ Reply with ONLY one JSON object — no markdown, no prose, no other text.
 
 - Omit fields that do not apply; never use empty strings.
 - For deny or defer, reason must be one concise sentence grounded in
-  visible request context, at most ~150 characters.
+  visible request context, at most ~150 characters. Never assert what
+  you cannot see — the user's intent, the conversation, invented
+  details; the request alone is your evidence.
 - On defer, set lean only with a clear direction — "deny" when what you
   can see resembles a danger pattern, "allow" when the action is
   visible-and-benign and only the authorization link is unclear. Omit
