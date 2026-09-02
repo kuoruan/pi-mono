@@ -4,8 +4,7 @@
  * decision events, keyed by requestId) to in-process consumers — the
  * `/ai-guard report` candidate signal and the `/ai-guard denied` panel.
  *
- * MODULE INVARIANTS (pinned by the source-scan test in
- * tests/audit/module-invariants.test.ts):
+ * MODULE INVARIANTS (pinned by the module-invariants source-scan test):
  *
  * - **Never writes**: this module performs zero writes anywhere — no config, no session file, no log
  *   mutation. Reading the log is its entire effect on the world.
