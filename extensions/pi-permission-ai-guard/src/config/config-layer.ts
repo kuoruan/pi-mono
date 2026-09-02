@@ -332,6 +332,19 @@ export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
 }
 
 /**
+ * What a persist call carries: the target layer, the environment (trust
+ * boundary + agent dir), and the complete config snapshot to write.
+ */
+export interface PersistConfigOptions {
+  /** The layer to write (global or project). */
+  target: ConfigLayerTarget;
+  /** The environment resolving layer paths and project trust. */
+  env: ConfigEnv;
+  /** The effective config snapshot to persist. */
+  config: AiGuardConfig;
+}
+
+/**
  * Persist the current EFFECTIVE config into a config layer — the explicit
  * menu actions "save to global config" / "save to project config". The
  * snapshot is written leaf-by-leaf via jsonc-parser's modify: only leaves
@@ -350,11 +363,7 @@ export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
  * @param options - The target layer, the environment, and the snapshot.
  * @returns The path (+ created/changed flags), or an error with no write.
  */
-export function persistConfigLayer(options: {
-  target: ConfigLayerTarget;
-  env: ConfigEnv;
-  config: AiGuardConfig;
-}): SaveConfigResult {
+export function persistConfigLayer(options: PersistConfigOptions): SaveConfigResult {
   const { target, env, config } = options;
   // Refuse before ANY filesystem work: a save into an unhonored layer
   // must not even touch the disk.

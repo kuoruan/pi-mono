@@ -326,6 +326,8 @@ describe("resolveMapping — the mapping consequence rule", () => {
       original: SOFT,
       emitted: SOFT,
       riskLevel: "low",
+      deferKind: undefined,
+      deferReason: undefined,
       deferLean: undefined,
       mode: "default",
       noticeShown: false,
@@ -333,6 +335,7 @@ describe("resolveMapping — the mapping consequence rule", () => {
     expect(held.annotate).toBe(false);
     expect(held.emittedReason).toBeUndefined();
     expect(held.markNoticeShown).toBe(false);
+    expect(held.instructionSource).toBe("content");
     expect(held.notice).toEqual({
       message: "reviewer denied this request (risk low) — unsafe",
       level: "warning",
@@ -352,6 +355,7 @@ describe("resolveMapping — the mapping consequence rule", () => {
     ).toEqual({
       annotate: false,
       notice: null,
+      instructionSource: null,
       markNoticeShown: false,
     });
   });
@@ -361,6 +365,8 @@ describe("resolveMapping — the mapping consequence rule", () => {
       original: SOFT,
       emitted: DEFER_V,
       riskLevel: "low",
+      deferKind: undefined,
+      deferReason: undefined,
       deferLean: undefined,
       mode: "default",
       noticeShown: false,
@@ -393,6 +399,8 @@ describe("resolveMapping — the mapping consequence rule", () => {
       original: DEFER_V,
       emitted: ALLOW,
       riskLevel: undefined,
+      deferKind: undefined,
+      deferReason: undefined,
       deferLean: undefined,
       mode: "lenient",
       noticeShown: false,
@@ -407,6 +415,8 @@ describe("resolveMapping — the mapping consequence rule", () => {
       original: DEFER_V,
       emitted: ALLOW,
       riskLevel: undefined,
+      deferKind: undefined,
+      deferReason: undefined,
       deferLean: undefined,
       mode: "lenient",
       noticeShown: true,
@@ -420,6 +430,8 @@ describe("resolveMapping — the mapping consequence rule", () => {
       original: SOFT,
       emitted: ALLOW,
       riskLevel: "low",
+      deferKind: undefined,
+      deferReason: undefined,
       deferLean: undefined,
       mode: "permissive",
       noticeShown: false,
@@ -437,6 +449,8 @@ describe("resolveMapping — the mapping consequence rule", () => {
       original: DEFER_V,
       emitted: { kind: "deny", reason: "needs the target" },
       riskLevel: undefined,
+      deferKind: undefined,
+      deferReason: undefined,
       deferLean: undefined,
       mode: "strict",
       noticeShown: false,

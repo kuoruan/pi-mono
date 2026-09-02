@@ -35,21 +35,18 @@ import {
   type ResolvedRequestAuth,
   reviewModel,
 } from "#src/model/model-review.ts";
-import type { RiskLevel, VerdictLean } from "#src/model/model-verdict.ts";
+import type { ModelCallDeferKind, RiskLevel, VerdictLean } from "#src/model/model-verdict.ts";
 import { effectiveOverride, type SessionOverrides } from "#src/session/session-overrides.ts";
-import { normalizeAndRedactText, shortHash, truncateMiddle } from "#src/utils.ts";
+import { normalizeAndRedactText, shortHash } from "#src/utils.ts";
 
 import { accountModelOutcome, type CircuitBreaker, consumeTrip } from "./circuit-breaker.ts";
-import {
-  type MachineryFailureKind,
-  PRE_CALL_MACHINERY_KINDS,
-  type PreCallMachineryKind,
-} from "./machinery-kinds.ts";
+import { PRE_CALL_MACHINERY_KINDS, type PreCallMachineryKind } from "./machinery-kinds.ts";
 import type { VerdictCache } from "./verdict-cache.ts";
 import {
   applyVerdictMode,
+  type DenyInstructionSource,
   machineryDenyReason,
-  NOTIFY_REASON_CEILING,
+  machineryDeferNotice,
   machineryTarget,
   resolveMapping,
   withAgentInstruction,
@@ -117,16 +114,16 @@ export interface ReviewPipelineDeps {
 }
 
 /**
- * The human notice for a machinery-forced defer — the deferred ask lands on
- * the operator with no dialog context of its own, so the line names the
- * failure kind (doctrine symmetry with the breaker-trip notice). No
- * structural colon: the TUI's own level prefix would double it up.
- *
- * @param kind - The classified machinery failure kind.
- * @returns The notification message.
+ * What the escalation footwork hands back to a verdict gate: the
+ * annotated record to write, and the agent instruction's source for the
+ * deny the gate may be about to return (null when nothing deny-shaped
+ * was emitted).
  */
-function machineryDeferNotice(kind: MachineryFailureKind): string {
-  return `reviewer could not complete the review (${kind}) — deferring to you`;
+interface EscalationFootwork {
+  /** The annotated (or plain) decision record. */
+  record: DecisionRecordEntry;
+  /** The instruction source for an emitted deny, else null. */
+  instructionSource: DenyInstructionSource | null;
 }
 
 /**
@@ -205,30 +202,38 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // annotation below; noticeState/deps stay captured from the factory.
     // The mode mapping's shared footwork for the two gates that emit a real
     // verdict (cache-hit and fresh model): resolveMapping owns the deciding
-    // rule (annotation input + every notify owed); this closure performs
-    // the side effects — flip the notice state, send the notify, annotate
-    // the record. The per-call constants (mode, noticeState, deps) are
-    // closure-captured — only the per-verdict facts travel as parameters.
+    // rule (annotation input + every notify owed + the instruction
+    // source); this closure performs the side effects — flip the notice
+    // state, send the notify, annotate the record. The per-call constants
+    // (mode, noticeState, deps) are closure-captured — only the
+    // per-verdict facts travel as parameters.
     const annotateAndEscalate = (
       record: DecisionRecordEntry,
       original: AuthorizerVerdict,
       emitted: AuthorizerVerdict,
       riskLevel: RiskLevel | undefined,
       deferLean: VerdictLean | undefined,
-    ): DecisionRecordEntry => {
+      deferKind: ModelCallDeferKind | undefined,
+      deferReason: string | undefined,
+    ): EscalationFootwork => {
       const decision = resolveMapping({
         original,
         emitted,
         riskLevel,
+        deferKind,
+        deferReason,
         deferLean,
         mode,
         noticeShown: noticeState.shown,
       });
       if (decision.markNoticeShown) noticeState.shown = true;
       if (decision.notice) deps.notify(decision.notice.message, decision.notice.level);
-      return decision.annotate
-        ? mapped(record, mode, emitted.kind, decision.emittedReason)
-        : record;
+      return {
+        record: decision.annotate
+          ? mapped(record, mode, emitted.kind, decision.emittedReason)
+          : record,
+        instructionSource: decision.instructionSource,
+      };
     };
 
     // surface-unmatched is expected config behavior (silent defer; outside
@@ -401,30 +406,34 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const lookup = deps.verdictCache.lookup(commandHash, contextHash, cc);
     if (lookup.hit) {
       // Cached verdicts are allow/deny only (defers are never stored), so
-      // the defer branch of the mapping is unreachable here. The cached
-      // riskLevel rides along so a cached deny maps identically to its
-      // fresh first pass.
+      // the defer branch of the mapping is unreachable here — the
+      // instruction source derives "content" structurally (no defer
+      // classification exists to make it machinery). The cached riskLevel
+      // rides along so a cached deny maps identically to its fresh first
+      // pass.
       const emitted = applyVerdictMode(mode, lookup.verdict, undefined, lookup.riskLevel);
-      const record = annotateAndEscalate(
+      const { record, instructionSource } = annotateAndEscalate(
         DecisionRecord.cacheHit(base, lookup.verdict),
         lookup.verdict,
         emitted,
         lookup.riskLevel,
-        // Cached verdicts are allow/deny only — no defer, so no lean.
+        // Cached verdicts are allow/deny only — no defer, so no lean and
+        // no defer classification.
+        undefined,
+        undefined,
         undefined,
       );
       // Replay gate: the verdict was already recorded at its model gate —
       // debug stream only (see the log-stream doctrine in
       // decision-record.ts).
       log.debug(DECISION_EVENT, record);
-      // A cached deny replays the model's own reason (defers are never
-      // stored, so a mapping-synthesized machinery reason is unreachable
-      // here) — the content instruction, appended exactly once (the cache
-      // holds the un-instructed original; each hit re-appends).
+      // A cached deny replays the model's own reason — the instruction
+      // is appended exactly once per hit (the cache holds the
+      // un-instructed original; each hit re-appends).
       if (emitted.kind === "deny") {
         return {
           kind: "deny",
-          reason: withAgentInstruction(emitted.reason, "content"),
+          reason: withAgentInstruction(emitted.reason, instructionSource ?? "content"),
         };
       }
       return emitted;
@@ -491,38 +500,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       },
       reviewOutcome.riskLevel,
     );
-    // model-defer in default (any lean) and lenient (deny-leaning) asks — but
-    // the upstream defer verdict carries no reason field, so the dialog
-    // alone would never show WHAT the reviewer wants clarified. Mirror it
-    // via the escalation channel (notify), symmetric with strict's
-    // deny reason. In-call machinery failures (empty reply, timeout, …)
-    // get the same treatment as pre-call gates: a forced defer must name
-    // its cause.
-    if (
-      emitted.kind === "defer" &&
-      reviewOutcome.deferKind === "model-defer" &&
-      reviewOutcome.deferReason
-    ) {
-      deps.notify(
-        `reviewer asks — ${truncateMiddle(reviewOutcome.deferReason, NOTIFY_REASON_CEILING)}`,
-        "info",
-      );
-    } else if (
-      emitted.kind === "defer" &&
-      reviewOutcome.deferKind !== undefined &&
-      // The model's own defer is never machinery: a terse model may defer
-      // without a reason (parseVerdictObject documents the omission) — the
-      // verdict itself completed, so no cause-notice fires.
-      reviewOutcome.deferKind !== "model-defer"
-    ) {
-      deps.notify(machineryDeferNotice(reviewOutcome.deferKind), "warning");
-    }
-    const record = annotateAndEscalate(
+    const { record, instructionSource } = annotateAndEscalate(
       DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome, contextHash),
       reviewOutcome.verdict,
       emitted,
       reviewOutcome.riskLevel,
       reviewOutcome.lean,
+      reviewOutcome.deferKind,
+      reviewOutcome.deferReason,
     );
     log.review(DECISION_EVENT, record);
 
@@ -559,19 +544,13 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
 
     // The returned deny carries the agent instruction; the audit record
     // (annotated above) and the cache (stored above) keep the un-instructed
-    // reason. Source discrimination: a machinery-defer mapped to deny by
-    // strict/permissive carries a mapping-synthesized machinery reason
-    // (the review failed — retry-later copy); a model deny, or strict's
-    // mapping of the reviewer's own uncertain model-defer, carries content
-    // copy (the review completed — the agent must stop pursuing).
+    // reason. The source discrimination (machinery iff the review failed,
+    // content iff the request was judged) lives in resolveMapping — same
+    // rule as the cache-hit gate above.
     if (emitted.kind === "deny") {
-      const source =
-        reviewOutcome.verdict.kind === "defer" && reviewOutcome.deferKind !== "model-defer"
-          ? "machinery"
-          : "content";
       return {
         kind: "deny",
-        reason: withAgentInstruction(emitted.reason, source),
+        reason: withAgentInstruction(emitted.reason, instructionSource ?? "content"),
       };
     }
     return emitted;

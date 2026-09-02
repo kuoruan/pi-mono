@@ -204,6 +204,19 @@ export function uncertainDenyReason(mode: Mode): string {
 }
 
 /**
+ * The human notice for a machinery-forced defer — the deferred ask lands on
+ * the operator with no dialog context of its own, so the line names the
+ * failure kind (doctrine symmetry with the breaker-trip notice). No
+ * structural colon: the TUI's own level prefix would double it up.
+ *
+ * @param kind - The classified machinery failure kind.
+ * @returns The notification message.
+ */
+export function machineryDeferNotice(kind: MachineryFailureKind): string {
+  return `reviewer could not complete the review (${kind}) — deferring to you`;
+}
+
+/**
  * The deny reason for a machinery-failure denial: the agent sees why the
  * review could not complete instead of a silent deny. Mode-parameterized
  * so audit readers see which policy produced the deny.
@@ -353,15 +366,24 @@ export interface MappingDecision {
    */
   annotate: boolean;
   /**
-   * The operator notice this mapping owes, rendered and leveled; null
-   * when silent. Three kinds: a model deny that HOLDS or escalates
+   * The operator notice this disposition owes, rendered and leveled; null
+   * when silent. Five kinds: a model deny that HOLDS or escalates
    * (v27 renders no dialog for denials — the notify line is the
    * operator's only copy), a mapped defer (the "asking you instead"
-   * tail corrects the operator's read), and the once-per-pipeline
-   * fail-open notice (the mode auto-approving against the model's
-   * explicit verdict or its neutral uncertainty).
+   * tail corrects the operator's read), the once-per-pipeline fail-open
+   * notice (the mode auto-approving against the model's explicit verdict
+   * or its neutral uncertainty), a model-defer that emitted as defer
+   * (the "reviewer asks" mirror — the dialog alone never shows what the
+   * reviewer wants clarified), and a machinery defer that emitted as
+   * defer (the cause notice — a forced defer must name its failure kind).
    */
-  notice: { message: string; level: "warning" } | null;
+  notice: { message: string; level: "info" | "warning" } | null;
+  /**
+   * The agent instruction's source for an emitted deny — the
+   * discrimination rule (machinery iff the original was a machinery
+   * defer) lives here, once; null when nothing deny-shaped was emitted.
+   */
+  instructionSource: DenyInstructionSource | null;
   /**
    * Whether this decision consumes the once-per-pipeline fail-open
    * notice state (the caller flips its `shown` flag).
@@ -370,13 +392,42 @@ export interface MappingDecision {
 }
 
 /**
+ * The per-ask mapping context resolveMapping decides on: the verdicts
+ * (original vs emitted), the risk/defer classification, the lean, the
+ * mode, and the once-per-pipeline notice state.
+ */
+export interface MappingInput {
+  /** The model's (or cached) verdict. */
+  original: AuthorizerVerdict;
+  /** The verdict the mode mapping emitted. */
+  emitted: AuthorizerVerdict;
+  /** The model's risk assessment (escalation copy). */
+  riskLevel: RiskLevel | undefined;
+  /**
+   * The fresh review's defer classification (kind + clarification
+   * request) when the original is a defer; undefined on the cache-hit
+   * path (defers are never stored — a cached original is allow/deny
+   * only) and when the original is not a defer.
+   */
+  deferKind: ModelCallDeferKind | undefined;
+  /** The model's clarification request on its own defer, if any. */
+  deferReason: string | undefined;
+  /** The reviewer's lean on a fresh model defer. */
+  deferLean: VerdictLean | undefined;
+  /** The effective mode (names the policy in the fail-open copy). */
+  mode: Mode;
+  /** Whether the once-per-pipeline fail-open notice already fired. */
+  noticeShown: boolean;
+}
+
+/**
  * The mapping's consequence resolver — the deciding rule that used to
  * live in the pipeline's closure, extracted as one pure function: given
  * the original verdict, the emitted verdict, and the per-ask context
- * (risk level, defer lean, mode, notice state), it decides the record
- * annotation and every notify the mapping owes. The pipeline calls it
- * and performs the side effects; the rule itself is testable in one
- * place.
+ * (risk level, defer classification, lean, mode, notice state), it
+ * decides the record annotation, every notify the disposition owes, and
+ * the agent instruction's source. The pipeline calls it and performs
+ * the side effects; the rule itself is testable in one place.
  *
  * The input is an object because `original` and `emitted` are adjacent
  * same-typed parameters — positional calls could swap them silently; the
@@ -384,25 +435,44 @@ export interface MappingDecision {
  * inclination — silent; the fail-open notice belongs to the mode going
  * AGAINST the model) lives in the field docs above.
  *
- * @param input - The per-ask mapping context (verdicts, risk, lean, mode,
- *   notice state), field-documented above.
- * @returns The record-annotation and notify decision.
+ * @param input - The per-ask mapping context, field-documented on
+ *   {@link MappingInput}.
+ * @returns The record-annotation, notify, and instruction-source decision.
  */
-export function resolveMapping(input: {
-  /** The model's (or cached) verdict. */
-  original: AuthorizerVerdict;
-  /** The verdict the mode mapping emitted. */
-  emitted: AuthorizerVerdict;
-  /** The model's risk assessment (escalation copy). */
-  riskLevel: RiskLevel | undefined;
-  /** The reviewer's lean on a fresh model defer. */
-  deferLean: VerdictLean | undefined;
-  /** The effective mode (names the policy in the fail-open copy). */
-  mode: Mode;
-  /** Whether the once-per-pipeline fail-open notice already fired. */
-  noticeShown: boolean;
-}): MappingDecision {
-  const { original, emitted, riskLevel, deferLean, mode, noticeShown } = input;
+export function resolveMapping(input: MappingInput): MappingDecision {
+  const { original, emitted, riskLevel, deferKind, deferReason, deferLean, mode, noticeShown } =
+    input;
+  // The agent instruction's source: machinery iff what was denied is a
+  // machinery defer (the review failed — retry-later copy); content
+  // otherwise (the request itself was judged — stop-pursuing copy). Null
+  // when nothing deny-shaped was emitted. One rule, stated once: the
+  // cache-hit path derives "content" from it structurally (a cached
+  // original is allow/deny only, so the machinery branch is unreachable
+  // by type, not by comment).
+  const instructionSource: DenyInstructionSource | null =
+    emitted.kind === "deny"
+      ? original.kind === "defer" && deferKind !== undefined && deferKind !== "model-defer"
+        ? "machinery"
+        : "content"
+      : null;
+  // A defer that emitted as defer owes its own notices: the model's
+  // clarification (mirrored — the upstream defer verdict carries no
+  // reason field, so the dialog alone would never show WHAT the reviewer
+  // wants clarified), or the machinery cause (a forced defer must name
+  // its failure kind — same doctrine as the pre-call gates). A terse
+  // model defer without a reason stays silent (the verdict itself
+  // completed; parseVerdictObject documents the omission).
+  const deferNotice: { message: string; level: "info" | "warning" } | null =
+    emitted.kind === "defer" && original.kind === "defer"
+      ? deferKind === "model-defer" && deferReason
+        ? {
+            message: `reviewer asks — ${truncateMiddle(deferReason, NOTIFY_REASON_CEILING)}`,
+            level: "info",
+          }
+        : deferKind !== undefined && deferKind !== "model-defer"
+          ? { message: machineryDeferNotice(deferKind), level: "warning" }
+          : null
+      : null;
   if (emitted.kind === original.kind) {
     // The verdict held. A model deny that holds in every mode is the
     // reviewer's hardest call — v27 has no dialog for denials (the
@@ -413,14 +483,22 @@ export function resolveMapping(input: {
     // GENERIC_DENY_REASON for a reason-less deny, so today this never
     // evaluates false — but the contract is "deny WITH a reason", and a
     // future deny producer (e.g. a persisted cache) could reach here
-    // without one.
-    return original.kind === "deny" && original.reason
-      ? {
-          annotate: false,
-          notice: { message: escalationMessage(original, riskLevel, "denied"), level: "warning" },
-          markNoticeShown: false,
-        }
-      : { annotate: false, notice: null, markNoticeShown: false };
+    // without one. A defer that holds still owes its own notice (the
+    // machinery cause, or the model's mirrored clarification).
+    if (original.kind === "deny" && original.reason) {
+      return {
+        annotate: false,
+        notice: { message: escalationMessage(original, riskLevel, "denied"), level: "warning" },
+        instructionSource,
+        markNoticeShown: false,
+      };
+    }
+    return {
+      annotate: false,
+      notice: deferNotice,
+      instructionSource,
+      markNoticeShown: false,
+    };
   }
   // The mapping changed the emitted kind: the record gets the mapping
   // annotation, and the emittedReason tells audit readers what the agent
@@ -435,7 +513,7 @@ export function resolveMapping(input: {
       : emitted.kind === "deny"
         ? emitted.reason
         : undefined;
-  let notice: MappingDecision["notice"] = null;
+  let notice: MappingDecision["notice"] = deferNotice;
   let markNoticeShown = false;
   if (emitted.kind === "defer") {
     // A mode-softened deny becomes the human's decision — the tail
@@ -455,5 +533,5 @@ export function resolveMapping(input: {
         : "non-allow verdicts — hard-tier denials still block";
     notice = { message: `${mode} auto-approves ${loosened}`, level: "warning" };
   }
-  return { annotate: true, emittedReason, notice, markNoticeShown };
+  return { annotate: true, emittedReason, notice, instructionSource, markNoticeShown };
 }

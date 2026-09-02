@@ -426,13 +426,12 @@ export class RuntimeSettings {
     const rows = this.#entries.flatMap((e) =>
       e.menuRows ? e.menuRows().map((r) => ({ entry: e, row: r })) : [],
     );
-    const labels = rows.map((r) => r.row.label);
-    const choice = await ctx.ui.select(
+    const picked = await this.#pickItem(
+      ctx,
       "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
-      labels,
+      rows,
+      (r) => r.row.label,
     );
-    if (choice === undefined) return;
-    const picked = rows[labels.indexOf(choice)];
     await picked?.entry.run(picked?.row.args, ctx);
   }
 
@@ -716,13 +715,12 @@ export class RuntimeSettings {
       this.#deps.notify("pass a picker-capable UI to browse the suggested rule fragments", "info");
       return;
     }
-    const labels = top.map((c) => `${c.occurrences}× ${c.target} (${c.surface})`);
-    const choice = await ctx.ui.select(
+    const picked = await this.#pickItem(
+      ctx,
       "ai-guard report — pick a suggestion to view its rule",
-      labels,
+      top,
+      (c) => `${c.occurrences}× ${c.target} (${c.surface})`,
     );
-    if (choice === undefined) return;
-    const picked = top.find((c, i) => labels[i] === choice);
     if (!picked) return;
     this.#deps.notify(
       `suggested rule (confirm, then paste into pi-permission-system config) — ${picked.suggestedRule}`,
@@ -752,19 +750,16 @@ export class RuntimeSettings {
     }
     const recent = history.toReversed();
     // Labels carry a millisecond timestamp so repeated (target, surface)
-    // pairs stay distinguishable and the picked record maps back exactly
-    // (two model roundtrips cannot land in the same millisecond).
-    const labels = recent.map(
+    // pairs stay distinguishable — the pick-item seam's uniqueness
+    // discipline (two model roundtrips cannot land in the same
+    // millisecond).
+    const record = await this.#pickItem(
+      ctx,
+      "ai-guard denied — pick a record to view its reason",
+      recent,
       (d) =>
         `deny${d.riskLevel ? ` (${d.riskLevel})` : ""} — ${d.target} [${d.surface}] (${d.timestamp.slice(11, 23)})`,
     );
-    const choice = await ctx.ui.select(
-      "ai-guard denied — pick a record to view its reason",
-      labels,
-    );
-    if (choice === undefined) return;
-    const picked = labels.indexOf(choice);
-    const record = recent[picked];
     if (!record) return;
     // The reason's notify copy rides the 200-char ceiling like every
     // other model-reason line (the audit record keeps the full text).
@@ -882,6 +877,30 @@ export class RuntimeSettings {
   }
 
   /**
+   * Pick an item through the label-based select seam: renders items, asks
+   * the UI, maps the chosen label back to its item. The seam returns label
+   * strings, so label↔item uniqueness is this helper's one discipline —
+   * callers whose items can repeat (the deny panel's repeated targets)
+   * must render distinguishing detail into the label.
+   *
+   * @param ctx - The command UI context (select-capable).
+   * @param title - The picker title.
+   * @param items - The items to choose among.
+   * @param render - The label renderer (one per item).
+   * @returns The picked item, or undefined on cancel.
+   */
+  async #pickItem<T>(
+    ctx: AiGuardUiContext,
+    title: string,
+    items: readonly T[],
+    render: (item: T) => string,
+  ): Promise<T | undefined> {
+    const labels = items.map(render);
+    const choice = await ctx.ui.select(title, labels);
+    return choice === undefined ? undefined : items[labels.indexOf(choice)];
+  }
+
+  /**
    * Open the spec's value picker and apply the choice.
    *
    * @param spec - The setting to pick a value for.
@@ -890,14 +909,12 @@ export class RuntimeSettings {
   async #pickValue(spec: EnumSettingSpec, ctx: AiGuardUiContext): Promise<void> {
     const title = `${this.#commandWord(spec)} — current: ${this.#label(spec)}`;
     // Picker lines carry the per-value detail (`strict — the reviewer's
-    // allow is the only pass`) — plain text, resolved by index so the
+    // allow is the only pass`) — plain text, resolved by item so the
     // pretty line never has to be parsed back.
     const options = this.#options(spec);
-    const labels = options.map((o) =>
+    const option = await this.#pickItem(ctx, title, options, (o) =>
       spec.optionDetails?.[o.text] ? `${o.text} — ${spec.optionDetails[o.text]}` : o.text,
     );
-    const choice = await ctx.ui.select(title, labels);
-    const option = choice !== undefined ? options[labels.indexOf(choice)] : undefined;
     if (option) {
       this.#applyOption(spec, option, ctx);
     }

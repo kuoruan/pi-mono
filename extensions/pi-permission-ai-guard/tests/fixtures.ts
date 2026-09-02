@@ -1,8 +1,8 @@
 /**
  * Shared ask fixtures: upstream-shaped PromptPayload / evidence / details
- * builders used across the ask and review-request test files.
- * One definition per fixture shape so ask projections can't drift between
- * suites.
+ * builders used by the ask, review-request, and review-pipeline test
+ * suites. One definition per fixture shape so ask projections can't drift
+ * between suites.
  */
 
 import type { PromptPayload, PromptPermissionDetails } from "@gotgenes/pi-permission-system";

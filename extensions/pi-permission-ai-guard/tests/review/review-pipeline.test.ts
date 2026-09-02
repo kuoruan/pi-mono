@@ -24,34 +24,7 @@ import {
 } from "#src/review/review-pipeline.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
 import { uncertainDenyReason, withAgentInstruction } from "#src/review/verdict-mode.ts";
-
-/**
- * Minimal bash PromptPayload for a fixture (pi-permission-system 26.0+).
- *
- * @param sub - The policy-selected sub-command (rides in `request.value`).
- * @param full - Optional full command; when it differs from `sub`, a
- *   `full command` evidence entry is added, matching the 26.0 runtime shape.
- * @returns A minimal `PromptPayload` with `kind: "bash"`.
- */
-function bashPayload(sub: string, full?: string): PromptPayload {
-  const evidence =
-    full && full !== sub ? [{ label: "full command", text: full, detail: null }] : [];
-  return {
-    kind: "bash",
-    request: {
-      requester: { agentName: null, forwarded: false, sessionId: null },
-      surface: "bash",
-      toolName: null,
-      invokedToolName: null,
-      value: sub,
-      matchedPattern: null,
-      commandContext: null,
-      executedUnit: null,
-    },
-    evidence,
-    annotations: [],
-  } as PromptPayload;
-}
+import { bashPayload, makeDetails } from "#test/fixtures.ts";
 
 const baseConfig: AiGuardConfig = configSchema.parse({
   provider: "anthropic",
@@ -96,21 +69,6 @@ function makeSessionManagerWith(entries: unknown[]) {
     getSessionId: () => "s1",
     buildContextEntries: () => entries as unknown as SessionEntry[],
   };
-}
-
-function makeDetails(overrides: Record<string, unknown> = {}) {
-  const value = typeof overrides.value === "string" ? overrides.value : "ls -la";
-  return {
-    requestId: "test-1",
-    source: "tool_call" as const,
-    agentName: null,
-    payload: bashPayload(value),
-    message: "Run command",
-    surface: "bash",
-    value,
-    command: value,
-    ...overrides,
-  } as PromptPermissionDetails;
 }
 
 /**
