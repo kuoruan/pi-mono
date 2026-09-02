@@ -7,7 +7,7 @@
  * review audit log.
  */
 
-import { EXTENSION_ID, LINK_NAME } from "./config-schema.ts";
+import { EXTENSION_ID, LINK_NAME } from "#src/config/config-schema.ts";
 
 /**
  * Human-facing message prefix for UI notification copy, derived from the

@@ -33,12 +33,12 @@ import type {
   PromptPermissionDetails,
 } from "@gotgenes/pi-permission-system";
 
-import { CircuitBreaker } from "../src/circuit-breaker.ts";
-import { type AiGuardConfig, configSchema } from "../src/config-schema.ts";
-import { type ModelRegistryLike, createCompleteSimple } from "../src/model-review.ts";
-import { createReviewPipeline } from "../src/review-pipeline.ts";
-import type { SessionManagerLike } from "../src/transcript-stripper.ts";
-import { VerdictCache } from "../src/verdict-cache.ts";
+import type { SessionManagerLike } from "#src/ask/transcript-stripper.ts";
+import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
+import { type ModelRegistryLike, createCompleteSimple } from "#src/model/model-review.ts";
+import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
+import { createReviewPipeline } from "#src/review/review-pipeline.ts";
+import { VerdictCache } from "#src/review/verdict-cache.ts";
 
 type ProviderName = "anthropic" | "openai";
 type VerdictKind = "allow" | "deny" | "defer";

@@ -6,8 +6,8 @@
     "noEmit": true,
     "paths": {
       "#src/*": ["./src/*"],
-      "#test/*": ["./test/*"]
+      "#test/*": ["./tests/*"]
     }
   },
-  "include": ["src", "test", "scripts", "vitest.config.ts"]
+  "include": ["src", "tests", "scripts", "vitest.config.ts"]
 }

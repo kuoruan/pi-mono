@@ -4,7 +4,6 @@
  * and expose the runtime settings surface ({@link RuntimeSettings}).
  */
 
-import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -14,21 +13,22 @@ import {
   type PermissionsReadyEvent,
 } from "@gotgenes/pi-permission-system";
 
+import { readDecisionLog } from "#src/audit/decision-log-reader.ts";
+import { readTailLinesFromFile } from "#src/audit/log-tail-fs.ts";
 import {
   type ConfigEnv,
   type LoadConfigResult,
   type SaveConfigFn,
   loadAiGuardConfig,
   persistConfigLayer,
-} from "./config-layer.ts";
-import { MODE_VALUES, NOTIFY_LEVEL_VALUES } from "./config-schema.ts";
-import { readDecisionLog } from "./decision-log-reader.ts";
-import { warn } from "./logger.ts";
-import { CYCLE_MODE_VALUES, EMPHASIZED_MODE, MODE_BLURBS } from "./mode-table.ts";
-import { type CompleteSimpleFn, createCompleteSimple } from "./model-review.ts";
-import { type ReviewPipelineDeps, createReviewPipeline } from "./review-pipeline.ts";
-import { RuntimeSettings, type EnumSettingSpec } from "./runtime-settings.ts";
-import { SessionLifecycle } from "./session-lifecycle.ts";
+} from "#src/config/config-layer.ts";
+import { MODE_VALUES, NOTIFY_LEVEL_VALUES } from "#src/config/config-schema.ts";
+import { CYCLE_MODE_VALUES, EMPHASIZED_MODE, MODE_BLURBS } from "#src/config/mode-table.ts";
+import { warn } from "#src/logger.ts";
+import { type CompleteSimpleFn, createCompleteSimple } from "#src/model/model-review.ts";
+import { type ReviewPipelineDeps, createReviewPipeline } from "#src/review/review-pipeline.ts";
+import { RuntimeSettings, type EnumSettingSpec } from "#src/session/runtime-settings.ts";
+import { SessionLifecycle } from "#src/session/session-lifecycle.ts";
 
 /**
  * Optional overrides for testing. In production (default export) all
@@ -45,7 +45,7 @@ export interface AiGuardDependencies {
    * used — the factory owns authorizer construction.
    */
   createPipeline?: (deps: ReviewPipelineDeps) => Authorizer["authorize"];
-  /** Override the config-layer persistence (the save-to-config actions). */
+  /** Override the config-layer persistence (the save-config actions). */
   saveConfig?: SaveConfigFn;
 }
 /**
@@ -61,7 +61,7 @@ const SETTINGS: readonly EnumSettingSpec[] = [
   {
     name: "mode",
     values: [...MODE_VALUES],
-    description: "what happens to the reviewer's denials and uncertainty",
+    description: "how denials and uncertainty are disposed",
     hiddenValue: "default",
     cycleValues: CYCLE_MODE_VALUES,
     highlightValue: EMPHASIZED_MODE,
@@ -73,48 +73,12 @@ const SETTINGS: readonly EnumSettingSpec[] = [
     // (ctrl+alt+g stays mode-only), no highlight (a quieter pane is a
     // preference, not a danger).
     name: "notifyLevel",
+    commandName: "notify-level",
     values: [...NOTIFY_LEVEL_VALUES],
-    description: "the minimum ambient notify level (off = silence all review-loop notices)",
+    description: "the ambient notify threshold",
     hiddenValue: "info",
   },
 ];
-
-/**
- * Read the last `lineCount` lines of a UTF-8 file, or undefined when
- * unreadable (missing file, permission) — the report command's only file
- * access. Tail-bounded in BOTH the parse window and memory: only the
- * final chunk of the file is read (the log grows without rotation, so a
- * whole-file read would grow with it). The chunk assumes ~1KB per line —
- * when a pathological long line exceeds the chunk, the window silently
- * shrinks (conservative: fewer entries, never wrong ones).
- *
- * @param path - The file path.
- * @param lineCount - How many trailing lines to return.
- * @returns The trailing lines, or undefined when the file cannot be read.
- */
-function readLogFileTail(path: string, lineCount: number): string[] | undefined {
-  try {
-    const { size } = statSync(path);
-    // A generous per-line allowance: 1KB × the window. When the whole file
-    // is smaller, read it all (the bound holds trivially).
-    const chunkBytes = Math.min(size, lineCount * 1024);
-    const start = size - chunkBytes;
-    const fd = openSync(path, "r");
-    try {
-      const buffer = Buffer.alloc(chunkBytes);
-      readSync(fd, buffer, 0, chunkBytes, start);
-      const lines = buffer.toString("utf8").split("\n");
-      // The first line is usually mid-line (the chunk starts at a byte
-      // offset); drop it unless the read starts at the file's beginning.
-      const usable = start > 0 ? lines.slice(1) : lines;
-      return usable.slice(-lineCount);
-    } finally {
-      closeSync(fd);
-    }
-  } catch {
-    return undefined;
-  }
-}
 
 export function createAiGuardExtension(
   pi: ExtensionAPI,
@@ -163,10 +127,18 @@ export function createAiGuardExtension(
           }
           return persistConfigLayer({ target, env: sessionEnv, config });
         }),
-      // The report command's log read: production reads the real review
-      // log's tail (read-only; the reader's invariants forbid writes).
-      readDecisionLog: (home) => readDecisionLog(home, { readTailLines: readLogFileTail }),
+    },
+    {
+      // The read-only panels' collaborators: the report command's log read
+      // (production reads the real review log's tail — read-only; the
+      // reader's invariants forbid writes) and the session's live deny
+      // history, read through an accessor because the array is recreated
+      // at each session_start, after this wiring runs once.
+      notify: lifecycle.feedbackNotify,
+      readDecisionLog: (home: string) =>
+        readDecisionLog(home, { readTailLines: readTailLinesFromFile }),
       home: homedir(),
+      readDenyHistory: () => lifecycle.session?.denyHistory ?? [],
     },
     SETTINGS,
   );

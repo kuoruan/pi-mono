@@ -27,7 +27,7 @@
   "type": "module",
   "imports": {
     "#src/*": "./src/*",
-    "#test/*": "./test/*"
+    "#test/*": "./tests/*"
   },
   "exports": {
     ".": {

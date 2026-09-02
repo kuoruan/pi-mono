@@ -2,6 +2,19 @@
 
 A Pi extension that reviews permission **asks** with a light model, using a token-optimized stripped transcript. This file pins down the ubiquitous language so reviews, navigators (human or AI), and future contributors share one vocabulary.
 
+## Source layout
+
+Six directories under `src/`, one per concept cluster (the glossary sections below map onto them):
+
+- `config/` — the operator-configured surface: schema, layered load/persist, the mode ladder's declarative facts.
+- `ask/` — from permission ask to review prompt: eligibility, the structured projection (ADR 0011), cache identity, transcript stripping, prompt rendering.
+- `model/` — talking to the reviewer model: auth/call/retry, verdict parsing.
+- `review/` — the review engine and its verdicts: the pipeline, mode mapping, the failure taxonomy, circuit breaker, verdict cache.
+- `session/` — session state and the operator surface: lifecycle, the `/ai-guard` command table, overrides, session-file persistence.
+- `audit/` — the decision record and its readers: record factories, the review-log reader + fs tail adapter, report candidates.
+
+Root: `extension.ts`/`index.ts` (composition + entry), `logger.ts`/`utils.ts` (shared infrastructure). Imports inside `src/` use the `#src/<dir>/x.ts` absolute form.
+
 ## Language
 
 ### The ask
@@ -48,7 +61,7 @@ The leniency ladder for the reviewer's non-allow verdicts, strictest first. Deni
 - Reviewer machinery failures (model unresolved, auth failed, transcript errors, timeouts, unparseable or empty replies, no review target) never map to allow in any mode — a broken reviewer must not rubber-stamp: they deny under `strict` (fail-closed by doctrine) and `permissive` (allow needs a verdict), and defer under the other two. The `permissive` deny is the ladder's one non-monotone cell (`lenient` defers, `permissive` denies) — a defer would need a dialog the yolo contract forbids. Contract over monotonicity, stated as an exception.
 - A machinery-forced defer notifies its classified cause, repeatedly when the failure repeats (no dedup: the same kind can recur for different underlying reasons, and each interruption lands on its own dialog).
 - The model's judgment is always recorded; the mode maps only what the link emits. The ctrl+alt+g cycle visits `default → lenient → permissive`; only `strict` is set explicitly via `/ai-guard mode strict` (full fail-closed automation deserves a deliberate choice — the red footer makes the permissive stop visible).
-- Session overrides persist in the pi session file and restore on resume; a fresh session starts from the config default. The save actions (`save-to-global-config` / `save-to-project-config`) persist the current effective config — every field, session overrides included — into a config layer, so a saved field shadows the layers beneath it.
+- Session overrides persist in the pi session file and restore on resume; a fresh session starts from the config default. The save actions (`save-config global` / `save-config project`) persist the current effective config — every field, session overrides included — into a config layer, so a saved field shadows the layers beneath it.
 
 ### Session state
 
@@ -72,6 +85,9 @@ Per-session LRU keyed by a review request snapshot (a decision-relevant projecti
 
 **Deny history**:
 Session-memory list of what the reviewer itself refused (`/ai-guard denied` reads it) — model-gate denies only: mapping artifacts (mode-softened denies, `strict`'s defer→deny) and machinery denials are absent by design, and a cached deny replays without a new entry. Each record carries the teaching reason un-instructed (exactly as the audit record holds it) and the redacted target form (a credential in the command must not echo to the terminal via the panel's notify).
+
+**Command entry table**:
+The single table behind the `/ai-guard` command: one row per first token (a setting's spec, or an action verb — `save-config`, `breaker`, `report`, `denied`). Completion, the settings menu, and dispatch all traverse the one table, so adding a verb is one entry, not a set of hand-built touch points. Each row owns its argument grammar (settings take enum values + `reset`; `save-config` takes `global|project` — its bare form and its menu row open the target picker; `breaker` takes the fixed `reset`) and routes to its apply method; the read-only panels' collaborators (the log read, the deny history) ride their entries' own dep bundle, not the settings seam.
 
 ### Review
 
@@ -133,7 +149,7 @@ All from `@gotgenes/pi-permission-system` (peer range `^27.1.1 || ^28.0.0 || ^29
 
 ## Prompt writing principles
 
-The safety rules prompt (`SAFETY_RULES` in `src/prompt.ts`) is the semantic instruction fed to the review model. These principles govern how it is written and maintained.
+The safety rules prompt (`SAFETY_RULES` in `src/ask/prompt.ts`) is the semantic instruction fed to the review model. These principles govern how it is written and maintained.
 
 ### 1. Semantic, not literal
 
