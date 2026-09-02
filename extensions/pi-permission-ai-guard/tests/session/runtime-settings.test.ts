@@ -230,8 +230,14 @@ describe("RuntimeSettings — command", () => {
     await settings.command.handler("", ctx);
 
     expect(ctx.ui.select).toHaveBeenCalledWith(
-      "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
-      ["mode — default (config)", "save config", "reset circuit breaker"],
+      "ai-guard settings — pick a setting to adjust or an action to run",
+      [
+        "mode — default (config)",
+        "save config",
+        "reset circuit breaker",
+        "report suggested rules",
+        "browse model denies",
+      ],
     );
     expect(overrides.mode).toBe("strict");
   });
@@ -262,12 +268,14 @@ describe("RuntimeSettings — command", () => {
     // Menu rows list BOTH settings (plus the save verbs); picking the
     // second spec and a value applies it like any other.
     expect(ctx.ui.select).toHaveBeenCalledWith(
-      "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
+      "ai-guard settings — pick a setting to adjust or an action to run",
       [
         "mode — default (config)",
         "notify level — info (config)",
         "save config",
         "reset circuit breaker",
+        "report suggested rules",
+        "browse model denies",
       ],
     );
     expect(overrides.notifyLevel).toBe("off");
@@ -330,8 +338,14 @@ describe("RuntimeSettings — command", () => {
       .mockResolvedValueOnce("off");
     await settings.command.handler("", menuCtx);
     expect(menuCtx.ui.select).toHaveBeenCalledWith(
-      "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
-      ["notify level — warning (session)", "save config", "reset circuit breaker"],
+      "ai-guard settings — pick a setting to adjust or an action to run",
+      [
+        "notify level — warning (session)",
+        "save config",
+        "reset circuit breaker",
+        "report suggested rules",
+        "browse model denies",
+      ],
     );
     expect(menuCtx.ui.select).toHaveBeenCalledWith(
       "notify level — current: notify level — warning (session)",
@@ -792,11 +806,10 @@ describe("RuntimeSettings — settings-menu labels stay plain", () => {
     expect(menuOptions[0]![0]).toBe("mode — permissive (session)");
   });
 
-  it("the menu lists only menu-reachable entries — the read-only panels stay typed-verb-only", async () => {
-    // report/denied are entry-table rows (completion + dispatch) but NOT
-    // menu rows (menuLabel undefined): the settings menu's surface is a
-    // shipped decision — adding a menuLabel to a panel silently widens
-    // the menu unless this trips.
+  it("the menu lists every entry — settings, actions, and the read-only panels alike", async () => {
+    // Every verb is menu-reachable (the panels joined the menu beside
+    // save-config): the menu's full surface is pinned so a new entry
+    // without menuRows silently narrows it — this trips.
     const { settings } = makeSettings();
     const menuOptions: string[][] = [];
     const select = vi.fn<(title: string, options: string[]) => Promise<string | undefined>>(
@@ -812,8 +825,14 @@ describe("RuntimeSettings — settings-menu labels stay plain", () => {
     await settings.command.handler("", ctx);
     const labels = menuOptions[0]!;
     // Exactly the menu-reachable rows: the specs (mode in this fixture)
-    // plus the save action and the breaker reset — no panel rows.
-    expect(labels).toEqual(["mode — default (config)", "save config", "reset circuit breaker"]);
+    // plus every action verb — save, breaker, and the two panels.
+    expect(labels).toEqual([
+      "mode — default (config)",
+      "save config",
+      "reset circuit breaker",
+      "report suggested rules",
+      "browse model denies",
+    ]);
   });
 });
 

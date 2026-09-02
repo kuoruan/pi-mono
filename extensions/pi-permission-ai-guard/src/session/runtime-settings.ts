@@ -251,9 +251,9 @@ interface CommandEntry {
   readonly completionLabel: string;
   /**
    * The settings-menu rows this entry contributes (none = not
-   * menu-reachable; the read-only panels stay typed-verb-only, as
-   * shipped). Settings contribute one row showing live state; a bare
-   * action verb contributes its phrase and lets its picker ask the rest.
+   * menu-reachable). Settings contribute one row showing live state; a
+   * bare action verb contributes its phrase and lets its picker ask
+   * the rest; a fixed-argument verb carries its argument.
    */
   readonly menuRows?: () => MenuRow[];
   /** Second-token completion for the entry's argument grammar, if any. */
@@ -458,7 +458,7 @@ export class RuntimeSettings {
     );
     const picked = await this.#pickItem(
       ctx,
-      "ai-guard settings — pick a setting to adjust, save the current config, or reset the breaker",
+      "ai-guard settings — pick a setting to adjust or an action to run",
       rows,
       (r) => r.row.label,
     );
@@ -602,11 +602,13 @@ export class RuntimeSettings {
       {
         name: "report",
         completionLabel: "report — suggest permission rules for repeated asks",
+        menuRows: () => [{ label: "report suggested rules", args: [] }],
         run: (_args, ctx) => this.#applyReport(ctx),
       },
       {
         name: "denied",
         completionLabel: "denied — browse this session's model denies",
+        menuRows: () => [{ label: "browse model denies", args: [] }],
         run: (_args, ctx) => this.#applyDenied(ctx),
       },
     ];
