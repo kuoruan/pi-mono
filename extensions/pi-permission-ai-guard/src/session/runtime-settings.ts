@@ -195,9 +195,7 @@ export interface PanelDeps {
    * injected (production reads the real file; tests inject fixtures).
    * Returns undefined when the log cannot be read.
    */
-  readDecisionLog: (home: string) => LogEntry[] | undefined;
-  /** The user's home directory (log path resolution). */
-  home: string;
+  readDecisionLog: () => LogEntry[] | undefined;
   /** This session's model-gate deny history (empty when no session). */
   readDenyHistory: () => readonly DenyRecord[];
 }
@@ -732,7 +730,7 @@ export class RuntimeSettings {
    * @param ctx - The command context (notify + optional picker).
    */
   async #applyReport(ctx: AiGuardUiContext): Promise<void> {
-    const entries = this.#panels.readDecisionLog(this.#panels.home);
+    const entries = this.#panels.readDecisionLog();
     if (entries === undefined) {
       this.#deps.notify("no review log found — nothing to report yet", "info");
       return;

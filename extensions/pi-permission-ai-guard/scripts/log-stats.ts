@@ -27,7 +27,6 @@
  *   npx tsx scripts/log-stats.ts --file /path/to/review.jsonl
  */
 
-import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 
 import { readLogLines, reviewLogPath } from "#src/audit/decision-log-reader.ts";
@@ -56,7 +55,7 @@ interface RepeatedGroup {
 function main(): void {
   const { values } = parseArgs({
     options: {
-      file: { type: "string", default: reviewLogPath(homedir()) },
+      file: { type: "string", default: reviewLogPath() },
     },
   });
   const path = values.file;

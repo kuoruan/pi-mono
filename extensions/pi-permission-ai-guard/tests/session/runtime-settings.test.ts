@@ -72,7 +72,7 @@ interface MakeSettingsOptions {
   /** The session's deny-history records (default: empty). */
   denyHistory?: DenyRecord[];
   /** The report command's log-read stub (default: no log). */
-  readDecisionLog?: (home: string) => LogEntry[] | undefined;
+  readDecisionLog?: () => LogEntry[] | undefined;
 }
 
 function makeSettings(overridesInit: SessionOverrides = {}, options: MakeSettingsOptions = {}) {
@@ -98,7 +98,6 @@ function makeSettings(overridesInit: SessionOverrides = {}, options: MakeSetting
     },
     {
       readDecisionLog: options.readDecisionLog ?? (() => undefined),
-      home: "/home/test",
       readDenyHistory: () => options.denyHistory ?? [],
     },
     options.specs ?? SPECS,
@@ -982,7 +981,6 @@ describe("RuntimeSettings — denied command", () => {
       },
       {
         readDecisionLog: () => undefined,
-        home: "/home/test",
         readDenyHistory: () => liveHistory,
       },
       SPECS,

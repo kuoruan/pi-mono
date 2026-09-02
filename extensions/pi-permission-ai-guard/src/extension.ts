@@ -4,8 +4,6 @@
  * and expose the runtime settings surface ({@link RuntimeSettings}).
  */
 
-import { homedir } from "node:os";
-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   type Authorizer,
@@ -133,9 +131,7 @@ export function createAiGuardExtension(
       // reader's invariants forbid writes) and the session's live deny
       // history, read through an accessor because the array is recreated
       // at each session_start, after this wiring runs once.
-      readDecisionLog: (home: string) =>
-        readDecisionLog(home, { readTailLines: readTailLinesFromFile }),
-      home: homedir(),
+      readDecisionLog: () => readDecisionLog({ readTailLines: readTailLinesFromFile }),
       readDenyHistory: () => lifecycle.session?.denyHistory ?? [],
     },
     SETTINGS,

@@ -1,3 +1,5 @@
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+
 /**
  * Decision-log reader: the read-only bridge from the permission-review
  * JSONL log (written by this link AND the permission system's terminal
@@ -59,13 +61,18 @@ export interface LogReadDeps {
 export const LOG_TAIL_LINES = 5000;
 
 /**
- * The default review-log path (the permission system's global logs dir).
+ * The default review-log path (the permission system's global logs dir),
+ * resolved from the agent directory the same way the config layer
+ * resolves its own paths — `getAgentDir()` honors `PI_CODING_AGENT_DIR`
+ * and rebranded `CONFIG_DIR_NAME`, so a relocated agent dir reads the
+ * right log instead of a stale `~`-derived one.
  *
- * @param home - The user's home directory.
+ * @param agentDir - The agent config directory (defaults to
+ *   `getAgentDir()`; injectable for tests).
  * @returns The conventional review-log path.
  */
-export function reviewLogPath(home: string): string {
-  return `${home}/.pi/agent/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl`;
+export function reviewLogPath(agentDir: string = getAgentDir()): string {
+  return `${agentDir}/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl`;
 }
 
 /**
@@ -105,16 +112,17 @@ export function readLogLines(
 /**
  * Read and parse the review log's tail.
  *
- * @param home - The user's home directory (path resolution).
  * @param deps - The tail-read seam (injected; production reads the file).
  * @param lineCount - How many trailing lines to consume (default 5000).
+ * @param agentDir - The agent config directory (defaults to
+ *   `getAgentDir()`; injectable for tests).
  * @returns The parsed entries in file order, or undefined when the log
  *   cannot be read (missing file → the caller's friendly message).
  */
 export function readDecisionLog(
-  home: string,
   deps: LogReadDeps,
   lineCount: number = LOG_TAIL_LINES,
+  agentDir: string = getAgentDir(),
 ): LogEntry[] | undefined {
-  return readLogLines(reviewLogPath(home), deps, lineCount);
+  return readLogLines(reviewLogPath(agentDir), deps, lineCount);
 }

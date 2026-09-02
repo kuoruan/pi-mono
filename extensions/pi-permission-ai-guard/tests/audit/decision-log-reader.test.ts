@@ -29,8 +29,8 @@ function seam(body: string | undefined): ReadTailLines {
 
 describe("reviewLogPath", () => {
   it("resolves the conventional pps logs path under home", () => {
-    expect(reviewLogPath("/home/u")).toBe(
-      "/home/u/.pi/agent/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl",
+    expect(reviewLogPath("/agent")).toBe(
+      "/agent/extensions/pi-permission-system/logs/pi-permission-system-permission-review.jsonl",
     );
   });
 });
@@ -41,7 +41,7 @@ describe("readDecisionLog", () => {
       JSON.stringify({ event: "ai_guard.decision", gate: "model", requestId: "r1" }),
       JSON.stringify({ event: "permission_request.approved", requestId: "r1" }),
     ].join("\n");
-    const entries = readDecisionLog("/h", { readTailLines: seam(body) });
+    const entries = readDecisionLog({ readTailLines: seam(body) });
     expect(entries).toHaveLength(2);
     expect(entries?.[0]?.event).toBe("ai_guard.decision");
     expect(entries?.[1]?.resolution ?? entries?.[1]?.event).toBe("permission_request.approved");
@@ -54,13 +54,13 @@ describe("readDecisionLog", () => {
       JSON.stringify({ event: "ai_guard.decision", gate: "model" }),
       "{broken",
     ].join("\n");
-    const entries = readDecisionLog("/h", { readTailLines: seam(body) });
+    const entries = readDecisionLog({ readTailLines: seam(body) });
     expect(entries).toHaveLength(1);
     expect(entries?.[0]?.gate).toBe("model");
   });
 
   it("returns undefined when the file cannot be read (missing log)", () => {
-    expect(readDecisionLog("/h", { readTailLines: seam(undefined) })).toBeUndefined();
+    expect(readDecisionLog({ readTailLines: seam(undefined) })).toBeUndefined();
   });
 
   it("honors the tail window (the seam receives the line count)", () => {
@@ -69,7 +69,7 @@ describe("readDecisionLog", () => {
       seenCount = n;
       return [];
     };
-    readDecisionLog("/h", { readTailLines: counting });
+    readDecisionLog({ readTailLines: counting });
     expect(seenCount).toBe(5000);
   });
 });
