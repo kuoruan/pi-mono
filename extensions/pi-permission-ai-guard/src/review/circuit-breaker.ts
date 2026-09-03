@@ -2,20 +2,17 @@
 
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
-import type { BreakerVerdict } from "#src/config/config-schema.ts";
+import type { AiGuardConfig } from "#src/config/config-schema.ts";
 
 /** Which tier is tripped: the hard session cap or the recoverable streak. */
 export type BreakerTier = "total" | "consecutive";
 
-/** Circuit breaker thresholds. */
-export interface CircuitBreakerConfig {
-  /** Recoverable tier: trip after this many consecutive denies (resets on trip). */
-  consecutive: number;
-  /** Hard session cap: trip after this many total denies (never resets on its own). */
-  total: number;
-  /** Verdict to return when the breaker trips. */
-  verdict: BreakerVerdict;
-}
+/**
+ * Circuit breaker thresholds — the config's `circuitBreaker` section, taken
+ * from the schema's inferred shape so the two can't drift (a zod field
+ * added there lands here automatically).
+ */
+export type CircuitBreakerConfig = AiGuardConfig["circuitBreaker"];
 
 /**
  * Circuit breaker: trips after too many deny verdicts in one session.

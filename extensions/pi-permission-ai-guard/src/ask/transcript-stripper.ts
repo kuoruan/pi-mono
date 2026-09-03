@@ -27,7 +27,12 @@ export interface StrippedTranscript {
    * safe to log.
    */
   trustedIntent: string[];
-  /** Untrusted tool calls: "toolName: truncatedArgs" (most recent, up to maxToolCalls) */
+  /**
+   * Untrusted tool calls: "toolName: truncatedArgs" (most recent, up to
+   * maxToolCalls). Sanitized (zero-width chars stripped, whitespace
+   * collapsed) + secrets redacted — same contract as trustedIntent: the
+   * stripper is the single sanitization boundary for both arrays.
+   */
   toolCalls: string[];
   /** Number of entries that were stripped (for logging) */
   strippedCount: number;
@@ -171,7 +176,11 @@ export function stripTranscript(
 
   // The trusted-intent pipeline: sanitized (injection + secrets) then
   // truncated before it enters the transcript — the ONLY write path, so a
-  // change to the pipeline happens in one place.
+  // change to the pipeline happens in one place. The ORDER is deliberate:
+  // redact the full text BEFORE truncating. Reversing it would leak partial
+  // credentials — a truncation point landing mid-key leaves a fragment too
+  // short for any redaction pattern to match, and the fragment ships to the
+  // model raw.
   const pushTrustedIntent = (text: string): void => {
     if (text && trustedIntent.length < options.maxUserMessages) {
       trustedIntent.push(truncateMiddle(normalizeAndRedactText(text), options.maxCharsPerEntry));
@@ -217,6 +226,15 @@ export function stripTranscript(
     }
 
     if (role === "assistant") {
+      // Quota check BEFORE extraction: toolCallsFromAssistant stringifies
+      // and redacts every tool-call block (arguments can carry whole files),
+      // so once the quota is full, older assistant messages must skip that
+      // work entirely — they are counted stripped and dropped, exactly like
+      // the other unretained entries.
+      if (toolCalls.length >= options.maxToolCalls) {
+        strippedCount++;
+        continue;
+      }
       // Extract tool calls only, discard assistant text
       const calls = toolCallsFromAssistant(message.content, options.maxCharsPerEntry);
       for (const call of calls) {

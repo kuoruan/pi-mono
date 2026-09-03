@@ -258,6 +258,15 @@ export function textFromContent(content: unknown): string {
 const REGEX_METACHARACTERS = /[.*+?^${}()|[\]\\]/g;
 
 /**
+ * Compiled glob patterns, keyed by pattern. `globMatch` sits on the ask
+ * path (every permission request consults the surface matcher), so a
+ * pattern's RegExp is compiled once per process, not once per call; the
+ * map is bounded by the distinct patterns in configs, and an unflagged
+ * RegExp's `test` is stateless, so reuse is safe.
+ */
+const GLOB_REGEXPS = new Map<string, RegExp>();
+
+/**
  * Glob match: `*` matches any character sequence, other chars match literally.
  *
  * @param pattern - The glob pattern (with `*` wildcards).
@@ -266,14 +275,18 @@ const REGEX_METACHARACTERS = /[.*+?^${}()|[\]\\]/g;
  */
 export function globMatch(pattern: string, text: string): boolean {
   if (!pattern.includes("*")) return pattern === text;
-  const re = new RegExp(
-    "^" +
-      pattern
-        .split("*")
-        .map((part) => part.replace(REGEX_METACHARACTERS, "\\$&"))
-        .join(".*") +
-      "$",
-  );
+  let re = GLOB_REGEXPS.get(pattern);
+  if (!re) {
+    re = new RegExp(
+      "^" +
+        pattern
+          .split("*")
+          .map((part) => part.replace(REGEX_METACHARACTERS, "\\$&"))
+          .join(".*") +
+        "$",
+    );
+    GLOB_REGEXPS.set(pattern, re);
+  }
   return re.test(text);
 }
 

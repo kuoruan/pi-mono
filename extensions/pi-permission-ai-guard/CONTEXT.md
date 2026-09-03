@@ -128,7 +128,7 @@ A report candidate for a deterministic permission rule: the same ask (surface + 
 ### Transcript
 
 **Stripped transcript**:
-A token-optimized transcript fed to the model. Keeps trusted user messages (including `ask_user_question` answers) and tool-call names+args; deletes assistant text, tool results, and compaction summaries (summaries may contain model output and must never become authorization signals).
+A token-optimized transcript fed to the model. Keeps trusted user messages (including `ask_user_question` answers) and tool-call names+args; deletes assistant text, tool results, and compaction summaries (summaries may contain model output and must never become authorization signals). The stripper is the single sanitization boundary for both retained arrays (entries arrive sanitized, flattened, and secret-redacted; the prompt renders them verbatim) — a composed end-to-end test pins the chain.
 
 **Trusted intent**:
 The user-message portion of the stripped transcript. The only authorization source the model honors — and within it, the latest message is the authorization anchor (the request the agent is currently acting on); earlier messages are context, not additional authorization.

@@ -284,11 +284,10 @@ export function verbWord(name: string): string {
  * @returns The display phrase.
  */
 export function displayPhrase(name: string): string {
-  return name
-    .replace(/[-_]+/g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase()
-    .trim();
+  // The same tokenizer as {@link verbWord} — the display face is the typed
+  // face with separators read as spaces ("notify-level" → "notify level") —
+  // so the two derivations can never drift apart.
+  return verbWord(name).replaceAll("-", " ");
 }
 
 /** The settings-menu row for the save verb (its picker asks the target). */

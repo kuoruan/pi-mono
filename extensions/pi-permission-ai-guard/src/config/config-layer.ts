@@ -136,6 +136,11 @@ interface LayerFile {
   ambiguous: boolean;
 }
 
+/** A layer file read: parsed object, or a tagged failure to surface upstream. */
+type ReadLayerResult =
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; failure: LayerParseFailure };
+
 /**
  * Locate the layer's config file. Discovery order: `config.jsonc` first,
  * then `config.json` (dual presence is ambiguous — `.jsonc` wins via the
@@ -146,12 +151,6 @@ interface LayerFile {
  * @param dir - The layer directory.
  * @returns The resolved file, or undefined when no config exists yet.
  */
-
-/** A layer file read: parsed object, or a tagged failure to surface upstream. */
-type ReadLayerResult =
-  | { ok: true; value: Record<string, unknown> }
-  | { ok: false; failure: LayerParseFailure };
-
 function resolveLayerFile(dir: string): LayerFile | undefined {
   let path: string | undefined;
   let found = 0;
@@ -264,11 +263,7 @@ function readPath(root: Record<string, unknown>, path: readonly string[]): unkno
   return current;
 }
 
-/**
- * Enumerate the leaf paths of a plain nested object: scalars and arrays are
- * leaves, plain objects recurse. The zod-parsed config's key order is
- * stable, so edits apply in a deterministic sequence.
- */
+/** One leaf in a config object's path enumeration. */
 interface LeafEntry {
   /** The property path from the object root to this leaf. */
   path: string[];
@@ -277,7 +272,9 @@ interface LeafEntry {
 }
 
 /**
- * Enumerate the leaf paths of a plain nested object.
+ * Enumerate the leaf paths of a plain nested object: scalars and arrays
+ * are leaves, plain objects recurse. The zod-parsed config's key order is
+ * stable, so edits apply in a deterministic sequence.
  *
  * @param value - The object to walk.
  * @param path - The accumulated property path.
@@ -360,6 +357,11 @@ export interface PersistConfigOptions {
  * invalid snapshot refuses; unknown keys are stripped and the CANONICAL
  * parse output is what lands in the file.
  *
+ * The two mutually exclusive results each live in their own helper:
+ * {@link createLayerFile} (no file yet — write the snapshot whole) and
+ * {@link editLayerFile} (existing file — the leaf diff and its refusal
+ * gates).
+ *
  * @param options - The target layer, the environment, and the snapshot.
  * @returns The path (+ created/changed flags), or an error with no write.
  */
@@ -393,14 +395,7 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
   const path = resolveLayerFile(dir)?.path ?? createPath;
 
   if (!existsSync(path)) {
-    try {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, `${JSON.stringify(canonical.data, null, 2)}\n`, "utf-8");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { path, created: false, changed: false, error: message };
-    }
-    return { path, created: true, changed: true };
+    return createLayerFile(path, canonical.data);
   }
 
   let text: string;
@@ -410,7 +405,43 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
     const message = error instanceof Error ? error.message : String(error);
     return { path, created: false, changed: false, error: message };
   }
+  return editLayerFile(path, canonical.data, text);
+}
 
+/**
+ * The create branch of {@link persistConfigLayer}: no file exists yet, so
+ * write the snapshot whole (fresh directory included). The two branches are
+ * mutually exclusive results — a file is either created from nothing or
+ * edited in place — and each owns its own error surface.
+ *
+ * @param path - The layer file path to create.
+ * @param data - The validated config snapshot to write.
+ * @returns The save result (`created: true` on success).
+ */
+function createLayerFile(path: string, data: AiGuardConfig): SaveConfigResult {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { path, created: false, changed: false, error: message };
+  }
+  return { path, created: true, changed: true };
+}
+
+/**
+ * The edit branch of {@link persistConfigLayer}: an existing file is edited
+ * in place, leaf by leaf, so comments and key order elsewhere in the file
+ * survive. Three refusal gates (a file the loader would skip, a structural
+ * conflict, duplicate keys that would shadow the saved values) plus the
+ * final integrity check all live here.
+ *
+ * @param path - The existing layer file path.
+ * @param data - The validated config snapshot to apply.
+ * @param text - The file's current text.
+ * @returns The save result (`changed: false` when already identical).
+ */
+function editLayerFile(path: string, data: AiGuardConfig, text: string): SaveConfigResult {
   // Validity gate: never edit a file the loader itself would skip.
   const parsed = parseLayerText(text);
   if (!parsed.ok) {
@@ -427,7 +458,7 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
   // running text, so jsonc-parser edits never overlap.
   let running = text;
   let changed = false;
-  for (const { path: leafPath, value } of leafPaths(canonical.data)) {
+  for (const { path: leafPath, value } of leafPaths(data)) {
     const previous = readPath(current, leafPath);
     if (previous === MISSING || !isDeepStrictEqual(previous, value)) {
       let edits;
@@ -473,7 +504,7 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
       error: "refusing to write — the target file's shape conflicts with the current config",
     };
   }
-  for (const { path: leafPath, value } of leafPaths(canonical.data)) {
+  for (const { path: leafPath, value } of leafPaths(data)) {
     const saved = readPath(finalParsed.value, leafPath);
     if (saved === MISSING || !isDeepStrictEqual(saved, value)) {
       return {

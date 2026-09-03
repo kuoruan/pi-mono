@@ -35,7 +35,7 @@ import {
   type ResolvedRequestAuth,
   reviewModel,
 } from "#src/model/model-review.ts";
-import type { ModelCallDeferKind, RiskLevel, VerdictLean } from "#src/model/model-verdict.ts";
+import type { RiskLevel } from "#src/model/model-verdict.ts";
 import { effectiveOverride, type SessionOverrides } from "#src/session/session-overrides.ts";
 import { normalizeAndRedactText, shortHash } from "#src/utils.ts";
 
@@ -45,6 +45,7 @@ import type { VerdictCache } from "./verdict-cache.ts";
 import {
   applyVerdictMode,
   type DenyInstructionSource,
+  type ModelDeferInfo,
   machineryDenyReason,
   machineryDeferNotice,
   machineryTarget,
@@ -190,6 +191,11 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
 
   const driftState: DriftWarnState = { warned: false };
 
+  // Session invariant, computed once: `config.instructions` is fixed for the
+  // pipeline's lifetime, and the ~10KB system prompt is rebuilt per call
+  // otherwise (only the user prompt varies per ask).
+  const systemPrompt = buildReviewSystemPrompt(deps.config.instructions);
+
   return async (details, query, log) => {
     const { config } = deps;
     // Session-scoped override (/ai-guard, ctrl+alt+g) wins over the config
@@ -212,17 +218,15 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       original: AuthorizerVerdict,
       emitted: AuthorizerVerdict,
       riskLevel: RiskLevel | undefined,
-      deferLean: VerdictLean | undefined,
-      deferKind: ModelCallDeferKind | undefined,
-      deferReason: string | undefined,
+      defer: ModelDeferInfo | undefined,
     ): EscalationFootwork => {
       const decision = resolveMapping({
         original,
         emitted,
         riskLevel,
-        deferKind,
-        deferReason,
-        deferLean,
+        deferKind: defer?.kind,
+        deferReason: defer?.reason,
+        deferLean: defer?.lean,
         mode,
         noticeShown: noticeState.shown,
       });
@@ -417,10 +421,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         lookup.verdict,
         emitted,
         lookup.riskLevel,
-        // Cached verdicts are allow/deny only — no defer, so no lean and
-        // no defer classification.
-        undefined,
-        undefined,
+        // Cached verdicts are allow/deny only — no defer context at all.
         undefined,
       );
       // Replay gate: the verdict was already recorded at its model gate —
@@ -458,8 +459,8 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       );
     }
 
-    // Build prompt (redaction happens inside buildReviewPrompt).
-    const systemPrompt = buildReviewSystemPrompt(config.instructions);
+    // Build the user prompt (redaction happens inside buildReviewPrompt;
+    // the system prompt is the factory-level invariant above).
     const userPrompt = buildReviewPrompt(transcript, request);
 
     // Model review.
@@ -476,15 +477,29 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
 
     // Raw replies are verbose AND unnecessary for clean verdicts (the
     // structured record + sentinel suffice) — only defer failures keep the
-    // original text, so a broken parse can be replayed.
-    if (reviewOutcome.verdict.kind === "defer" && reviewOutcome.rawReply !== undefined) {
-      // The raw reply may re-quote prompt content — redact before it
-      // lands in any log stream (models can parrot credentials).
-      log.debug(
-        MODEL_REPLY_EVENT,
-        modelReply(requestId, modelId, normalizeAndRedactText(reviewOutcome.rawReply)),
-      );
+    // original text, so a broken parse can be replayed. The raw reply may
+    // re-quote prompt content — redact ONCE here (the single point), and
+    // feed both the debug event and the decision record (models can
+    // parrot credentials).
+    const deferReplyRedacted =
+      reviewOutcome.verdict.kind === "defer" && reviewOutcome.rawReply !== undefined
+        ? normalizeAndRedactText(reviewOutcome.rawReply)
+        : undefined;
+    if (deferReplyRedacted !== undefined) {
+      log.debug(MODEL_REPLY_EVENT, modelReply(requestId, modelId, deferReplyRedacted));
     }
+
+    // The fresh defer context, built once: applyVerdictMode routes it and
+    // the mapping below reuses the same facts (one object, not three
+    // re-spread scalars).
+    const deferInfo: ModelDeferInfo | undefined =
+      reviewOutcome.verdict.kind === "defer"
+        ? {
+            kind: reviewOutcome.deferKind,
+            reason: reviewOutcome.deferReason,
+            lean: reviewOutcome.lean,
+          }
+        : undefined;
 
     // The mode maps only what the link EMITS: the breaker still
     // counts real model denials and the cache still stores the model's
@@ -493,21 +508,22 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const emitted = applyVerdictMode(
       mode,
       reviewOutcome.verdict,
-      {
-        kind: reviewOutcome.deferKind,
-        reason: reviewOutcome.deferReason,
-        lean: reviewOutcome.lean,
-      },
+      deferInfo,
       reviewOutcome.riskLevel,
     );
     const { record, instructionSource } = annotateAndEscalate(
-      DecisionRecord.model(base, modelId, transcript.strippedCount, reviewOutcome, contextHash),
+      DecisionRecord.model(
+        base,
+        modelId,
+        transcript.strippedCount,
+        reviewOutcome,
+        contextHash,
+        deferReplyRedacted,
+      ),
       reviewOutcome.verdict,
       emitted,
       reviewOutcome.riskLevel,
-      reviewOutcome.lean,
-      reviewOutcome.deferKind,
-      reviewOutcome.deferReason,
+      deferInfo,
     );
     log.review(DECISION_EVENT, record);
 

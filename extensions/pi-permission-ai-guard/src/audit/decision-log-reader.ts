@@ -67,6 +67,14 @@ export const LOG_TAIL_LINES = 5000;
  * and rebranded `CONFIG_DIR_NAME`, so a relocated agent dir reads the
  * right log instead of a stale `~`-derived one.
  *
+ * The layout is the permission system's documented convention
+ * (configuration.md: logs under `extensions/pi-permission-system/logs/`,
+ * file `<id>-permission-review.jsonl`), not an exported API — the path is
+ * hand-built from that convention until upstream exports it. The log is
+ * also optional on the write side: `permissionReviewLog: false` in the
+ * permission system's config stops the file from existing, so a missing
+ * file is a legal state, handled by each reader's friendly-absent branch.
+ *
  * @param agentDir - The agent config directory (defaults to
  *   `getAgentDir()`; injectable for tests).
  * @returns The conventional review-log path.

@@ -49,7 +49,9 @@ function makeUiCtx(selectResult?: string) {
       notify: vi.fn<(message: string, type?: "info" | "warning" | "error") => void>(),
       setStatus: vi.fn<(key: string, text: string | undefined) => void>(),
       select: vi.fn<() => Promise<string | undefined>>(async () => selectResult),
-      custom: vi.fn(async () => "closed") as unknown as ExtensionUIContext["custom"],
+      custom: vi.fn<() => Promise<string>>(
+        async () => "closed",
+      ) as unknown as ExtensionUIContext["custom"],
     },
   };
 }

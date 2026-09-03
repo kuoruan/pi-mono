@@ -240,6 +240,9 @@ function surfaceOf(details: PromptPermissionDetails): string | undefined {
  */
 const DIRECTIONAL_SURFACE_FAMILIES: ReadonlySet<string> = new Set(["path", "external_directory"]);
 
+/** The directional member suffixes (`path_read` → family `path`). */
+const DIRECTIONAL_SUFFIXES: readonly string[] = ["_read", "_write"];
+
 /**
  * The family a surface belongs to: itself, unless it is a `_read`/`_write`
  * member of a directional path family (`path_read` → `path`). A surface
@@ -250,7 +253,7 @@ const DIRECTIONAL_SURFACE_FAMILIES: ReadonlySet<string> = new Set(["path", "exte
  * @returns The surface's family (itself unless a directional member).
  */
 function surfaceFamilyOf(surface: string): string {
-  for (const suffix of ["_read", "_write"]) {
+  for (const suffix of DIRECTIONAL_SUFFIXES) {
     if (!surface.endsWith(suffix)) continue;
     const family = surface.slice(0, -suffix.length);
     if (DIRECTIONAL_SURFACE_FAMILIES.has(family)) return family;

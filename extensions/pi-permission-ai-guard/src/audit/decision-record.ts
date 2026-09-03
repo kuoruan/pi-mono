@@ -155,20 +155,23 @@ const CLEAN_VERDICT_OMITTED = "(clean verdict, rawReply omitted)";
  * the field comment in {@link DecisionRecord.model} for the rationale.
  *
  * @param reviewOutcome - The full-review call outcome.
+ * @param preRedacted - The caller's already-redacted defer reply, when it
+ *   redacted one for its own debug stream (the pipeline does — same text,
+ *   same redaction). Redacted here only when absent.
  * @returns The rawReply value for the audit record: a sentinel for a clean verdict, the raw text
  *   for defer-with-reply, or null when the call threw.
  */
-function rawReplyForRecord(reviewOutcome: ReviewOutcome): string | null {
+function rawReplyForRecord(reviewOutcome: ReviewOutcome, preRedacted?: string): string | null {
   if (reviewOutcome.verdict.kind === "defer") {
     // defer: keep the raw text when the call produced any (no-json / invalid-
     // verdict-value / model-defer); null when it threw before replying
     // (timeout / call-failed) or returned an empty body (empty-reply), so the
-    // absence of text stays a genuine null. The review stream is always on,
-    // so the text is redacted like the debug stream's copy — the model may
-    // parrot prompt content (credentials, working directory) and the audit
-    // record must carry no more than the debug event does.
+    // absence of text stays a genuine null. The reply is redacted exactly
+    // once — by the caller when it hands `preRedacted`, here otherwise — so
+    // the audit record carries no more than the debug stream does (the
+    // model may parrot prompt content: credentials, working directory).
     return reviewOutcome.rawReply !== undefined
-      ? normalizeAndRedactText(reviewOutcome.rawReply)
+      ? (preRedacted ?? normalizeAndRedactText(reviewOutcome.rawReply))
       : null;
   }
   // Clean allow/deny: the JSON parsed; verdict, reason (deny only), and
@@ -324,6 +327,10 @@ export const DecisionRecord = {
    *   as the verdict-cache key's context hash) — lets audit readers tell
    *   same-context repetitions (routine) from cross-context ones (each
    *   occurrence was a separate judgment call).
+   * @param deferReplyRedacted - The caller's pre-redacted defer reply (the
+   *   pipeline redacts one for its debug event and hands it here so the
+   *   same text is not redacted twice). Optional: without it the record
+   *   redacts the outcome's raw reply itself.
    * @returns A decision record for the model gate.
    */
   model(
@@ -332,6 +339,7 @@ export const DecisionRecord = {
     strippedCount: number,
     reviewOutcome: ReviewOutcome,
     contextHash: string,
+    deferReplyRedacted?: string,
   ): DecisionRecordEntry {
     return {
       ...base,
@@ -370,7 +378,7 @@ export const DecisionRecord = {
       //    and riskLevel are already in the structured fields above, so the
       //    raw text is omitted via a sentinel (NOT null, so it can't be
       //    confused with the throw-based defer absence above).
-      rawReply: rawReplyForRecord(reviewOutcome),
+      rawReply: rawReplyForRecord(reviewOutcome, deferReplyRedacted),
     };
   },
 };

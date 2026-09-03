@@ -161,13 +161,16 @@ export function readSessionId(sessionManager: SessionManagerLike): string | null
 
 /**
  * Rank order of the TUI notify levels — the threshold comparison's
- * arithmetic. Module-level: pure, no captured state.
- *
+ * arithmetic (module-level and pure, so no per-call allocation).
+ */
+const NOTIFY_LEVEL_ORDER: readonly NotifyLevel[] = ["info", "warning", "error"];
+
+/**
  * @param level - A TUI notify level.
  * @returns The level's rank (higher = more severe).
  */
 function notifyLevelRank(level: NotifyLevel): number {
-  return ["info", "warning", "error"].indexOf(level);
+  return NOTIFY_LEVEL_ORDER.indexOf(level);
 }
 
 /**

@@ -19,10 +19,10 @@ The reviewer runs a short, cheap decision on each ask and defers at the first mi
 3. Policy gate: query the deterministic engine at gate parity — if the policy already says `allow` or `deny`, defer. This link only adds value when the engine is undecided (`ask`).
 4. Circuit breaker: a tripped breaker short-circuits without a model call.
 5. Resolve the model (fails fast on a config error).
-6. Strip transcript (token-optimized): feeds both the verdict cache's context fingerprint and the review prompt.
+6. Strip transcript (token-optimized, secrets redacted): feeds both the verdict cache's context fingerprint and the review prompt.
 7. Verdict cache lookup: a repeated ask in a stable conversation skips the model.
 8. Resolve auth — after the cache, so a cached repeat ask survives an auth flap.
-9. Build prompt (credentials in the command/intent are redacted here).
+9. Build prompt (the command and request fields are redacted).
 10. Model review: JSON verdict.
 11. Record the verdict into the breaker counters and cache.
 
@@ -209,7 +209,7 @@ Each reviewer-relevant decision writes an `ai_guard.decision` record to pi-permi
 | `modelId`     | `provider/model` of the reviewer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `rawReply`    | Three states: the raw model text for defer paths that produced one (`no-json` / `invalid-verdict-value` / `model-defer`); `null` for `timeout` / `call-failed` / `empty-reply` (no text was produced); `"(clean verdict, rawReply omitted)"` for allow/deny where the parsed JSON is already in structured fields (`verdict`, `reason`, `riskLevel`)                                                                                                                                                                               |
 | `riskLevel`   | Model-assessed risk (`low`/`medium`/`high`/`critical`), or `null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `contextHash` | Trusted-intent context fingerprint (same value as the verdict-cache key's context hash) — distinguishes same-context repetitions from cross-context ones; absent on records written before 0.9.0                                                                                                                                                                                                                                                                                                                                   |
+| `contextHash` | Trusted-intent context fingerprint (same value as the verdict-cache key's context hash) — distinguishes same-context repetitions from cross-context ones                                                                                                                                                                                                                                                                                                                                                                           |
 
 Supplementary debug records (written via `log.debug`, gated by the upstream log level):
 
