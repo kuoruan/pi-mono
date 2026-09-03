@@ -47,6 +47,9 @@ importers:
 
   extensions/pi-celadon:
     dependencies:
+      '@aliou/sh':
+        specifier: ^0.3.0
+        version: 0.3.0
       '@ctrl/tinycolor':
         specifier: ^4.2.0
         version: 4.2.0
@@ -113,8 +116,8 @@ importers:
         specifier: ^0.84.4
         version: 0.84.4
       '@gotgenes/pi-permission-system':
-        specifier: ^30.0.0
-        version: 30.0.0(@earendil-works/pi-coding-agent@0.84.4(supports-color@7.2.0)(ws@8.21.3)(zod@4.5.4))(@earendil-works/pi-tui@0.84.4)
+        specifier: ^31.0.0
+        version: 31.0.0(@earendil-works/pi-coding-agent@0.84.4(supports-color@7.2.0)(ws@8.21.3)(zod@4.5.4))(@earendil-works/pi-tui@0.84.4)
       '@tsconfig/node22':
         specifier: 'catalog:'
         version: 22.0.6
@@ -132,6 +135,10 @@ importers:
         version: 4.1.11(@opentelemetry/api@1.9.0)(@types/node@22.20.1)(vite@8.2.0(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.0))
 
 packages:
+
+  '@aliou/sh@0.3.0':
+    resolution: {integrity: sha512-Rti2aDL2DpU+YnVJl2s2jvDSdb+Fi2eRnQZxEp1DL94iOjOVgUk3zEL03gevDuqz+DWC9iP0mqUm2i2t8Qkf1w==}
+    engines: {node: '>=24'}
 
   '@anthropic-ai/sdk@0.91.1':
     resolution: {integrity: sha512-LAmu761tSN9r66ixvmciswUj/ZC+1Q4iAfpedTfSVLeswRwnY3n2Nb6Tsk+cLPP28aLOPWeMgIuTuCcMC6W/iw==}
@@ -355,8 +362,8 @@ packages:
       '@modelcontextprotocol/sdk':
         optional: true
 
-  '@gotgenes/pi-permission-system@30.0.0':
-    resolution: {integrity: sha512-OV/JQKYpyrNYVcxvYfnx5LfUz1yj+cFP4GYp8UWK4395BZerFt+MWR7rEu0NR4tkNH/fglw4i4cDVwiKsFqxCQ==}
+  '@gotgenes/pi-permission-system@31.0.0':
+    resolution: {integrity: sha512-LgizOm1iRT7B3ct7ML2F7Zr/W9fSbV+d2t6sivvcTr2ZWivt8uxbO+Gy1QmCf3mmm5ErHJRTQSa9tTYOoifC+g==}
     engines: {node: '>=22'}
     peerDependencies:
       '@earendil-works/pi-coding-agent': '>=0.79.0'
@@ -2004,6 +2011,8 @@ packages:
 
 snapshots:
 
+  '@aliou/sh@0.3.0': {}
+
   '@anthropic-ai/sdk@0.91.1(zod@4.5.4)':
     dependencies:
       json-schema-to-ts: 3.1.1
@@ -2438,7 +2447,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@gotgenes/pi-permission-system@30.0.0(@earendil-works/pi-coding-agent@0.84.4(supports-color@7.2.0)(ws@8.21.3)(zod@4.5.4))(@earendil-works/pi-tui@0.84.4)':
+  '@gotgenes/pi-permission-system@31.0.0(@earendil-works/pi-coding-agent@0.84.4(supports-color@7.2.0)(ws@8.21.3)(zod@4.5.4))(@earendil-works/pi-tui@0.84.4)':
     dependencies:
       '@earendil-works/pi-coding-agent': 0.84.4(supports-color@7.2.0)(ws@8.21.3)(zod@4.5.4)
       '@earendil-works/pi-tui': 0.84.4
