@@ -220,6 +220,7 @@ function readLayer(dir: string, issues: ConfigIssue[]): Record<string, unknown> 
 
 /**
  * Deep merge two plain objects. `target` is the base, `source` overrides.
+ *
  * - Plain objects are merged recursively.
  * - Arrays, null, and other values are replaced (source wins).
  * - Does not mutate either argument — returns a new object.
@@ -350,12 +351,11 @@ export interface PersistConfigOptions {
  * created with the complete snapshot.
  *
  * Guardrails, all inside this interface:
- * - Refuses the `project` target when the project is untrusted (that
- * layer isn't honored for reads either — saving there would write a
- * config that never applies and masquerade as success).
- * - Validates the snapshot against the zod schema before any write: an
- * invalid snapshot refuses; unknown keys are stripped and the CANONICAL
- * parse output is what lands in the file.
+ *
+ * - Refuses the `project` target when the project is untrusted (that layer isn't honored for reads
+ *   either — saving there would write a config that never applies and masquerade as success).
+ * - Validates the snapshot against the zod schema before any write: an invalid snapshot refuses;
+ *   unknown keys are stripped and the CANONICAL parse output is what lands in the file.
  *
  * The two mutually exclusive results each live in their own helper:
  * {@link createLayerFile} (no file yet — write the snapshot whole) and

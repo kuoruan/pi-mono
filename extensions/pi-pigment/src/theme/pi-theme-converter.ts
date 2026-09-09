@@ -6,17 +6,16 @@
  * decided HERE, at generation time (never at render time).
  *
  * Two AA surfaces, never confused (the converter owns only the first):
- * - Converter AA: chrome slots (success/error/warning/accent, the fg
- * ladder) are enforced against the CANVAS — pi paints its own chrome on
- * the canvas, so those colors must read there. The user-theme channel's
- * conversion opts OUT (enforceAa: false — author colors verbatim, the
- * enforcement boundary: colors YOU set render verbatim); the bundled
- * ships are pi-pigment-supplied and keep the sweep.
- * - Runtime AA: token colors are enforced at render time by
- * enforceThemeColors against the palette's blend backgrounds (the tint
- * ladders). The nine syntax colors in the FILE serve pi's own markdown
- * code rendering — same source, different precision than the full
- * tokenColors the diff pipeline loads.
+ *
+ * - Converter AA: chrome slots (success/error/warning/accent, the fg ladder) are enforced against the
+ *   CANVAS — pi paints its own chrome on the canvas, so those colors must read there. The
+ *   user-theme channel's conversion opts OUT (enforceAa: false — author colors verbatim, the
+ *   enforcement boundary: colors YOU set render verbatim); the bundled ships are
+ *   pi-pigment-supplied and keep the sweep.
+ * - Runtime AA: token colors are enforced at render time by enforceThemeColors against the palette's
+ *   blend backgrounds (the tint ladders). The nine syntax colors in the FILE serve pi's own
+ *   markdown code rendering — same source, different precision than the full tokenColors the diff
+ *   pipeline loads.
  *
  * Output shape: the 53 required + 3 optional pi tokens (themes.md), all
  * flat hex (no vars indirection — the generator has no authors), plus the

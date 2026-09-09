@@ -445,7 +445,7 @@ describe("buildReviewPrompt", () => {
 
   it("preserves external-path read target without redaction for non-secret path", () => {
     const cmd =
-      "python3 -c \"import json; d=json.load(open('/home/liao/.pi/agent/npm/manifest.json'))\"";
+      "python3 -c \"import json; d=json.load(open('/home/dev/.pi/agent/npm/manifest.json'))\"";
     const prompt = buildReviewPrompt(
       { trustedIntent: [], toolCalls: [], strippedCount: 0 },
       {

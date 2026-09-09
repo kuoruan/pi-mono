@@ -214,17 +214,15 @@ export interface TextComponent {
 /**
  * A registered tool captured by a mock ExtensionAPI, typed as the SDK's
  * ToolDefinition except where the fixture seam deliberately relaxes:
- * - `execute`'s tail parameters accept `unknown` + an optional ctx — the
- * suites invoke execute without an ExtensionContext (the wrappers never
- * read it; it flows to the SDK origin verbatim), so a full SDK ctx would
- * force every call site to fabricate one.
- * - `renderCall`/`renderResult` return `unknown` — the fixture's fake Text
- * is not a pi-tui Component (the makeTextComponent seam below).
- * Everything else — name, label, renderShell, parameters,
- * prepareArguments, the schema members — carries the SDK's exact type:
- * a ToolDefinition or WrapperSpec drift (the renderShell field addition
- * that once slipped past the old any-typed surface) now fails at compile
- * time instead of at the first test assertion.
+ *
+ * - `execute`'s tail parameters accept `unknown` + an optional ctx — the suites invoke execute
+ *   without an ExtensionContext (the wrappers never read it; it flows to the SDK origin verbatim),
+ *   so a full SDK ctx would force every call site to fabricate one.
+ * - `renderCall`/`renderResult` return `unknown` — the fixture's fake Text is not a pi-tui Component
+ *   (the makeTextComponent seam below). Everything else — name, label, renderShell, parameters,
+ *   prepareArguments, the schema members — carries the SDK's exact type: a ToolDefinition or
+ *   WrapperSpec drift (the renderShell field addition that once slipped past the old any-typed
+ *   surface) now fails at compile time instead of at the first test assertion.
  */
 export type RegisteredTool = Omit<
   ToolDefinition,

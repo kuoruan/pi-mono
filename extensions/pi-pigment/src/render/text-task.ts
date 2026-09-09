@@ -114,13 +114,11 @@ export function clearPreviewTask(text: PreviewTextHost): void {
 }
 
 /**
- * Attach a width-aware preview task to a Text component (the primitive
- * setDiffPreviewTask builds on) — the protocol's OWN re-arm guard: the
- * TUI's updateDisplay re-runs renderResult and re-attaches a fresh task
- * closure every cycle, and only a CHANGED identity re-arms (placeholder
- * + redraw); unchanged re-runs keep the rendered frame. The render
- * loop's width-aware key stays the width guard — two orthogonal
- * compares, both inside the protocol. Never invalidates — the async
+ * Attach a width-aware preview task to a Text component (the primitive setDiffPreviewTask builds
+ * on) — the protocol's OWN re-arm guard: the TUI's updateDisplay re-runs renderResult and
+ * re-attaches a fresh task closure every cycle, and only a CHANGED identity re-arms (placeholder +
+ * Redraw); unchanged re-runs keep the rendered frame. The render loop's width-aware key stays the
+ * width guard — two orthogonal compares, both inside the protocol. Never invalidates — the async
  * render completes through the loop's own completion path (pinned in
  * tests/render/text-task.test.ts).
  *

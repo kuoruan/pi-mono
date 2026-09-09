@@ -9,16 +9,18 @@
  * re-shaping upstream execution results).
  *
  * Scenarios already pinned elsewhere (not duplicated here):
- * - plain-while-streaming → highlighted swap (tool-execute.test.ts)
- * - timeout suffix (tool-execute.test.ts)
- * - heredoc injection regions (heredoc-inject.test.ts)
- * - restore path fires the highlight (tool-execute.test.ts)
+ *
+ * - Plain-while-streaming → highlighted swap (tool-execute.test.ts)
+ * - Timeout suffix (tool-execute.test.ts)
+ * - Heredoc injection regions (heredoc-inject.test.ts)
+ * - Restore path fires the highlight (tool-execute.test.ts)
  *
  * This suite pins the four UNCOVERED scenarios:
- * - theme switch re-highlights (the cache key carries the palette identity)
- * - control bytes in the command defuse at intake (ADR 0004)
- * - the empty command renders the bare prompt
- * - a command superseded mid-highlight never lands (stale guard)
+ *
+ * - Theme switch re-highlights (the cache key carries the palette identity)
+ * - Control bytes in the command defuse at intake (ADR 0004)
+ * - The empty command renders the bare prompt
+ * - A command superseded mid-highlight never lands (stale guard)
  */
 
 import { vol } from "memfs";

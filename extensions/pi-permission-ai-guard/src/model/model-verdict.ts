@@ -251,14 +251,14 @@ function tryExtractBalanced(text: string, start: number): string | null {
  *
  * If the first balanced object fails to parse, the recovery depends on whether
  * it looks like a verdict attempt:
- * - A malformed verdict-shaped candidate (e.g. `{verdict: "deny", reason: "x"}`
- * with unquoted keys, which `parseJsonWithRepair` does not fix) stops the
- * search and returns `null` — so a broken verdict is never overridden by an
- * unrelated later object (prevents a deny→allow flip when the model wraps a
- * malformed deny and then includes an allow example in its reasoning).
- * - Non-verdict-shaped brace noise (e.g. `{var}`, `{bad}`, template/markdown
- * fragments) keeps scanning — preserving recovery when the model mentions
- * config syntax before the real verdict JSON.
+ *
+ * - A malformed verdict-shaped candidate (e.g. `{verdict: "deny", reason: "x"}` with unquoted keys,
+ *   which `parseJsonWithRepair` does not fix) stops the search and returns `null` — so a broken
+ *   verdict is never overridden by an unrelated later object (prevents a deny→allow flip when the
+ *   model wraps a malformed deny and then includes an allow example in its reasoning).
+ * - Non-verdict-shaped brace noise (e.g. `{var}`, `{bad}`, template/markdown fragments) keeps
+ *   scanning — preserving recovery when the model mentions config syntax before the real verdict
+ *   JSON.
  *
  * Returns `null` if no parseable object is found.
  *

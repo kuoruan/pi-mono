@@ -523,12 +523,12 @@ describe("buildAskContext — 9-kind dispatch", () => {
       surface: "skill",
       value: "my-skill",
       payload: payload("skill_read", { surface: "skill", value: "my-skill" }, [
-        ev("read path", "/home/liao/.pi/agent/skills/my-skill/SKILL.md"),
+        ev("read path", "/home/dev/.pi/agent/skills/my-skill/SKILL.md"),
       ]),
     });
     const ask = buildAskContext(details, cwd);
     expect(ask.kind).toBe("skill_read");
-    expect(ask.readPath).toBe("/home/liao/.pi/agent/skills/my-skill/SKILL.md");
+    expect(ask.readPath).toBe("/home/dev/.pi/agent/skills/my-skill/SKILL.md");
     expect(ask.flaggedElements).toEqual(["my-skill"]);
   });
 

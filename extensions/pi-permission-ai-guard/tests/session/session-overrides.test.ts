@@ -6,11 +6,11 @@
  * directly so a precedence regression fails here first, by name.
  *
  * The load-bearing invariants under test (from the module docblocks):
- * - override-present means defined (writers delete on undefined);
- * - effectiveConfig skips undefined override keys, so a reset can never
- * shadow the config value into the saved layer file — the bug the
- * projection exists to make impossible;
- * - the snapshot carries every non-override config field untouched.
+ *
+ * - Override-present means defined (writers delete on undefined);
+ * - EffectiveConfig skips undefined override keys, so a reset can never shadow the config value into
+ *   the saved layer file — the bug the projection exists to make impossible;
+ * - The snapshot carries every non-override config field untouched.
  */
 
 import { describe, expect, it } from "vitest";
