@@ -17,7 +17,9 @@ import { test } from "vitest";
 import {
   diffRowFrame,
   injectBg,
+  paintWordDiff,
   plainWordDiff,
+  shouldEmphasize,
   wordDiffAnalysis,
   wrapAnsi,
 } from "#src/render/render-shared.ts";
@@ -39,6 +41,8 @@ const _diffRowFrame = diffRowFrame;
 const _injectBg = injectBg;
 const _wordDiffAnalysis = wordDiffAnalysis;
 const _plainWordDiff = plainWordDiff;
+const _paintWordDiff = paintWordDiff;
+const _shouldEmphasize = shouldEmphasize;
 const _styledLine = styledLine;
 const _plainLine = plainLine;
 const _cjkLine = cjkLine;
@@ -168,5 +172,31 @@ test("word-diff pair (the fallback/unhighlighted analysis)", async ({ bench }) =
   await bench("plainWordDiff (jsdiff + paint)", () => {
     const result = _plainWordDiff(_wordOldLine, _wordNewLine, _diffPalette);
     sink += result.old.length + result.new.length;
+  }).run();
+  // The pre-optimization baseline the one-pass sequence replaced: analyze
+  // (diffWords) THEN paint via plainWordDiff (a SECOND diffWords on the
+  // same pair). Kept alongside so the A/B is self-contained in this file.
+  await bench("old two-pass sequence (wordDiffAnalysis + plainWordDiff)", () => {
+    const analysis = _wordDiffAnalysis(_wordOldLine, _wordNewLine);
+    sink += analysis.similarity;
+    if (_shouldEmphasize(analysis)) {
+      const painted = _plainWordDiff(_wordOldLine, _wordNewLine, _diffPalette);
+      sink += painted.old.length + painted.new.length;
+    }
+  }).run();
+});
+
+test("unified plain path per pair (the over-budget fallback sequence)", async ({ bench }) => {
+  // Mirrors render-unified's per-pair sequence when the highlight budget
+  // is exceeded: the verdict (wordDiffAnalysis) gates the plain painter,
+  // and the painter consumes the analysis's parts — one diffWords per
+  // pair (plainWordDiff, the standalone two-pass form, is benched above).
+  await bench("verdict + paintWordDiff (one diffWords per pair)", () => {
+    const analysis = _wordDiffAnalysis(_wordOldLine, _wordNewLine);
+    sink += analysis.similarity;
+    if (_shouldEmphasize(analysis)) {
+      const painted = _paintWordDiff(analysis.parts, _diffPalette);
+      sink += painted.old.length + painted.new.length;
+    }
   }).run();
 });

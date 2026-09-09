@@ -4,7 +4,7 @@
  * line numbers, background injection, word-diff analysis) both views use.
  */
 
-import { diffWords } from "diff";
+import { diffWords, type Change } from "diff";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import { expandTabs, isPlainAscii, iterateCells, measurePlain } from "#src/core/ansi.ts";
@@ -72,6 +72,16 @@ export interface WordDiff {
   oldRanges: CharRange[];
   /** The new side's changed ranges. */
   newRanges: CharRange[];
+  /**
+   * The jsdiff change list the analysis walked — the raw material the
+   * plain painter consumes directly (the unified view's fallback path
+   * never re-runs diffWords on a pair it already analyzed). FROZEN:
+   * callers must not mutate it. Note the identical-input fast path
+   * returns an EMPTY list — diffWords("same", "same") would yield one
+   * common part, so consumers must not equate `parts` with a fresh
+   * diffWords call.
+   */
+  parts: readonly Change[];
 }
 
 /**
@@ -558,7 +568,7 @@ export function wordDiffAnalysis(oldText: string, newText: string): WordDiff {
   // Identical lines (and the empty pair) are fully common by definition
   // — skip jsdiff and every walk. Zero-drift with the general path: same
   // would count every code point, maxLength equals it, similarity 1.
-  if (oldText === newText) return { similarity: 1, oldRanges: [], newRanges: [] };
+  if (oldText === newText) return { similarity: 1, oldRanges: [], newRanges: [], parts: [] };
   const parts = diffWords(oldText, newText);
   const oldRanges: CharRange[] = [];
   const newRanges: CharRange[] = [];
@@ -590,7 +600,17 @@ export function wordDiffAnalysis(oldText: string, newText: string): WordDiff {
     }
   }
   const maxLength = Math.max(countCodePoints(oldText), countCodePoints(newText));
-  return { similarity: maxLength > 0 ? same / maxLength : 1, oldRanges, newRanges };
+  // The plain painter consumes `parts` in the same tick and must be able
+  // to trust it: freeze the list (and its entries) so a future consumer
+  // cannot mutate the raw material out from under the ranges/verdict.
+  for (const part of parts) Object.freeze(part);
+  Object.freeze(parts);
+  return {
+    similarity: maxLength > 0 ? same / maxLength : 1,
+    oldRanges,
+    newRanges,
+    parts,
+  };
 }
 
 /**
@@ -707,20 +727,27 @@ export function injectBg(ansiLine: string, options: InjectBgOptions): string {
 }
 
 /**
- * Word-level emphasis for unhighlighted (fallback) paired lines: changed
- * words get the brighter word-backgrounds, shared words stay on the line bg.
+ * A word-emphasized paired row: each side's plain text with the
+ * word-level backgrounds composited in (paintWordDiff's output).
+ */
+export interface EmphasizedPair {
+  /** The old side's painted text (removed-word emphasis). */
+  old: string;
+  /** The new side's painted text (added-word emphasis). */
+  new: string;
+}
+
+/**
+ * Paint a word diff's change list: changed words get the brighter
+ * word-backgrounds, shared words stay on the line bg. The parts come from
+ * a prior analysis (or a direct diffWords) — one jsdiff pass per pair
+ * feeds both the verdict and this painter.
  *
- * @param oldText - Plain old line content.
- * @param newText - Plain new line content.
+ * @param parts - The jsdiff change list for the pair.
  * @param palette - The resolved palette (word-level backgrounds).
  * @returns The emphasized old/new pair.
  */
-export function plainWordDiff(
-  oldText: string,
-  newText: string,
-  palette: DiffPalette,
-): { old: string; new: string } {
-  const parts = diffWords(oldText, newText);
+export function paintWordDiff(parts: readonly Change[], palette: DiffPalette): EmphasizedPair {
   let oldOutput = "";
   let newOutput = "";
   for (const part of parts) {
@@ -741,6 +768,25 @@ export function plainWordDiff(
     }
   }
   return { old: oldOutput, new: newOutput };
+}
+
+/**
+ * Word-level emphasis for unhighlighted (fallback) paired lines — the
+ * standalone form (its own jsdiff pass) for callers with no prior
+ * analysis; the unified view pairs this with wordDiffAnalysis's parts
+ * through paintWordDiff instead.
+ *
+ * @param oldText - Plain old line content.
+ * @param newText - Plain new line content.
+ * @param palette - The resolved palette (word-level backgrounds).
+ * @returns The emphasized old/new pair.
+ */
+export function plainWordDiff(
+  oldText: string,
+  newText: string,
+  palette: DiffPalette,
+): EmphasizedPair {
+  return paintWordDiff(diffWords(oldText, newText), palette);
 }
 
 /**

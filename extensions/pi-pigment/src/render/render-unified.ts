@@ -15,7 +15,7 @@ import {
   gutterWidth,
   lineNumberWidth,
   MIN_RENDER_WIDTH,
-  plainWordDiff,
+  paintWordDiff,
   shouldEmphasize,
   type DiffViewOptions,
   wordDiffAnalysis,
@@ -163,7 +163,10 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
           }),
         );
       } else {
-        const plain = plainWordDiff(d.content, a.content, palette);
+        // The analysis already ran the pair's word diff — its parts feed
+        // the painter directly, so the plain path pays one diffWords per
+        // pair (not two).
+        const plain = paintWordDiff(wordDiff.parts, palette);
         emitRow("del", d.oldNum, `${palette.bgRemoved}${plain.old}`);
         emitRow("add", a.newNum, `${palette.bgAdded}${plain.new}`);
       }
