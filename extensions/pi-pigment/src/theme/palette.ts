@@ -252,54 +252,62 @@ const THEME_FG_KEYS = [
   "toolDiffContext",
 ] as const;
 
+/** The memo: the slot values as last read plus the composed key. */
+interface ThemeKeyMemo {
+  /** Raw slot ANSI values in read order (fg keys then bg keys). */
+  parts: string[];
+  /** The composed key for those parts. */
+  key: string;
+}
+
 /**
  * A stable key for the theme's rendered diff-relevant colors. Two themes that
  * render these keys identically are interchangeable as far as the palette is
  * concerned; any change (theme switch, hot-reloaded theme file) changes the key.
+ *
+ * CONTENT-verified memo, not identity-only: production passes the constant
+ * module Theme proxy, and pi's setTheme swaps the instance BEHIND the proxy —
+ * an identity hit alone must never be trusted (it pinned the first theme's
+ * palette forever — the stale-diff-on-theme-switch report). On every call the
+ * walk reads all slots as raw ANSI (getFgAnsi/getBgAnsi — the values, no
+ * wrapper strings) and compares them against the memo's parts; an identical
+ * read returns the stored key with zero string building, any drift rebuilds.
+ * Because the comparison covers EVERY slot derivePalette reads, drift cannot
+ * hide. Every slot derivePalette reads must sit in the reads (a dim-only
+ * reload that missed the key kept the old palette snapshot once before).
  *
  * @param theme - The theme to key.
  * @returns A string unique to the theme's rendered diff colors.
  */
 export function themeCacheKey(theme?: PaletteTheme): string {
   if (!theme?.fg) return "no-theme";
-  // Identity memo keyed on the theme OBJECT: pi's theme switching and
-  // hot-reload both replace the instance (loadTheme constructs a new
-  // Theme every time — verified), so object identity is change-safe.
-  // This walk was once per-resolveDiffPalette (the per-render hot path —
-  // "dim" was left out by that era's omission); the identity memo below
-  // now runs it once per theme instance, and EVERY slot derivePalette
-  // reads must sit in the key arrays — a dim-only hot-reload that missed
-  // the key kept silent the old palette snapshot.
-  const memoized = themeKeyMemo.get(theme);
-  if (memoized !== undefined) return memoized;
+  const prev = themeKeyMemo.get(theme);
+  // One pass reads every slot; the comparison rides on the same pass, so
+  // the memo is verified against the FULL content — never a spot-check.
   const parts: string[] = [];
-  for (const key of THEME_FG_KEYS) {
+  let index = 0;
+  let drifted = prev === undefined;
+  const read = (get: () => string, fallback: string): void => {
+    let value: string;
     try {
-      parts.push(theme.fg(key, key));
+      value = get();
     } catch {
-      parts.push(key);
+      value = fallback;
     }
-  }
-  for (const key of THEME_BG_KEYS) {
-    try {
-      if (theme.bg) {
-        parts.push(theme.bg(key, key));
-      } else if (theme.getBgAnsi) {
-        parts.push(theme.getBgAnsi(key));
-      } else {
-        parts.push(key);
-      }
-    } catch {
-      parts.push(key);
-    }
-  }
+    parts.push(value);
+    if (prev !== undefined && prev.parts[index] !== value) drifted = true;
+    index++;
+  };
+  for (const key of THEME_FG_KEYS) read(() => theme.getFgAnsi(key), key);
+  for (const key of THEME_BG_KEYS) read(() => theme.getBgAnsi(key), key);
+  if (prev !== undefined && !drifted) return prev.key;
   const key = parts.join("|");
-  themeKeyMemo.set(theme, key);
+  themeKeyMemo.set(theme, { parts, key });
   return key;
 }
 
-/** Object-identity memo for themeCacheKey (themes are replaced, never mutated). */
-const themeKeyMemo = new WeakMap<PaletteTheme, string>();
+/** Content-verified memo for themeCacheKey (stable proxy key, content-checked value). */
+const themeKeyMemo = new WeakMap<PaletteTheme, ThemeKeyMemo>();
 
 // ---------------------------------------------------------------------------
 // Singleton state and resolution

@@ -35,6 +35,45 @@ describe("themeCacheKey", () => {
     expect(themeCacheKey(undefined)).toBe("no-theme");
     expect(themeCacheKey({} as PaletteTheme)).toBe("no-theme");
   });
+
+  it("re-keys when the theme swaps BEHIND one object identity (pi's proxy shape)", () => {
+    // Production hands every render the module-level Theme PROXY: pi's
+    // setTheme swaps the underlying instance through globalThis while the
+    // proxy object itself keeps a constant identity. The key must follow
+    // the CONTENT — an identity-keyed memo would pin the first theme's
+    // palette forever (the "diff body and stats chips stay recolored
+    // after a /settings theme switch" report).
+    const slots: Record<string, string> = {
+      toolTitle: "\x1b[38;2;138;180;255m",
+      accent: "\x1b[38;2;138;180;255m",
+      muted: "\x1b[38;2;130;130;140m",
+      dim: "\x1b[38;2;110;110;120m",
+      success: "\x1b[38;2;100;200;120m",
+      error: "\x1b[38;2;255;100;100m",
+      toolDiffAdded: "\x1b[38;2;80;220;120m",
+      toolDiffRemoved: "\x1b[38;2;240;90;90m",
+      toolDiffContext: "\x1b[38;2;130;130;130m",
+      toolSuccessBg: "\x1b[48;2;30;30;40m",
+      toolErrorBg: "\x1b[48;2;40;30;30m",
+    };
+    const proxyLike = {
+      fg: (name: string, text: string) => `${slots[name] ?? ""}${text}\x1b[0m`,
+      bg: (name: string, text: string) => `${slots[name] ?? ""}${text}\x1b[0m`,
+      getFgAnsi: (name: string) => slots[name] ?? "",
+      getBgAnsi: (name: string) => slots[name] ?? "",
+      bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
+    };
+    const firstKey = themeCacheKey(proxyLike);
+    const firstPalette = resolveDiffPalette(proxyLike);
+    // The proxy object never changes; the instance behind it does.
+    slots.toolDiffAdded = "\x1b[38;2;1;2;3m";
+    slots.toolSuccessBg = "\x1b[48;2;250;250;250m";
+    expect(themeCacheKey(proxyLike)).not.toBe(firstKey);
+    const second = resolveDiffPalette(proxyLike);
+    expect(second).not.toBe(firstPalette);
+    expect(second.bgBase).toBe("\x1b[48;2;250;250;250m");
+    expect(second.fgAdded).toBe("\x1b[38;2;1;2;3m");
+  });
 });
 
 describe("resolveDiffPalette", () => {
