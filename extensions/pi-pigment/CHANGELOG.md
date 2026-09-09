@@ -1,5 +1,15 @@
 # pi-pigment
 
+## 0.1.2
+
+### Patch Changes
+
+- f07cfaf: perf(pigment): preview renders are single-flight with latest-wins, and streaming grep frames no longer pollute the highlight cache.
+- 0ba913f: the theme-switch bench measures the real re-render path again (hlBlock API drift), and a shiki engine bench pins the JS-regex vs Oniguruma decision data.
+- f367f94: shiki tokenizes through the Oniguruma WASM engine (the canonical TextMate reference): realistic dense source renders 3-6x faster, cold first-tokenize ~3x, and the JS-regex engine's lazy-compile machinery — the grammar-state flake's root-cause carrier — is gone.
+- 9b76d09: word highlights no longer bleed into indentation: whitespace jsdiff merges into changed chunks stays out of the word backgrounds.
+- e4e719f: word-diff range extraction is ~36% faster: one allocation-free pass per changed chunk replaces the slice-and-recount walks.
+
 ## 0.1.1
 
 ### Patch Changes
