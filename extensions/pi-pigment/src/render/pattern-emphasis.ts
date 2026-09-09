@@ -7,7 +7,7 @@
  * anchor run).
  */
 
-import { RESET } from "#src/core/ansi.ts";
+import { FG_DEFAULT, RESET } from "#src/core/ansi.ts";
 import { createBoundedMap } from "#src/core/bounded-map.ts";
 
 /** How the caller wants the pattern matched (grep/find flags). */
@@ -91,7 +91,7 @@ export interface EmphasizeOptions {
   flags: MatchFlags;
   /** The emphasis spec (bold fg wrap). */
   emphasis: EmphasisSpec;
-  /** The base fg re-opened after each match's RESET ("" = plain). */
+  /** The base fg re-opened after each match's close ("" = plain). */
   baseFg?: string;
 }
 
@@ -108,18 +108,23 @@ export function emphasize(options: EmphasizeOptions): string {
   const spans = content.split(SGR_SPLIT);
 
   // Emphasis must never fight the span's own syntax color: after each hit,
-  // re-open the fg escape that was active on entry (a bare RESET left the
-  // span's remainder uncolored). The emphasis signal itself is BOLD +
-  // independent fg (the CLI convention — ripgrep, GNU grep, and git grep
-  // all render matches as bold-plus-distinct-color): bold stays visible
-  // even where the fg happens to match a token color.
+  // re-open the fg escape that was active on entry. The emphasis signal
+  // itself is BOLD + independent fg (the CLI convention — ripgrep, GNU grep,
+  // and git grep all render matches as bold-plus-distinct-color): bold stays
+  // visible even where the fg happens to match a token color. The close is
+  // CHANNEL-SCOPED (bold-off, then spanFg — or the fg default when none): a
+  // full RESET would kill the pi frame's line-level canvas mid-line and expose
+  // the terminal default background from the match onward (the tool-ls rule).
   const BOLD = "\x1b[1m";
-  // The fg active before each match — the emphasis wrap RESETs, so the
-  // remainder must re-open the span it was in; plain-text callers pass
-  // their base fg so the text after a match keeps it (highlighted callers
-  // leave it empty: their spans carry their own re-opens).
+  const BOLD_OFF = "\x1b[22m";
+  // The fg active before each match — the emphasis wrap closes its own
+  // channels, so the remainder must re-open the span it was in; plain-text
+  // callers pass their base fg so the text after a match keeps it (highlighted
+  // callers leave it empty: their spans carry their own re-opens).
   let spanFg = baseFg;
-  const wrap = (hit: string) => `${BOLD}${emphasis.fg}${hit}${RESET}${spanFg}`;
+  // The fg escape spans a match sits in replaces the emphasis fg without a
+  // separate close (fg escapes overwrite); without one, close to the default.
+  const wrap = (hit: string) => `${BOLD}${emphasis.fg}${hit}${BOLD_OFF}${spanFg || FG_DEFAULT}`;
 
   // Matcher per grep/find semantics (memoized — see matcherFor).
   const { regex, needle } = matcherFor(pattern, flags);

@@ -9,7 +9,7 @@
 
 import type { FindToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import { inertText, RESET } from "#src/core/ansi.ts";
+import { FG_DEFAULT, inertText } from "#src/core/ansi.ts";
 import { detectLanguage } from "#src/theme/highlight.ts";
 
 import { accentEmphasis, emphasize, type EmphasisSpec } from "./pattern-emphasis.ts";
@@ -89,7 +89,10 @@ function styleFindPath(options: StyleFindPathOptions): string {
   // Code-file detection reuses detectLanguage (the SDK/Shiki-shared
   // authority) — no second extension table to drift.
   if (detectLanguage(basename)) {
-    return theme.fg("dim", inertText(dirname)) + palette.fgCode + styledBase(basename) + RESET;
+    // The fgCode escape closes channel-scoped (the tool-ls rule): a full
+    // RESET would kill pi's line-level frame canvas and expose the terminal
+    // default behind the row tail.
+    return theme.fg("dim", inertText(dirname)) + palette.fgCode + styledBase(basename) + FG_DEFAULT;
   }
   return theme.fg("dim", inertText(dirname)) + theme.fg("toolOutput", styledBase(basename));
 }

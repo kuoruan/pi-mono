@@ -7,8 +7,9 @@ import { buildFakeTheme, buildRenderTheme } from "#test/fixtures.ts";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
+const BOLD_OFF = "\x1b[22m";
+const FG_DEFAULT = "\x1b[39m";
 const STR_FG = "\x1b[38;2;220;220;170m"; // a syntax-string color
-const FG_ADD = FALLBACK_PALETTE.fgAdded;
 /** The emphasis spec callers pass: bold + an independent accent fg. */
 const EMPHASIS = { fg: "\x1b[38;2;255;170;0m" };
 
@@ -76,14 +77,17 @@ describe("renderHitLine (plain-text hit lines carry their own fg)", () => {
     });
     // The content opens with the toolOutput fg (the plain-text path has
     // no token spans to carry one — without this, the muted prefix bled
-    // into the content and the first match's RESET left the rest on the
+    // into the content and the first match's close left the rest on the
     // terminal default).
     expect(out).toContain(theme.getFgAnsi("toolOutput"));
-    // The emphasis wrap re-opens the content fg after its RESET: the
-    // text AFTER the match keeps the toolOutput color, not the default.
-    const resetIdx = out.indexOf(RESET);
-    expect(resetIdx).toBeGreaterThan(-1);
-    expect(out.slice(resetIdx + RESET.length)).toContain(theme.getFgAnsi("toolOutput"));
+    // The emphasis wrap closes CHANNEL-SCOPED (bold off) and re-opens the
+    // content fg: the text AFTER the match keeps the toolOutput color.
+    expect(out).toContain(`${BOLD_OFF}${theme.getFgAnsi("toolOutput")}`);
+    // The line ends with the channel-scoped fg close — a full RESET is
+    // gone from the emission path (it would kill pi's line-level frame
+    // canvas from the match onward — the tool-ls rule).
+    expect(out).not.toContain(RESET);
+    expect(out.endsWith(FG_DEFAULT)).toBe(true);
   });
 });
 
@@ -109,24 +113,26 @@ describe("emphasize (grep hit emphasis)", () => {
       flags: { literal: false, ignoreCase: false },
       emphasis: EMPHASIS,
     });
-    // After the first hit's RESET, the string color resumes for the rest.
-    // The wrap is BOLD + accent (the CLI convention — visible even where
-    // the accent overlaps a token color).
+    // After each hit's channel-scoped close (bold off), the string color
+    // resumes for the rest. The wrap is BOLD + accent (the CLI convention
+    // — visible even where the accent overlaps a token color); the
+    // content's own trailing RESET passes through untouched.
     expect(out).toBe(
-      `${STR_FG}${BOLD}${EMPHASIS.fg}abc${RESET}${STR_FG}${BOLD}${EMPHASIS.fg}abc${RESET}${STR_FG}${RESET}`,
+      `${STR_FG}${BOLD}${EMPHASIS.fg}abc${BOLD_OFF}${STR_FG}${BOLD}${EMPHASIS.fg}abc${BOLD_OFF}${STR_FG}${RESET}`,
     );
   });
 
-  it("emphasizes literal needles case-insensitively with original casing", () => {
+  it("closes bold-only and falls back to the fg default without a span fg", () => {
     const out = emphasize({
       content: "Find find FIND",
       pattern: "find",
       flags: { literal: true, ignoreCase: true },
       emphasis: EMPHASIS,
     });
-    // Only the hits are wrapped; the spaces between stay untouched.
+    // No span fg active (plain content): each hit closes bold, then the
+    // fg default — never a full reset (the frame canvas must survive).
     expect(out).toBe(
-      `${BOLD}${EMPHASIS.fg}Find${RESET} ${BOLD}${EMPHASIS.fg}find${RESET} ${BOLD}${EMPHASIS.fg}FIND${RESET}`,
+      `${BOLD}${EMPHASIS.fg}Find${BOLD_OFF}${FG_DEFAULT} ${BOLD}${EMPHASIS.fg}find${BOLD_OFF}${FG_DEFAULT} ${BOLD}${EMPHASIS.fg}FIND${BOLD_OFF}${FG_DEFAULT}`,
     );
   });
 });
@@ -173,5 +179,24 @@ describe("renderHitLine prefix coloring", () => {
     });
     // No emphasis spans at all — and no escape bloat beyond the source.
     expect(out).toBe("abcdef");
+  });
+
+  it("emits channel-scoped closes only — no full reset, no background escapes", () => {
+    // The wrap must never kill pi's line-level frame canvas: a full RESET
+    // or an inline bg escape would expose the terminal default background
+    // from the match onward (the tool-ls channel-scoped rule).
+    const content = `${STR_FG}Find find FIND`;
+    const out = emphasize({
+      content,
+      pattern: "find",
+      flags: { literal: true, ignoreCase: true },
+      emphasis: EMPHASIS,
+      baseFg: STR_FG,
+    });
+    // eslint-disable-next-line no-control-regex -- matches the escape classes the wrap must not emit
+    expect(out).not.toMatch(/\x1b\[0m/);
+    // eslint-disable-next-line no-control-regex -- matches the background escapes the wrap must not emit
+    expect(out).not.toMatch(/\x1b\[4[89]/);
+    expect(out).toContain(BOLD_OFF);
   });
 });

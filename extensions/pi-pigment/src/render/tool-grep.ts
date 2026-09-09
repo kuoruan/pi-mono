@@ -7,7 +7,7 @@
 
 import type { GrepToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import { inertText, RESET } from "#src/core/ansi.ts";
+import { FG_DEFAULT, inertText } from "#src/core/ansi.ts";
 import { detectLanguage, hlBlock, MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
@@ -254,9 +254,11 @@ export function renderHitLine(options: RenderHitLineOptions): string {
   // Hit prefixes render muted: getFgAnsi (the escape alone — fg() with empty
   // text is a visual no-op, open+reset cancel out). Context prefixes dim.
   const prefixStyle = hit.isContext ? palette.fgDim : theme.getFgAnsi("muted");
-  // Toolbox output: bare RESET, never palette.rowReset (that re-opens the
-  // diff canvas — a diff-row concept).
-  return `${prefixStyle}${hit.prefix} ${baseFg}${emphasized}${RESET}`;
+  // Toolbox output: channel-scoped closes only — palette.rowReset would
+  // re-open the diff canvas (a diff-row concept), and a full RESET would
+  // kill pi's line-level frame canvas and expose the terminal default
+  // behind the row tail (the tool-ls rule).
+  return `${prefixStyle}${hit.prefix} ${baseFg}${emphasized}${FG_DEFAULT}`;
 }
 
 /** The renderHighlighted inputs. */
