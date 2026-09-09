@@ -166,8 +166,19 @@ export function createGrepWrapper(
         fallback: plain,
         invalidate: ctx.invalidate,
         key: () => taskKey,
+        // Streaming frames render transient (never cached): each partial
+        // version is content that will never repeat — caching it would
+        // evict the stable blocks the LRU protects. The settled frame
+        // re-renders once and caches normally.
         render: async () =>
-          `${await renderHighlighted({ lines: shownLines, pattern, flags, theme, palette })}${tail ? `\n${tail}` : ""}`,
+          `${await renderHighlighted({
+            lines: shownLines,
+            pattern,
+            flags,
+            theme,
+            palette,
+            cache: !options.isPartial,
+          })}${tail ? `\n${tail}` : ""}`,
       });
       return text;
     },
@@ -273,6 +284,8 @@ interface RenderHighlightedOptions {
   theme: PaletteTheme;
   /** The palette (emphasis colors). */
   palette: DiffPalette;
+  /** False = transient render (streaming): highlight without caching. */
+  cache?: boolean;
 }
 
 /**
@@ -338,6 +351,7 @@ async function renderHighlighted(options: RenderHighlightedOptions): Promise<str
         language: entry.lang,
         palette,
         piTheme: theme,
+        cache: options.cache,
       });
       for (let k = 0; k < chunk.length; k++) {
         const member = chunk[k];

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { attachPreviewTask, getWidthAwareText } from "#src/render/text-task.ts";
+import { attachPreviewTask, clearPreviewTask, getWidthAwareText } from "#src/render/text-task.ts";
 
 /**
  * A fresh Text-shaped host for the stale-rejection scenarios (each drive
@@ -133,6 +133,95 @@ describe("width-aware render driver (getWidthAwareText)", () => {
     text.render(80);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(host.current()).toBe("fallback-body");
+  });
+
+  it("a changed identity resets the protocol: the next frame re-renders even on a key match", async () => {
+    const host = makeHost();
+    const text = host.text;
+    let renders = 0;
+    const taskOf = (identity: string) => ({
+      identity,
+      placeholder: `P(${identity})`,
+      fallback: "F",
+      invalidate: () => {},
+      key: () => "k",
+      render: async () => {
+        renders++;
+        return `body(${identity})`;
+      },
+    });
+    attachPreviewTask(text, taskOf("id-a"));
+    text.render(80);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(renders).toBe(1);
+    // A re-attach with a NEW identity but an identical key fn: the old
+    // rendered key belonged to the old generation — the next frame must
+    // re-render (a stale key match would strand the new placeholder).
+    attachPreviewTask(text, taskOf("id-b"));
+    text.render(80);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(renders).toBe(2);
+    expect(host.current()).toBe("body(id-b)");
+  });
+
+  it("a cleared host re-renders on re-attach even when the key matches", async () => {
+    const host = makeHost();
+    const text = host.text;
+    let renders = 0;
+    const task = {
+      identity: "fixed",
+      placeholder: "loading…",
+      fallback: "F",
+      invalidate: () => {},
+      key: () => "k",
+      render: async () => {
+        renders++;
+        return `body#${renders}`;
+      },
+    };
+    attachPreviewTask(text, task);
+    text.render(80);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(renders).toBe(1);
+    // Clear fully detaches (task, identity, key, queue) then the SAME
+    // task re-attaches: without the key reset the frame would see the
+    // matching key and never render — a stuck placeholder.
+    clearPreviewTask(text);
+    text.setText("");
+    attachPreviewTask(text, task);
+    text.render(80);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(renders).toBe(2);
+    expect(host.current()).toBe("body#2");
+  });
+
+  it("latest-wins: bursts collapse to at most one render behind the in-flight one", async () => {
+    const host = makeHost();
+    const text = host.text;
+    const started: string[] = [];
+    let release!: (value: string) => void;
+    text.previewTask = {
+      identity: "fixed",
+      placeholder: "loading…",
+      fallback: "failed",
+      invalidate: () => {},
+      key: (w: number) => `k${w}`,
+      render: (w: number) => {
+        started.push(`w${w}`);
+        if (started.length === 1) return new Promise<string>((resolve) => (release = resolve));
+        return Promise.resolve(`body-w${w}`);
+      },
+    };
+    const r1 = text.render(80); // starts w80 (in flight, never resolves yet)
+    expect(r1).toEqual(["loading…"]);
+    expect(started).toEqual(["w80"]);
+    text.render(90); // key advances: pending recorded, no second render
+    text.render(100); // key advances again: pending overwritten
+    expect(started).toEqual(["w80"]); // still exactly one in flight
+    release("stale-body"); // w80 settles — its key is gone: dropped, then w100 runs
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(started).toEqual(["w80", "w100"]); // the middle key never rendered
+    expect(host.current()).toBe("body-w100");
   });
 
   it("stale rejection: a superseded render neither swaps nor falls back", async () => {

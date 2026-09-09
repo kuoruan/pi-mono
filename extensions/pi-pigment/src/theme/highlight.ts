@@ -121,6 +121,16 @@ export interface HlBlockOptions {
   piTheme?: PaletteTheme;
   /** Optional pre-slice file text (grammar-state seeding). */
   seed?: string;
+  /**
+   * False = transient render: still highlight, but do NOT store the result
+   * in the LRU. Streaming output renderers pass this while the content
+   * still grows — every partial version would otherwise sit in the cache
+   * as a never-read-again entry, evicting the stable blocks it protects.
+   * Cache READS still apply (a repeated frame with unchanged content hits
+   * an earlier transient render's miss and re-tokenizes — acceptable, the
+   * final settled frame re-renders once and caches normally).
+   */
+  cache?: boolean;
 }
 
 /**
@@ -167,7 +177,7 @@ export async function hlBlock(options: HlBlockOptions): Promise<string[]> {
     // does NOT add a trailing empty line (views join line arrays, so
     // this normalizes both to the array's shape).
     const trimmed = code.endsWith("\n") && output.length > 0 ? output.slice(0, -1) : output;
-    highlightCache.set(key, trimmed);
+    if (options.cache !== false) highlightCache.set(key, trimmed);
     return trimmed;
   } catch {
     return linesOf(code);

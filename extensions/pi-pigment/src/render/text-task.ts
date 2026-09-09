@@ -59,6 +59,19 @@ export interface PreviewTask {
  */
 export type DiffSeedFor = (hunkNewStart: number) => string | undefined;
 
+/**
+ * The latest-wins render queue hanging off a preview host: at most one
+ * render runs at a time; every newer request overwrites `pendingWidth`
+ * so a burst collapses to ≤2 renders (the in-flight one + the newest).
+ * The frame loop enqueues, `drainPreview` executes one at a time.
+ */
+export interface PreviewRenderQueue {
+  /** True while a render runs for this host. */
+  inFlight: boolean;
+  /** The newest requested width not yet started (undefined = queue empty). */
+  pendingWidth?: number;
+}
+
 /** Extended Text component carrying a preview task. */
 export interface PreviewTextHost extends Component {
   /** Replaces the component's rendered text. */
@@ -67,7 +80,13 @@ export interface PreviewTextHost extends Component {
   previewWidthAware?: boolean;
   /** The component's original render, saved before wrapping. */
   previewBaseRender?: (width: number) => string[];
-  /** Cache key of the last-rendered task result. */
+  /**
+   * The key of the last scheduled/committed render — the commit guard AND
+   * the frame loop's dedupe: a same-key frame re-renders nothing, and an
+   * async result whose key was superseded never touches the text. Reset
+   * by the attach guard on identity change and by clearPreviewTask, so a
+   * re-armed or re-attached host always re-renders on its next frame.
+   */
   previewRenderedKey?: string;
   /** The scheduled preview task driving this component. */
   previewTask?: PreviewTask;
@@ -78,6 +97,8 @@ export interface PreviewTextHost extends Component {
    * wrapper-side errorFrameKey lived in the factory instead).
    */
   previewIdentity?: string;
+  /** The latest-wins render queue (created by the first enqueue). */
+  previewRender?: PreviewRenderQueue;
   /** Per-line background painter the TUI calls while rendering; undefined = none. */
   customBgFn?: (line: string) => string;
   /** Sets the background painter (CustomBgText's official entry). */
@@ -101,23 +122,28 @@ export function renderEmpty(text: PreviewTextHost): PreviewTextHost {
 }
 
 /**
- * Detach the live task AND its identity stamp. The synchronous render
- * paths (renderEmpty, the plain fallback) must call this — leaving the
- * identity behind would make a later task with the same identity skip
- * its re-arm on a host that no longer carries the old task's content.
+ * Detach the live task AND the whole render protocol state (identity,
+ * rendered key, queue). The synchronous render paths (renderEmpty, the
+ * plain fallback) must call this — leaving ANY of it behind would either
+ * make a later same-identity task skip its re-arm on a host that no
+ * longer carries the old task's content, or skip its render because the
+ * cleared key still matches (a stuck placeholder).
  *
- * @param text - The Text component.
+ * @param text - The host.
  */
 export function clearPreviewTask(text: PreviewTextHost): void {
   text.previewTask = undefined;
   text.previewIdentity = undefined;
+  text.previewRenderedKey = undefined;
+  text.previewRender = undefined;
 }
 
 /**
  * Attach a width-aware preview task to a Text component (the primitive setDiffPreviewTask builds
  * on) — the protocol's OWN re-arm guard: the TUI's updateDisplay re-runs renderResult and
  * re-attaches a fresh task closure every cycle, and only a CHANGED identity re-arms (placeholder +
- * Redraw); unchanged re-runs keep the rendered frame. The render loop's width-aware key stays the
+ * full protocol reset — the rendered key and queue belong to the old task generation); unchanged
+ * re-runs keep the rendered frame. The render loop's width-aware key stays the
  * width guard — two orthogonal compares, both inside the protocol. Never invalidates — the async
  * render completes through the loop's own completion path (pinned in
  * tests/render/text-task.test.ts).
@@ -129,6 +155,8 @@ export function attachPreviewTask(text: PreviewTextHost, task: PreviewTask): voi
   text.previewTask = task;
   if (text.previewIdentity === task.identity) return;
   text.previewIdentity = task.identity;
+  text.previewRenderedKey = undefined;
+  text.previewRender = undefined;
   text.setText(task.placeholder);
 }
 
@@ -307,24 +335,51 @@ export function getWidthAwareText(
       if (text.previewRenderedKey !== key) {
         text.previewRenderedKey = key;
         text.setText(task.placeholder);
-        Promise.resolve(task.render(renderWidth))
-          .then((rendered: string): string => {
-            if (text.previewRenderedKey === key) {
-              text.setText(rendered);
-              task.invalidate();
-            }
-            return rendered;
-          })
-          .catch((): string => {
-            if (text.previewRenderedKey === key) {
-              text.setText(task.fallback);
-              task.invalidate();
-            }
-            return task.fallback;
-          });
+        // Latest-wins queue: enqueue the newest width and drain. A render
+        // already running stays the only one — newer frames overwrite the
+        // pending width, so a burst (drag-resize, streaming partials)
+        // collapses to at most two renders: the in-flight one plus the
+        // newest. Superseded results never commit (the key guard).
+        const queue = (text.previewRender ??= { inFlight: false });
+        queue.pendingWidth = renderWidth;
+        void drainPreview(text);
       }
     }
     return text.previewBaseRender?.(width) ?? [];
   };
   return text;
+}
+
+/**
+ * Drain a host's latest-wins queue: run renders one at a time until no
+ * pending width remains. Each iteration re-reads the CURRENT task (a
+ * mid-flight re-attach pulls the next generation's render), guards the
+ * commit on the key recorded at start (a superseded result neither swaps
+ * nor falls back), and loops for the newest width that arrived while it
+ * ran.
+ *
+ * @param text - The host carrying the queue.
+ */
+async function drainPreview(text: PreviewTextHost): Promise<void> {
+  const queue = text.previewRender;
+  if (!queue) return;
+  while (!queue.inFlight && queue.pendingWidth !== undefined) {
+    const task = text.previewTask;
+    if (!task) return; // detached mid-queue: the clear wiped the state
+    const width = queue.pendingWidth;
+    queue.pendingWidth = undefined;
+    queue.inFlight = true;
+    const key = task.key(width);
+    let rendered: string;
+    try {
+      rendered = await task.render(width);
+    } catch {
+      rendered = task.fallback;
+    }
+    queue.inFlight = false;
+    if (text.previewRenderedKey === key) {
+      text.setText(rendered);
+      task.invalidate();
+    }
+  }
 }

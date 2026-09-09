@@ -56,12 +56,44 @@ describe("detectLanguage", () => {
   });
 });
 
+/**
+ * A fresh syntax-colored palette per call (content-identical across calls).
+ *
+ * @returns The resolved palette.
+ */
+function paletteOf(): ReturnType<typeof resolveDiffPalette> {
+  return resolveDiffPalette(buildFakeTheme({ syntaxColors: true }));
+}
+
 describe("hlBlock", () => {
   beforeEach(() => {
     resetPigmentForTest();
   });
   afterEach(() => {
     resetPigmentForTest();
+  });
+
+  it("cache:false renders but does not populate the LRU (streaming renders are transient)", async () => {
+    const themed = buildFakeTheme({ syntaxColors: true });
+    const call = (cache?: boolean) =>
+      hlBlock({
+        code: CODE,
+        language: "typescript",
+        palette: paletteOf(),
+        piTheme: themed,
+        cache,
+      });
+    // First render marked transient: same output, but the LRU must NOT
+    // hold it — the second pass tokenizes fresh (a cache hit would return
+    // the SAME array reference).
+    const first = await call(false);
+    const second = await call();
+    expect(second).toEqual(first);
+    expect(second).not.toBe(first);
+    // Control: normal renders cache — a repeat is a reference hit.
+    const cached1 = await call();
+    const cached2 = await call();
+    expect(cached2).toBe(cached1);
   });
 
   it("returns unhighlighted lines for unknown languages and oversized input", async () => {
