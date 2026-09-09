@@ -46,7 +46,7 @@
   },
   "overrides": [
     {
-      "files": ["**/*.{test,spec}.{ts,tsx,js,mjs,cjs}"],
+      "files": ["**/*.{test,spec,bench}.{ts,tsx,js,mjs,cjs}"],
       "env": {
         "vitest": true
       },
@@ -72,6 +72,13 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "files": ["**/*.{bench}.{ts,tsx,js,mjs,cjs}"],
+      "rules": {
+        "no-underscore-dangle": "off",
+        "vitest/expect-expect": "off"
       }
     },
     {
