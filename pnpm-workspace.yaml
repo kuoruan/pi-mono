@@ -4,12 +4,8 @@ packages:
 catalog:
   "@tsconfig/node22": ^22.0.6
   "@types/node": ^22.20.1
-  memfs: ^4.68.2
+  memfs: ^4.71.0
   typescript: ^7.0.2
-  vitest: ^4.1.11
+  vitest: ^5.0.0
 
-minimumReleaseAgeExclude:
-  - "@gotgenes/pi-permission-system"
-  - zod
-  - "@aliou/sh"
-  - "@earendil-works/*"
+minimumReleaseAge: 10

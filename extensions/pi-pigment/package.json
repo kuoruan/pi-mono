@@ -68,8 +68,8 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.85.0",
-    "@earendil-works/pi-tui": "^0.85.0",
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "@earendil-works/pi-tui": "^0.85.1",
     "@tsconfig/node22": "catalog:",
     "@types/node": "catalog:",
     "memfs": "catalog:",
