@@ -555,7 +555,10 @@ function trimChunkWhitespace(value: string): TrimmedChunk {
  * @returns The ranges and similarity.
  */
 export function wordDiffAnalysis(oldText: string, newText: string): WordDiff {
-  if (!oldText && !newText) return { similarity: 1, oldRanges: [], newRanges: [] };
+  // Identical lines (and the empty pair) are fully common by definition
+  // — skip jsdiff and every walk. Zero-drift with the general path: same
+  // would count every code point, maxLength equals it, similarity 1.
+  if (oldText === newText) return { similarity: 1, oldRanges: [], newRanges: [] };
   const parts = diffWords(oldText, newText);
   const oldRanges: CharRange[] = [];
   const newRanges: CharRange[] = [];
@@ -563,24 +566,27 @@ export function wordDiffAnalysis(oldText: string, newText: string): WordDiff {
   let newPosition = 0;
   let same = 0;
   for (const part of parts) {
-    const codePoints = countCodePoints(part.value);
     if (part.removed) {
-      const { lead, body } = trimChunkWhitespace(part.value);
-      const start = oldPosition + countCodePoints(lead);
-      const end = start + countCodePoints(body);
+      // One pass per changed chunk: total code points plus the whitespace
+      // edges' code-point tallies (no slicing — the range producer needs
+      // counts, not substrings).
+      const { total, lead, body } = chunkStats(part.value);
+      const start = oldPosition + lead;
+      const end = start + body;
       // All-whitespace chunks (an indentation-only edit) highlight nothing.
       if (end > start) oldRanges.push([start, end]);
-      oldPosition += codePoints;
+      oldPosition += total;
     } else if (part.added) {
-      const { lead, body } = trimChunkWhitespace(part.value);
-      const start = newPosition + countCodePoints(lead);
-      const end = start + countCodePoints(body);
+      const { total, lead, body } = chunkStats(part.value);
+      const start = newPosition + lead;
+      const end = start + body;
       if (end > start) newRanges.push([start, end]);
-      newPosition += codePoints;
+      newPosition += total;
     } else {
-      same += codePoints;
-      oldPosition += codePoints;
-      newPosition += codePoints;
+      const total = countCodePoints(part.value);
+      same += total;
+      oldPosition += total;
+      newPosition += total;
     }
   }
   const maxLength = Math.max(countCodePoints(oldText), countCodePoints(newText));
@@ -588,14 +594,51 @@ export function wordDiffAnalysis(oldText: string, newText: string): WordDiff {
 }
 
 /**
- * Count code points (not UTF-16 code units) in a string.
+ * One changed chunk's tallies from a single pass: total code points, and
+ * the leading-whitespace / body / trailing-whitespace split in code
+ * points. No allocations — the range producer consumes counts, only
+ * plainWordDiff (the string painter) calls trimChunkWhitespace for the
+ * actual substrings.
  *
- * @param text - The text to count.
+ * @param value - The chunk.
+ * @returns The tallies.
+ */
+function chunkStats(value: string): { total: number; lead: number; body: number; trail: number } {
+  let total = 0;
+  let firstNonWs = -1;
+  let lastNonWsEnd = 0;
+  let i = 0;
+  while (i < value.length) {
+    const cp = value.codePointAt(i) ?? 0;
+    const len = cp > 0xffff ? 2 : 1;
+    if (!isWhitespaceCodePoint(cp)) {
+      if (firstNonWs === -1) firstNonWs = total;
+      lastNonWsEnd = total + 1;
+    }
+    total += 1;
+    i += len;
+  }
+  if (firstNonWs === -1) return { total, lead: total, body: 0, trail: 0 };
+  return { total, lead: firstNonWs, body: lastNonWsEnd - firstNonWs, trail: total - lastNonWsEnd };
+}
+
+/**
+ * Count code points (not UTF-16 code units) in plain text — a direct
+ * surrogate-aware walk, allocation-free (the iterateCells form yields one
+ * cell object per code point; the range producer pays this per chunk and
+ * per line, where escape handling is never needed).
+ *
+ * @param text - The plain text to count.
  * @returns The code-point count.
  */
 function countCodePoints(text: string): number {
   let count = 0;
-  for (const cell of iterateCells(text)) count += cell.chars;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    // A high surrogate consumes its low half: one code point, two units.
+    if (code >= 0xd800 && code <= 0xdbff) i += 1;
+    count += 1;
+  }
   return count;
 }
 
