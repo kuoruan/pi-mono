@@ -2,7 +2,7 @@
 // N visible code blocks, theme A warm (the pre-switch state), then theme B
 // (cold highlight cache) — the two passes a /settings theme switch costs.
 //
-//   node tools/theme-switch-bench.js [N=30] [lines=60]
+//   node tools/theme-switch-bench.js [N=30] [lines=60] [theme=nord]
 //
 // (No --experimental-strip-types needed: the .ts imports below rely on
 // Node's default type stripping, on by default since Node 22.18.)
@@ -19,6 +19,9 @@ import { setSyntaxThemeSelection } from "../src/theme/theme-selection.ts";
 
 const N = Number(process.argv[2] ?? 30);
 const LINES = Number(process.argv[3] ?? 60);
+
+/** A real bundled Shiki theme id for the intake leg (any @shikijs/themes name). */
+const WARM_THEME = process.argv[4] ?? "nord";
 
 /**
  * A fixture-shaped pi theme (the fixtures' buildFakeTheme, inlined).
@@ -90,12 +93,14 @@ const paletteB = resolveDiffPalette(fakeB);
 
 // Warm pass: the pre-switch state (theme A cached).
 for (const b of blocks) {
-  await hlBlock(b.code, "ts", paletteA, fakeA);
+  await hlBlock({ code: b.code, language: "ts", palette: paletteA, piTheme: fakeA });
 }
 
 // Theme switch: every block's cache entry is now cold (identity changed).
 let t0 = performance.now();
-await Promise.all(blocks.map((b) => hlBlock(b.code, "ts", paletteB, fakeB)));
+await Promise.all(
+  blocks.map((b) => hlBlock({ code: b.code, language: "ts", palette: paletteB, piTheme: fakeB })),
+);
 const parallelMs = performance.now() - t0;
 
 // The sequential cold shape (theme C — fresh identity, no parallel flood).
@@ -103,7 +108,7 @@ const fakeC = fakeTheme("bench-c", 40);
 const paletteC = resolveDiffPalette(fakeC);
 t0 = performance.now();
 for (const b of blocks) {
-  await hlBlock(b.code, "ts", paletteC, fakeC);
+  await hlBlock({ code: b.code, language: "ts", palette: paletteC, piTheme: fakeC });
 }
 const sequentialMs = performance.now() - t0;
 
@@ -125,7 +130,18 @@ for (const b of blocks) {
 const tokenizeMs = performance.now() - t0;
 const renderMs = sequentialMs - tokenizeMs;
 
+// The bundled-theme intake (the heavy path a pigment-* switch adds):
+// first materialization = module import + translucent flattening;
+// later switches hit the memo. Engin-independent, reported separately.
+const { loadBundledTheme } = await import("../src/theme/bundled-intake.ts");
+let tB = performance.now();
+await loadBundledTheme(WARM_THEME);
+const intakeColdMs = performance.now() - tB;
+tB = performance.now();
+await loadBundledTheme(WARM_THEME);
+const intakeWarmMs = performance.now() - tB;
+
 const ms = (v) => v.toFixed(1);
 console.log(
-  `blocks=${N} lines=${LINES} | cold parallel=${ms(parallelMs)}ms (${ms(parallelMs / N)}/block) | cold sequential=${ms(sequentialMs)}ms (${ms(sequentialMs / N)}/block) | tokenize-only=${ms(tokenizeMs)}ms | non-tokenize=${ms(renderMs)}ms`,
+  `blocks=${N} lines=${LINES} | cold parallel=${ms(parallelMs)}ms (${ms(parallelMs / N)}/block) | cold sequential=${ms(sequentialMs)}ms (${ms(sequentialMs / N)}/block) | tokenize-only=${ms(tokenizeMs)}ms | non-tokenize=${ms(renderMs)}ms | intake(cold)=${ms(intakeColdMs)}ms intake(memo)=${ms(intakeWarmMs)}ms`,
 );
