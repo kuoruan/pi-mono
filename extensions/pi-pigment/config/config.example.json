@@ -1,0 +1,23 @@
+{
+  "disabledTools": [],
+  "indicatorStyle": "bar",
+  "syntaxTheme": {
+    "base": "auto",
+    "diff": {
+      "added": {
+        "text": "#3fb950",
+        "tint": "#3fb95066"
+      },
+      "removed": {
+        "tint": "#f8514966"
+      }
+    },
+    "dark": {
+      "diff": {
+        "removed": {
+          "tint": "#5c1d1dcc"
+        }
+      }
+    }
+  }
+}

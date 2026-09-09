@@ -1,0 +1,94 @@
+{
+  "name": "pi-pigment",
+  "version": "0.1.0",
+  "description": "Pigment for your pi: Shiki-highlighted diffs, shell commands, grep hits, and file listings — every color from your active pi theme",
+  "keywords": [
+    "diff",
+    "pi",
+    "pi-extension",
+    "pi-package",
+    "pi-pigment",
+    "pi-theme",
+    "pigment",
+    "shiki",
+    "syntax-highlighting",
+    "terminal"
+  ],
+  "homepage": "https://github.com/kuoruan/pi-mono/tree/master/extensions/pi-pigment#readme",
+  "bugs": {
+    "url": "https://github.com/kuoruan/pi-mono/issues"
+  },
+  "license": "MIT",
+  "author": "Xingwang Liao",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuoruan/pi-mono.git",
+    "directory": "extensions/pi-pigment"
+  },
+  "files": [
+    "themes",
+    "src",
+    "config",
+    "schemas",
+    "README.md",
+    "CONFIG.md",
+    "LICENSE",
+    "docs"
+  ],
+  "type": "module",
+  "imports": {
+    "#src/*": "./src/*"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "generate:themes": "node scripts/generate-themes.ts"
+  },
+  "dependencies": {
+    "@aliou/sh": "^0.3.1",
+    "@ctrl/tinycolor": "^4.2.0",
+    "@shikijs/themes": "^4.4.3",
+    "ansis": "^4.3.1",
+    "diff": "^9.0.0",
+    "get-east-asian-width": "^1.6.0",
+    "jsonc-parser": "^3.3.1",
+    "pretty-ms": "^9.3.1",
+    "shiki": "^4.4.3",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.85.0",
+    "@earendil-works/pi-tui": "^0.85.0",
+    "@tsconfig/node22": "catalog:",
+    "@types/node": "catalog:",
+    "memfs": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.85.0",
+    "@earendil-works/pi-tui": ">=0.85.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "themes": [
+      "./themes"
+    ]
+  }
+}

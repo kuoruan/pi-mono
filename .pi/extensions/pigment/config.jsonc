@@ -1,0 +1,16 @@
+// pi-pigment development dogfooding config (this repo's project layer —
+// anyone running pi here gets these renders; the global layer is empty
+// and the project layer is the only configuration).
+{
+  // All seven wrappers active — empty array keeps everything on.
+  "disabledTools": [],
+
+  // The ▌ marker on changed lines (try "none" to compare).
+  "indicatorStyle": "bar",
+
+  // ADR 0006: the override layer — "auto" follows the /theme selection
+  // (ours-detection maps pigment-* themes to their shiki sources); an
+  // explicit value follows pi's grammar: a single theme name or a
+  // "light/dark" pair, overriding ONLY the token colors.
+  "syntaxTheme": "auto",
+}

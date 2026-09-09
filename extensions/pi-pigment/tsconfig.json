@@ -1,0 +1,15 @@
+{
+  "extends": "@tsconfig/node22/tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vitest/globals"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "paths": {
+      "#src/*": ["./src/*"],
+      "#test/*": ["./tests/*"]
+    }
+  },
+  "include": ["src", "tests", "vitest.config.ts"]
+}

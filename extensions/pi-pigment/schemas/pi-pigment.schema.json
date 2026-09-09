@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kuoruan/pi-mono/master/extensions/pi-pigment/schemas/pi-pigment.schema.json",
+  "title": "pi-pigment configuration",
+  "description": "Configuration for pi-pigment, the Shiki-powered tool-output renderer for pi. Lives at ~/.pi/agent/extensions/pi-pigment/config.jsonc (global) or .pi/extensions/pi-pigment/config.jsonc (project; the project layer wins per key).",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor schema association (this file's $id) — ignored at load."
+    },
+    "disabledTools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["write", "edit", "bash", "powershell", "grep", "ls", "find"]
+      },
+      "uniqueItems": true,
+      "default": [],
+      "description": "Tools pi-pigment does NOT wrap — pi's built-in renderer is used instead."
+    },
+    "indicatorStyle": {
+      "type": "string",
+      "enum": ["bar", "none"],
+      "default": "bar",
+      "description": "Left-edge change indicator in diff rows: the bar marker, or none."
+    },
+    "syntaxTheme": {
+      "description": "The syntax TOKEN override layer (ADR 0006). \"auto\" (default) follows the active pi theme: a pigment-* theme (registered by pi-pigment) maps back to its Shiki source for full-precision token colors; any other theme derives from its nine syntax* colors. An explicit value overrides ONLY the token colors — the chrome/canvas/diff roots always belong to the pi theme. Values follow pi's theme-setting grammar: a single theme name (a Shiki-bundled theme like \"vitesse-dark\", or a themes/ file stem — Shiki names are AA-fitted to the canvas, your files render verbatim), or an explicit \"light/dark\" pair (\"github-light/github-dark\" — the first half renders on light pi themes, the second on dark, following the terminal when the pi theme is an automatic pair). An object patches a base with semantic colors.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "$ref": "#/$defs/themeObject"
+        }
+      ],
+      "default": "auto"
+    }
+  },
+  "$defs": {
+    "themeObject": {
+      "type": "object",
+      "description": "The inline syntaxTheme object (ADR 0002). Patch mode sets a base (\"auto\" for diff-only overrides); variant mode defines the theme in per-polarity variants. Each variant may name its own base (a theme name or a \"light/dark\" pair), generalizing the pair structure to per-polarity user files.",
+      "properties": {
+        "base": {
+          "type": "string",
+          "description": "The theme being patched: \"auto\", a Shiki-bundled theme name, a themes/ file stem, or a \"light/dark\" pair."
+        },
+        "colors": {
+          "$ref": "#/$defs/semanticColors"
+        },
+        "diff": {
+          "$ref": "#/$defs/diffRoots"
+        },
+        "light": {
+          "$ref": "#/$defs/themeVariant",
+          "description": "The light variant (variant mode): its own base and/or colors/roots."
+        },
+        "dark": {
+          "$ref": "#/$defs/themeVariant",
+          "description": "The dark variant (variant mode): its own base and/or colors/roots."
+        }
+      },
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": ["base"]
+        },
+        {
+          "required": ["light"]
+        },
+        {
+          "required": ["dark"]
+        }
+      ]
+    },
+    "themeVariant": {
+      "type": "object",
+      "description": "One polarity variant: its own base and/or patches. The variant matching the pi theme's polarity is used; the other is ignored.",
+      "properties": {
+        "base": {
+          "type": "string",
+          "description": "The theme this polarity uses (a theme name or a \"light/dark\" pair); absent inherits the object's base"
+        },
+        "colors": {
+          "$ref": "#/$defs/semanticColors"
+        },
+        "diff": {
+          "$ref": "#/$defs/diffRoots"
+        }
+      },
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": ["base"]
+        },
+        {
+          "required": ["colors"]
+        },
+        {
+          "required": ["diff"]
+        }
+      ]
+    },
+    "semanticColors": {
+      "type": "object",
+      "description": "Semantic syntax colors. In variant mode (no base) these define the theme; in patch mode only listed keys deviate from the base. Values are opaque #rrggbb.",
+      "properties": {
+        "comment": {
+          "$ref": "#/$defs/hex6"
+        },
+        "keyword": {
+          "$ref": "#/$defs/hex6"
+        },
+        "function": {
+          "$ref": "#/$defs/hex6"
+        },
+        "variable": {
+          "$ref": "#/$defs/hex6"
+        },
+        "string": {
+          "$ref": "#/$defs/hex6"
+        },
+        "number": {
+          "$ref": "#/$defs/hex6"
+        },
+        "type": {
+          "$ref": "#/$defs/hex6"
+        },
+        "operator": {
+          "$ref": "#/$defs/hex6"
+        },
+        "punctuation": {
+          "$ref": "#/$defs/hex6"
+        }
+      },
+      "additionalProperties": false
+    },
+    "diffRoots": {
+      "type": "object",
+      "description": "Diff-root overrides (ADR 0003, revised by 0006), line-scoped sides only: added/removed (pi's toolDiffAdded/toolDiffRemoved vocabulary) hold text (#rrggbb, the line text color) and tint (#rrggbbaa, anchors the word-level emphasis and scales the line/gutter ladder). The box canvas is NOT a root — it is the pi theme's own toolSuccessBg. The key IS the semantics — a misplaced form fails at load, never silently at render.",
+      "properties": {
+        "background": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "The diff box canvas, opaque #rrggbb."
+        },
+        "added": {
+          "$ref": "#/$defs/diffRootSide"
+        },
+        "removed": {
+          "$ref": "#/$defs/diffRootSide"
+        }
+      },
+      "additionalProperties": false
+    },
+    "diffRootSide": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "This side's line text color, opaque #rrggbb."
+        },
+        "tint": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{8}$",
+          "description": "This side's word-level wash, translucent #rrggbbaa — anchors the emphasis ladder (line and gutter backgrounds scale with its alpha)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "hex6": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    }
+  },
+  "additionalProperties": false
+}
