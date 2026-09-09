@@ -212,6 +212,18 @@ describe("header helpers", () => {
     expect(plain(summarize(0, 0, FALLBACK_PALETTE))).toBe("no changes");
   });
 
+  it("chips close with the bare reset — no background re-open tail", () => {
+    // The header row's background is injected (injectBg re-opens its
+    // baseBg after every reset) — the chip must NOT re-open the palette's
+    // bgBase itself, or that stale escape would overpaint the row tail
+    // (the mechanism behind the theme-switch stale-chip report).
+    for (const chip of [summarize(3, 5, FALLBACK_PALETTE), summarize(0, 0, FALLBACK_PALETTE)]) {
+      expect(chip).toContain("\x1b[0m");
+      // eslint-disable-next-line no-control-regex -- matches the SGR bg escapes the chip must not emit
+      expect(chip).not.toMatch(/\x1b\[4[89]/);
+    }
+  });
+
   it("formatToolErrorResult windows the body collapsed, shows everything expanded", () => {
     const theme = {
       fg: (name: string, text: string) => `[${name}]${text}`,
