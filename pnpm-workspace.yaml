@@ -9,3 +9,9 @@ catalog:
   vitest: ^5.0.0
 
 minimumReleaseAge: 10
+
+allowBuilds:
+  esbuild: false
+  protobufjs: false
+  tree-sitter-bash: false
+  "@google/genai": false
