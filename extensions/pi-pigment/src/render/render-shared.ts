@@ -9,7 +9,7 @@ import { diffWords } from "diff";
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import { expandTabs, isPlainAscii, iterateCells, measurePlain } from "#src/core/ansi.ts";
 import type { DiffLine, ParsedDiff } from "#src/core/diff.ts";
-import { ansiState } from "#src/core/sgr.ts";
+import { SgrState } from "#src/core/sgr.ts";
 import { hlBlock, MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
@@ -175,11 +175,15 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
   let rowCols = 0;
   let onLastRow = false;
   let effectiveWidth = width;
+  const tracker = new SgrState();
   /** Close the current row (pad to EXACT width) and open the next. */
   const breakRow = (): void => {
-    const state = ansiState(row);
+    const state = tracker.replay();
     rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+    // The next row opens with the carried state plus a fresh fillBg —
+    // the tracker must seed from that opening so its replay stays exact.
     row = state + fillBg;
+    tracker.applySeq(state + fillBg);
     rowCols = 0;
     if (rows.length >= maxRows - 1) {
       onLastRow = true;
@@ -192,6 +196,7 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
       effectiveWidth = width > 2 ? width - 1 : width;
     }
     if (cell.escape) {
+      tracker.apply(cell.text);
       row += cell.text;
       continue;
     }

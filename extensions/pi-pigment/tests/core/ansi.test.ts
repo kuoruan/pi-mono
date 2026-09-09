@@ -6,10 +6,11 @@ import {
   expandTabs,
   fgRgb,
   fitAnsi,
+  iterateCells,
   measurePlain,
   mixBg,
 } from "#src/core/ansi.ts";
-import { ansiState, SgrState } from "#src/core/sgr.ts";
+import { SgrState } from "#src/core/sgr.ts";
 import { wrapAnsi, injectBg, wordDiffAnalysis } from "#src/render/render-shared.ts";
 import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
 import { plain } from "#test/fixtures.ts";
@@ -74,13 +75,25 @@ describe("fitAnsi", () => {
   });
 });
 
-describe("ansiState", () => {
+/**
+ * Batch reduction over SgrState — ansiState's former shell, pinned in tests.
+ *
+ * @param content - ANSI-styled text.
+ * @returns The re-open sequences.
+ */
+function batchState(content: string): string {
+  const state = new SgrState();
+  state.applySeq(content);
+  return state.replay();
+}
+
+describe("SGR batch reduction (SgrState applySeq + replay)", () => {
   it("extracts the last active fg and bg", () => {
-    expect(ansiState(`${RED_BG}${GREEN_FG}x`)).toBe(`${RED_BG}${GREEN_FG}`);
+    expect(batchState(`${RED_BG}${GREEN_FG}x`)).toBe(`${RED_BG}${GREEN_FG}`);
   });
 
   it("resets on SGR 0 and default fg on 39", () => {
-    expect(ansiState(`${GREEN_FG}a${RESET}b`)).toBe("");
+    expect(batchState(`${GREEN_FG}a${RESET}b`)).toBe("");
   });
 
   it("carries open font attributes (bold/italic survive the line break)", () => {
@@ -88,22 +101,22 @@ describe("ansiState", () => {
     const ITALIC = "\u001b[3m";
     const UNDO = "\u001b[22m\u001b[23m";
     // A bold+italic token broken by a wrap keeps both attributes.
-    expect(ansiState(`${BOLD}${ITALIC}${GREEN_FG}partial`)).toBe(`${GREEN_FG}${BOLD}${ITALIC}`);
+    expect(batchState(`${BOLD}${ITALIC}${GREEN_FG}partial`)).toBe(`${GREEN_FG}${BOLD}${ITALIC}`);
     // Attribute-off codes clear what they close (fg stays).
-    expect(ansiState(`${BOLD}${GREEN_FG}x${UNDO}`)).toBe(`${GREEN_FG}`);
+    expect(batchState(`${BOLD}${GREEN_FG}x${UNDO}`)).toBe(`${GREEN_FG}`);
     // A full reset clears attributes too.
-    expect(ansiState(`${BOLD}${GREEN_FG}x${RESET}`)).toBe("");
+    expect(batchState(`${BOLD}${GREEN_FG}x${RESET}`)).toBe("");
     // `ESC[m` (empty params) is a reset.
-    expect(ansiState(`${BOLD}x\u001b[m`)).toBe("");
+    expect(batchState(`${BOLD}x\u001b[m`)).toBe("");
     // Composite sequences parse per-parameter: bold + truecolor fg in one.
-    expect(ansiState("\u001b[1;38;2;10;20;30mx")).toBe("\u001b[38;2;10;20;30m\u001b[1m");
+    expect(batchState("\u001b[1;38;2;10;20;30mx")).toBe("\u001b[38;2;10;20;30m\u001b[1m");
     // 256-color specs consume their tail.
-    expect(ansiState("\u001b[38;5;220mx")).toBe("\u001b[38;5;220m");
+    expect(batchState("\u001b[38;5;220mx")).toBe("\u001b[38;5;220m");
   });
 
   it("re-opens carried state so wrapped tokens keep their style", () => {
     const BOLD = "\u001b[1m";
-    const state = ansiState(`${BOLD}${GREEN_FG}partial`);
+    const state = batchState(`${BOLD}${GREEN_FG}partial`);
     // The wrap continuation begins with the state; the token stays bold.
     expect(state.startsWith(`${GREEN_FG}`)).toBe(true);
     expect(state).toContain(BOLD);
@@ -111,7 +124,7 @@ describe("ansiState", () => {
 });
 
 /**
- * The pre-refactor ansiState body — pinned as the reference so the shared
+ * The pre-refactor batch reducer — pinned as the reference so the shared
  * SgrState machine can never drift from the established grammar.
  *
  * @param content - ANSI-styled text.
@@ -175,9 +188,9 @@ describe("SgrState (incremental) matches the batch reduction", () => {
     "\x1b[48;5;1mbg256\x1b[49m\x1b[38;2;1;2;3mfg\x1b[39m",
   ];
 
-  it("batch ansiState equals the reference reduction", () => {
+  it("batch reduction equals the reference reduction", () => {
     for (const s of corpus) {
-      expect(ansiState(s)).toBe(referenceAnsiState(s));
+      expect(batchState(s)).toBe(referenceAnsiState(s));
     }
   });
 
@@ -366,6 +379,117 @@ describe("wrapAnsi plain-ASCII rows", () => {
     expect(rows.length).toBe(2);
     expect(plain(rows[0])).toBe(line.slice(0, 60));
     expect(plain(rows[1])).toBe(line.slice(60));
+  });
+});
+
+/**
+ * The scan-based walk (batch state re-scan per break) pinned as the
+ * reference: the incremental tracker must reproduce it byte for byte.
+ *
+ * @param content - ANSI-styled text.
+ * @param options - Width, row budget, and padding background.
+ * @returns The wrapped rows.
+ */
+function referenceWrapAnsi(
+  content: string,
+  options: { width: number; maxRows: number; fillBg: string },
+): string[] {
+  const { width, maxRows, fillBg } = options;
+  const palette = FALLBACK_PALETTE;
+  const rows: string[] = [];
+  let row = "";
+  let rowCols = 0;
+  let onLastRow = false;
+  let effectiveWidth = width;
+  const breakRow = (): void => {
+    const state = referenceAnsiState(row);
+    rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+    row = state + fillBg;
+    rowCols = 0;
+    if (rows.length >= maxRows - 1) {
+      onLastRow = true;
+      effectiveWidth = width > 2 ? width - 1 : width;
+    }
+  };
+  for (const cell of iterateCells(content)) {
+    if (!onLastRow && rows.length >= maxRows - 1) {
+      onLastRow = true;
+      effectiveWidth = width > 2 ? width - 1 : width;
+    }
+    if (cell.escape) {
+      row += cell.text;
+      continue;
+    }
+    if (rowCols + cell.cols > effectiveWidth) {
+      if (onLastRow) {
+        if (width > 2) {
+          rows.push(
+            row +
+              fillBg +
+              " ".repeat(Math.max(0, effectiveWidth - rowCols)) +
+              palette.rowReset +
+              palette.fgDim +
+              "›" +
+              palette.rowReset,
+          );
+        } else {
+          rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+        }
+        return rows;
+      }
+      breakRow();
+    }
+    row += cell.text;
+    rowCols += cell.cols;
+  }
+  if (row.length > 0 || rows.length === 0) {
+    rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+  }
+  return rows;
+}
+
+describe("wrapAnsi incremental SGR state (differential)", () => {
+  const cases: { content: string; width: number; maxRows: number; fillBg: string }[] = [
+    // Token-shaped long line breaking twice with attributes carried.
+    {
+      content: "\x1b[38;2;218;112;214mconst\x1b[39m \x1b[1mtail\x1b[22m ".repeat(6),
+      width: 20,
+      maxRows: 6,
+      fillBg: "",
+    },
+    // Composite + 256-color + bg spans wrapping at a narrow width.
+    {
+      content: "\x1b[48;2;30;30;40m\x1b[1;38;2;10;20;30mword\x1b[22m ".repeat(8),
+      width: 16,
+      maxRows: 5,
+      fillBg: "\x1b[48;2;30;30;40m",
+    },
+    // CJK content (non-plain walk).
+    { content: "汉".repeat(30), width: 14, maxRows: 6, fillBg: "" },
+    // Truncation with the marker (width > 2, last row).
+    {
+      content: `\x1b[38;2;1;2;3mx\x1b[39m`.repeat(20),
+      width: 8,
+      maxRows: 3,
+      fillBg: "",
+    },
+    // width <= 2 truncation without a marker.
+    { content: "\x1b[1mxyz\x1b[22m".repeat(6), width: 2, maxRows: 2, fillBg: "" },
+    // Fits: single row, no tracking consumed.
+    { content: `${GREEN_FG}abc${RESET}`, width: 40, maxRows: 4, fillBg: "" },
+  ];
+
+  it("matches the scan-based reference byte for byte", () => {
+    for (const c of cases) {
+      expect(
+        wrapAnsi(c.content, {
+          width: c.width,
+          maxRows: c.maxRows,
+          fillBg: c.fillBg,
+          palette: FALLBACK_PALETTE,
+        }),
+      ).toEqual(referenceWrapAnsi(c.content, c));
+    }
   });
 });
 

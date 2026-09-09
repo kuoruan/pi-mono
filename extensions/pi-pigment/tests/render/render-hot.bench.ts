@@ -1,7 +1,7 @@
 /**
  * The per-frame render hot paths: wrapAnsi / diffRowFrame / injectBg /
  * word-diff pay per row of every diff view render. The cell-level costs
- * underneath them (measurePlain / iterateCells / ansiState) live in
+ * underneath them (measurePlain / iterateCells / SgrState) live in
  * tests/core/ansi-hot.bench.ts; inputs are shared through
  * #test/bench-fixtures.ts.
  *
@@ -65,7 +65,7 @@ test("wrapAnsi (fits-width fast path)", async ({ bench }) => {
 });
 
 test("wrapAnsi (real wrap)", async ({ bench }) => {
-  await bench("styled line x4 wrapped at 40 cols (breaks + ansiState)", () => {
+  await bench("styled line x4 wrapped at 40 cols (breaks + SGR state)", () => {
     sink += _wrapAnsi(_styledLine.repeat(4), {
       width: 40,
       maxRows: 4,

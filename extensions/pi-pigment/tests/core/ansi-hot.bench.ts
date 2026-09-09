@@ -1,5 +1,5 @@
 /**
- * The ansi cell/line hot paths: measurePlain / iterateCells / ansiState
+ * The ansi cell/line hot paths: measurePlain / iterateCells / SgrState
  * are the per-cell and per-line costs every diff view pays on its first
  * render of a block (the Text/Box caches amortize them across unchanged
  * frames; the first wrap and every width change pay full price). Baseline
@@ -16,7 +16,8 @@
  */
 import { test } from "vitest";
 
-import { ansiState, fitAnsi, iterateCells, measurePlain } from "#src/core/ansi.ts";
+import { fitAnsi, iterateCells, measurePlain } from "#src/core/ansi.ts";
+import { SgrState } from "#src/core/sgr.ts";
 import { cjkLine, diffBody, plainLine, styledLine } from "#test/bench-fixtures.ts";
 
 // Bind the measured functions AND the shared inputs locally: vite's module
@@ -24,7 +25,6 @@ import { cjkLine, diffBody, plainLine, styledLine } from "#test/bench-fixtures.t
 // a getter call inside the timed callback would dominate the measurement.
 const _measurePlain = measurePlain;
 const _iterateCells = iterateCells;
-const _ansiState = ansiState;
 const _fitAnsi = fitAnsi;
 const _styledLine = styledLine;
 const _plainLine = plainLine;
@@ -69,12 +69,21 @@ test("iterateCells", async ({ bench }) => {
   }).run();
 });
 
-test("ansiState (the wrap breakRow snapshot)", async ({ bench }) => {
-  await bench("styled code line", () => {
-    sink += _ansiState(_styledLine).length;
+test("SgrState apply (the wrap walk's per-escape update)", async ({ bench }) => {
+  const state = new SgrState();
+  const tokenOpen = "\x1b[38;2;218;112;214m";
+  const tokenClose = "\x1b[39m";
+  await bench("apply a truecolor token open", () => {
+    state.apply(tokenOpen);
+    sink += state.replay().length;
   }).run();
-  await bench("plain ASCII line (no escapes)", () => {
-    sink += _ansiState(_plainLine).length;
+  await bench("apply a fg-reset (39m)", () => {
+    state.apply(tokenClose);
+    sink += state.replay().length;
+  }).run();
+  await bench("applySeq seeding (state + fillBg)", () => {
+    state.applySeq("\x1b[48;2;30;30;40m\x1b[1m");
+    sink += state.replay().length;
   }).run();
 });
 
