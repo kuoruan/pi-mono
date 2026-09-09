@@ -476,15 +476,83 @@ export function shouldUseSplit(diff: ParsedDiff, width: number, maxRows: number)
 }
 
 /**
- * Word-level diff of a paired old/new line: the changed character ranges on
- * each side plus their similarity (shared characters over the longer line).
- * Ranges are CODE-POINT offsets — the same unit `injectBg` advances per
- * visible character — so emphasis stays aligned when wide (CJK/emoji)
- * characters precede the changed words.
+ * Whether a code point is whitespace — the JS `\s` class (excluding the
+ * already-handled tab/newline structure), the same class jsdiff's word
+ * splitting consults, so the trim below never disagrees with jsdiff about
+ * what a "whitespace run" is.
  *
- * @param oldText - Plain old line content.
- * @param newText - Plain new line content.
- * @returns Similarity and the [start, end) ranges per side.
+ * @param cp - The code point.
+ * @returns True for every JS-\s member.
+ */
+function isWhitespaceCodePoint(cp: number): boolean {
+  return (
+    (cp >= 0x09 && cp <= 0x0d) ||
+    cp === 0x20 ||
+    cp === 0xa0 ||
+    cp === 0x1680 ||
+    (cp >= 0x2000 && cp <= 0x200a) ||
+    cp === 0x2028 ||
+    cp === 0x2029 ||
+    cp === 0x202f ||
+    cp === 0x205f ||
+    cp === 0x3000 ||
+    cp === 0xfeff
+  );
+}
+
+/** A diff chunk split into its whitespace edges and its body. */
+interface TrimmedChunk {
+  /** Leading whitespace code units. */
+  lead: string;
+  /** The chunk's non-whitespace body ("" for all-whitespace chunks). */
+  body: string;
+  /** Trailing whitespace code units. */
+  trail: string;
+}
+
+/**
+ * Split a changed chunk's whitespace edges off its body. jsdiff's
+ * `diffWords` merges adjacent whitespace INTO the changed words
+ * (`\toldValue` is ONE removed chunk — an indented edit highlight would
+ * paint the tab too, and after expandTabs the bleed doubles to two
+ * columns). The word highlight belongs on the word: both the range
+ * producer (wordDiffAnalysis) and the plain path (plainWordDiff) trim
+ * through this split.
+ *
+ * @param value - A changed chunk's value.
+ * @returns The split.
+ */
+function trimChunkWhitespace(value: string): TrimmedChunk {
+  let start = -1;
+  let end = value.length;
+  let i = 0;
+  while (i < value.length) {
+    const cp = value.codePointAt(i) ?? 0;
+    const len = cp > 0xffff ? 2 : 1;
+    if (!isWhitespaceCodePoint(cp)) {
+      if (start === -1) start = i;
+      end = i + len;
+    }
+    i += len;
+  }
+  if (start === -1) return { lead: value, body: "", trail: "" };
+  return { lead: value.slice(0, start), body: value.slice(start, end), trail: value.slice(end) };
+}
+
+/**
+ * Word-level change analysis: the changed char ranges in the old and new
+ * texts plus a similarity score. `diffWords` granularity, measured in
+ * code points so wide/code-unit-multi characters never shift ranges.
+ *
+ * Whitespace jsdiff merges into a changed chunk stays OUT of the ranges
+ * (the highlight must cover the word, not the indentation). NOTE: jsdiff's
+ * greedy alignment can highlight a DIFFERENT occurrence when identical
+ * words repeat in the line — the word-diff definition (git/GitHub behave
+ * the same), not a position bug.
+ *
+ * @param oldText - The old line.
+ * @param newText - The new line.
+ * @returns The ranges and similarity.
  */
 export function wordDiffAnalysis(oldText: string, newText: string): WordDiff {
   if (!oldText && !newText) return { similarity: 1, oldRanges: [], newRanges: [] };
@@ -497,10 +565,17 @@ export function wordDiffAnalysis(oldText: string, newText: string): WordDiff {
   for (const part of parts) {
     const codePoints = countCodePoints(part.value);
     if (part.removed) {
-      oldRanges.push([oldPosition, oldPosition + codePoints]);
+      const { lead, body } = trimChunkWhitespace(part.value);
+      const start = oldPosition + countCodePoints(lead);
+      const end = start + countCodePoints(body);
+      // All-whitespace chunks (an indentation-only edit) highlight nothing.
+      if (end > start) oldRanges.push([start, end]);
       oldPosition += codePoints;
     } else if (part.added) {
-      newRanges.push([newPosition, newPosition + codePoints]);
+      const { lead, body } = trimChunkWhitespace(part.value);
+      const start = newPosition + countCodePoints(lead);
+      const end = start + countCodePoints(body);
+      if (end > start) newRanges.push([start, end]);
       newPosition += codePoints;
     } else {
       same += codePoints;
@@ -606,11 +681,18 @@ export function plainWordDiff(
   let oldOutput = "";
   let newOutput = "";
   for (const part of parts) {
-    if (part.removed)
-      oldOutput += `${palette.bgRemovedWord}${part.value}${palette.rowReset}${palette.bgRemoved}`;
-    else if (part.added)
-      newOutput += `${palette.bgAddedWord}${part.value}${palette.rowReset}${palette.bgAdded}`;
-    else {
+    if (part.removed) {
+      const { lead, body, trail } = trimChunkWhitespace(part.value);
+      oldOutput += lead;
+      if (body)
+        oldOutput += `${palette.bgRemovedWord}${body}${palette.rowReset}${palette.bgRemoved}`;
+      oldOutput += trail;
+    } else if (part.added) {
+      const { lead, body, trail } = trimChunkWhitespace(part.value);
+      newOutput += lead;
+      if (body) newOutput += `${palette.bgAddedWord}${body}${palette.rowReset}${palette.bgAdded}`;
+      newOutput += trail;
+    } else {
       oldOutput += part.value;
       newOutput += part.value;
     }

@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { iterateCells } from "#src/core/ansi.ts";
 import type { DiffLine, ParsedDiff } from "#src/core/diff.ts";
 import { parseDiff, parsePatchFiles } from "#src/core/diff.ts";
 import { formatToolErrorResult, setToolErrorBg } from "#src/render/error-frame.ts";
@@ -122,6 +123,39 @@ describe("renderUnified", () => {
     expect(plain(out)).toContain("more lines");
   });
 
+  it("word emphasis covers exactly the changed word — no bleed into indentation", async () => {
+    const diff = parseDiff("\toldValue = 1;\n", "\tnewValue = 1;\n", 0);
+    const out = await renderView(renderUnified, diff, { maxLines: 10 });
+    // Cell-level walk of the final ANSI rows: collect the visible chars
+    // under each word background, then assert the changed words carry
+    // them EXACTLY — the tab (jsdiff merges it into the changed chunk,
+    // and the renderer expands it to two columns) must stay out.
+    const bgClasses = [
+      FALLBACK_PALETTE.bgRemovedWord,
+      FALLBACK_PALETTE.bgAddedWord,
+      FALLBACK_PALETTE.bgRemoved,
+      FALLBACK_PALETTE.bgAdded,
+      FALLBACK_PALETTE.bgBase,
+    ];
+    const spanOf = (bg: string): string => {
+      let chars = "";
+      let on = false;
+      for (const row of out.split("\n")) {
+        for (const cell of iterateCells(row)) {
+          if (cell.escape) {
+            if (cell.text === bg) on = true;
+            else if (bgClasses.includes(cell.text)) on = false;
+            continue;
+          }
+          if (on) chars += cell.text;
+        }
+      }
+      return chars;
+    };
+    expect(spanOf(FALLBACK_PALETTE.bgRemovedWord)).toBe("oldValue");
+    expect(spanOf(FALLBACK_PALETTE.bgAddedWord)).toBe("newValue");
+  });
+
   it("returns an empty string for an empty diff", async () => {
     const out = await renderView(
       renderUnified,
@@ -174,6 +208,19 @@ describe("plainWordDiff", () => {
     expect(n).toContain("new");
     expect(o).not.toContain("new");
     expect(n).not.toContain("old");
+  });
+
+  it("keeps whitespace jsdiff merges into changed words out of the word paint", () => {
+    const { old: o, new: n } = plainWordDiff(
+      "\toldValue = 1;",
+      "\tnewValue = 1;",
+      FALLBACK_PALETTE,
+    );
+    // The tab rides outside the word background (the bleed the trimmed
+    // ranges fixed on the highlight path, mirrored here); the shared
+    // " = 1;" tail also stays outside any word wrap.
+    expect(o).toContain(`\t${FALLBACK_PALETTE.bgRemovedWord}oldValue`);
+    expect(n).toContain(`\t${FALLBACK_PALETTE.bgAddedWord}newValue`);
   });
 
   it("returns plain text for identical inputs", () => {

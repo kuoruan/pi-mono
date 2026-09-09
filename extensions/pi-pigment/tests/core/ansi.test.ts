@@ -516,6 +516,30 @@ describe("injectBg / wordDiffAnalysis code-point alignment", () => {
     expect(out).toContain(`${hi}value`);
   });
 
+  it("trims the whitespace jsdiff merges into changed chunks (tab case)", () => {
+    const { oldRanges, newRanges } = wordDiffAnalysis("\toldValue = 1;", "\tnewValue = 1;");
+    // The tab is part of the changed chunk (jsdiff lumps leading
+    // whitespace into the word) — the range covers the word only, so the
+    // highlight never bleeds into the indentation (a tab renders as two
+    // columns after expandTabs, doubling the visual bleed).
+    expect(oldRanges).toEqual([[1, 9]]);
+    expect(newRanges).toEqual([[1, 9]]);
+  });
+
+  it("trims leading and trailing whitespace merged into changed chunks", () => {
+    const { oldRanges, newRanges } = wordDiffAnalysis("  oldValue ", "  newValue");
+    // "  oldValue " = lead 2 + word 8 + trail 1 code points. The word
+    // occupies [2, 10); the merged whitespace stays unhighlighted.
+    expect(oldRanges).toEqual([[2, 10]]);
+    expect(newRanges).toEqual([[2, 10]]);
+  });
+
+  it("whitespace-only edits produce no word ranges", () => {
+    const { oldRanges, newRanges } = wordDiffAnalysis("x", " x");
+    expect(oldRanges).toEqual([]);
+    expect(newRanges).toEqual([]);
+  });
+
   it("measurePlain's ASCII fast path agrees with the cell walk", () => {
     // Same answer both ways for: plain ASCII, empty, spaces-only.
     for (const s of ["", "   ", "const x = 1;", "a".repeat(500)]) {
