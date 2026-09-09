@@ -10,7 +10,7 @@ import { createOnigurumaEngine } from "shiki/engine/oniguruma";
  * ONE engine per process, selected by BENCH_ENGINE:
  * BENCH_ENGINE=js   pnpm vitest bench tests/theme/shiki-engine.bench.ts
  * BENCH_ENGINE=onig pnpm vitest bench tests/theme/shiki-engine.bench.ts
- * (default: the source's engine — "js" until the migration lands).
+ * (default: the source's engine — "onig" since the migration landed).
  *
  * Why not A/B both cores in one bench file: measured side-by-side in one
  * heap, the ratio collapses to ~1.35x with run-to-run flips — the second
@@ -42,7 +42,7 @@ import { beforeAll, test } from "vitest";
 import tsReal from "#src/render/render-shared.ts?raw";
 
 const ENGINE: "js" | "onig" =
-  process.env.BENCH_ENGINE === "onig" ? "onig" : process.env.BENCH_ENGINE === "js" ? "js" : "js";
+  process.env.BENCH_ENGINE === "js" ? "js" : process.env.BENCH_ENGINE === "onig" ? "onig" : "onig";
 
 /** The C++ outlier (its grammar is the documented worst case, #893). */
 const cppCode = `#include <vector>

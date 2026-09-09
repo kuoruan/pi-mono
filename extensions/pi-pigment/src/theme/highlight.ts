@@ -85,11 +85,13 @@ export function detectLanguage(filePath: string): BundledLanguage | undefined {
 // ---------------------------------------------------------------------------
 // No engine prewarm (measured: the shiki module's
 // ~28ms import is paid at extension load (this file's static registry
-// import), leaving ensureCore ~4ms (engine 0.5 + grammar 3) — and every
-// hlBlock consumer renders through an async plain-then-styled upgrade
-// (text-task / invalidate) that makes any load latency invisible. The
-// dominant first-use cost (regex compilation at first tokenize, 10-60ms)
-// was never warmable by preloading a grammar anyway. Shiki's own guidance
+// import), leaving ensureCore ~45ms (WASM instantiate ~40 + grammar 3)
+// — and every hlBlock consumer renders through an async plain-then-
+// styled upgrade (text-task / invalidate) that makes any load latency
+// invisible. There is no regex compilation to warm: the Oniguruma WASM
+// engine interprets TextMate patterns directly (the JavaScript-regex
+// engine's lazy per-pattern compile premium — ~600ms on the first
+// tokenize of a 29KB file — left with that engine). Shiki's own guidance
 // is the lazy singleton (ensureCore's promise memo); VS Code renders
 // plain and restyles when the tokenizer catches up — the same model.
 const highlightCache = createBoundedMap<string, string[]>(CACHE_LIMIT);

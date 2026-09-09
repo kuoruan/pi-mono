@@ -7,7 +7,7 @@
 
 import {
   createHighlighterCore,
-  createJavaScriptRegexEngine,
+  createOnigurumaEngine,
   type HighlighterCore,
   type ThemedToken,
 } from "shiki";
@@ -41,11 +41,22 @@ const FONT_UNDERLINE = 4;
 /** Strikethrough bit of Shiki's FontStyle. */
 const FONT_STRIKETHROUGH = 8;
 
-/** The shared highlighter core (lazy; grammar engine is a process singleton). */
+/** The shared highlighter core (lazy; the Oniguruma WASM engine is a process singleton). */
 let corePromise: Promise<HighlighterCore> | undefined;
 
 /**
  * Ensure the core exists and the language is loaded (shared with highlight.ts).
+ *
+ * The Oniguruma WASM engine is shiki's Node default and the canonical
+ * TextMate reference (VS Code/vscode-textmate's engine): on realistic
+ * dense sources it tokenizes 3-6x faster than the JavaScript-regex engine
+ * (which pays oniguruma-to-es regex transpilation + lazy per-pattern
+ * compilation at first use), and it has no lazy-compile machinery to
+ * flirt with — the grammar-state flake's root-cause carrier.
+ * Creation pays a one-time ~40ms WASM instantiation, absorbed by the
+ * async plain-then-styled upgrade every highlight consumer renders
+ * through. See tests/theme/shiki-engine.bench.ts (BENCH_ENGINE=onig) for
+ * the pinned measurements.
  *
  * @param language - The language to load.
  * @returns The highlighter core, or undefined when the language cannot load.
@@ -54,7 +65,9 @@ export async function ensureCore(language: BundledLanguage): Promise<Highlighter
   try {
     // The await sits INSIDE this try: a construction rejection must reach
     // this catch to clear the poisoned memo.
-    corePromise ??= createHighlighterCore({ engine: createJavaScriptRegexEngine() });
+    corePromise ??= createHighlighterCore({
+      engine: createOnigurumaEngine(import("shiki/wasm")),
+    });
     const resolved = await corePromise;
     try {
       if (!resolved.getLoadedLanguages().includes(language)) {

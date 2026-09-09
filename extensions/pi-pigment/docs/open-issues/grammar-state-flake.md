@@ -1,5 +1,9 @@
 # Open issue: grammar-state test flakes under full parallel runs (10-50%)
 
+## Status update: the root-cause carrier left with the engine migration
+
+The shiki engine migration (JS-regex → Oniguruma WASM) removed the flake's identified root-cause carrier from the runtime: `oniguruma-to-es`'s `lazyCompileLength` machinery (emulated long-pattern regexes compiled on first `exec`) no longer exists in the tokenize path — the WASM engine interprets TextMate patterns directly. The `LoadedLangs`/`clip_search` suspects in Leading suspects below are all `oniguruma-to-es` internals; they cannot recur. Post-migration evidence: 5 consecutive full-parallel runs green (562/562 each — the old signature was 10-20% per run). Not marked definitively closed: CI accrual continues, and the in-test self-heal (clear cache + re-render, ≤3 attempts) stays as unrelated defense-in-depth. The guardrails below remain binding regardless.
+
 `tests/render/tool-output.test.ts` → "grep highlights same-file lines as one block (grammar state flows across lines)" fails ~10-20% of **full parallel** runs (`vitest run`, 16 forks), never in isolation, never with `--no-file-parallelism`, and never standalone (same code outside vitest is deterministic). Pre-dates the cleanup rounds (witnessed once during the P/T batches); the cleanup's type/import-only changes are not the trigger.
 
 ## Evidence (per-PID instrumented logs, two failure captures)
