@@ -7,8 +7,9 @@
 import { diffWords } from "diff";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
-import { ansiState, expandTabs, isPlainAscii, iterateCells, measurePlain } from "#src/core/ansi.ts";
+import { expandTabs, isPlainAscii, iterateCells, measurePlain } from "#src/core/ansi.ts";
 import type { DiffLine, ParsedDiff } from "#src/core/diff.ts";
+import { ansiState } from "#src/core/sgr.ts";
 import { hlBlock, MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";

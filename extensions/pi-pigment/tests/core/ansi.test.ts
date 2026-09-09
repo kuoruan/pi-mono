@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  ansiState,
   BG_DEFAULT,
   bgRgb,
   expandTabs,
@@ -10,6 +9,7 @@ import {
   measurePlain,
   mixBg,
 } from "#src/core/ansi.ts";
+import { ansiState, SgrState } from "#src/core/sgr.ts";
 import { wrapAnsi, injectBg, wordDiffAnalysis } from "#src/render/render-shared.ts";
 import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
 import { plain } from "#test/fixtures.ts";
@@ -17,6 +17,7 @@ import { plain } from "#test/fixtures.ts";
 const RED_BG = "\x1b[48;2;255;0;0m";
 const GREEN_FG = "\x1b[38;2;0;255;0m";
 const RESET = "\x1b[0m";
+const ESC = "\x1b";
 
 describe("expandTabs", () => {
   it("replaces tabs with two spaces", () => {
@@ -106,6 +107,94 @@ describe("ansiState", () => {
     // The wrap continuation begins with the state; the token stays bold.
     expect(state.startsWith(`${GREEN_FG}`)).toBe(true);
     expect(state).toContain(BOLD);
+  });
+});
+
+/**
+ * The pre-refactor ansiState body — pinned as the reference so the shared
+ * SgrState machine can never drift from the established grammar.
+ *
+ * @param content - ANSI-styled text.
+ * @returns The batched reduction.
+ */
+function referenceAnsiState(content: string): string {
+  let fg = "";
+  let bg = "";
+  const attrs = new Set<number>();
+  for (const match of content.matchAll(new RegExp(`${ESC}\\[([^m]*)m`, "g"))) {
+    const params = (match[1] || "0").split(";").map(Number);
+    let i = 0;
+    while (i < params.length) {
+      const p = params[i] ?? 0;
+      if (p === 0) {
+        fg = "";
+        bg = "";
+        attrs.clear();
+      } else if (p === 39) {
+        fg = "";
+      } else if (p === 49) {
+        bg = "";
+      } else if (p === 38 || p === 48) {
+        const kind = params[i + 1];
+        const len = kind === 5 ? 3 : kind === 2 ? 5 : 1;
+        const seq = `\u001b[${params.slice(i, i + len).join(";")}m`;
+        if (p === 38) fg = seq;
+        else bg = seq;
+        i += len - 1;
+      } else if (p === 22) {
+        attrs.delete(1);
+        attrs.delete(2);
+      } else if (p === 23) {
+        attrs.delete(3);
+      } else if (p === 24) {
+        attrs.delete(4);
+      } else if (p === 29) {
+        attrs.delete(9);
+      } else if (p >= 1 && p <= 9) {
+        attrs.add(p);
+      }
+      i++;
+    }
+  }
+  return bg + fg + [...attrs].map((a) => `\u001b[${a}m`).join("");
+}
+
+describe("SgrState (incremental) matches the batch reduction", () => {
+  // Token-shaped lines, composite params, 256-color, malformed 38/48,
+  // empty params, attribute stacking.
+  const corpus = [
+    "plain text",
+    `${GREEN_FG}const${RESET}`,
+    "\x1b[1;38;2;10;20;30mcomposite\x1b[22m",
+    "\x1b[38;5;220m256-color\x1b[39m",
+    "\x1b[mempty-param-resets",
+    "\x1b[38mmalformed\x1b[0m",
+    "\x1b[48;2;30;30;40m\x1b[1mbold-bg\x1b[22m\x1b[49m",
+    "\x1b[1m\x1b[3m\x1b[4m\x1b[9mattrs\x1b[29m\x1b[23m\x1b[0m",
+    "\x1b[38;2;218;112;214mconst\x1b[39m \x1b[1mtail\x1b[22m",
+    "\x1b[48;5;1mbg256\x1b[49m\x1b[38;2;1;2;3mfg\x1b[39m",
+  ];
+
+  it("batch ansiState equals the reference reduction", () => {
+    for (const s of corpus) {
+      expect(ansiState(s)).toBe(referenceAnsiState(s));
+    }
+  });
+
+  it("incremental apply over each escape equals the reference reduction", () => {
+    for (const s of corpus) {
+      const state = new SgrState();
+      for (const m of s.matchAll(new RegExp(`${ESC}\\[[^m]*m`, "g"))) state.apply(m[0]);
+      expect(state.replay()).toBe(referenceAnsiState(s));
+    }
+  });
+
+  it("applySeq seeds multi-sequence replays correctly", () => {
+    const state = new SgrState();
+    state.applySeq("\x1b[48;2;30;30;40m\x1b[1m");
+    expect(state.replay()).toBe("\x1b[48;2;30;30;40m\x1b[1m");
+    state.applySeq("\x1b[0m");
+    expect(state.replay()).toBe("");
   });
 });
 

@@ -16,8 +16,6 @@ import { mixRgb } from "./color.ts";
 /** The ESC control character every ANSI escape sequence starts with. */
 const ESC = "\u001b";
 
-/** Match any SGR escape sequence, capturing its parameters. */
-const ANSI_CAPTURE_RE = new RegExp(`${ESC}\\[([^m]*)m`, "g");
 /** Printable ASCII code units — the width fast-path gate. */
 const PLAIN_ASCII_RE = /^[\x20-\x7e]*$/;
 /** Truecolor-only color factory (level 3, ignoring NO_COLOR/FORCE_COLOR). */
@@ -305,76 +303,4 @@ export function measurePlain(content: string): number {
   let columns = 0;
   for (const cell of iterateCells(content)) columns += cell.cols;
   return columns;
-}
-
-/**
- * The SGR color spec's parameter count: `2;r;g;b` consumes 5 (kind +
- * three channels), `5;n` consumes 3 (kind + index), and a bare 38/48
- * (malformed) consumes just itself.
- *
- * @param kind - The spec's sub-selector (the parameter after 38/48).
- * @returns The parameter count.
- */
-function colorSpecLength(kind: number | undefined): number {
-  if (kind === 5) return 3;
-  if (kind === 2) return 5;
-  return 1;
-}
-
-/**
- * The SGR sequences that re-open the final style (bg, fg, attrs).
- * ansiState starts each continuation line's style from where the line
- * above left it (stripped trailing space + merged SGR tails), so a token
- * broken mid-line keeps its style on the next.
- *
- * @param content - ANSI-styled text.
- * @returns The SGR sequences that re-open the final style (bg, fg, attrs).
- */
-export function ansiState(content: string): string {
-  let fg = "";
-  let bg = "";
-  const attrs = new Set<number>();
-  for (const match of content.matchAll(ANSI_CAPTURE_RE)) {
-    // `ESC[m` (empty params) is a reset, same as `ESC[0m`.
-    const params = (match[1] || "0").split(";").map(Number);
-    let i = 0;
-    while (i < params.length) {
-      const p = params[i] ?? 0;
-      if (p === 0) {
-        fg = "";
-        bg = "";
-        attrs.clear();
-      } else if (p === 39) {
-        fg = "";
-      } else if (p === 49) {
-        bg = "";
-      } else if (p === 38 || p === 48) {
-        // A color spec consumes its tail: `2;r;g;b` (truecolor) or `5;n`
-        // (256-color); a bare 38/48 (malformed) consumes just itself.
-        const kind = params[i + 1];
-        const len = colorSpecLength(kind);
-        const seq = `\u001b[${params.slice(i, i + len).join(";")}m`;
-        if (p === 38) {
-          fg = seq;
-        } else {
-          bg = seq;
-        }
-        i += len - 1;
-      } else if (p === 22) {
-        attrs.delete(1); // bold off (and dim off — 2)
-        attrs.delete(2);
-      } else if (p === 23) {
-        attrs.delete(3); // italic off
-      } else if (p === 24) {
-        attrs.delete(4); // underline off
-      } else if (p === 29) {
-        attrs.delete(9); // strikethrough off
-      } else if (p >= 1 && p <= 9) {
-        attrs.add(p);
-      }
-      i++;
-    }
-  }
-  const attrSeqs = [...attrs].map((a) => `\u001b[${a}m`).join("");
-  return bg + fg + attrSeqs;
 }
