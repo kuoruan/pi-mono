@@ -16,10 +16,10 @@ import { mixRgb } from "./color.ts";
 /** The ESC control character every ANSI escape sequence starts with. */
 const ESC = "\u001b";
 
-/** Match any SGR escape sequence (parameters + "m"). */
-const ANSI_RE = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
 /** Match any SGR escape sequence, capturing its parameters. */
 const ANSI_CAPTURE_RE = new RegExp(`${ESC}\\[([^m]*)m`, "g");
+/** Printable ASCII code units — the width fast-path gate. */
+const PLAIN_ASCII_RE = /^[\x20-\x7e]*$/;
 /** Truecolor-only color factory (level 3, ignoring NO_COLOR/FORCE_COLOR). */
 const color = new Ansis(3);
 
@@ -68,23 +68,16 @@ export function mixBg(base: RgbColor, accent: RgbColor, intensity: number): stri
 }
 
 /**
- * Remove all SGR escape sequences.
- *
- * @param content - ANSI-styled text.
- * @returns The text with escapes removed.
- */
-export function stripAnsi(content: string): string {
-  return content.replace(ANSI_RE, "");
-}
-
-/**
  * Expand tabs to two spaces (the renderer's tab width).
  *
  * @param content - Text possibly containing tabs.
  * @returns The text with tabs expanded.
  */
 export function expandTabs(content: string): string {
-  return content.replace(/\t/g, "  ");
+  // Fast path: no tab means the same string reference — the hot wrap
+  // paths (shouldUseSplit's measure and every row wrap) avoid allocating
+  // a copy per line.
+  return content.includes("\t") ? content.replace(/\t/g, "  ") : content;
 }
 
 // ---------------------------------------------------------------------------
@@ -248,26 +241,52 @@ export function* iterateCells(s: string): Generator<Cell> {
  */
 export function fitAnsi(content: string, width: number, reset: string, fgDim: string): string {
   if (width <= 0) return "";
-  const columns = measurePlain(content);
-  if (columns <= width) {
-    return content + " ".repeat(width - columns);
+  // Plain path: printable ASCII truncates by slicing (one column per code
+  // unit; the marker row's content budget is width-1, and a plain line
+  // always fills it exactly, so the pad is zero).
+  if (isPlainAscii(content)) {
+    if (content.length <= width) return content + " ".repeat(width - content.length);
+    const showWidth = width > 2 ? width - 1 : width;
+    return width > 2
+      ? `${content.slice(0, showWidth)}${reset}${fgDim}›${reset}`
+      : `${content.slice(0, showWidth)}${reset}`;
   }
+  // Non-plain: ONE walk serves both outcomes — it follows the fit budget
+  // (`width`) as the consume-before-check limit and, in parallel, keeps
+  // the truncation prefix (budget width-1, the marker's column). A cell
+  // that breaks the fit budget proves content remains: return the
+  // truncation prefix. Completing the walk proves the content fits.
   const showWidth = width > 2 ? width - 1 : width;
-  let kept = 0;
-  let shown = 0;
-  // Consume-before-check (wrapAnsi's rule): a wide code point that would
-  // cross the boundary is left out entirely — then pad to the show budget
-  // so the row stays at EXACTLY `width` columns (the marker takes one).
+  let shown = 0; // columns under the fit budget
+  let truncEnd = 0; // prefix end under the width-1 budget
+  let truncShown = 0; // prefix columns (≤ showWidth)
   for (const cell of iterateCells(content)) {
-    if (cell.escape || shown + cell.cols <= showWidth) {
-      kept = cell.end;
-      shown += cell.cols;
-    } else break;
+    if (!cell.escape && shown + cell.cols > width) {
+      const pad = " ".repeat(Math.max(0, showWidth - truncShown));
+      return width > 2
+        ? `${content.slice(0, truncEnd)}${reset}${pad}${fgDim}›${reset}`
+        : `${content.slice(0, truncEnd)}${reset}`;
+    }
+    if (!cell.escape) shown += cell.cols;
+    if (cell.escape || truncShown + cell.cols <= showWidth) {
+      truncEnd = cell.end;
+      if (!cell.escape) truncShown += cell.cols;
+    }
   }
-  const pad = " ".repeat(Math.max(0, showWidth - shown));
-  return width > 2
-    ? `${content.slice(0, kept)}${reset}${pad}${fgDim}›${reset}`
-    : `${content.slice(0, kept)}${reset}`;
+  return content + " ".repeat(width - shown);
+}
+
+/**
+ * Whether every code unit is printable ASCII — the shared fast-path gate:
+ * such text maps one column per code unit (no escapes to skip, no wide
+ * code points), so measurement reduces to `.length` and wrapping reduces
+ * to slicing.
+ *
+ * @param content - The text to test.
+ * @returns True when only printable ASCII code units are present.
+ */
+export function isPlainAscii(content: string): boolean {
+  return PLAIN_ASCII_RE.test(content);
 }
 
 /**
@@ -282,7 +301,7 @@ export function measurePlain(content: string): number {
   // iteration (each yielded cell is an object allocation; a diff body of
   // plain lines would pay one per character). Anything else (escapes,
   // non-ASCII, wide code points) takes the precise walk.
-  if (/^[\x20-\x7e]*$/.test(content)) return content.length;
+  if (isPlainAscii(content)) return content.length;
   let columns = 0;
   for (const cell of iterateCells(content)) columns += cell.cols;
   return columns;

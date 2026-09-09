@@ -9,22 +9,14 @@ import {
   fitAnsi,
   measurePlain,
   mixBg,
-  stripAnsi,
 } from "#src/core/ansi.ts";
 import { wrapAnsi, injectBg, wordDiffAnalysis } from "#src/render/render-shared.ts";
 import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
+import { plain } from "#test/fixtures.ts";
 
 const RED_BG = "\x1b[48;2;255;0;0m";
 const GREEN_FG = "\x1b[38;2;0;255;0m";
 const RESET = "\x1b[0m";
-
-describe("stripAnsi", () => {
-  it("removes SGR sequences", () => {
-    expect(stripAnsi(`${RED_BG}text${RESET}`)).toBe("text");
-    expect(stripAnsi(`a\x1b[1mb\x1b[22mc`)).toBe("abc");
-    expect(stripAnsi("plain")).toBe("plain");
-  });
-});
 
 describe("expandTabs", () => {
   it("replaces tabs with two spaces", () => {
@@ -47,13 +39,18 @@ describe("fitAnsi", () => {
     expect(fitAnsi("ab", 5, RESET, "")).toBe("ab   ");
   });
 
+  it("truncates plain ASCII via slicing (exact bytes)", () => {
+    // The plain path slice: content to width-1, pad-less, close + marker.
+    expect(fitAnsi("abcdefgh", 3, RESET, "")).toBe(`ab${RESET}›${RESET}`);
+  });
+
   it("keeps escape sequences out of the visual count", () => {
     const fitted = fitAnsi(`${GREEN_FG}abcdef${RESET}`, 3, RESET, "");
-    expect(stripAnsi(fitted)).toBe("ab›");
+    expect(plain(fitted)).toBe("ab›");
   });
 
   it("truncates without a marker when width is tiny", () => {
-    expect(stripAnsi(fitAnsi("abcdef", 2, RESET, ""))).toBe("ab");
+    expect(plain(fitAnsi("abcdef", 2, RESET, ""))).toBe("ab");
   });
 
   it("returns empty for non-positive width", () => {
@@ -64,15 +61,15 @@ describe("fitAnsi", () => {
     // Regression: the truncation loop once stopped on columns >= showWidth
     // AFTER consuming a wide char, emitting 7 visible columns for width 6.
     const fitted = fitAnsi("中中中b", 6, RESET, "");
-    expect(measurePlain(stripAnsi(fitted))).toBe(6);
+    expect(measurePlain(plain(fitted))).toBe(6);
     // The third wide char is left out and the gap padded: exactly 6 columns.
-    expect(stripAnsi(fitted)).toBe("中中 ›");
+    expect(plain(fitted)).toBe("中中 ›");
   });
 
   it("keeps CJK truncation exact at a two-column boundary", () => {
     // Width 5: budget 4 content columns -> two CJK chars + marker = 5.
     const fitted = fitAnsi("中中中", 5, RESET, "");
-    expect(measurePlain(stripAnsi(fitted))).toBe(5);
+    expect(measurePlain(plain(fitted))).toBe(5);
   });
 });
 
@@ -165,8 +162,25 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
     expect(rows.length).toBeGreaterThan(1);
     // Every row's visible width is at most 40 columns.
     for (const row of rows) {
-      expect(measurePlain(stripAnsi(row))).toBeLessThanOrEqual(40);
+      expect(measurePlain(plain(row))).toBeLessThanOrEqual(40);
     }
+  });
+
+  it("styled content that fits emits one row byte-identical to the pad formula", () => {
+    const reset = "\u001b[0m";
+    // Escaped content has no plain fast path — the cell walk's final push
+    // must reproduce the fits formula (content + fillBg + pad + reset).
+    const styled = `${GREEN_FG}abc${reset}`;
+    expect(
+      wrapAnsi(styled, { width: 5, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
+    ).toEqual([`${styled}  ${reset}`]);
+  });
+
+  it("CJK content that fits emits one row byte-identical to the pad formula", () => {
+    const reset = "\u001b[0m";
+    expect(
+      wrapAnsi("你好", { width: 6, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
+    ).toEqual([`你好  ${reset}`]);
   });
 
   it("breaks before a wide char that would cross the boundary (no 1-column overflow)", () => {
@@ -175,7 +189,7 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
     const line = "汉".repeat(20) + "x";
     const rows = wrapAnsi(line, { width: 40, maxRows: 10, fillBg: "", palette: FALLBACK_PALETTE });
     expect(rows[0]).not.toContain("x");
-    expect(measurePlain(stripAnsi(rows[0]))).toBeLessThanOrEqual(40);
+    expect(measurePlain(plain(rows[0]))).toBeLessThanOrEqual(40);
     expect(rows.length).toBeGreaterThan(1);
   });
 
@@ -191,11 +205,11 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
       palette: FALLBACK_PALETTE,
     });
     const last = rows[rows.length - 1]!;
-    expect(measurePlain(stripAnsi(last))).toBe(8);
+    expect(measurePlain(plain(last))).toBe(8);
     // The padding before the marker sits on the row's fill background, not
     // the canvas base.
     expect(last).toContain(fillBg);
-    expect(stripAnsi(last).endsWith("›")).toBe(true);
+    expect(plain(last).endsWith("›")).toBe(true);
   });
 
   it("pads an ASCII line to exactly width columns (unified row contract)", () => {
@@ -209,6 +223,60 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
     expect(
       wrapAnsi("exactfit", { width: 8, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
     ).toEqual([`exactfit${reset}`]);
+  });
+});
+
+describe("wrapAnsi plain-ASCII rows", () => {
+  it("breaks a long plain line into exact-width rows (no ghost tail row)", () => {
+    const fillBg = "\x1b[48;2;10;20;30m";
+    const reset = "\u001b[0m";
+    const line = "ab".repeat(70); // 140 columns
+    const rows = wrapAnsi(line, { width: 60, maxRows: 10, fillBg, palette: FALLBACK_PALETTE });
+    expect(rows.length).toBe(3); // 60 + 60 + 20 — not 4 with an empty tail
+    expect(rows[0]).toBe(`${line.slice(0, 60)}${fillBg}${reset}`);
+    // Row opens repeat the carried SGR state (the previous row's fillBg
+    // open) plus the fresh fillBg — the cell walk's exact byte contract.
+    expect(rows[1]).toBe(`${fillBg}${line.slice(60, 120)}${fillBg}${reset}`);
+    expect(rows[2]).toBe(
+      `${fillBg}${fillBg}${line.slice(120)}${fillBg}${" ".repeat(60 - 20)}${reset}`,
+    );
+    for (const row of rows) {
+      expect(measurePlain(plain(row))).toBe(60);
+    }
+  });
+
+  it("truncates at the row budget: last row keeps width-1 content + › marker", () => {
+    // The unit version of the bench's 150-line / width 60 / budget 3 shape.
+    const fillBg = "\x1b[48;2;10;20;30m";
+    const line = "ab".repeat(100); // 200 columns
+    const rows = wrapAnsi(line, { width: 60, maxRows: 3, fillBg, palette: FALLBACK_PALETTE });
+    expect(rows.length).toBe(3);
+    expect(rows[2]).toContain("›");
+    expect(plain(rows[2]).endsWith("›")).toBe(true);
+    // 59 content columns + the marker = exactly 60.
+    expect(measurePlain(plain(rows[2]))).toBe(60);
+    // The row content stays on its own background.
+    expect(rows[2]).toContain(fillBg);
+  });
+
+  it("width 2 truncates without a marker (no room)", () => {
+    const rows = wrapAnsi("abcdefgh", {
+      width: 2,
+      maxRows: 2,
+      fillBg: "",
+      palette: FALLBACK_PALETTE,
+    });
+    expect(rows.length).toBe(2);
+    expect(plain(rows[0])).toBe("ab");
+    expect(plain(rows[1])).toBe("cd");
+  });
+
+  it("an exact multiple of the width ends at the boundary (no empty tail row)", () => {
+    const line = "ab".repeat(60); // 120 columns = width * 2
+    const rows = wrapAnsi(line, { width: 60, maxRows: 10, fillBg: "", palette: FALLBACK_PALETTE });
+    expect(rows.length).toBe(2);
+    expect(plain(rows[0])).toBe(line.slice(0, 60));
+    expect(plain(rows[1])).toBe(line.slice(60));
   });
 });
 

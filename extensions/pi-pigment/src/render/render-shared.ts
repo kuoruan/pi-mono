@@ -7,7 +7,7 @@
 import { diffWords } from "diff";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
-import { ansiState, expandTabs, iterateCells, measurePlain } from "#src/core/ansi.ts";
+import { ansiState, expandTabs, isPlainAscii, iterateCells, measurePlain } from "#src/core/ansi.ts";
 import type { DiffLine, ParsedDiff } from "#src/core/diff.ts";
 import { hlBlock, MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
@@ -154,15 +154,21 @@ export interface WrapAnsiOptions {
 export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
   const { width, maxRows, fillBg, palette } = options;
   if (width <= 0) return [""];
-  // Fast path: the line fits — pad to width. Gate on the COLUMN count, not
-  // the code-unit length: CJK code points take two columns, so a length
-  // gate lets wide-only lines overflow (a 25-CJK-char line is 25 units but
-  // 50 columns).
-  const columns = measurePlain(content);
-  if (columns <= width) {
-    const pad = width - columns;
-    return [content + fillBg + " ".repeat(pad) + palette.rowReset];
+  // Plain fast path: pure printable ASCII needs no cell walk — one column
+  // per code unit, so the fits gate and the wrapping both reduce to length
+  // arithmetic and slicing. (A length-only gate must NOT decide for styled
+  // or CJK content: wide code points count two columns, so a CJK line can
+  // fit the code-unit budget while overflowing visually.)
+  if (isPlainAscii(content)) {
+    if (content.length <= width) {
+      return [content + fillBg + " ".repeat(width - content.length) + palette.rowReset];
+    }
+    return wrapPlainAscii(content, width, maxRows, fillBg, palette);
   }
+  // Non-plain content (escapes, CJK): the cell walk below handles BOTH the
+  // fits and the wrap outcome itself — a fitting line emits one row via
+  // the final push, byte-identical to the pad formula above — so there is
+  // no separate pre-measure to pay a second walk.
   const rows: string[] = [];
   let row = "";
   let rowCols = 0;
@@ -217,6 +223,57 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
   }
   if (row.length > 0 || rows.length === 0) {
     rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+  }
+  return rows;
+}
+
+/**
+ * Wrap pure printable-ASCII content without the cell walk — the walk's
+ * byte contract replicated by slicing: rows break at exactly `width`
+ * columns; row 1 opens with `fillBg`, rows 2+ with the carried state
+ * (the previous row's fillBg open) plus the fresh `fillBg`; the last row
+ * truncates at width-1 with the `›` marker when content remains (width
+ * <= 2 has no marker room); every row closes at exactly `width` columns.
+ *
+ * @param content - Printable ASCII (isPlainAscii held) longer than width.
+ * @param width - Target column width (> 0).
+ * @param maxRows - Row budget.
+ * @param fillBg - Background escape for each row's padding.
+ * @param palette - The resolved palette (rowReset + fgDim for the marker).
+ * @returns The wrapped rows.
+ */
+function wrapPlainAscii(
+  content: string,
+  width: number,
+  maxRows: number,
+  fillBg: string,
+  palette: DiffPalette,
+): string[] {
+  const rows: string[] = [];
+  let start = 0;
+  let room = width;
+  while (start < content.length) {
+    if (rows.length >= maxRows - 1) room = width > 2 ? width - 1 : width;
+    const end = Math.min(start + room, content.length);
+    const slice = content.slice(start, end);
+    const open = rows.length === 0 ? "" : rows.length === 1 ? fillBg : `${fillBg}${fillBg}`;
+    const truncating = rows.length >= maxRows - 1 && end < content.length;
+    if (truncating) {
+      if (width > 2) {
+        rows.push(
+          `${open}${slice}${fillBg}${" ".repeat(Math.max(0, room - slice.length))}${palette.rowReset}${palette.fgDim}›${palette.rowReset}`,
+        );
+      } else {
+        rows.push(
+          `${open}${slice}${fillBg}${" ".repeat(Math.max(0, width - slice.length))}${palette.rowReset}`,
+        );
+      }
+      return rows;
+    }
+    rows.push(
+      `${open}${slice}${fillBg}${" ".repeat(Math.max(0, width - slice.length))}${palette.rowReset}`,
+    );
+    start = end;
   }
   return rows;
 }
