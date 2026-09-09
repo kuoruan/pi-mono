@@ -10,9 +10,10 @@ export default defineProject({
     // files reuse the module-graph transform instead of paying the full
     // cost again. CI (fresh checkout) is unaffected either way.
     fsModuleCache: true,
-    // Parallelism note: tests/render/tool-output.test.ts carries the
-    // grammar-state flake (upstream shiki tokenize nondeterminism under
-    // concurrent forks — see docs/open-issues/grammar-state-flake.md).
+    // Parallelism note: tests/render/tool-output.test.ts historically
+    // carried the grammar-state flake (upstream shiki tokenize
+    // nondeterminism under concurrent forks — root-cause carrier removed
+    // by the engine migration; see docs/open-issues/grammar-state-flake.md).
     // Parallel stays on: the affected test self-heals inside its own
     // bounded clear-cache-and-retry loop.
     fileParallelism: true,

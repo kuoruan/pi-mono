@@ -101,9 +101,9 @@ const highlightCache = createBoundedMap<string, string[]>(CACHE_LIMIT);
  * The cache itself is correct-by-construction (deterministic tokenize of
  * deterministic keys); the seam exists so a test can force a re-render
  * through a fresh derivation after resetting the theme-selection state.
- * (NOT for corePromise — that singleton is the flake root-cause carrier;
- * its only isolation boundary is the process. See
- * docs/open-issues/grammar-state-flake.md.)
+ * (NOT for corePromise — that singleton is where an engine-level
+ * corruption would persist; its only isolation boundary is the process.
+ * See docs/open-issues/grammar-state-flake.md.)
  */
 export function clearHighlightCacheForTest(): void {
   highlightCache.clear();
