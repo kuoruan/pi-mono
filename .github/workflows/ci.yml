@@ -30,3 +30,22 @@ jobs:
 
       - name: Check formatting
         run: pnpm fmt:check
+
+  test:
+    name: Test & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm + Node
+        uses: pnpm/setup@v2
+        with:
+          runtime: node@22
+          cache: true
+
+      - name: Typecheck
+        run: pnpm check
+
+      - name: Test
+        run: pnpm test
