@@ -118,13 +118,31 @@ export interface ShellState {
 }
 
 /**
+ * The create-preview stats (write's new-file path): the content's line
+ * count and fingerprint, keyed by the content REFERENCE — settled args
+ * are frozen, so the reference is stable frame to frame and the scans
+ * run once per call, not per updateDisplay frame.
+ */
+export interface NewFileStatsMemo {
+  /** The content string the stats were computed from. */
+  content: string;
+  /** The content's line count (0 for empty). */
+  lineCount: number;
+  /** The content's FNV-1a fingerprint (the identity key's seal). */
+  fingerprint: string;
+}
+
+/**
  * Write's render state: the existence-probe cache (renderCall), the
- * create-preview cache (renderCall), and the stats stash renderResult
- * bridges from result details (the "+N −M" call-header suffix).
+ * create-preview stats memo (renderResult), and the stats stash
+ * renderResult bridges from result details (the "+N −M" call-header
+ * suffix).
  */
 export interface WriteState {
   /** The existence probe cache (per path — renderCall probes sync, once). */
   existsProbes?: Record<string, boolean>;
+  /** The create-preview stats memo (see {@link NewFileStatsMemo}). */
+  newFileStats?: NewFileStatsMemo;
   /**
    * The +added/−removed counts bridged from result details by
    * renderResult (the call header renders on every update, so it
@@ -133,11 +151,6 @@ export interface WriteState {
   added?: number;
   /** The removed count (see added). */
   removed?: number;
-  /**
-   * The create's line count (bridged with the stats) — the header suffix
-   * "✓ new file (N lines)" reads it.
-   */
-  newFileLines?: number;
   /** The no-change confirmation (bridged once; the header suffix reads it). */
   noChange?: boolean;
 }

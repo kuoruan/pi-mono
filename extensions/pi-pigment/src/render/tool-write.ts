@@ -140,8 +140,11 @@ function newFileBody(options: NewFileBodyOptions): string {
  */
 function writeSummarySegment(state: WriteState, theme: PaletteTheme, palette: DiffPalette): string {
   if (state.noChange) return theme.fg("success", "✓ no changes");
-  if (state.newFileLines !== undefined) {
-    return theme.fg("success", `✓ new file (${state.newFileLines} lines)`);
+  // The line count lives in the stats memo (the bridge field the header
+  // used to read died with it — the memo is set by the SAME renderResult,
+  // so the header sees it on the same next frame).
+  if (state.newFileStats) {
+    return theme.fg("success", `✓ new file (${state.newFileStats.lineCount} lines)`);
   }
   if (state.added !== undefined && state.removed !== undefined) {
     return summarize(state.added, state.removed, palette);
@@ -307,17 +310,29 @@ export function createWriteWrapper(
       }
       if (d?.kind === "new") {
         const { filePath: fp } = d;
+        const rawArgs = argsOf<WriteToolInput>(ctx.args).content ?? "";
+        // Stats memo (edit's parsedDiff pattern): renderResult re-runs on
+        // every updateDisplay, and settled args are frozen — the content's
+        // REFERENCE is stable frame to frame, so the line count and
+        // fingerprint scan once per call instead of per frame.
+        let stats = ctx.state.newFileStats;
+        if (!stats || stats.content !== rawArgs) {
+          stats = {
+            content: rawArgs,
+            lineCount: rawArgs ? countLines(rawArgs) : 0,
+            fingerprint: fnv1a(rawArgs),
+          };
+          ctx.state.newFileStats = stats;
+        }
+        const lineCount = stats.lineCount;
         // Inert at intake (ADR 0004): model-authored content gets the same
         // neutralization as file reads before highlighting/wrapping see
-        // it. The inert pass + line count live INSIDE the keyed render
-        // below — a trigger frame (expand, invalidate) pays nothing.
-        const rawArgs = argsOf<WriteToolInput>(ctx.args).content ?? "";
-        const lineCount = rawArgs ? countLines(rawArgs) : 0;
+        // it. The inert pass lives INSIDE the keyed render below — a
+        // trigger frame (expand, invalidate) pays nothing.
         const rawContent = (): string => inertText(rawArgs);
         // The ✓ summary bridges to the header suffix (the next call render
         // picks it up); the result slot below carries ONLY the content
         // preview — one summary position across every wrapper.
-        ctx.state.newFileLines = lineCount;
         clearToolHeaderBg(text);
         // The identity = the width-neutral input stamp (the attach guard
         // compares it — the old newFileKey state field retired); the
@@ -330,7 +345,7 @@ export function createWriteWrapper(
           fp,
           palette.identity,
           lineCount,
-          fnv1a(rawArgs),
+          stats.fingerprint,
           options.expanded ? "x" : "c",
         ]);
         const lg = detectLanguage(fp);

@@ -75,11 +75,10 @@ export interface WordDiff {
   /**
    * The jsdiff change list the analysis walked — the raw material the
    * plain painter consumes directly (the unified view's fallback path
-   * never re-runs diffWords on a pair it already analyzed). FROZEN:
-   * callers must not mutate it. Note the identical-input fast path
-   * returns an EMPTY list — diffWords("same", "same") would yield one
-   * common part, so consumers must not equate `parts` with a fresh
-   * diffWords call.
+   * never re-runs diffWords on a pair it already analyzed). Treat it as
+   * read-only. Note the identical-input fast path returns an EMPTY list
+   * — diffWords("same", "same") would yield one common part, so
+   * consumers must not equate `parts` with a fresh diffWords call.
    */
   parts: readonly Change[];
 }
@@ -600,11 +599,6 @@ export function wordDiffAnalysis(oldText: string, newText: string): WordDiff {
     }
   }
   const maxLength = Math.max(countCodePoints(oldText), countCodePoints(newText));
-  // The plain painter consumes `parts` in the same tick and must be able
-  // to trust it: freeze the list (and its entries) so a future consumer
-  // cannot mutate the raw material out from under the ranges/verdict.
-  for (const part of parts) Object.freeze(part);
-  Object.freeze(parts);
   return {
     similarity: maxLength > 0 ? same / maxLength : 1,
     oldRanges,

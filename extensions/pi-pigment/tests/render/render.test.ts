@@ -239,6 +239,41 @@ describe("rendering pipeline", () => {
     expect(plain(rendered)).toContain("const value = 1;");
   });
 
+  it("the new-file stats memo reuses per-frame stats and re-derives on new args", async () => {
+    const tools = await registerTools();
+    const write = toolOf(tools, "write");
+    if (!write.renderResult) throw new Error("write.renderResult missing");
+
+    const filePath = join(tempDir, "fresh-memo.ts");
+    const { ctx } = makeRenderCtx();
+    (ctx as unknown as { args: unknown }).args = {
+      path: filePath,
+      content: "const a = 1;\n",
+    };
+    const result = { isError: false, details: { kind: "new", filePath } } as never;
+    write.renderResult(result, { expanded: true, isPartial: false }, buildRenderTheme(), ctx);
+    const state = (
+      ctx as unknown as {
+        state: { newFileStats?: { content: string; lineCount: number; fingerprint: number } };
+      }
+    ).state;
+    const first = state.newFileStats;
+    expect(first).toBeDefined();
+    expect(first!.lineCount).toBe(1);
+    // The settled args' content reference is stable frame to frame: the
+    // next renderResult must reuse the memo (the perf claim's hit path).
+    write.renderResult(result, { expanded: true, isPartial: false }, buildRenderTheme(), ctx);
+    expect(state.newFileStats).toBe(first);
+    // A fresh args parse (new reference) re-derives the stats.
+    (ctx as unknown as { args: unknown }).args = {
+      path: filePath,
+      content: "const a = 1;\nconst b = 2;\n",
+    };
+    write.renderResult(result, { expanded: true, isPartial: false }, buildRenderTheme(), ctx);
+    expect(state.newFileStats).not.toBe(first);
+    expect(state.newFileStats!.lineCount).toBe(2);
+  });
+
   it("edit renderResult renders the actual matched diff", async () => {
     const tools = await registerTools();
     const edit = toolOf(tools, "edit");
