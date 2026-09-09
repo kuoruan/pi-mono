@@ -1,6 +1,6 @@
 {
   "name": "pi-pigment",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pigment for your pi: Shiki-highlighted diffs, shell commands, grep hits, and file listings — every color from your active pi theme",
   "keywords": [
     "diff",
