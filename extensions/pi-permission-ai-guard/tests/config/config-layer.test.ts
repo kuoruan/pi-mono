@@ -1,12 +1,12 @@
 import { parse as parseJsonc } from "jsonc-parser";
-import { createFsFromVolume, vol } from "memfs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigEnv } from "#src/config/config-layer.ts";
 import { loadAiGuardConfig, persistConfigLayer } from "#src/config/config-layer.ts";
 import { configSchema } from "#src/config/config-schema.ts";
+import { vol } from "#test/memfs.ts";
 
-vi.mock("node:fs", () => createFsFromVolume(vol));
+vi.mock("node:fs");
 
 /**
  * A test environment: untrusted by default so the project layer stays inert.

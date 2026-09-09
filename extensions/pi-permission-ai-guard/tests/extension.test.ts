@@ -6,9 +6,7 @@
  * store have their own direct test files.
  */
 
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -29,6 +27,8 @@ const mocks = vi.hoisted(() => {
     getPermissionsService: vi.fn<(sessionId: string) => unknown>(),
   };
 });
+
+vi.mock("node:fs");
 
 vi.mock("@gotgenes/pi-permission-system", () => ({
   getPermissionsService: (sessionId: string) => mocks.getPermissionsService(sessionId),
@@ -181,6 +181,18 @@ function settingEntry(mode: string | null, parentId: string | null = null, id = 
  * @returns The mock pi, the stub pipeline's captured calls, and its
  *   createPipeline (for "not called" assertions).
  */
+/**
+ * A schema-valid baseline config for the wiring tests. The real config
+ * layer reads the machine's agent dir, so the wiring tests inject a
+ * baseline config instead of calling it — lifecycle timing assertions
+ * must not depend on which files exist under $HOME.
+ *
+ * @returns A fresh AiGuardConfig with schema defaults.
+ */
+function makeBaselineConfig(): AiGuardConfig {
+  return configSchema.parse({ provider: "test", model: "test" });
+}
+
 function installExtension(
   service: unknown = { registerAuthorizer: mocks.registerAuthorizer },
   deps: Record<string, unknown> = {},
@@ -188,7 +200,13 @@ function installExtension(
   const pi = makeMockPi();
   if (service !== null) mocks.getPermissionsService.mockReturnValue(service);
   const { createPipeline, calls } = makeStubPipeline();
-  createAiGuardExtension(pi as any, { createPipeline, ...deps });
+  createAiGuardExtension(pi as any, {
+    createPipeline,
+    // Default config seam (see makeBaselineConfig); a test may override
+    // it via `deps` — the config-failure tests do.
+    loadConfig: () => ({ config: makeBaselineConfig(), issues: [] }),
+    ...deps,
+  });
   return { pi, calls, createPipeline };
 }
 
@@ -689,26 +707,19 @@ describe("createAiGuardExtension — save-config actions", () => {
       loadConfig: () => ({ config, issues: [] }),
     });
 
-    // Point the session cwd at a throwaway tmp dir: the guard must refuse
-    // BEFORE any filesystem work, and even if that ordering ever weakens,
-    // the write lands here (and gets removed) — never the real
-    // ~/.pi/agent dir.
-    const tmpCwd = mkdtempSync(join(tmpdir(), "ai-guard-untrusted-"));
-    try {
-      const sessionCtx = makeSessionCtx({ trusted: false, cwd: tmpCwd });
-      pi.fire("session_start", {}, sessionCtx);
-      const ctx = makeUiCtx();
-      await pi.commands.get("ai-guard")!.handler("save-config project", ctx);
+    // A virtual project dir: the guard must refuse BEFORE any filesystem
+    // work, and the volume proves it stays untouched.
+    const sessionCtx = makeSessionCtx({ trusted: false, cwd: "/virtual-project" });
+    pi.fire("session_start", {}, sessionCtx);
+    const ctx = makeUiCtx();
+    await pi.commands.get("ai-guard")!.handler("save-config project", ctx);
 
-      expect(sessionCtx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("[ai-guard] could not save to project config"),
-        "error",
-      );
-      // Positive proof the guard never touched disk: the project dir must
-      // not exist even transiently.
-      expect(existsSync(join(tmpCwd, ".pi"))).toBe(false);
-    } finally {
-      rmSync(tmpCwd, { recursive: true, force: true });
-    }
+    expect(sessionCtx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("[ai-guard] could not save to project config"),
+      "error",
+    );
+    // Positive proof the guard never touched the volume: the project dir
+    // must not exist even transiently.
+    expect(existsSync("/virtual-project/.pi")).toBe(false);
   });
 });
