@@ -65,8 +65,8 @@ test("wrapAnsi (fits-width fast path)", async ({ bench }) => {
 });
 
 test("wrapAnsi (real wrap)", async ({ bench }) => {
-  await bench("styled line squeezed to 40 cols", () => {
-    sink += _wrapAnsi(_styledLine, {
+  await bench("styled line x4 wrapped at 40 cols (breaks + ansiState)", () => {
+    sink += _wrapAnsi(_styledLine.repeat(4), {
       width: 40,
       maxRows: 4,
       fillBg: _diffPalette.bgBase,
@@ -94,6 +94,20 @@ test("wrapAnsi (overflow truncation)", async ({ bench }) => {
       fillBg: _diffPalette.bgBase,
       palette: _diffPalette,
     }).length;
+  }).run();
+});
+
+test("wrapAnsi (plain body, one wrap per line)", async ({ bench }) => {
+  const lines = _diffBody.split("\n");
+  await bench("150 plain lines at width 60 (per-line wrap)", () => {
+    for (const line of lines) {
+      sink += _wrapAnsi(line, {
+        width: 60,
+        maxRows: 3,
+        fillBg: "",
+        palette: _diffPalette,
+      }).length;
+    }
   }).run();
 });
 

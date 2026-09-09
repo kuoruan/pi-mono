@@ -16,7 +16,7 @@
  */
 import { test } from "vitest";
 
-import { ansiState, iterateCells, measurePlain } from "#src/core/ansi.ts";
+import { ansiState, fitAnsi, iterateCells, measurePlain } from "#src/core/ansi.ts";
 import { cjkLine, diffBody, plainLine, styledLine } from "#test/bench-fixtures.ts";
 
 // Bind the measured functions AND the shared inputs locally: vite's module
@@ -25,6 +25,7 @@ import { cjkLine, diffBody, plainLine, styledLine } from "#test/bench-fixtures.t
 const _measurePlain = measurePlain;
 const _iterateCells = iterateCells;
 const _ansiState = ansiState;
+const _fitAnsi = fitAnsi;
 const _styledLine = styledLine;
 const _plainLine = plainLine;
 const _cjkLine = cjkLine;
@@ -37,7 +38,7 @@ const _diffBody = diffBody;
 let sink = 0;
 
 test("measurePlain", async ({ bench }) => {
-  await bench("styled code line (~120 cols with escapes)", () => {
+  await bench("styled code line (~25 cols with escapes)", () => {
     sink += _measurePlain(_styledLine);
   }).run();
   await bench("plain ASCII line (80 chars)", () => {
@@ -74,5 +75,17 @@ test("ansiState (the wrap breakRow snapshot)", async ({ bench }) => {
   }).run();
   await bench("plain ASCII line (no escapes)", () => {
     sink += _ansiState(_plainLine).length;
+  }).run();
+});
+
+const FIT_RESET = "\x1b[0m";
+const FIT_DIM = "\x1b[38;2;110;110;110m";
+
+test("fitAnsi (truncation)", async ({ bench }) => {
+  await bench("plain line truncated at width 40", () => {
+    sink += _fitAnsi(_plainLine, 40, FIT_RESET, FIT_DIM).length;
+  }).run();
+  await bench("styled line truncated at width 16", () => {
+    sink += _fitAnsi(_styledLine, 16, FIT_RESET, FIT_DIM).length;
   }).run();
 });
