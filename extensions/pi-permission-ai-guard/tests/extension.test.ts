@@ -225,7 +225,6 @@ function makeUiCtx() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
   mocks.getPermissionsService.mockReturnValue(undefined);
 });
 

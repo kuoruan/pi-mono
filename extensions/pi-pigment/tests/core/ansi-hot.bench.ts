@@ -1,61 +1,78 @@
 /**
- * The ansi hot-path bench: measurePlain / wrapAnsi / iterateCells are the
- * per-line costs every diff view pays on its first render of a block (the
- * Text/Box caches amortize them across unchanged frames; the first wrap
- * and every width change pay full price). Baseline before optimizing; the
- * ASCII fast path in measurePlain lands against these numbers.
+ * The ansi cell/line hot paths: measurePlain / iterateCells / ansiState
+ * are the per-cell and per-line costs every diff view pays on its first
+ * render of a block (the Text/Box caches amortize them across unchanged
+ * frames; the first wrap and every width change pay full price). Baseline
+ * before optimizing; the ASCII fast path in measurePlain lands against
+ * these numbers. The frame-level render costs (wrapAnsi / diffRowFrame /
+ * injectBg / word diff) live in tests/render/render-hot.bench.ts.
+ *
+ * Benchmarks live inside `test()` as the `bench` context fixture;
+ * `.bench.ts` files are skipped by `vitest run` and measured via
+ * `pnpm vitest bench`.
+ *
+ * Every benchmark folds its return value into a running sink so the
+ * engine cannot eliminate the measured work (dead-code elimination).
  */
-import { bench, describe } from "vitest";
+import { test } from "vitest";
 
-import { measurePlain } from "#src/core/ansi.ts";
-import { wrapAnsi } from "#src/render/render-shared.ts";
+import { ansiState, iterateCells, measurePlain } from "#src/core/ansi.ts";
+import { cjkLine, diffBody, plainLine, styledLine } from "#test/bench-fixtures.ts";
 
-/** A representative highlighted code line: tokens with truecolor escapes. */
-const styledLine =
-  "\x1b[38;2;218;112;214mconst\x1b[39m \x1b[38;2;156;220;254mrenderView\x1b[39m\x1b[38;2;171;178;191m(\x1b[39m\x1b[38;2;209;154;102m42\x1b[39m\x1b[38;2;171;178;191m)\x1b[39m \x1b[38;2;218;212;163;0.9m{\x1b[39m";
+// Bind the measured functions AND the shared inputs locally: vite's module
+// runner wraps every imported binding in a getter, and at nanosecond scale
+// a getter call inside the timed callback would dominate the measurement.
+const _measurePlain = measurePlain;
+const _iterateCells = iterateCells;
+const _ansiState = ansiState;
+const _styledLine = styledLine;
+const _plainLine = plainLine;
+const _cjkLine = cjkLine;
+const _diffBody = diffBody;
 
-/** A plain ASCII line (the common case for source code). */
-const plainLine = "  const total = items.reduce((sum, item) => sum + item.price, 0);";
+// One module-level sink absorbs every measured return value: an unused
+// result would let the engine eliminate the measured work entirely
+// (dead-code elimination — pure functions like measurePlain inline and
+// vanish once their result is dropped).
+let sink = 0;
 
-/** A CJK-carrying line (the case the column gate exists for). */
-const cjkLine = "  // 中文注释宽度按双列计算，确保不溢出行宽限制边界情况";
-
-/** A 150-line diff body (one frame's worth at the render budget). */
-const diffBody = Array.from({ length: 150 }, (_, i) => `${plainLine} // ${i}`).join("\n");
-
-describe("measurePlain", () => {
-  bench("styled code line (~120 cols with escapes)", () => {
-    measurePlain(styledLine);
-  });
-  bench("plain ASCII line (80 chars)", () => {
-    measurePlain(plainLine);
-  });
-  bench("CJK line (double-width cells)", () => {
-    measurePlain(cjkLine);
-  });
-  bench("150-line diff body", () => {
-    for (const line of diffBody.split("\n")) measurePlain(line);
-  });
+test("measurePlain", async ({ bench }) => {
+  await bench("styled code line (~120 cols with escapes)", () => {
+    sink += _measurePlain(_styledLine);
+  }).run();
+  await bench("plain ASCII line (80 chars)", () => {
+    sink += _measurePlain(_plainLine);
+  }).run();
+  await bench("CJK line (double-width cells)", () => {
+    sink += _measurePlain(_cjkLine);
+  }).run();
+  await bench("150-line diff body", () => {
+    for (const line of _diffBody.split("\n")) sink += _measurePlain(line);
+  }).run();
 });
 
-describe("wrapAnsi (fits-width fast path)", () => {
-  bench("plain ASCII line at width 160 (pad only)", () => {
-    wrapAnsi(plainLine, {
-      width: 160,
-      maxRows: 4,
-      fillBg: "",
-      palette: { bgBase: "\x1b[48;2;30;30;40m", rowReset: "\x1b[0m" } as never,
-    });
-  });
+test("iterateCells", async ({ bench }) => {
+  const walk = (line: string): void => {
+    for (const cell of _iterateCells(line)) {
+      if (!cell.escape) sink += cell.cols;
+    }
+  };
+  await bench("styled code line (escape + token cells)", () => {
+    walk(_styledLine);
+  }).run();
+  await bench("plain ASCII line", () => {
+    walk(_plainLine);
+  }).run();
+  await bench("CJK line (wide-cell path)", () => {
+    walk(_cjkLine);
+  }).run();
 });
 
-describe("wrapAnsi (real wrap)", () => {
-  bench("styled line squeezed to 40 cols", () => {
-    wrapAnsi(styledLine, {
-      width: 40,
-      maxRows: 4,
-      fillBg: "\x1b[48;2;30;30;40m",
-      palette: { bgBase: "\x1b[48;2;30;30;40m", rowReset: "\x1b[0m" } as never,
-    });
-  });
+test("ansiState (the wrap breakRow snapshot)", async ({ bench }) => {
+  await bench("styled code line", () => {
+    sink += _ansiState(_styledLine).length;
+  }).run();
+  await bench("plain ASCII line (no escapes)", () => {
+    sink += _ansiState(_plainLine).length;
+  }).run();
 });

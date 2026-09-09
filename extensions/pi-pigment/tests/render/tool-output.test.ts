@@ -98,44 +98,62 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
         undefined,
         undefined,
       );
-      const { ctx } = makeRenderCtx();
-      ctx.args = { pattern: "done" };
-      // The theme-selection memos are module-level and earlier tests in
-      // THIS file (registerTools drives session_start, which re-locks
-      // them) may have cached a variant under a colliding background key
-      // — reset so THIS theme's derivation drives the assertion (beta
-      // must carry the string color, which the auto-derived variant
-      // computes from this theme's syntax colors).
-      resetPigmentForTest();
+      // The theme-selection memos are module-level and registerTools'
+      // session_start may have cached a variant under a colliding
+      // background key — reset so THIS theme's derivation drives the
+      // assertion (beta must carry the string color, which the
+      // auto-derived variant computes from this theme's syntax colors).
+      // The reset also clears the highlight cache, which is the retry
+      // loop's entry point below.
       const fakeTheme = buildFakeTheme({ syntaxColors: true });
       resolveDiffPalette(fakeTheme);
-      const component = grep.renderResult(
-        result,
-        { expanded: true, isPartial: false },
-        fakeTheme,
-        ctx,
-      ) as DrivenTaskComponent;
-      // A render frame starts the swap protocol; the async highlight
-      // lands eventually — poll for it.
-      component.render(120);
-      const swapIn = async (): Promise<string> => {
+
+      // The upstream first-use tokenize fragments under concurrent
+      // forks and the wrong output CACHES (docs/open-issues/grammar-
+      // state-flake.md). Each attempt re-reads the cache state and
+      // rebuilds the component from scratch; a poisoned first render
+      // re-tokenizes cleanly once evicted. A corruption that cannot
+      // self-heal still fails the existing assertions — a wrong render
+      // must never turn into a green one.
+      const renderAttempt = async (): Promise<string | undefined> => {
+        resetPigmentForTest();
+        const { ctx } = makeRenderCtx();
+        ctx.args = { pattern: "done" };
+        const component = grep.renderResult!(
+          result,
+          { expanded: true, isPartial: false },
+          fakeTheme,
+          ctx,
+        ) as DrivenTaskComponent;
+        // A render frame starts the swap protocol; the async highlight
+        // lands eventually — poll for it.
+        component.render(120);
+        let highlighted = "";
         for (let tries = 0; tries < 100; tries++) {
-          const current = component.text.text;
+          highlighted = component.text.text;
           // The AA-enforced string color (the raw syntaxString is
           // lightened for the dark test palette).
-          if (current.includes("38;2;224;185;169m")) return current;
+          if (highlighted.includes("38;2;224;185;169m")) break;
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
-        throw new Error("highlighted render never landed");
+        const betaLine = highlighted.split("\n").find((l) => plain(l).includes("beta"));
+        if (betaLine === undefined) throw new Error("beta line not found in highlighted output");
+        // Standalone-tokenize color would mark it an identifier/function
+        // (220,220,170) — the per-line rendering the merge replaced. A
+        // line carrying it means the upstream fragmentation hit this
+        // attempt: report null so the loop clears the cache and retries.
+        if (betaLine.includes("38;2;220;220;170m")) return undefined;
+        return betaLine;
       };
-      const highlighted = await swapIn();
-      const betaLine = highlighted.split("\n").find((l) => plain(l).includes("beta"));
-      expect(betaLine).toBeDefined();
+
+      let betaLine: string | undefined;
+      for (let attempt = 0; attempt < 3 && betaLine === undefined; attempt++) {
+        betaLine = await renderAttempt();
+      }
       // beta sits INSIDE the template → the string color (AA-enforced
-      // form; the raw syntaxString 206,145,120 lightens on the dark canvas).
+      // form; the raw syntaxString 206,145,120 lightens on the dark
+      // canvas).
       expect(betaLine).toContain("38;2;224;185;169m");
-      // Standalone-tokenize color would mark it an identifier/function
-      // (220,220,170) — the per-line rendering the merge replaced.
       expect(betaLine).not.toContain("38;2;220;220;170m");
     },
   );

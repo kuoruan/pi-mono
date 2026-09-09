@@ -26,7 +26,6 @@ vi.mock("@gotgenes/pi-permission-system", () => ({
 }));
 
 beforeEach(() => {
-  vi.clearAllMocks();
   mocks.getPermissionsService.mockReturnValue({
     registerAuthorizer: mocks.registerAuthorizer,
   });

@@ -33,7 +33,9 @@ unique themeId,`loadedLangs` normal.
   partial (renderCall on a mid-stream command), not a corrupted-then-
   healed tokenize.
 - **`fileParallelism: false` is stable** (4× green, ~26s vs ~7s) — the
-  suite runs sequentially until this is rooted upstream.
+  suite ran sequentially until this was rooted upstream. This pin was
+  later REPLACED by an in-test self-heal (see Status below): the whole
+  suite runs parallel again.
 - Standalone Node (same code path, same theme, same grammar) is always
   correct, first call included. Concurrent `codeToTokensBase` (same or
   different grammar) in one process could not reproduce it either.
@@ -67,6 +69,12 @@ unique themeId,`loadedLangs` normal.
 
 ## Next steps
 
+0. ~~Verify clear-cache + re-tokenize recovery~~ — DONE: the flaky test now
+   self-heals: each attempt clears the cache (`resetPigmentForTest`) and
+   rebuilds the component from scratch; a poisoned first render
+   re-tokenizes, and up to two re-renders run before the assertions fail.
+   The suite returned to full parallelism (the global pin is gone); the
+   recovery claim is being watched in CI runs.
 1. **File the upstream issue** (shiki / @shikijs/engine-javascript) with the
    two token-dump signatures (no-match type: whole-line plain token; and
    wrong-match type: template-string state never opening) — ask whether

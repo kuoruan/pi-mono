@@ -6,6 +6,10 @@ export default defineProject({
   test: {
     globals: true,
     include: ["tests/**/*.test.ts"],
+    // Persist the transform cache across runs: local reruns skip most of
+    // the module-graph transform cost; CI (fresh checkout) is unaffected
+    // either way.
+    fsModuleCache: true,
   },
   resolve: {
     alias: {
