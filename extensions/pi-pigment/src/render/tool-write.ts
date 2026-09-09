@@ -24,7 +24,7 @@ import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { setCallHeader } from "./error-frame.ts";
 import { clearToolHeaderBg, padDiffBody, summarize, resultLine } from "./header.ts";
-import { borderBar, diffRowFrame, gutterWidth, wrapAnsi } from "./render-shared.ts";
+import { borderBar, diffRowFrame, gutterWidth, injectBg, wrapAnsi } from "./render-shared.ts";
 import { attachPreviewTask, renderEmpty, setDiffPreviewTask } from "./text-task.ts";
 import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
 import { COLLAPSED_LINES, collapsedView, taskKeyOf } from "./tool-output.ts";
@@ -100,36 +100,31 @@ function newFileBody(options: NewFileBodyOptions): string {
   const numberWidth = Math.max(2, String(lines.length).length);
   const gutter = gutterWidth(numberWidth, indicatorGlyph);
   const codeWidth = Math.max(20, width - gutter);
-  const output: string[] = [];
-  lines.forEach((line, i) => {
-    const frame = diffRowFrame({
-      type: "add",
-      number: i + 1,
-      numberWidth,
-      palette,
-      indicatorGlyph,
-    });
-    // Unlimited wrap budget: the file PREVIEW must show its content
-    // (the diff views' narrow-terminal row cap truncates overlong
-    // lines behind a › marker — a docs line's tail is content the
-    // writer needs to see). The codeBg prefix opens the code area on
-    // the add-row background: hlBlock's spans are fg-only, so without
-    // it the content would sit on the canvas (unstyled, reading white)
-    // while the row's tail padding carries the tint — the diff views
-    // get this opening escape for free from injectBg, this path must
-    // supply it (ansiState re-opens it on wrapped rows).
-    const wrapped = wrapAnsi(`${frame.codeBg}${line}`, {
-      width: codeWidth,
-      maxRows: Number.POSITIVE_INFINITY,
-      fillBg: frame.codeBg,
-      palette,
-    });
-    output.push(`${frame.gutter}${wrapped[0]}${palette.rowReset}`);
-    for (let rowIndex = 1; rowIndex < wrapped.length; rowIndex++) {
-      output.push(`${frame.continuation}${wrapped[rowIndex]}${palette.rowReset}`);
-    }
-  });
-  return output.join("\n");
+  return lines
+    .flatMap((line, i) => {
+      const frame = diffRowFrame({
+        type: "add",
+        number: i + 1,
+        numberWidth,
+        palette,
+        indicatorGlyph,
+      });
+      // Unlimited wrap budget: the file PREVIEW must show its content
+      // (the diff views' narrow-terminal row cap truncates overlong
+      // lines behind a › marker).
+      const wrapped = wrapAnsi(injectBg(line, { baseBg: frame.codeBg, palette }), {
+        width: codeWidth,
+        maxRows: Number.POSITIVE_INFINITY,
+        fillBg: frame.codeBg,
+        palette,
+      });
+      const rows = [`${frame.gutter}${wrapped[0]}${palette.rowReset}`];
+      for (let rowIndex = 1; rowIndex < wrapped.length; rowIndex++) {
+        rows.push(`${frame.continuation}${wrapped[rowIndex]}${palette.rowReset}`);
+      }
+      return rows;
+    })
+    .join("\n");
 }
 
 /**
