@@ -1,0 +1,26 @@
+{
+  "name": "Pi Light",
+
+  "cursorColor": "#1F2328",
+  "selectionBackground": "#D0D0E0",
+
+  "background": "#F3F3F3",
+  "foreground": "#1F2328",
+
+  "black": "#262626",
+  "blue": "#42648A",
+  "cyan": "#426E6E",
+  "green": "#4A734A",
+  "purple": "#7E57C2",
+  "red": "#AA5555",
+  "white": "#6C6C6C",
+  "yellow": "#825E1F",
+  "brightBlack": "#5F5F5F",
+  "brightBlue": "#2A6CB8",
+  "brightCyan": "#287676",
+  "brightGreen": "#357A35",
+  "brightPurple": "#8258C0",
+  "brightRed": "#C04040",
+  "brightWhite": "#FFFFFF",
+  "brightYellow": "#946426"
+}

@@ -1,0 +1,26 @@
+{
+  "name": "Pi Dark",
+
+  "cursorColor": "#D4D4D4",
+  "selectionBackground": "#3A3A4A",
+
+  "background": "#18181E",
+  "foreground": "#D4D4D4",
+
+  "black": "#31313A",
+  "blue": "#809FFF",
+  "cyan": "#8ABEB7",
+  "green": "#B5BD68",
+  "purple": "#B098DA",
+  "red": "#DA9090",
+  "white": "#C8C8C8",
+  "yellow": "#FFFF00",
+  "brightBlack": "#666666",
+  "brightBlue": "#8FABFF",
+  "brightCyan": "#7DD5C9",
+  "brightGreen": "#D3E14F",
+  "brightPurple": "#B9A3DE",
+  "brightRed": "#DE9B9B",
+  "brightWhite": "#FFFFFF",
+  "brightYellow": "#F0F000"
+}
