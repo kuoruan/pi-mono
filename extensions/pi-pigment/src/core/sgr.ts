@@ -15,6 +15,11 @@ const ANSI_CAPTURE_RE = new RegExp(`${ESC}\\[([^m]*)m`, "g");
 const SPEC_38 = `${ESC}[38;`;
 const SPEC_48 = `${ESC}[48;`;
 
+/** The reset-like sequences reinjectSgr re-injects a background after. */
+const SEQ_RESET_ALL = `${ESC}[0m`;
+const SEQ_RESET_FG = `${ESC}[39m`;
+const SEQ_RESET_BG = `${ESC}[49m`;
+
 /**
  * The SGR color spec's parameter count: `2;r;g;b` consumes 5 (kind +
  * three channels), `5;n` consumes 3 (kind + index), and a bare 38/48
@@ -217,4 +222,44 @@ export class SgrState {
     const attrSeqs = [...this.attrs].map((a) => `\u001b[${a}m`).join("");
     return this.bg + this.fg + attrSeqs;
   }
+}
+
+/**
+ * Re-inject `bg` after each reset-like SGR (Shiki closes tokens with the
+ * ESC[39m family; 0m/49m count as broader resets). One indexOf walk
+ * (SIMD substring search) with the same whole-sequence semantics the
+ * iterateCells walk pins: an escape cell is ESC + everything up to the
+ * next "m"; a lone ESC without a terminator is a code point and copied
+ * as-is (no injection there).
+ *
+ * @param line - The ANSI-styled line.
+ * @param bg - The background escape to re-inject.
+ * @param escIndex - The first ESC offset (callers probing it already
+ *   hand it over, skipping the re-scan).
+ * @returns The line with backgrounds re-established.
+ */
+export function reinjectSgr(line: string, bg: string, escIndex: number): string {
+  let i = escIndex;
+  if (i === -1) return line;
+  let out = "";
+  let last = 0;
+  while (i !== -1) {
+    out += line.slice(last, i);
+    const end = line.indexOf("m", i + 1);
+    if (end === -1) {
+      // Lone ESC: the cell walk yields it as one code point and keeps
+      // scanning after it; copy one byte and continue the search.
+      last = i + 1;
+      i = line.indexOf(ESC, last);
+      continue;
+    }
+    const seq = line.slice(i, end + 1);
+    out += seq;
+    if (seq === SEQ_RESET_ALL || seq === SEQ_RESET_FG || seq === SEQ_RESET_BG) {
+      out += bg;
+    }
+    last = end + 1;
+    i = line.indexOf(ESC, last);
+  }
+  return out + line.slice(last);
 }

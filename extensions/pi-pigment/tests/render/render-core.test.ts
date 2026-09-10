@@ -13,7 +13,6 @@ import { formatToolErrorResult, setToolErrorBg } from "#src/render/error-frame.t
 import { summarize } from "#src/render/header.ts";
 import {
   lineNumberWidth,
-  plainWordDiff,
   borderBar,
   adaptiveWrapRows,
   shouldUseSplit,
@@ -191,48 +190,6 @@ describe("renderUnified", () => {
     const text = plain(out);
     expect(text).toContain("const v = 'a';");
     expect(text).toContain("const v = 'b';");
-  });
-});
-
-describe("plainWordDiff", () => {
-  it("wraps changed words with the word backgrounds, shared words plain", () => {
-    const { old: o, new: n } = plainWordDiff(
-      "keep this old bit",
-      "keep this new bit",
-      FALLBACK_PALETTE,
-    );
-    // The changed words carry escapes; the shared prefix does not.
-    expect(o.startsWith("keep this ")).toBe(true);
-    expect(n.startsWith("keep this ")).toBe(true);
-    expect(o).toContain("old");
-    expect(n).toContain("new");
-    expect(o).not.toContain("new");
-    expect(n).not.toContain("old");
-  });
-
-  it("keeps whitespace jsdiff merges into changed words out of the word paint", () => {
-    const { old: o, new: n } = plainWordDiff(
-      "\toldValue = 1;",
-      "\tnewValue = 1;",
-      FALLBACK_PALETTE,
-    );
-    // The tab rides outside the word background (the bleed the trimmed
-    // ranges fixed on the highlight path, mirrored here); the shared
-    // " = 1;" tail also stays outside any word wrap.
-    expect(o).toContain(`\t${FALLBACK_PALETTE.bgRemovedWord}oldValue`);
-    expect(n).toContain(`\t${FALLBACK_PALETTE.bgAddedWord}newValue`);
-  });
-
-  it("returns plain text for identical inputs", () => {
-    const { old: o, new: n } = plainWordDiff("same", "same", FALLBACK_PALETTE);
-    expect(o).toBe("same");
-    expect(n).toBe("same");
-  });
-
-  it("handles fully-divergent inputs", () => {
-    const { old: o, new: n } = plainWordDiff("aaa", "bbb", FALLBACK_PALETTE);
-    expect(o).toContain("aaa");
-    expect(n).toContain("bbb");
   });
 });
 

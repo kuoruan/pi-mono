@@ -7,9 +7,9 @@
 import { diffWords, type Change } from "diff";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
-import { expandTabs, isPlainAscii, iterateCells, measurePlain } from "#src/core/ansi.ts";
+import { ESC, expandTabs, isPlainAscii, iterateCells, measurePlain } from "#src/core/ansi.ts";
 import type { DiffLine, ParsedDiff } from "#src/core/diff.ts";
-import { SgrState } from "#src/core/sgr.ts";
+import { reinjectSgr, SgrState } from "#src/core/sgr.ts";
 import { hlBlock, MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
@@ -698,6 +698,41 @@ export function injectBg(ansiLine: string, options: InjectBgOptions): string {
   const rangeList = ranges ?? EMPTY_RANGES;
   const emphasisBg = highlightBg ?? baseBg;
   const rowEnd = palette?.rowReset ?? baseBg;
+  // One ESC probe decides every later branch: memchr-fast, stops at the
+  // first ESC on styled lines (no full-line regex scan wasted on them).
+  const escIndex = ansiLine.indexOf(ESC);
+  if (rangeList.length === 0) {
+    // No emphasis ranges: the only work is the base bg wrap plus the reset
+    // reinjection. An escape-free line (any charset) needs neither;
+    // otherwise reinjectSgr resumes from the known first ESC.
+    if (escIndex === -1) return `${baseBg}${ansiLine}${rowEnd}`;
+    return `${baseBg}${reinjectSgr(ansiLine, baseBg, escIndex)}${rowEnd}`;
+  }
+  if (escIndex === -1 && isPlainAscii(ansiLine)) {
+    // Plain ASCII with ranges: no escape scanning, no per-cell
+    // allocations. Range units are code-point offsets; plain ASCII makes
+    // one code unit equal one code point, so the walk indexes the string
+    // directly. The range advance and toggle logic mirror the general
+    // path exactly.
+    let output = baseBg;
+    let visible = 0;
+    let inHighlight = false;
+    let rangeIndex = 0;
+    for (let i = 0; i < ansiLine.length; i++) {
+      while (rangeIndex < rangeList.length && visible >= rangeList[rangeIndex][1]) rangeIndex += 1;
+      const wantsHighlight =
+        rangeIndex < rangeList.length &&
+        visible >= rangeList[rangeIndex][0] &&
+        visible < rangeList[rangeIndex][1];
+      if (wantsHighlight !== inHighlight) {
+        inHighlight = wantsHighlight;
+        output += inHighlight ? emphasisBg : baseBg;
+      }
+      output += ansiLine[i];
+      visible += 1;
+    }
+    return output + rowEnd;
+  }
   let output = baseBg;
   let visible = 0;
   let inHighlight = false;

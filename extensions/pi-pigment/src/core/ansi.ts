@@ -13,13 +13,13 @@ import { eastAsianWidth } from "get-east-asian-width";
 
 import { mixRgb } from "./color.ts";
 
-/** The ESC control character every ANSI escape sequence starts with. */
-const ESC = "\u001b";
-
 /** Printable ASCII code units — the width fast-path gate. */
 const PLAIN_ASCII_RE = /^[\x20-\x7e]*$/;
 /** Truecolor-only color factory (level 3, ignoring NO_COLOR/FORCE_COLOR). */
 const color = new Ansis(3);
+
+/** The ESC control character every ANSI escape sequence starts with. */
+export const ESC = "\u001b";
 
 /** The SGR reset sequence. */
 export const RESET = "\u001b[0m";
