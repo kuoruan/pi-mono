@@ -5,7 +5,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { attachPreviewTask, clearPreviewTask, getWidthAwareText } from "#src/render/text-task.ts";
+import {
+  attachPreviewTask,
+  clearPreviewTask,
+  definePreviewTask,
+  getWidthAwareText,
+} from "#src/render/text-task.ts";
+import { taskKeyOf } from "#src/render/tool-output.ts";
 
 /**
  * A fresh Text-shaped host for the stale-rejection scenarios (each drive
@@ -76,6 +82,83 @@ describe("attachPreviewTask (the attach guard)", () => {
     expect(text.previewIdentity).toBe("id-b");
     expect(host.current()).toBe("P-b");
     expect(invalidations).toBe(0);
+  });
+});
+
+describe("definePreviewTask (the task builder)", () => {
+  it("derives the identity from prefix+stamps through taskKeyOf — ONE stamp list, both compares", () => {
+    // The construction contract: the call site's visible stamp array is
+    // the single source; the identity (attach guard) and the render key
+    // (cache) both derive from it — they can no longer drift apart.
+    const task = definePreviewTask({
+      prefix: "wd",
+      stamps: ["pal-id", 12, "ts", ""],
+      widthAware: true,
+      placeholder: "P",
+      fallback: "F",
+      invalidate: () => {},
+      render: async () => "R",
+    });
+    expect(task.identity).toBe(taskKeyOf("wd", ["pal-id", 12, "ts", ""]));
+  });
+
+  it("widthAware: the key is the width-appended identity (a resize re-keys)", () => {
+    const task = definePreviewTask({
+      prefix: "nf",
+      stamps: ["file.ts", "pal-id"],
+      widthAware: true,
+      placeholder: "P",
+      fallback: "F",
+      invalidate: () => {},
+      render: async () => "R",
+    });
+    expect(task.key(80)).toBe(`${task.identity}\u000080`);
+    expect(task.key(100)).not.toBe(task.key(80));
+  });
+
+  it("widthAware: false — the key ignores width (a resize reuses the render)", () => {
+    const task = definePreviewTask({
+      identity: "g\u0000content-hash",
+      widthAware: false,
+      placeholder: "P",
+      fallback: "F",
+      invalidate: () => {},
+      render: async () => "R",
+    });
+    expect(task.key(80)).toBe("g\u0000content-hash");
+    expect(task.key(100)).toBe(task.key(80));
+  });
+
+  it("drives the render loop: width-aware re-renders on resize, width-neutral does not", async () => {
+    // The widthAware decision, exercised through the real frame loop:
+    // a width-sensitive preview re-renders when the width changes; a
+    // width-neutral one keeps its frame.
+    const drive = async (widthAware: boolean): Promise<number> => {
+      const host = makeHost();
+      let renders = 0;
+      attachPreviewTask(
+        host.text,
+        definePreviewTask({
+          prefix: "t",
+          stamps: ["frozen"],
+          widthAware,
+          placeholder: "loading…",
+          fallback: "F",
+          invalidate: () => {},
+          render: async () => {
+            renders += 1;
+            return "body";
+          },
+        }),
+      );
+      host.text.render(80);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      host.text.render(120); // the resize event
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return renders;
+    };
+    expect(await drive(true)).toBe(2); // resize → fresh key → re-render
+    expect(await drive(false)).toBe(1); // same key → the frame stands
   });
 });
 

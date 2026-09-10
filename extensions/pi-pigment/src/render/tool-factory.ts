@@ -26,10 +26,11 @@ import { clearToolHeaderBg, resultLine } from "./header.ts";
 import {
   attachPreviewTask,
   clearPreviewTask,
+  definePreviewTask,
   getWidthAwareText,
   type PreviewTextHost,
 } from "./text-task.ts";
-import { elapsedOf, firstTextOf, stampElapsed, taskKeyOf, tookFooter } from "./tool-output.ts";
+import { elapsedOf, firstTextOf, stampElapsed, tookFooter } from "./tool-output.ts";
 import {
   type ShellState,
   callStateOf,
@@ -296,21 +297,19 @@ export function createToolWrapper<TState extends object = Record<string, unknown
         // frame; expand, theme swaps, or a new message change the
         // identity and re-arm through the protocol.
         const placeholder = frame(ERROR_FRAME_DEFAULT_WIDTH);
-        const identity = taskKeyOf(orig.name, [
-          options.expanded ? 1 : 0,
-          took,
-          palette.identity,
-          message,
-        ]);
         setToolErrorBg(text, theme, palette);
-        attachPreviewTask(text, {
-          identity,
-          placeholder,
-          fallback: placeholder,
-          invalidate: ctx.invalidate,
-          key: (w: number) => `${identity}\u0000${w}`,
-          render: (w: number) => Promise.resolve(frame(w)),
-        });
+        attachPreviewTask(
+          text,
+          definePreviewTask({
+            prefix: orig.name,
+            stamps: [options.expanded ? 1 : 0, took, palette.identity, message],
+            widthAware: true,
+            placeholder,
+            fallback: placeholder,
+            invalidate: ctx.invalidate,
+            render: (w: number) => Promise.resolve(frame(w)),
+          }),
+        );
         return text;
       }
       if (spec.renderResult) {

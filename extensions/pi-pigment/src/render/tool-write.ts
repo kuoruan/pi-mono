@@ -26,9 +26,14 @@ import { setCallHeader } from "./error-frame.ts";
 import { clearToolHeaderBg, padDiffBody, summarize, resultLine } from "./header.ts";
 import { injectBg } from "./inject-bg.ts";
 import { borderBar, diffRowFrame, gutterWidth } from "./row-frame.ts";
-import { attachPreviewTask, renderEmpty, setDiffPreviewTask } from "./text-task.ts";
+import {
+  attachPreviewTask,
+  definePreviewTask,
+  renderEmpty,
+  setDiffPreviewTask,
+} from "./text-task.ts";
 import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
-import { COLLAPSED_LINES, collapsedView, streamingStamp, taskKeyOf } from "./tool-output.ts";
+import { COLLAPSED_LINES, collapsedView, streamingStamp } from "./tool-output.ts";
 import {
   argsSettled,
   callStateOf,
@@ -347,66 +352,70 @@ export function createWriteWrapper(
         // picks it up); the result slot below carries ONLY the content
         // preview — one summary position across every wrapper.
         clearToolHeaderBg(text);
-        // The identity = the width-neutral input stamp (the attach guard
-        // compares it — the old newFileKey state field retired); the
-        // WIDTH joins the task key only: the body pre-wraps per render
-        // width, so a resize must re-render. The content fingerprint
-        // seals the key (a same-path same-lineCount rewrite must
-        // re-render; within one call args are frozen, so it never fires —
-        // cheap insurance against a stale memo).
+        // The stamps = the width-neutral input list (the attach guard
+        // compares the identity they derive into — the old newFileKey
+        // state field retired); the WIDTH joins the task key only
+        // (widthAware): the body pre-wraps per render width, so a resize
+        // must re-render. The content fingerprint seals the key (a
+        // same-path same-lineCount rewrite must re-render; within one
+        // call args are frozen, so it never fires — cheap insurance
+        // against a stale memo).
         // The pending gate snapshots at attach time (the async render may
         // run after settle — a late read of mutable frame state would
         // revert to the tokenizing path).
         const pending = resultStreaming(ctx);
-        const identity = taskKeyOf("nf", [
-          fp,
-          palette.identity,
-          lineCount,
-          stats.fingerprint,
-          options.expanded ? "x" : "c",
-          streamingStamp(pending),
-        ]);
         const lg = detectLanguage(fp);
-        attachPreviewTask(text, {
-          identity,
-          placeholder: padDiffBody(theme.fg("muted", "rendering file…"), palette),
-          fallback: "",
-          invalidate: ctx.invalidate,
-          key: (width: number) => `${identity}\u0000${width}`,
-          render: async (width: number) => {
-            const content = rawContent();
-            if (!content) return "";
-            // Streaming frames stay plain (no re-tokenize per partial);
-            // the settled frame highlights and populates the cache.
-            const bodyLines = pending
-              ? linesOf(content)
-              : await hlBlock({
-                  code: content,
-                  language: lg,
+        attachPreviewTask(
+          text,
+          definePreviewTask({
+            prefix: "nf",
+            stamps: [
+              fp,
+              palette.identity,
+              lineCount,
+              stats.fingerprint,
+              options.expanded ? "x" : "c",
+              streamingStamp(pending),
+            ],
+            widthAware: true,
+            placeholder: padDiffBody(theme.fg("muted", "rendering file…"), palette),
+            fallback: "",
+            invalidate: ctx.invalidate,
+            render: async (width: number) => {
+              const content = rawContent();
+              if (!content) return "";
+              // Streaming frames stay plain (no re-tokenize per partial);
+              // the settled frame highlights and populates the cache.
+              const bodyLines = pending
+                ? linesOf(content)
+                : await hlBlock({
+                    code: content,
+                    language: lg,
+                    palette,
+                    piTheme: theme,
+                  });
+              // The shared window authority: the collapsed budget AND the
+              // expanded cap (MAX_RENDER_LINES) flow through one call, one
+              // tail grammar (write shows no Took footer — the SDK's own
+              // write renderer never did either).
+              const { shown, tail } = collapsedView(bodyLines, {
+                budget: COLLAPSED_LINES.write,
+                expanded: options.expanded,
+                expandedCap: MAX_RENDER_LINES,
+                theme,
+              });
+              return `${padDiffBody(
+                newFileBody({
+                  lines: shown,
                   palette,
-                  piTheme: theme,
-                });
-            // The shared window authority: the collapsed budget AND the
-            // expanded cap (MAX_RENDER_LINES) flow through one call, one
-            // tail grammar (write shows no Took footer — the SDK's own
-            // write renderer never did either).
-            const { shown, tail } = collapsedView(bodyLines, {
-              budget: COLLAPSED_LINES.write,
-              expanded: options.expanded,
-              expandedCap: MAX_RENDER_LINES,
-              theme,
-            });
-            return `${padDiffBody(
-              newFileBody({
-                lines: shown,
+                  indicatorGlyph: borderBar(indicatorStyle),
+                  width,
+                }),
                 palette,
-                indicatorGlyph: borderBar(indicatorStyle),
-                width,
-              }),
-              palette,
-            )}${tail ? `\n${tail}` : ""}`;
-          },
-        });
+              )}${tail ? `\n${tail}` : ""}`;
+            },
+          }),
+        );
         return text;
       }
 

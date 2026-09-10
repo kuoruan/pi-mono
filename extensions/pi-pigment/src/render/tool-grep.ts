@@ -13,7 +13,7 @@ import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { accentEmphasis, emphasize } from "./pattern-emphasis.ts";
-import { attachPreviewTask, renderEmpty } from "./text-task.ts";
+import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import {
   COLLAPSED_LINES,
@@ -172,26 +172,31 @@ export function createGrepWrapper(
         ignoreCase: callArgs.ignoreCase === true,
       };
       const plain = `${renderPlainOutput(shownLines, theme)}${tail ? `\n${tail}` : ""}`;
-      attachPreviewTask(text, {
-        identity: taskKey,
-        placeholder: plain,
-        fallback: plain,
-        invalidate: ctx.invalidate,
-        key: () => taskKey,
-        // Streaming frames skip highlighting entirely (the plain form is
-        // the placeholder AND the frame); the settled frame re-renders
-        // once through renderHighlighted and populates the cache.
-        render: async () =>
-          pending
-            ? plain
-            : `${await renderHighlighted({
-                lines: shownLines,
-                pattern,
-                flags,
-                theme,
-                palette,
-              })}${tail ? `\n${tail}` : ""}`,
-      });
+      attachPreviewTask(
+        text,
+        definePreviewTask({
+          identity: taskKey,
+          // Grep's output has no width-dependent layout: the width never
+          // joins the key (a resize reuses the render).
+          widthAware: false,
+          placeholder: plain,
+          fallback: plain,
+          invalidate: ctx.invalidate,
+          // Streaming frames skip highlighting entirely (the plain form is
+          // the placeholder AND the frame); the settled frame re-renders
+          // once through renderHighlighted and populates the cache.
+          render: async () =>
+            pending
+              ? plain
+              : `${await renderHighlighted({
+                  lines: shownLines,
+                  pattern,
+                  flags,
+                  theme,
+                  palette,
+                })}${tail ? `\n${tail}` : ""}`,
+        }),
+      );
       return text;
     },
   });

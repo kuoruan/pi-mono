@@ -161,6 +161,65 @@ export function attachPreviewTask(text: PreviewTextHost, task: PreviewTask): voi
   text.setText(task.placeholder);
 }
 
+/**
+ * The task's identity source — one of two real shapes:
+ *
+ * - `{ prefix, stamps }` — the derived form: `taskKeyOf` joins them into the identity, so the stamp
+ *   list sits VISIBLY at the call site beside the closure it must cover (the protocol's one rule —
+ *   the stamps must see every input the render closure captures — becomes a missing array entry to
+ *   eyeball, not a lurking cache bug);
+ * - `{ identity }` — the precomputed form, for tools whose key composes through `outputTaskKey`
+ *   (grep/find/ls: that named-field builder is those tools' own stamps authority).
+ */
+export type PreviewIdentity =
+  | { prefix: string; stamps: Array<string | number> }
+  | { identity: string };
+
+/** The definePreviewTask inputs: the identity source plus the protocol fields. */
+export type DefinePreviewTaskSpec = PreviewIdentity & {
+  /**
+   * Whether the rendered output depends on width — the ONE decision that
+   * used to be six hand-copied key closures:
+   *
+   * - True derives the width-appended key (a resize produces a fresh key and a fresh render — the
+   *   diff views, write's preview, and the error frame pre-wrap their rows per width);
+   * - False keys on the identity alone (a resize reuses the rendered frame — grep/find/ls output has
+   *   no width-dependent layout).
+   */
+  widthAware: boolean;
+  /** Text shown synchronously while the async render is in flight. */
+  placeholder: string;
+  /** Text shown when the async render fails. */
+  fallback: string;
+  /** Asks the TUI to redraw this component. */
+  invalidate: () => void;
+  /** Produces the final rendered output at a given width. */
+  render: (width: number) => Promise<string>;
+};
+
+/**
+ * Build a PreviewTask — the construction counterpart to attachPreviewTask
+ * (the attach owns the protocol state; the builder owns the key
+ * derivation). The identity and the render loop's cache key derive from
+ * ONE stamp list: identity → key can never drift apart at a call site,
+ * and the two key conventions (width-appended vs width-neutral) live
+ * here instead of being re-copied per wrapper.
+ *
+ * @param spec - The task's identity source and protocol fields.
+ * @returns The complete preview task.
+ */
+export function definePreviewTask(spec: DefinePreviewTaskSpec): PreviewTask {
+  const identity = "identity" in spec ? spec.identity : taskKeyOf(spec.prefix, spec.stamps);
+  return {
+    identity,
+    placeholder: spec.placeholder,
+    fallback: spec.fallback,
+    invalidate: spec.invalidate,
+    key: spec.widthAware ? (width: number) => `${identity}\u0000${width}` : () => identity,
+    render: spec.render,
+  };
+}
+
 /** The diff preview's inputs — one object (the positional form drifted to ten). */
 export interface DiffPreviewInput {
   /** The host Text component to attach the task to. */
@@ -212,56 +271,55 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
     streaming = false,
   } = input;
   clearToolHeaderBg(text);
-  // ONE identity, width-appended at render time: everything else is
-  // frozen per task (the diff, the palette identity — composing it once
-  // skips the per-render themeCacheKey walk anyway). The streaming bit
-  // separates partial frames from the settled one, so the final frame
-  // re-arms and colors in even when the content no longer grows.
-  const baseKey = taskKeyOf(keyPrefix, [
-    palette.identity,
-    diff.lines.length,
-    language ?? "",
-    streamingStamp(streaming),
-  ]);
-  attachPreviewTask(text, {
-    identity: baseKey,
-    placeholder: theme.fg("muted", " rendering diff…"),
-    fallback: "",
-    invalidate: ctx.invalidate,
-    key: (width: number) => `${baseKey}\u0000${width}`,
-    render: async (width: number) => {
-      // The seed (embedded-grammar coloring) stays OUT of the
-      // task key: the diff's content is frozen, and a later edit to the
-      // file (edit's seed source is the disk) must not re-color history —
-      // the seed only keys the highlight cache. Residual, accepted: a
-      // width change re-renders and re-reads the seed, so a file edited
-      // after the fact colors the frozen hunk with the new prefix (a
-      // rare, display-only approximation).
-      // The split verdict is computed ONCE and shared: the seed budget
-      // and the view choice both consume it (it walks every visible
-      // content line — a duplicate call would double that scan).
-      const useSplit = shouldUseSplit(diff, width, maxLines);
-      // The budget follows the chosen view: split pairs a del+add into ONE
-      // visual row, so its window can consume up to 2×maxLines logical
-      // lines — slicing the seed at maxLines alone would leave the deepest
-      // visible hunk uncovered (the vue bug's second face, split edition).
-      // The highlight gate: streaming frames render plain, so they skip
-      // BOTH the language and the seed read; the settle frame colors in.
-      const seedBudget = useSplit ? maxLines * 2 : maxLines;
-      const seed = streaming ? undefined : seedFor?.(lastHunkNewStart(diff, seedBudget));
-      return renderPaddedDiff({
-        diff,
-        language: streaming ? undefined : language,
-        maxLines,
-        width,
-        palette,
-        theme,
-        indicatorStyle,
-        seed,
-        useSplit,
-      });
-    },
-  });
+  // ONE stamp list feeds both compares: the identity (the attach guard)
+  // and the width-appended render key derive from the same list through
+  // definePreviewTask — everything else is frozen per task (the diff, the
+  // palette identity). The streaming bit separates partial frames from
+  // the settled one, so the final frame re-arms and colors in even when
+  // the content no longer grows.
+  attachPreviewTask(
+    text,
+    definePreviewTask({
+      prefix: keyPrefix,
+      stamps: [palette.identity, diff.lines.length, language ?? "", streamingStamp(streaming)],
+      widthAware: true,
+      placeholder: theme.fg("muted", " rendering diff…"),
+      fallback: "",
+      invalidate: ctx.invalidate,
+      render: async (width: number) => {
+        // The seed (embedded-grammar coloring) stays OUT of the
+        // task key: the diff's content is frozen, and a later edit to the
+        // file (edit's seed source is the disk) must not re-color history —
+        // the seed only keys the highlight cache. Residual, accepted: a
+        // width change re-renders and re-reads the seed, so a file edited
+        // after the fact colors the frozen hunk with the new prefix (a
+        // rare, display-only approximation).
+        // The split verdict is computed ONCE and shared: the seed budget
+        // and the view choice both consume it (it walks every visible
+        // content line — a duplicate call would double that scan).
+        const useSplit = shouldUseSplit(diff, width, maxLines);
+        // The budget follows the chosen view: split pairs a del+add into ONE
+        // visual row, so its window can consume up to 2×maxLines logical
+        // lines — slicing the seed at maxLines alone would leave the deepest
+        // visible hunk uncovered (the vue bug's second face, split edition).
+        // The highlight gate: streaming frames render plain, so they skip
+        // BOTH the language and the seed read; the settle frame colors in.
+        const seedBudget = useSplit ? maxLines * 2 : maxLines;
+        const seed = streaming ? undefined : seedFor?.(lastHunkNewStart(diff, seedBudget));
+        return renderPaddedDiff({
+          diff,
+          language: streaming ? undefined : language,
+          maxLines,
+          width,
+          palette,
+          theme,
+          indicatorStyle,
+          seed,
+          useSplit,
+        });
+      },
+    }),
+  );
 }
 
 /**
