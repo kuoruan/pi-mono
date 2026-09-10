@@ -266,7 +266,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
       undefined,
       undefined,
     );
-    const { ctx, lastComponent } = makeRenderCtx();
+    const { ctx } = makeRenderCtx();
     ctx.args = { pattern: "match-target" };
     // Streaming partial: same output text (hence same length), but the
     // timing sideband is not stamped yet — the pre-final result carries

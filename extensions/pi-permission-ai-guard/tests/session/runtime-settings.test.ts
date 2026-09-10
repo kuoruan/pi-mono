@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { LogEntry } from "#src/audit/decision-log-reader.ts";
 import type { SaveConfigFn } from "#src/config/config-layer.ts";
-import { MODE_VALUES, type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
+import { MODE_VALUES, configSchema } from "#src/config/config-schema.ts";
 import { MODE_BLURBS } from "#src/config/mode-table.ts";
 import type { BreakerTier } from "#src/review/circuit-breaker.ts";
 import type { DenyRecord, NotifyFn } from "#src/review/review-pipeline.ts";

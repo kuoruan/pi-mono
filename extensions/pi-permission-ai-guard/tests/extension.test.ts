@@ -265,7 +265,7 @@ describe("createAiGuardExtension lifecycle", () => {
     // session_start fires before the permission service is published:
     // tryRegister finds no service and skips. permissions:ready then
     // fires and completes registration.
-    const { pi, createPipeline } = installExtension(null);
+    const { pi } = installExtension(null);
 
     // No service yet → session_start does not register.
     pi.fire("session_start", {}, makeSessionCtx());
@@ -323,7 +323,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("permissions:ready after registration is a no-op (register once per session)", () => {
-    const { pi, createPipeline } = installExtension();
+    const { pi } = installExtension();
 
     // session_start → register
     pi.fire("session_start", {}, makeSessionCtx());
@@ -360,7 +360,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("permissions:ready is a no-op when not yet registered and no session", () => {
-    const { pi, createPipeline } = installExtension();
+    const { pi } = installExtension();
 
     // permissions:ready before session_start → no session → no registration.
     pi.fireEvent("permissions:ready");
@@ -369,7 +369,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("session_shutdown disposes and resets all state", () => {
-    const { pi, createPipeline } = installExtension();
+    const { pi } = installExtension();
 
     // session_start → register
     pi.fire("session_start", {}, makeSessionCtx());
@@ -387,18 +387,18 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("session_shutdown does not throw when no registration was active", () => {
-    const { pi, createPipeline } = installExtension(null);
+    const { pi } = installExtension(null);
 
     expect(() => pi.fire("session_shutdown", {}, makeSessionCtx())).not.toThrow();
   });
 
   it("subscribes to permissions:ready channel on construction", () => {
-    const { pi, createPipeline } = installExtension(null);
+    const { pi } = installExtension(null);
     expect(pi.events.on).toHaveBeenCalledWith("permissions:ready", expect.any(Function));
   });
 
   it("subscribes to session_start and session_shutdown on construction", () => {
-    const { pi, createPipeline } = installExtension(null);
+    const { pi } = installExtension(null);
     expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
     expect(pi.on).toHaveBeenCalledWith("session_shutdown", expect.any(Function));
   });
@@ -422,7 +422,7 @@ describe("createAiGuardExtension lifecycle", () => {
   });
 
   it("a throwing getSessionId is not fatal — the ready payload id still registers", () => {
-    const { pi, createPipeline } = installExtension();
+    const { pi } = installExtension();
 
     expect(() =>
       pi.fire(

@@ -10,7 +10,6 @@
  * entries (one per dialect, the shapes observed in real sessions) so a
  * future regression in the modern shapes' resume rendering cannot hide.
  */
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 

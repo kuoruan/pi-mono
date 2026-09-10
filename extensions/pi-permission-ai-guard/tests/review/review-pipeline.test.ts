@@ -1,11 +1,6 @@
 import type { AssistantMessage, Model, Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import type {
-  PermissionCheckResult,
-  PermissionQuery,
-  PromptPayload,
-  PromptPermissionDetails,
-} from "@gotgenes/pi-permission-system";
+import type { PermissionCheckResult, PermissionQuery } from "@gotgenes/pi-permission-system";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -667,7 +662,7 @@ describe("createReviewPipeline — mode", () => {
         { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
       ])();
     };
-    const { log, reviewCalls, debugCalls } = makeRecordingLog();
+    const { log, debugCalls } = makeRecordingLog();
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
@@ -1950,7 +1945,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
 
 describe("createReviewPipeline — review follow-ups (cache-hit fail-open + total tier)", () => {
   it("permissive maps a cached soft deny to allow with the audit reason intact", async () => {
-    const { log, reviewCalls, debugCalls } = makeRecordingLog();
+    const { log, debugCalls } = makeRecordingLog();
     const { notifications, notify } = makeNotifySpy();
     let modelCalls = 0;
     const completeSimple = async () => {

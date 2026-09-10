@@ -1,4 +1,3 @@
-import type { PromptPayload, PromptPermissionDetails } from "@gotgenes/pi-permission-system";
 import { describe, expect, it } from "vitest";
 
 import { buildAskContext } from "#src/ask/ask.ts";
@@ -7,7 +6,7 @@ import {
   EXCLUDED_REQUEST_FACTS,
   reviewRequestCacheMaterial,
 } from "#src/ask/review-request.ts";
-import { bashPayload, ev, makeDetails, payload } from "#test/fixtures.ts";
+import { ev, makeDetails, payload } from "#test/fixtures.ts";
 
 describe("reviewRequestCacheMaterial", () => {
   it("keeps the complete bash action and canonical path boundary together", () => {

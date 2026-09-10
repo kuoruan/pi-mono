@@ -245,7 +245,7 @@ describe("syntax theme selections (the pair grammar)", () => {
   });
 
   it("every recommended pair resolves through the slash grammar and follows the palette's light/dark bit", async () => {
-    for (const [key, pair] of Object.entries(RECOMMENDED_PAIRS)) {
+    for (const pair of Object.values(RECOMMENDED_PAIRS)) {
       const value = `${pair.light}/${pair.dark}`;
       await selectString(value);
       resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG, syntaxColors: true }));

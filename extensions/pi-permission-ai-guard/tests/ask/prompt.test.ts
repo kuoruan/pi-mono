@@ -8,11 +8,6 @@ import { stripTranscript } from "#src/ask/transcript-stripper.ts";
 import { configSchema, EXTENSION_ID, LINK_NAME } from "#src/config/config-schema.ts";
 import { parseVerdictObject } from "#src/model/model-verdict.ts";
 
-// Evidence entry helper for fixtures.
-function ev(label: string, text: string, detail: string | null = null) {
-  return { label, text, detail };
-}
-
 /**
  * Build a minimal AskContext for prompt fixtures. Only the fields the test
  * exercises are set; the rest take their kind-appropriate defaults.

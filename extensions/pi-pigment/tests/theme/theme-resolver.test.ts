@@ -1,4 +1,4 @@
-import { bundledThemes, type BundledTheme } from "shiki";
+import { bundledThemes } from "shiki";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { configSchema } from "#src/config/config-schema.ts";

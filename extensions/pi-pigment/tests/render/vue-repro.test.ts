@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildFakeTheme,
   makeRenderCtx,
-  plain,
   registerTools,
   resetPigmentForTest,
   toolOf,

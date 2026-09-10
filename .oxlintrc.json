@@ -51,7 +51,6 @@
         "vitest": true
       },
       "rules": {
-        "no-unused-vars": "off",
         "typescript/no-explicit-any": "off",
         "typescript/no-non-null-assertion": "off",
         "vitest/no-focused-tests": "error",

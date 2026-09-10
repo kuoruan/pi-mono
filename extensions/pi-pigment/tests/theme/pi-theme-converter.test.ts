@@ -11,7 +11,7 @@ import { join } from "node:path";
 
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { themeNames } from "@shikijs/themes";
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
 import {
@@ -267,7 +267,7 @@ describe("convertToPiTheme: token set and structure", () => {
   it("produces flat 6-digit lowercase hex throughout (no vars, no 256, no defaults)", async () => {
     const theme = (await loadBundledTheme("github-dark"))!;
     const { doc } = convertToPiTheme(theme, "pigment-github-dark");
-    for (const [token, value] of Object.entries(doc!.colors)) {
+    for (const value of Object.values(doc!.colors)) {
       expect(value).toMatch(/^#[0-9a-f]{6}$/);
     }
     // And the export section.

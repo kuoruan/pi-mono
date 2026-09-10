@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { parseDiff } from "#src/core/diff.ts";
 import { renderUnified } from "#src/render/render-unified.ts";
 import { flattenTranslucentTokens, loadBundledTheme } from "#src/theme/bundled-intake.ts";
-import { resetPaletteForTest, resolveDiffPalette, setDiffRoots } from "#src/theme/palette.ts";
+import { resetPaletteForTest, resolveDiffPalette } from "#src/theme/palette.ts";
 import { type LoadedThemeFile } from "#src/theme/theme-file.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
 import {

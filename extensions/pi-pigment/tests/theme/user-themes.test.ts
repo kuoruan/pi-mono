@@ -12,7 +12,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PiThemeJson } from "#src/theme/pi-theme-converter.ts";
-import type { ThemeEnv } from "#src/theme/theme-file.ts";
 import { registeredSourceOf, resetRegistryForTest } from "#src/theme/theme-registry.ts";
 import {
   convertThemes,
