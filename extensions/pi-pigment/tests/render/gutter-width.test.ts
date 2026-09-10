@@ -1,11 +1,11 @@
 import { Text } from "@earendil-works/pi-tui";
-import { vol } from "memfs";
 import { describe, expect, it, vi } from "vitest";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
 import { renderUnified } from "#src/render/render-unified.ts";
 import { resolveDiffPalette } from "#src/theme/palette.ts";
 import { buildFakeTheme, plain } from "#test/fixtures.ts";
+import { vol } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 vi.mock("fs");

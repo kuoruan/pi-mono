@@ -9,7 +9,6 @@ import { existsSync, readFileSync } from "node:fs";
  */
 import { join } from "node:path";
 
-import { vol } from "memfs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PiThemeJson } from "#src/theme/pi-theme-converter.ts";
@@ -25,7 +24,7 @@ import {
   piNameForUserStem,
   registerConvertedThemes,
 } from "#src/theme/user-themes.ts";
-import { writeFile } from "#test/memfs.ts";
+import { vol, writeFile } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 

@@ -23,7 +23,6 @@
  * - A command superseded mid-highlight never lands (stale guard)
  */
 
-import { vol } from "memfs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ShellState } from "#src/render/tool-services.ts";
@@ -37,6 +36,7 @@ import {
   toolOf,
   type TextDouble,
 } from "#test/fixtures.ts";
+import { vol } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 vi.mock("fs");

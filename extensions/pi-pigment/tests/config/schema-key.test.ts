@@ -1,8 +1,9 @@
 import type * as FsModule from "node:fs";
 import { join } from "node:path";
 
-import { vol } from "memfs";
 import { describe, expect, it, vi } from "vitest";
+
+import { vol, writeFile } from "#test/memfs.ts";
 
 // The golden schema file is real (a committed asset): copy it into the
 // volume (read through the ACTUAL fs) so the whole file runs under one fs.
@@ -24,7 +25,6 @@ vi.mock("node:fs", async () => {
 import { readFileSync } from "node:fs";
 
 import { loadPigmentConfig } from "#src/config/config-layer.ts";
-import { writeFile } from "#test/memfs.ts";
 
 describe("the $schema editor-association key", () => {
   it("is ignored at load — the layer's real keys still apply", () => {

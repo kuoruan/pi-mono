@@ -1,4 +1,3 @@
-import { vol } from "memfs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,6 +9,7 @@ import {
   toolOf,
   type TextDouble,
 } from "#test/fixtures.ts";
+import { vol } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 vi.mock("fs");

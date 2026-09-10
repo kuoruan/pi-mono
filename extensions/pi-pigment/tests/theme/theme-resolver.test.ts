@@ -1,4 +1,3 @@
-import { vol } from "memfs";
 import { bundledThemes, type BundledTheme } from "shiki";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,7 +7,7 @@ import { resolveDiffPalette, resetPaletteForTest, setDiffRoots } from "#src/them
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
 import { resolveActiveTheme, setSyntaxThemeSelection } from "#src/theme/theme-selection.ts";
 import { buildFakeTheme, resetPigmentForTest } from "#test/fixtures.ts";
-import { writeFile } from "#test/memfs.ts";
+import { vol, writeFile } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 

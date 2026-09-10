@@ -1,14 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-/**
- * The detection chain, end to end (ADR 0006): an active pi theme whose
- * name is one of OURS (the registered, converted themes) drives the
- * precise pipeline — the mapped shiki theme's full tokenColors, AA
- * enforced against the palette's blend backgrounds, rendered bytes and
- * all. An external theme falls back to the nine-color derivation.
- */
-import { vol } from "memfs";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { parseDiff } from "#src/core/diff.ts";
@@ -27,7 +19,14 @@ import {
 } from "#src/theme/theme-selection.ts";
 import { setUserThemeEnv } from "#src/theme/user-themes.ts";
 import { buildFakeTheme, registerTools } from "#test/fixtures.ts";
-import { writeFile } from "#test/memfs.ts";
+/**
+ * The detection chain, end to end (ADR 0006): an active pi theme whose
+ * name is one of OURS (the registered, converted themes) drives the
+ * precise pipeline — the mapped shiki theme's full tokenColors, AA
+ * enforced against the palette's blend backgrounds, rendered bytes and
+ * all. An external theme falls back to the nine-color derivation.
+ */
+import { vol, writeFile } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 

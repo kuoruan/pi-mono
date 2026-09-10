@@ -4,7 +4,12 @@
  * definition per fixture shape so projections can't drift between suites.
  */
 
-import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentToolResult,
+  ExtensionAPI,
+  ToolDefinition,
+  ToolRenderResultOptions,
+} from "@earendil-works/pi-coding-agent";
 
 import pigmentExtension from "#src/index.ts";
 import type { PreviewTask } from "#src/render/text-task.ts";
@@ -144,6 +149,8 @@ export function makeTextComponent() {
     render: (_width: number): string[] => [state.text],
     invalidate: () => {},
     previewTask: undefined as PreviewTask | undefined,
+    previewRenderedKey: undefined as string | undefined,
+    previewIdentity: undefined as string | undefined,
     customBgFn: undefined as ((line: string) => string) | undefined,
     setCustomBgFn(fn?: (line: string) => string) {
       // Mirrors pi-tui's setter: assigns the (private-by-convention) field.
@@ -191,25 +198,20 @@ export function makeRenderCtx<TState extends object = Record<string, unknown>>()
 
 /**
  * A preview-task component driven by tests: the swap protocol's render
- * entry plus the text slot (grep/find/ls results).
+ * entry plus the text slot (grep/find/ls results). A TextDouble slice —
+ * hand-written copies drift; Pick-on-TextDouble cannot.
  */
-export interface DrivenTaskComponent {
-  render: (width: number) => string[];
-  text: { text: string };
-}
+export type DrivenTaskComponent = Pick<TextDouble, "render" | "text">;
 
 /**
  * A component carrying an attached preview task (write/edit results) —
- * drive the task's async render directly.
+ * drive the task's async render directly. A TextDouble slice —
+ * hand-written copies drift; Pick-on-TextDouble cannot.
  */
-export interface TaskCarrier {
-  previewTask?: { render: (width: number) => Promise<string> };
-}
+export type TaskCarrier = Pick<TextDouble, "previewTask">;
 
 /** A plain text-bearing component (call headers, sync renders). */
-export interface TextComponent {
-  text: { text: string };
-}
+export type TextComponent = Pick<TextDouble, "text">;
 
 /**
  * A registered tool captured by a mock ExtensionAPI, typed as the SDK's
@@ -218,11 +220,14 @@ export interface TextComponent {
  * - `execute`'s tail parameters accept `unknown` + an optional ctx — the suites invoke execute
  *   without an ExtensionContext (the wrappers never read it; it flows to the SDK origin verbatim),
  *   so a full SDK ctx would force every call site to fabricate one.
- * - `renderCall`/`renderResult` return `unknown` — the fixture's fake Text is not a pi-tui Component
- *   (the makeTextComponent seam below). Everything else — name, label, renderShell, parameters,
- *   prepareArguments, the schema members — carries the SDK's exact type: a ToolDefinition or
- *   WrapperSpec drift (the renderShell field addition that once slipped past the old any-typed
- *   surface) now fails at compile time instead of at the first test assertion.
+ * - `renderCall`/`renderResult` accept `result`/`args` as `unknown` (heterogeneous per-tool payloads)
+ *   but their THEME is the PaletteTheme the wrappers actually render against, their OPTIONS the
+ *   SDK's own ToolRenderResultOptions (the literal shape every call site passes), their ctx the
+ *   fixture's RenderContext, and their return the TextDouble the mock produces. Everything else —
+ *   name, label, renderShell, parameters, prepareArguments, the schema members — carries the SDK's
+ *   exact type: a ToolDefinition or WrapperSpec drift (the renderShell field addition that once
+ *   slipped past the old any-typed surface) now fails at compile time instead of at the first test
+ *   assertion.
  */
 export type RegisteredTool = Omit<
   ToolDefinition,
@@ -235,8 +240,13 @@ export type RegisteredTool = Omit<
     onUpdate: unknown,
     ctx?: unknown,
   ) => Promise<AgentToolResult<unknown>>;
-  renderCall?: (args: unknown, theme: unknown, ctx: unknown) => unknown;
-  renderResult?: (result: unknown, options: unknown, theme: unknown, ctx: unknown) => unknown;
+  renderCall?: (args: unknown, theme: PaletteTheme, ctx: RenderContext<object>) => TextDouble;
+  renderResult?: (
+    result: unknown,
+    options: ToolRenderResultOptions,
+    theme: PaletteTheme,
+    ctx: RenderContext<object>,
+  ) => TextDouble;
 };
 
 /**
@@ -276,6 +286,24 @@ export async function registerTools(
 }
 
 /**
+ * The API surface driveSession's mock actually implements — declared with
+ * precise member shapes so a name or signature drift fails at compile
+ * time. The crossing into the SDK's full ExtensionAPI (a big overloaded
+ * interface the mock never drives) narrows to one boundary cast.
+ */
+interface MockPiApi {
+  on: (
+    event: "session_start",
+    handler: (event: unknown, ctx: { cwd: string }) => void | Promise<void>,
+  ) => void;
+  // RegisteredTool is the extension's own registration shape (see above).
+  registerTool: (tool: RegisteredTool) => void;
+  getAllTools: () => Array<{ name: string }>;
+  getCommands: () => Array<{ name: string }>;
+  registerCommand: (name: string, options: unknown) => void;
+}
+
+/**
  * Fire the extension's session_start like pi does and collect the tools.
  *
  * @param env - Explicit session roots (either may be undefined).
@@ -291,7 +319,7 @@ async function driveSession(
   // does (and await it: the handler is async — pi's runner awaits every
   // handler's promise, and the tools only exist once it settles).
   let sessionStart: ((event: unknown, ctx: { cwd: string }) => void | Promise<void>) | undefined;
-  await pigmentExtension({
+  const api: MockPiApi = {
     on: (
       event: string,
       handler: (event: unknown, ctx: { cwd: string }) => void | Promise<void>,
@@ -312,7 +340,8 @@ async function driveSession(
     getCommands: () => [],
     // The /pigment command registers at module load (recorded, not run).
     registerCommand: (_name: string, _options: unknown) => {},
-  } as never);
+  };
+  await pigmentExtension(api as unknown as ExtensionAPI);
   await sessionStart?.(
     { type: "session_start", reason: "startup" },
     { cwd: env.cwd ?? defaultCwd ?? process.cwd() },

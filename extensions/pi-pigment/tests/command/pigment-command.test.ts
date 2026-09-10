@@ -1,15 +1,14 @@
 import { join } from "node:path";
 
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+
+import { registerPigmentCommand } from "#src/command/theme-command.ts";
 /**
  * The `/pigment` command: the bare-invocation subcommand selector, the
  * convert path (theme selector + direct stem), argument completions
  * (subcommand names, then stems), and the headless guards.
  */
-import { vol } from "memfs";
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-
-import { registerPigmentCommand } from "#src/command/theme-command.ts";
-import { writeFile } from "#test/memfs.ts";
+import { vol, writeFile } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 

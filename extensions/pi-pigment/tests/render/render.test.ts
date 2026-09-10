@@ -1,6 +1,5 @@
 import { join } from "node:path";
 
-import { vol } from "memfs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseDiff } from "#src/core/diff.ts";
@@ -19,6 +18,7 @@ import {
   type TextComponent,
   type TextDouble,
 } from "#test/fixtures.ts";
+import { vol } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 vi.mock("fs");

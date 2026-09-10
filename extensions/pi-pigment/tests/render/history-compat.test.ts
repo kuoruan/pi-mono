@@ -18,6 +18,7 @@ import {
   registerTools,
   buildFakeTheme,
   type DrivenTaskComponent,
+  type RegisteredTool,
   type TextDouble,
 } from "#test/fixtures.ts";
 
@@ -94,7 +95,7 @@ const HISTORY: HistoryEntry[] = [
  * @returns The rendered text and whether an async task attached.
  */
 function driveRender(
-  tool: { renderResult?: (r: unknown, o: unknown, t: unknown, c: unknown) => unknown },
+  tool: RegisteredTool,
   details: Record<string, unknown> | undefined,
   args: Record<string, unknown> | undefined,
 ): { text: string; taskAttached: boolean } {
@@ -102,9 +103,15 @@ function driveRender(
   // No lastComponent: the factory takes a fresh real Text (the swap-in
   // path under test is the result render, not component reuse).
   const ctx = {
+    lastComponent: undefined,
     args,
+    toolCallId: "hist-compat",
     state: {},
     invalidate: () => {},
+    isError: false,
+    argsComplete: true,
+    isPartial: false,
+    executionStarted: false,
     cwd: "/project",
   };
   const component = tool.renderResult!(

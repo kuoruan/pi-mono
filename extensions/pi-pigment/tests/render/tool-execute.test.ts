@@ -5,7 +5,6 @@
  * (ours and the SDK tools') routes through the mocked volume.
  */
 
-import { vol } from "memfs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
@@ -24,7 +23,7 @@ import {
   waitFor,
   type TextDouble,
 } from "#test/fixtures.ts";
-import { writeFile } from "#test/memfs.ts";
+import { vol, writeFile } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 vi.mock("fs");

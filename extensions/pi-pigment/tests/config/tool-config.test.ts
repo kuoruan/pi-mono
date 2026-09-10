@@ -1,10 +1,10 @@
 import { join } from "node:path";
 
-import { vol } from "memfs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
 import pigmentExtension from "#src/index.ts";
+import { vol } from "#test/memfs.ts";
 
 vi.mock("node:fs");
 vi.mock("fs");
