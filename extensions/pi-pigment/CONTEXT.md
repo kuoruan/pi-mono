@@ -142,7 +142,7 @@ _Avoid_: emphasis via the palette's fgCode (the code-file type color — invisib
 
 **Hunk gap**: The skipped unmodified lines between two hunks — carried on the separator line's `gap` field (never overloaded onto `newNum`) and computed by one authority (`hunkGap`) shared by both parsers. Renders as the `+N lines` separator label.
 
-**Row frame**: The per-line gutter composition (border + line number + sign + backgrounds) both views render rows through — one authority in render-shared; the views keep only pairing, column split, and separator styling.
+**Row frame**: The per-line gutter composition (border + line number + sign + backgrounds) both views render rows through — one authority in row-frame.ts (the render module family: wrap.ts for wrapping, row-frame.ts for the gutter, word-diff.ts for word-level emphasis, inject-bg.ts for backgrounds, split-verdict.ts for the split/unified choice; render-shared.ts holds only the shared view contract); the views keep only pairing, column split, and separator styling.
 
 **Grammar-state seed**: The embedded-grammar coloring input for diff hunks (vue/html): a diff slice shows no `<script>`/`<template>` tag, so tokenizing from the grammar's top level leaves script lines scope-less (the "vue partial diff renders uncolored" bug).
 

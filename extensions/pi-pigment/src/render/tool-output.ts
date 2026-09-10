@@ -177,6 +177,21 @@ export function outputMemoOf(cell: OutputMemoCell): OutputDerive {
 }
 
 /**
+ * Render raw output lines in pi's native look (the toolOutput foreground,
+ * one line at a time) — the plain/dim fallback grep/find/ls paint before
+ * (or instead of) highlighting. Those three output tools are its only
+ * clients, so it lives here beside the vocabulary it serves.
+ *
+ * @param lines - The output lines (empty array renders empty).
+ * @param theme - The active pi theme.
+ * @returns The styled text.
+ */
+export function renderPlainOutput(lines: readonly string[], theme: PaletteTheme): string {
+  if (!lines.length) return "";
+  return lines.map((line) => theme.fg("toolOutput", line)).join("\n");
+}
+
+/**
  * A tool result's content block — the structural subset of pi-ai's
  * TextContent/ImageContent union our render paths read (type + text;
  * signatures and image fields are none of the renderer's business).

@@ -15,16 +15,16 @@
 import { test } from "vitest";
 
 import { parseDiff } from "#src/core/diff.ts";
+import { injectBg } from "#src/render/inject-bg.ts";
+import { diffRowFrame } from "#src/render/row-frame.ts";
+import { shouldUseSplit } from "#src/render/split-verdict.ts";
 import {
-  diffRowFrame,
-  injectBg,
   paintWordDiff,
   plainWordDiff,
   shouldEmphasize,
-  shouldUseSplit,
   wordDiffAnalysis,
-  wrapAnsi,
-} from "#src/render/render-shared.ts";
+} from "#src/render/word-diff.ts";
+import { wrapAnsi } from "#src/render/wrap.ts";
 import {
   cjkLine,
   diffBody,

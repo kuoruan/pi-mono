@@ -11,14 +11,11 @@ import type { DiffLine, ParsedDiff } from "#src/core/diff.ts";
 import { parseDiff, parsePatchFiles } from "#src/core/diff.ts";
 import { formatToolErrorResult, setToolErrorBg } from "#src/render/error-frame.ts";
 import { summarize } from "#src/render/header.ts";
-import {
-  lineNumberWidth,
-  borderBar,
-  adaptiveWrapRows,
-  shouldUseSplit,
-} from "#src/render/render-shared.ts";
 import { renderSplit } from "#src/render/render-split.ts";
 import { renderUnified } from "#src/render/render-unified.ts";
+import { borderBar, lineNumberWidth } from "#src/render/row-frame.ts";
+import { shouldUseSplit } from "#src/render/split-verdict.ts";
+import { adaptiveWrapRows } from "#src/render/wrap.ts";
 import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
 import { plain } from "#test/fixtures.ts";
 

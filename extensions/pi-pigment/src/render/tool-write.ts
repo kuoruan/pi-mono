@@ -24,7 +24,8 @@ import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { setCallHeader } from "./error-frame.ts";
 import { clearToolHeaderBg, padDiffBody, summarize, resultLine } from "./header.ts";
-import { borderBar, diffRowFrame, gutterWidth, injectBg, wrapAnsi } from "./render-shared.ts";
+import { injectBg } from "./inject-bg.ts";
+import { borderBar, diffRowFrame, gutterWidth } from "./row-frame.ts";
 import { attachPreviewTask, renderEmpty, setDiffPreviewTask } from "./text-task.ts";
 import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
 import { COLLAPSED_LINES, collapsedView, streamingStamp, taskKeyOf } from "./tool-output.ts";
@@ -36,6 +37,7 @@ import {
   type WriteState,
   argsOf,
 } from "./tool-services.ts";
+import { wrapAnsi } from "./wrap.ts";
 
 /**
  * The `result.details` shapes execute() stashes for renderResult(). Kept

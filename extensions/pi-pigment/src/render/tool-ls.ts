@@ -10,7 +10,6 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { FG_DEFAULT } from "#src/core/ansi.ts";
 import { detectLanguage } from "#src/theme/highlight.ts";
 
-import { renderPlainOutput } from "./render-shared.ts";
 import { attachPreviewTask, renderEmpty } from "./text-task.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import {
@@ -19,6 +18,7 @@ import {
   elapsedOf,
   outputMemoOf,
   outputTaskKey,
+  renderPlainOutput,
 } from "./tool-output.ts";
 import { type ToolServices } from "./tool-services.ts";
 

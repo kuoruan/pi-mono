@@ -13,7 +13,6 @@ import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { accentEmphasis, emphasize } from "./pattern-emphasis.ts";
-import { renderPlainOutput } from "./render-shared.ts";
 import { attachPreviewTask, renderEmpty } from "./text-task.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import {
@@ -22,6 +21,7 @@ import {
   elapsedOf,
   outputMemoOf,
   outputTaskKey,
+  renderPlainOutput,
 } from "./tool-output.ts";
 import { argsOf, resultStreaming, type ToolServices } from "./tool-services.ts";
 

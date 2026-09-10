@@ -22,7 +22,7 @@ export default defineProject({
       include: ["tests/**/*.bench.ts"],
       // The bench files bind every function/input they import locally, so
       // the only remaining export-getter accesses are the ones INSIDE our
-      // source graph (render-shared → core/ansi). Those cost a few ns per
+      // source graph (wrap/word-diff → core/ansi). Those cost a few ns per
       // call against 0.2-1.4µs of measured work (well under the ±1-2% rme)
       // — accepted overhead, warning suppressed deliberately.
       suppressExportGetterWarnings: true,

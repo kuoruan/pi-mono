@@ -11,7 +11,9 @@ import {
   mixBg,
 } from "#src/core/ansi.ts";
 import { SgrState } from "#src/core/sgr.ts";
-import { wrapAnsi, injectBg, wordDiffAnalysis } from "#src/render/render-shared.ts";
+import { injectBg } from "#src/render/inject-bg.ts";
+import { wordDiffAnalysis } from "#src/render/word-diff.ts";
+import { wrapAnsi } from "#src/render/wrap.ts";
 import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
 import { plain } from "#test/fixtures.ts";
 
