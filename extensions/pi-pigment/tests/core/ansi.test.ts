@@ -540,6 +540,27 @@ describe("injectBg / wordDiffAnalysis code-point alignment", () => {
     expect(newRanges).toEqual([]);
   });
 
+  it("counts astral code points as one cell and pins the similarity math", () => {
+    const astral = wordDiffAnalysis("\t🎉old", "\t🎉new");
+    // jsdiff splits 🎉 as its own token: "\t🎉" is the shared prefix and
+    // "old"/"new" the changed words. 🎉 is ONE code point (two UTF-16
+    // units) — the changed word starts at position 2; a UTF-16-unit
+    // mis-count would put it at 3.
+    expect(astral.oldRanges).toEqual([[2, 5]]);
+    expect(astral.newRanges).toEqual([[2, 5]]);
+    // Shared "\t🎉" = 2 code points over the longer line (5): 0.4.
+    expect(astral.similarity).toBe(0.4);
+    // The identical-input fast path agrees with the general-path math.
+    expect(wordDiffAnalysis("const x = 1;", "const x = 1;")).toEqual({
+      similarity: 1,
+      oldRanges: [],
+      newRanges: [],
+      parts: [],
+    });
+    // Similarity = shared code points over the longer line.
+    expect(wordDiffAnalysis("你好世界 value", "你好世界 valor").similarity).toBe(0.5);
+  });
+
   it("measurePlain's ASCII fast path agrees with the cell walk", () => {
     // Same answer both ways for: plain ASCII, empty, spaces-only.
     for (const s of ["", "   ", "const x = 1;", "a".repeat(500)]) {

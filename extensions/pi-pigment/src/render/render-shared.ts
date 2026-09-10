@@ -485,10 +485,12 @@ export function shouldUseSplit(diff: ParsedDiff, width: number, maxRows: number)
 }
 
 /**
- * Whether a code point is whitespace — the JS `\s` class (excluding the
- * already-handled tab/newline structure), the same class jsdiff's word
- * splitting consults, so the trim below never disagrees with jsdiff about
- * what a "whitespace run" is.
+ * Whether a code point is whitespace — the JS `\s` class, exactly as
+ * jsdiff's word splitting consults it, so the trim below never disagrees
+ * with jsdiff about what a "whitespace run" is. Tab IS included — it is
+ * the whitespace the trim removes most (the indentation bleed); LF/CR
+ * are unreachable inside a single diff line's content but staying in the
+ * class keeps the classification total and identical to jsdiff's.
  *
  * @param cp - The code point.
  * @returns True for every JS-\s member.
@@ -649,8 +651,15 @@ function countCodePoints(text: string): number {
   let count = 0;
   for (let i = 0; i < text.length; i += 1) {
     const code = text.charCodeAt(i);
-    // A high surrogate consumes its low half: one code point, two units.
-    if (code >= 0xd800 && code <= 0xdbff) i += 1;
+    // A high surrogate pairs ONLY with a following low surrogate (one
+    // code point, two units). A lone high surrogate counts as one cell —
+    // UTF-8 decode never produces one (invalid bytes become U+FFFD), but
+    // exact parity with the iterateCells walk costs one branch and keeps
+    // the two counters identical on every input class.
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) i += 1;
+    }
     count += 1;
   }
   return count;
