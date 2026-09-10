@@ -1,4 +1,4 @@
 {
-  "theme": "light",
+  "theme": "light/dark",
   "defaultTools": ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"]
 }
