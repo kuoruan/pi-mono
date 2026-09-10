@@ -4,6 +4,7 @@ import { MAX_SEED_CHARS } from "#src/theme/highlight.ts";
 import {
   buildFakeTheme,
   makeRenderCtx,
+  plain,
   registerTools,
   resetPigmentForTest,
   toolOf,
@@ -16,6 +17,15 @@ vi.mock("fs");
 vi.mock("node:fs/promises");
 vi.mock("fs/promises");
 
+/**
+ * The row state's read, plain-joined (the seed memo's observable).
+ *
+ * @param state - The render row state.
+ * @returns The read lines joined, or an empty string when unread.
+ */
+const linesOfState = (state: object): string =>
+  ((state as { seedLines?: string[] }).seedLines ?? []).join("\n");
+
 const CWD = "/render-project";
 
 /**
@@ -25,6 +35,25 @@ const CWD = "/render-project";
  * @returns The generated assignment row.
  */
 const padRow = (i: number): string => `const pad${i} = ref(${i});`;
+
+/**
+ * A small SFC whose script block sits below the first line (the seed's
+ * shape: a mid-file hunk with the embedding tag out of view).
+ *
+ * @param scriptRows - The script block's rows.
+ * @returns The file text.
+ */
+const vue = (...scriptRows: string[]): string =>
+  [
+    "<template>",
+    "  <p>item</p>",
+    "</template>",
+    "",
+    '<script setup lang="ts">',
+    "import { ref } from 'vue';",
+    ...scriptRows,
+    "</script>",
+  ].join("\n");
 
 /** A LONG vue file: the tested change sits mid-file with no tag in view. */
 const LONG_VUE = [
@@ -147,6 +176,96 @@ describe("vue edit result coloring — long file, mid-file change", () => {
       // eslint-disable-next-line no-control-regex -- counting color escapes
       const chunks = (row?.match(/\x1b\[38;2;/g) ?? []).length;
       expect(chunks).toBeGreaterThan(1);
+    },
+  );
+});
+
+describe("the seed memo's lifetime (per row, not per file)", () => {
+  // Render one edit call and hand back its row state + rendered preview.
+  const runEdit = async (path: string, oldText: string, newText: string) => {
+    const tools = await registerTools({ cwd: CWD });
+    const edit = toolOf(tools, "edit");
+    const args = { path, edits: [{ oldText, newText }] };
+    const result = await edit.execute!("t-seq", args, undefined, undefined, undefined);
+    const mc = makeRenderCtx();
+    mc.ctx.args = args;
+    const component = edit.renderResult!(
+      result,
+      { expanded: true, isPartial: false },
+      buildFakeTheme({ syntaxColors: true }),
+      mc.ctx,
+    ) as unknown as TextDouble;
+    const out = await component.previewTask!.render(140);
+    return { state: mc.ctx.state, out };
+  };
+
+  it(
+    "a second edit of the same file seeds from the file WITH the first edit applied",
+    { timeout: 30000 },
+    async () => {
+      const path = `${CWD}/seq.vue`;
+      const first = "const alpha = ref(1);";
+      const second = "const beta = ref(2);";
+      vol.writeFileSync(path, vue(first, second));
+
+      const a = await runEdit(path, first, first.replace("ref(1)", "ref(11)"));
+      const b = await runEdit(path, second, second.replace("ref(2)", "ref(22)"));
+
+      // Each call is its own row with its own read: A read right after its
+      // own edit (the first change present, the second not yet), B read
+      // after both. A shared/global memo would give B A's older read — the
+      // first assertion pair pins the freshness ordering.
+      expect(linesOfState(a.state)).toContain("ref(11)");
+      expect(linesOfState(a.state)).not.toContain("ref(22)");
+      expect(linesOfState(b.state)).toContain("ref(11)");
+      expect(linesOfState(b.state)).toContain("ref(22)");
+      expect(a.state).not.toBe(b.state);
+      expect(plain(a.out)).toContain("ref(11)");
+      expect(plain(b.out)).toContain("ref(22)");
+    },
+  );
+
+  it(
+    "one row's seed is frozen: a later disk change does not rewrite it",
+    { timeout: 30000 },
+    async () => {
+      const path = `${CWD}/frozen.vue`;
+      const hunk = "const gamma = ref(3);";
+      vol.writeFileSync(path, vue(hunk));
+
+      const tools = await registerTools({ cwd: CWD });
+      const edit = toolOf(tools, "edit");
+      const args = { path, edits: [{ oldText: hunk, newText: hunk.replace("ref(3)", "ref(33)") }] };
+      const result = await edit.execute!("t-frozen", args, undefined, undefined, undefined);
+      const mc = makeRenderCtx();
+      mc.ctx.args = args;
+      const theme = buildFakeTheme({ syntaxColors: true });
+      const first = edit.renderResult!(
+        result,
+        { expanded: true, isPartial: false },
+        theme,
+        mc.ctx,
+      ) as unknown as TextDouble;
+      await first.previewTask!.render(140);
+      const read = (mc.ctx.state as { seedLines?: string[] }).seedLines;
+      expect(read?.join("\n")).toContain("ref(33)");
+
+      // The row re-renders (expand, theme swap, resize — the SDK re-runs
+      // renderResult with the SAME ctx.state). The frozen diff's prefix
+      // pairs with the file as its own edit left it: the later write must
+      // not bleed in, and the read must not repeat (no stat, no re-read).
+      vol.writeFileSync(path, vue("const later = ref(9);"));
+      const again = edit.renderResult!(
+        result,
+        { expanded: true, isPartial: false },
+        theme,
+        mc.ctx,
+      ) as unknown as TextDouble;
+      await again.previewTask!.render(140);
+      expect((mc.ctx.state as { seedLines?: string[] }).seedLines).toBe(read);
+      expect((mc.ctx.state as { seedLines?: string[] }).seedLines?.join("\n")).not.toContain(
+        "ref(9)",
+      );
     },
   );
 });
