@@ -770,6 +770,42 @@ describe("grep renderResult highlight swap", () => {
     await waitFor(() => (live.text.text.includes("38;2;224;185;169m") ? true : undefined));
     expect(live.text.text).toContain("38;2;224;185;169m");
   });
+
+  it("a settled repeat frame skips the placeholder rebuild (the early-return guard)", async () => {
+    const tools = await registerTools();
+    const grep = tools.find((t) => t.name === "grep");
+    if (!grep?.renderResult || !grep?.renderCall) throw new Error("grep not registered");
+    const { ctx } = makeRenderCtx();
+    // A counting theme: fg/bold are the payload builders the plain
+    // placeholder path uses (renderPlainOutput per line + the collapse
+    // tail). getFgAnsi/getBgAnsi are NOT counted — resolveDiffPalette's
+    // content-validated key reads them on every frame by design.
+    const base = buildRenderTheme();
+    let built = 0;
+    const theme = {
+      ...base,
+      fg: (...args: Parameters<typeof base.fg>): string => {
+        built += 1;
+        return base.fg(...args);
+      },
+      bold: (text: string): string => {
+        built += 1;
+        return base.bold(text);
+      },
+    };
+    grep.renderCall({ pattern: "value" }, theme, ctx);
+    const result = {
+      content: [{ type: "text", text: "src/a.ts:12: const value = 1;" }],
+      isError: false,
+    };
+    void grep.renderResult(result, { expanded: true, isPartial: false }, theme, ctx);
+    const afterFirst = built;
+    expect(afterFirst).toBeGreaterThan(0); // the first frame builds the placeholder
+    // The settled repeat: the taskKey is unchanged, so the body must
+    // early-return BEFORE the collapsedView/renderPlainOutput rebuild.
+    void grep.renderResult(result, { expanded: true, isPartial: false }, theme, ctx);
+    expect(built).toBe(afterFirst);
+  });
 });
 
 describe("write new-file preview line cap (memfs)", () => {

@@ -129,6 +129,20 @@ export function createFindWrapper(
       const anchor = globAnchor(callArgs.pattern ?? "");
       const emphasisSpec = accentEmphasis(theme);
       const elapsed = elapsedOf(result) ?? 0;
+      // One computed key serves BOTH roles — find has no width-dependent
+      // layout (same as grep): the width never joins the key.
+      const taskKey = outputTaskKey({
+        prefix: "f",
+        derived,
+        identity: palette.identity,
+        elapsedMs: elapsed,
+        expanded: options.expanded,
+      });
+      // The settled-frame early return (grep's shape): an unchanged
+      // identity means the attach guard below would discard the
+      // collapsedView/renderPlainOutput work this frame is about to do.
+      if (text.previewIdentity === taskKey && text.previewTask) return text;
+
       // The dim plain form is the placeholder AND the fallback — already
       // collapsed to the window (grep's shape): a large result set must
       // not flash the full listing before the styled render swaps in, nor
@@ -140,15 +154,6 @@ export function createFindWrapper(
         theme,
       });
       const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
-      // One computed key serves BOTH roles — find has no width-dependent
-      // layout (same as grep): the width never joins the key.
-      const taskKey = outputTaskKey({
-        prefix: "f",
-        derived,
-        identity: palette.identity,
-        elapsedMs: elapsed,
-        expanded: options.expanded,
-      });
       attachPreviewTask(text, {
         identity: taskKey,
         placeholder: plain,

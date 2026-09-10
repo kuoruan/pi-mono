@@ -221,11 +221,15 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
       // width change re-renders and re-reads the seed, so a file edited
       // after the fact colors the frozen hunk with the new prefix (a
       // rare, display-only approximation).
+      // The split verdict is computed ONCE and shared: the seed budget
+      // and the view choice both consume it (it walks every visible
+      // content line — a duplicate call would double that scan).
+      const useSplit = shouldUseSplit(diff, width, maxLines);
       // The budget follows the chosen view: split pairs a del+add into ONE
       // visual row, so its window can consume up to 2×maxLines logical
       // lines — slicing the seed at maxLines alone would leave the deepest
       // visible hunk uncovered (the vue bug's second face, split edition).
-      const seedBudget = shouldUseSplit(diff, width, maxLines) ? maxLines * 2 : maxLines;
+      const seedBudget = useSplit ? maxLines * 2 : maxLines;
       const seed = seedFor ? seedFor(lastHunkNewStart(diff, seedBudget)) : undefined;
       return renderPaddedDiff({
         diff,
@@ -236,6 +240,7 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
         theme,
         indicatorStyle,
         seed,
+        useSplit,
       });
     },
   });
@@ -253,11 +258,15 @@ async function renderPaddedDiff(
   options: Omit<DiffViewOptions, "piTheme" | "indicator"> & {
     theme: PaletteTheme;
     indicatorStyle: IndicatorStyle;
+    useSplit: boolean;
   },
 ): Promise<string> {
-  const { diff, language, maxLines, width, palette, theme, indicatorStyle, seed } = options;
+  const { diff, language, maxLines, width, palette, theme, indicatorStyle, seed, useSplit } =
+    options;
   // One frame for both views: the split-vs-unified choice picks the
-  // renderer, never the inputs (DiffViewOptions).
+  // renderer, never the inputs (DiffViewOptions). The verdict arrives
+  // from the caller — it also sizes the seed budget, and scanning
+  // twice per render was pure waste.
   const view = {
     diff,
     language,
@@ -268,7 +277,7 @@ async function renderPaddedDiff(
     indicator: indicatorStyle,
     seed,
   };
-  const body = await (shouldUseSplit(diff, width, maxLines) ? renderSplit : renderUnified)(view);
+  const body = await (useSplit ? renderSplit : renderUnified)(view);
   return padDiffBody(body, palette);
 }
 

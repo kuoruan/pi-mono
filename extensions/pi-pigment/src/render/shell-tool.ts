@@ -101,7 +101,8 @@ export function createShellWrapper(
         // Inert at intake (ADR 0004): the command is model-authored data —
         // control bytes in it must not reach the terminal as sequences.
         // (The highlighter's own escapes are OUR chrome and pass through.)
-        void renderShellCommand(inertText(command), profile.language, paletteNow, theme)
+        // safeCommand is the SAME inert form computed above — reuse it.
+        void renderShellCommand(safeCommand, profile.language, paletteNow, theme)
           .then((highlighted) => {
             // Compose over the base: renderTokensAnsi closes each token's
             // fg with ESC[39m — re-open the base after every close so

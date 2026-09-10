@@ -121,6 +121,33 @@ export function createGrepWrapper(
       const { output, lines } = derived;
       if (!output.trim()) return renderEmpty(text); // nothing to show — clear any stale task
 
+      // The swap key carries everything the render closure reads that can
+      // change between frames: the content (length + fingerprint — a
+      // same-length content delta still re-renders), the palette identity
+      // (a mid-session theme switch re-derives emphasis colors), the
+      // footer state (the last streaming partial and the final frame can
+      // share content exactly — only the Took footer differs, so the
+      // elapsed sideband is part of the key), and the expand state.
+      const elapsed = elapsedOf(result) ?? 0;
+      // One computed key serves BOTH roles: the width-neutral identity
+      // (the attach guard) and the render-loop cache key — grep's output
+      // has no width-dependent layout, so the width never joins the key
+      // (a resize reuses the render).
+      const taskKey = outputTaskKey({
+        prefix: "g",
+        derived,
+        identity: palette.identity,
+        elapsedMs: elapsed,
+        expanded: options.expanded,
+      });
+      // The settled-frame early return: an UNCHANGED identity means the
+      // attach guard below would discard every collapsedView/
+      // renderPlainOutput/join result this frame is about to build —
+      // skip the build entirely. The attach guard stays (the protocol's
+      // own authority); this is the body-level shortcut. Positioned after
+      // the empty guard, before any placeholder work.
+      if (text.previewIdentity === taskKey && text.previewTask) return text;
+
       // Render-side collapse (the agent's context keeps the full output):
       // the shared collapsedView owns the budget, hidden-count, and the
       // affordance+Took tail composition.
@@ -141,25 +168,6 @@ export function createGrepWrapper(
         ignoreCase: callArgs.ignoreCase === true,
       };
       const plain = `${renderPlainOutput(shownLines, theme)}${tail ? `\n${tail}` : ""}`;
-      // The swap key carries everything the render closure reads that can
-      // change between frames: the content (length + fingerprint — a
-      // same-length content delta still re-renders), the palette identity
-      // (a mid-session theme switch re-derives emphasis colors), the
-      // footer state (the last streaming partial and the final frame can
-      // share content exactly — only the Took footer differs, so the
-      // elapsed sideband is part of the key), and the expand state.
-      const elapsed = elapsedOf(result) ?? 0;
-      // One computed key serves BOTH roles: the width-neutral identity
-      // (the attach guard) and the render-loop cache key — grep's output
-      // has no width-dependent layout, so the width never joins the key
-      // (a resize reuses the render).
-      const taskKey = outputTaskKey({
-        prefix: "g",
-        derived,
-        identity: palette.identity,
-        elapsedMs: elapsed,
-        expanded: options.expanded,
-      });
       attachPreviewTask(text, {
         identity: taskKey,
         placeholder: plain,

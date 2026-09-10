@@ -48,15 +48,6 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
       // shape): trigger frames only check the key; the per-entry work
       // (connectors, type coloring) happens off the frame.
       const elapsed = elapsedOf(result) ?? 0;
-      // Collapsed up front (grep/find's shape): the placeholder and the
-      // fallback never flash or strand the full listing.
-      const { shown: shownEntries, tail: plainTail } = collapsedView(entries, {
-        budget: COLLAPSED_LINES.ls,
-        expanded: options.expanded,
-        result,
-        theme,
-      });
-      const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
       // One computed key serves BOTH roles — ls has no width-dependent
       // layout: the width never joins the key.
       const taskKey = outputTaskKey({
@@ -66,6 +57,20 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
         elapsedMs: elapsed,
         expanded: options.expanded,
       });
+      // The settled-frame early return (grep's shape): an unchanged
+      // identity means the attach guard below would discard the
+      // collapsedView/renderPlainOutput work this frame is about to do.
+      if (text.previewIdentity === taskKey && text.previewTask) return text;
+
+      // Collapsed up front (grep/find's shape): the placeholder and the
+      // fallback never flash or strand the full listing.
+      const { shown: shownEntries, tail: plainTail } = collapsedView(entries, {
+        budget: COLLAPSED_LINES.ls,
+        expanded: options.expanded,
+        result,
+        theme,
+      });
+      const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
       attachPreviewTask(text, {
         identity: taskKey,
         placeholder: plain,
