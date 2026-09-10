@@ -80,6 +80,21 @@ export function taskKeyOf(prefix: string, stamps: Array<string | number>): strin
   return `${prefix}\u0000${stamps.join("\u0000")}`;
 }
 
+/**
+ * The streaming key stamp — the result-preview settle splitter: pending
+ * frames carry it, the settled frame does not, so the settle identity
+ * differs from every partial's and the attach guard re-arms the one-time
+ * highlighted render even when the content no longer grows. Lives beside
+ * taskKeyOf (the key machinery's home); the streaming VOCABULARY
+ * (resultStreaming, argsSettled) stays in tool-services.
+ *
+ * @param streaming - Whether the frame's content is still growing.
+ * @returns The stamp ("s"), or "" for settled frames.
+ */
+export function streamingStamp(streaming: boolean): string {
+  return streaming ? "s" : "";
+}
+
 /** The outputTaskKey inputs. */
 export interface OutputTaskKeyOptions {
   /** The tool's short prefix ("g"/"f"/"l"). */
@@ -92,26 +107,34 @@ export interface OutputTaskKeyOptions {
   elapsedMs: number;
   /** Whether the frame is expanded. */
   expanded: boolean;
+  /**
+   * The streaming stamp (streamingStamp of the pending state). Highlighted
+   * tools pass it so a content-identical final frame re-renders with
+   * colors; plain tools omit it — their keys stay as before.
+   */
+  streaming?: boolean;
 }
 
 /**
  * The width-independent swap key grep/find/ls share: content identity
  * (length + fingerprint), palette identity (a theme switch re-renders),
- * footer state (the streaming-partial→final Took delta), and the expand
- * mode. A resize must NOT re-render these tools (no width-dependent
+ * footer state (the streaming-partial→final Took delta), the expand mode,
+ * and optionally the streaming stamp (the settle re-render for highlighted
+ * tools). A resize must NOT re-render these tools (no width-dependent
  * layout), so the callers' key closures ignore the width argument.
  *
  * @param options - The key's inputs.
  * @returns The swap key.
  */
 export function outputTaskKey(options: OutputTaskKeyOptions): string {
-  const { prefix, derived, identity, elapsedMs, expanded } = options;
+  const { prefix, derived, identity, elapsedMs, expanded, streaming } = options;
   return taskKeyOf(prefix, [
     derived.output.length,
     derived.hash,
     identity,
     elapsedMs,
     expanded ? "x" : "c",
+    ...(streaming === undefined ? [] : [streamingStamp(streaming)]),
   ]);
 }
 

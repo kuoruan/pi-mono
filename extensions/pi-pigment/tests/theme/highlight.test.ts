@@ -73,24 +73,16 @@ describe("hlBlock", () => {
     resetPigmentForTest();
   });
 
-  it("cache:false renders but does not populate the LRU (streaming renders are transient)", async () => {
+  it("caches every render (the transient cache:false API is gone — callers skip hlBlock while streaming)", async () => {
     const themed = buildFakeTheme({ syntaxColors: true });
-    const call = (cache?: boolean) =>
+    const call = () =>
       hlBlock({
         code: CODE,
         language: "typescript",
         palette: paletteOf(),
         piTheme: themed,
-        cache,
       });
-    // First render marked transient: same output, but the LRU must NOT
-    // hold it — the second pass tokenizes fresh (a cache hit would return
-    // the SAME array reference).
-    const first = await call(false);
-    const second = await call();
-    expect(second).toEqual(first);
-    expect(second).not.toBe(first);
-    // Control: normal renders cache — a repeat is a reference hit.
+    // A repeated render is a reference hit (the LRU holds it).
     const cached1 = await call();
     const cached2 = await call();
     expect(cached2).toBe(cached1);

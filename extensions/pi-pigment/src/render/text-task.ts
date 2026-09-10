@@ -17,7 +17,7 @@ import { shouldUseSplit, type DiffViewOptions } from "./render-shared.ts";
 import { renderSplit } from "./render-split.ts";
 import { renderUnified } from "./render-unified.ts";
 import { termW } from "./term.ts";
-import { taskKeyOf } from "./tool-output.ts";
+import { streamingStamp, taskKeyOf } from "./tool-output.ts";
 
 /**
  * The async preview task attached to a Text component — the swap
@@ -182,6 +182,13 @@ export interface DiffPreviewInput {
   indicatorStyle: IndicatorStyle;
   /** Optional grammar-state seed source (embedded grammars). */
   seedFor?: DiffSeedFor;
+  /**
+   * True while the call still streams: the preview renders WITHOUT
+   * highlighting (and without seed reads) — partials never re-tokenize
+   * growing content. The bit joins the identity so the settled frame
+   * re-arms and renders highlighted once.
+   */
+  streaming?: boolean;
 }
 
 /**
@@ -201,12 +208,20 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
     ctx,
     indicatorStyle,
     seedFor,
+    streaming = false,
   } = input;
   clearToolHeaderBg(text);
   // ONE identity, width-appended at render time: everything else is
   // frozen per task (the diff, the palette identity — composing it once
-  // skips the per-render themeCacheKey walk anyway).
-  const baseKey = taskKeyOf(keyPrefix, [palette.identity, diff.lines.length, language ?? ""]);
+  // skips the per-render themeCacheKey walk anyway). The streaming bit
+  // separates partial frames from the settled one, so the final frame
+  // re-arms and colors in even when the content no longer grows.
+  const baseKey = taskKeyOf(keyPrefix, [
+    palette.identity,
+    diff.lines.length,
+    language ?? "",
+    streamingStamp(streaming),
+  ]);
   attachPreviewTask(text, {
     identity: baseKey,
     placeholder: theme.fg("muted", " rendering diff…"),
@@ -229,11 +244,13 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
       // visual row, so its window can consume up to 2×maxLines logical
       // lines — slicing the seed at maxLines alone would leave the deepest
       // visible hunk uncovered (the vue bug's second face, split edition).
+      // The highlight gate: streaming frames render plain, so they skip
+      // BOTH the language and the seed read; the settle frame colors in.
       const seedBudget = useSplit ? maxLines * 2 : maxLines;
-      const seed = seedFor ? seedFor(lastHunkNewStart(diff, seedBudget)) : undefined;
+      const seed = streaming ? undefined : seedFor?.(lastHunkNewStart(diff, seedBudget));
       return renderPaddedDiff({
         diff,
-        language,
+        language: streaming ? undefined : language,
         maxLines,
         width,
         palette,
@@ -343,7 +360,12 @@ export function getWidthAwareText(
       const key = task.key(renderWidth);
       if (text.previewRenderedKey !== key) {
         text.previewRenderedKey = key;
-        text.setText(task.placeholder);
+        // The placeholder is attach's job (a CHANGED identity prints it
+        // before the TUI's render pass — this closure never re-prints
+        // it). A width-only change keeps the previous frame on screen
+        // while the render runs: resize bursts show a stable (mis-sized)
+        // frame and ONE final reprint at the settled width, instead of
+        // flickering the placeholder per width step.
         // Latest-wins queue: enqueue the newest width and drain. A render
         // already running stays the only one — newer frames overwrite the
         // pending width, so a burst (drag-resize, streaming partials)

@@ -26,7 +26,13 @@ import { setCallHeader } from "./error-frame.ts";
 import { summarize, resultLine } from "./header.ts";
 import { setDiffPreviewTask } from "./text-task.ts";
 import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
-import { callStateOf, type EditState, type ToolServices, argsOf } from "./tool-services.ts";
+import {
+  argsOf,
+  callStateOf,
+  resultStreaming,
+  type EditState,
+  type ToolServices,
+} from "./tool-services.ts";
 
 /** Show at most this many diff lines in an edit preview. */
 const MAX_PREVIEW_LINES = 60;
@@ -213,6 +219,9 @@ export function createEditWrapper(
           ctx,
           indicatorStyle,
           seedFor,
+          // Result growth from the three-state model (pending = streaming)
+          // — the same gate every preview path shares.
+          streaming: resultStreaming(ctx),
         });
         return text;
       }

@@ -23,7 +23,7 @@ import {
   outputMemoOf,
   outputTaskKey,
 } from "./tool-output.ts";
-import { argsOf, type ToolServices } from "./tool-services.ts";
+import { argsOf, resultStreaming, type ToolServices } from "./tool-services.ts";
 
 /** Grep's matching flags (read from ctx.args in renderResult, honored by emphasize). */
 interface GrepFlags {
@@ -132,13 +132,17 @@ export function createGrepWrapper(
       // One computed key serves BOTH roles: the width-neutral identity
       // (the attach guard) and the render-loop cache key — grep's output
       // has no width-dependent layout, so the width never joins the key
-      // (a resize reuses the render).
+      // (a resize reuses the render). The streaming stamp flows through
+      // outputTaskKey (the key authority) — pending frames render plain,
+      // and the settled frame's identity differs from every partial's.
+      const pending = resultStreaming(ctx);
       const taskKey = outputTaskKey({
         prefix: "g",
         derived,
         identity: palette.identity,
         elapsedMs: elapsed,
         expanded: options.expanded,
+        streaming: pending,
       });
       // The settled-frame early return: an UNCHANGED identity means the
       // attach guard below would discard every collapsedView/
@@ -174,19 +178,19 @@ export function createGrepWrapper(
         fallback: plain,
         invalidate: ctx.invalidate,
         key: () => taskKey,
-        // Streaming frames render transient (never cached): each partial
-        // version is content that will never repeat — caching it would
-        // evict the stable blocks the LRU protects. The settled frame
-        // re-renders once and caches normally.
+        // Streaming frames skip highlighting entirely (the plain form is
+        // the placeholder AND the frame); the settled frame re-renders
+        // once through renderHighlighted and populates the cache.
         render: async () =>
-          `${await renderHighlighted({
-            lines: shownLines,
-            pattern,
-            flags,
-            theme,
-            palette,
-            cache: !options.isPartial,
-          })}${tail ? `\n${tail}` : ""}`,
+          pending
+            ? plain
+            : `${await renderHighlighted({
+                lines: shownLines,
+                pattern,
+                flags,
+                theme,
+                palette,
+              })}${tail ? `\n${tail}` : ""}`,
       });
       return text;
     },
@@ -292,8 +296,6 @@ interface RenderHighlightedOptions {
   theme: PaletteTheme;
   /** The palette (emphasis colors). */
   palette: DiffPalette;
-  /** False = transient render (streaming): highlight without caching. */
-  cache?: boolean;
 }
 
 /**
@@ -359,7 +361,6 @@ async function renderHighlighted(options: RenderHighlightedOptions): Promise<str
         language: entry.lang,
         palette,
         piTheme: theme,
-        cache: options.cache,
       });
       for (let k = 0; k < chunk.length; k++) {
         const member = chunk[k];

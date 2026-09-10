@@ -91,6 +91,19 @@ export function callStateOf(ctx: RenderContext<object>): CallState {
 }
 
 /**
+ * Whether the call's result may still grow: the preview frames' streaming
+ * gate, derived from the three-state model. Only PENDING calls stream;
+ * error frames never reach the result previews (the factory intercepts
+ * them), so pending and result growth coincide everywhere previews render.
+ *
+ * @param ctx - The render context.
+ * @returns True while the result's content is still streaming.
+ */
+export function resultStreaming(ctx: RenderContext<object>): boolean {
+  return callStateOf(ctx) === "pending";
+}
+
+/**
  * The shell tools' render state. Co-authored with the SDK: our renderCall
  * stashes the command fields, and the SDK's native bash/powershell
  * renderResult (which the wrapper delegates output rendering to) reads

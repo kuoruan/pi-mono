@@ -17,7 +17,7 @@ import type {
 import { inertText } from "#src/core/ansi.ts";
 import { type ParsedDiff, parseDiff } from "#src/core/diff.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
-import { countLines, textBeforeLine } from "#src/core/lines.ts";
+import { countLines, linesOf, textBeforeLine } from "#src/core/lines.ts";
 import { detectLanguage, hlBlock } from "#src/theme/highlight.ts";
 import { resolveDiffPalette, type DiffPalette, type PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
@@ -27,10 +27,11 @@ import { clearToolHeaderBg, padDiffBody, summarize, resultLine } from "./header.
 import { borderBar, diffRowFrame, gutterWidth, injectBg, wrapAnsi } from "./render-shared.ts";
 import { attachPreviewTask, renderEmpty, setDiffPreviewTask } from "./text-task.ts";
 import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
-import { COLLAPSED_LINES, collapsedView, taskKeyOf } from "./tool-output.ts";
+import { COLLAPSED_LINES, collapsedView, streamingStamp, taskKeyOf } from "./tool-output.ts";
 import {
   argsSettled,
   callStateOf,
+  resultStreaming,
   type ToolServices,
   type WriteState,
   argsOf,
@@ -284,6 +285,11 @@ export function createWriteWrapper(
         // renderResult — live and restored alike). The split lives INSIDE
         // the callback — it runs only when the task's keyed render asks
         // for a seed, never per frame.
+        // The seed source for embedded grammars (vue/html): the NEW file's
+        // text before the hunk, sliced from args (which persist into
+        // renderResult — live and restored alike). The split lives INSIDE
+        // the callback — it runs only when the task's keyed render asks
+        // for a seed, never per frame.
         const newContent = argsOf<WriteToolInput>(ctx.args).content ?? "";
         const seedFor = (start: number): string | undefined => textBeforeLine(newContent, start);
         setDiffPreviewTask({
@@ -297,6 +303,7 @@ export function createWriteWrapper(
           ctx,
           indicatorStyle,
           seedFor,
+          streaming: resultStreaming(ctx),
         });
         return text;
       }
@@ -341,12 +348,17 @@ export function createWriteWrapper(
         // seals the key (a same-path same-lineCount rewrite must
         // re-render; within one call args are frozen, so it never fires —
         // cheap insurance against a stale memo).
+        // The pending gate snapshots at attach time (the async render may
+        // run after settle — a late read of mutable frame state would
+        // revert to the tokenizing path).
+        const pending = resultStreaming(ctx);
         const identity = taskKeyOf("nf", [
           fp,
           palette.identity,
           lineCount,
           stats.fingerprint,
           options.expanded ? "x" : "c",
+          streamingStamp(pending),
         ]);
         const lg = detectLanguage(fp);
         attachPreviewTask(text, {
@@ -358,17 +370,21 @@ export function createWriteWrapper(
           render: async (width: number) => {
             const content = rawContent();
             if (!content) return "";
-            const hlLines = await hlBlock({
-              code: content,
-              language: lg,
-              palette,
-              piTheme: theme,
-            });
+            // Streaming frames stay plain (no re-tokenize per partial);
+            // the settled frame highlights and populates the cache.
+            const bodyLines = pending
+              ? linesOf(content)
+              : await hlBlock({
+                  code: content,
+                  language: lg,
+                  palette,
+                  piTheme: theme,
+                });
             // The shared window authority: the collapsed budget AND the
             // expanded cap (MAX_RENDER_LINES) flow through one call, one
             // tail grammar (write shows no Took footer — the SDK's own
             // write renderer never did either).
-            const { shown, tail } = collapsedView(hlLines, {
+            const { shown, tail } = collapsedView(bodyLines, {
               budget: COLLAPSED_LINES.write,
               expanded: options.expanded,
               expandedCap: MAX_RENDER_LINES,

@@ -86,9 +86,10 @@ describe("width-aware render driver (getWidthAwareText)", () => {
     const text = host.text;
     expect(text.previewWidthAware).toBe(true);
 
-    // Attach a task whose render resolves late with a key check.
+    // Attach a task whose render resolves late with a key check (the
+    // attach guard prints the placeholder; render() never re-prints it).
     let renders = 0;
-    text.previewTask = {
+    attachPreviewTask(text, {
       identity: "fixed",
       placeholder: "loading…",
       fallback: "failed",
@@ -98,7 +99,7 @@ describe("width-aware render driver (getWidthAwareText)", () => {
         renders++;
         return "rendered-body";
       },
-    };
+    });
 
     // First render(width) kicks the async swap: placeholder now, body later.
     const out1 = text.render(80);
@@ -200,7 +201,7 @@ describe("width-aware render driver (getWidthAwareText)", () => {
     const text = host.text;
     const started: string[] = [];
     let release!: (value: string) => void;
-    text.previewTask = {
+    attachPreviewTask(text, {
       identity: "fixed",
       placeholder: "loading…",
       fallback: "failed",
@@ -211,7 +212,7 @@ describe("width-aware render driver (getWidthAwareText)", () => {
         if (started.length === 1) return new Promise<string>((resolve) => (release = resolve));
         return Promise.resolve(`body-w${w}`);
       },
-    };
+    });
     const r1 = text.render(80); // starts w80 (in flight, never resolves yet)
     expect(r1).toEqual(["loading…"]);
     expect(started).toEqual(["w80"]);
@@ -232,7 +233,7 @@ describe("width-aware render driver (getWidthAwareText)", () => {
     {
       const host = makeHost();
       let releaseA: ((value: string) => void) | undefined;
-      host.text.previewTask = {
+      attachPreviewTask(host.text, {
         identity: "fixed",
         placeholder: "placeholder",
         fallback: "fallback",
@@ -242,8 +243,8 @@ describe("width-aware render driver (getWidthAwareText)", () => {
           new Promise<string>((resolve) => {
             releaseA = resolve;
           }),
-      };
-      host.text.render(80); // starts A, records key "a", lands placeholder
+      });
+      host.text.render(80); // starts A, records key "a"
       host.text.previewRenderedKey = "superseded"; // A's key is gone
       releaseA?.("A OUTPUT"); // A resolves — the guard must reject the swap
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -254,7 +255,7 @@ describe("width-aware render driver (getWidthAwareText)", () => {
     {
       const host = makeHost();
       let rejectA: ((reason: unknown) => void) | undefined;
-      host.text.previewTask = {
+      attachPreviewTask(host.text, {
         identity: "fixed",
         placeholder: "placeholder",
         fallback: "fallback",
@@ -264,7 +265,7 @@ describe("width-aware render driver (getWidthAwareText)", () => {
           new Promise<string>((_resolve, reject) => {
             rejectA = reject;
           }),
-      };
+      });
       host.text.render(80);
       host.text.previewRenderedKey = "superseded";
       rejectA?.(new Error("late boom")); // the guard must reject the fallback too
