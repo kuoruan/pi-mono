@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseHitLine } from "#src/render/tool-grep.ts";
-import { collapsedView } from "#src/render/tool-output.ts";
+import { collapsedView, elapsedOf, outputMemoOf, outputTaskKey } from "#src/render/tool-output.ts";
 import { resolveDiffPalette } from "#src/theme/palette.ts";
 import {
   buildFakeTheme,
@@ -179,6 +179,38 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     const text = plain(component.text.text);
     expect(text).toContain("app.ts:1:");
     expect(text).toContain("const value = 42;");
+  });
+
+  it("grep's identity carries exactly its documented stamps", async () => {
+    writeFileSync(join(tempDir, "identity-stamps.ts"), "const value = 42;\n");
+    const tools = await registerTools();
+    const grep = tools.find((t) => t.name === "grep");
+    if (!grep?.renderResult) throw new Error("grep not registered");
+    const result = await grep.execute("t1", { pattern: "value" }, undefined, undefined, undefined);
+    const theme = buildRenderTheme();
+    const { ctx } = makeRenderCtx();
+    ctx.args = { pattern: "value" };
+    const component = grep.renderResult(
+      result,
+      { expanded: true, isPartial: false },
+      theme,
+      ctx,
+    ) as DrivenTaskComponent;
+    // The precomputed form: the identity IS outputTaskKey's join. Composing
+    // the expectation through the same authorities (the output memo, the
+    // palette, the elapsed sideband) keeps it exact — a dropped or
+    // reordered stamp fails here.
+    const derived = outputMemoOf({})(result as object);
+    expect(component.previewIdentity).toBe(
+      outputTaskKey({
+        prefix: "g",
+        derived,
+        identity: resolveDiffPalette(theme).identity,
+        elapsedMs: elapsedOf(result) ?? 0,
+        expanded: true,
+        streaming: false,
+      }),
+    );
   });
 
   it("ls renders entries with directories marked", async () => {

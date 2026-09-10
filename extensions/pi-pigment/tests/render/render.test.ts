@@ -2,8 +2,9 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseDiff } from "#src/core/diff.ts";
+import { parseDiff, parsePatchFiles } from "#src/core/diff.ts";
 import { renderUnified } from "#src/render/render-unified.ts";
+import { taskKeyOf } from "#src/render/tool-output.ts";
 import { resolveDiffPalette } from "#src/theme/palette.ts";
 import {
   buildFakeTheme,
@@ -312,6 +313,82 @@ describe("rendering pipeline", () => {
       `"[48;2;30;30;40m[0m[48;2;30;30;40m[38;2;200;100;100m▌[0m[48;2;30;30;40m[48;2;59;38;38m[38;2;200;100;100m 1[0m[48;2;30;30;40m[48;2;59;38;38m [38;2;200;100;100m-[48;2;59;38;38m [0m[48;2;30;30;40m[48;2;69;43;43m[38;2;179;179;179mconst a = [48;2;96;55;55m1[48;2;69;43;43m;[39m[48;2;69;43;43m[0m[48;2;30;30;40m[48;2;69;43;43m                                          [0m[48;2;30;30;40m[38;2;100;180;120m▌[0m[48;2;30;30;40m[48;2;37;45;48m[38;2;100;180;120m 1[0m[48;2;30;30;40m[48;2;37;45;48m [38;2;100;180;120m+[48;2;37;45;48m [0m[48;2;30;30;40m[48;2;41;53;52m[38;2;179;179;179mconst a = [48;2;51;75;64m2[48;2;41;53;52m;[39m[48;2;41;53;52m[0m[48;2;30;30;40m[48;2;41;53;52m                                          [0m[48;2;30;30;40m"`,
     );
   }, 15000);
+
+  it("the edit preview's identity carries exactly its documented stamps", async () => {
+    const tools = await registerTools();
+    const edit = toolOf(tools, "edit");
+    if (!edit.renderResult) throw new Error("edit.renderResult missing");
+    // The narrowed function, captured for the closure below (property
+    // narrowing does not survive into a nested function body).
+    const renderResult = edit.renderResult;
+    const filePath = join(tempDir, "identity.ts");
+    vol.writeFileSync(filePath, "const a = 1;\n");
+    const patch = "--- app.ts\n+++ app.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n";
+    const theme = buildRenderTheme();
+    const attach = (isPartial: boolean): TextDouble => {
+      const { ctx } = makeRenderCtx();
+      ctx.args = { path: filePath };
+      ctx.isPartial = isPartial;
+      return renderResult(
+        {
+          content: [{ type: "text", text: "edited" }],
+          isError: false,
+          details: { diff: "", patch, firstChangedLine: 1 },
+        },
+        { expanded: true, isPartial: false },
+        theme,
+        ctx,
+      ) as TextDouble;
+    };
+    // The full list, spelled out: [palette.identity, diff.lines.length,
+    // language, streaming]. The parsed diff comes through the same parser
+    // the wrapper uses; palette.identity embeds a NUL, so the expectation
+    // composes through taskKeyOf rather than splitting the identity.
+    const parsed = parsePatchFiles(patch)[0]!;
+    expect(attach(false).previewIdentity).toBe(
+      taskKeyOf("ed", [resolveDiffPalette(theme).identity, parsed.lines.length, "typescript", ""]),
+    );
+    // The settle bit: the same inputs mid-stream must key differently, or
+    // the final frame never re-renders in color.
+    expect(attach(true).previewIdentity).toBe(
+      taskKeyOf("ed", [resolveDiffPalette(theme).identity, parsed.lines.length, "typescript", "s"]),
+    );
+  });
+
+  it("write's new-file preview identity carries exactly its documented stamps", async () => {
+    const tools = await registerTools();
+    const write = toolOf(tools, "write");
+    if (!write.renderResult) throw new Error("write.renderResult missing");
+    // The narrowed function, captured for the closure below.
+    const renderResult = write.renderResult;
+    const filePath = join(tempDir, "identity-new.ts");
+    const theme = buildRenderTheme();
+    const attach = (expanded: boolean, isPartial: boolean): TextDouble => {
+      const { ctx } = makeRenderCtx();
+      ctx.args = { path: filePath, content: "const value = 1;\n" };
+      ctx.isPartial = isPartial;
+      return renderResult(
+        { isError: false, details: { kind: "new", filePath } },
+        { expanded, isPartial: false },
+        theme,
+        ctx,
+      ) as TextDouble;
+    };
+    // [fp, palette.identity, lineCount, stats.fingerprint, expand, streaming].
+    // lineCount and the fingerprint come from the wrapper's own stats memo
+    // (not reachable here), so this pins the prefix, the trailing stamps,
+    // and the identity's segment count — a dropped trailing stamp or a lost
+    // expand/streaming bit fails; a dropped middle stamp does not.
+    const identity = attach(true, false).previewIdentity!;
+    expect(identity.startsWith(`nf\u0000${filePath}\u0000`)).toBe(true);
+    expect(identity.endsWith("\u0000x\u0000")).toBe(true);
+    // The expand and streaming bits both re-key.
+    expect(attach(false, false).previewIdentity).not.toBe(identity);
+    expect(attach(true, true).previewIdentity).not.toBe(identity);
+    // Segments: prefix + fp + palette.identity(theme key + roots key) +
+    // lineCount + fingerprint + expand + streaming.
+    expect(identity.split("\u0000")).toHaveLength(8);
+  });
 
   it("edit renderResult works from the SDK's own details shape (ADR 0005 compat)", async () => {
     // The primary path IS the SDK shape now: execute delegates verbatim,

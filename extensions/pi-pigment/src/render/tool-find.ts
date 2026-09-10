@@ -13,7 +13,7 @@ import { FG_DEFAULT, inertText } from "#src/core/ansi.ts";
 import { detectLanguage } from "#src/theme/highlight.ts";
 
 import { accentEmphasis, emphasize, type EmphasisSpec } from "./pattern-emphasis.ts";
-import { attachPreviewTask, renderEmpty } from "./text-task.ts";
+import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import {
   COLLAPSED_LINES,
@@ -154,39 +154,44 @@ export function createFindWrapper(
         theme,
       });
       const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
-      attachPreviewTask(text, {
-        identity: taskKey,
-        placeholder: plain,
-        fallback: plain,
-        invalidate: ctx.invalidate,
-        key: () => taskKey,
-        render: async () => {
-          const { shown: lines, tail } = collapsedView(all, {
-            budget: COLLAPSED_LINES.find,
-            expanded: options.expanded,
-            result,
-            theme,
-          });
-          // The SDK appends truncation notices as a bracketed tail line —
-          // style the path lines, pass notices through muted.
-          const styled = lines.map((line) => {
-            // The SDK's only bracketed output form is the truncation
-            // notice (the payload is templated — `[1000 results limit
-            // reached. Use limit=2000 for more, or refine pattern]`,
-            // `[50.0KB limit reached]` — so match the shape, not the
-            // literal). Everything else — including bracketed filenames
-            // like `[note].md` — is a path.
-            if (NOTICE_TAIL.test(line)) {
-              return theme.fg("warning", inertText(line));
-            }
-            if (line === "No files found matching pattern") {
-              return theme.fg("muted", line);
-            }
-            return styleFindPath({ path: line, theme, palette, anchor, emphasis: emphasisSpec });
-          });
-          return tail ? `${styled.join("\n")}\n${tail}` : styled.join("\n");
-        },
-      });
+      attachPreviewTask(
+        text,
+        definePreviewTask({
+          identity: taskKey,
+          // Find has no width-dependent layout (same as grep): the width
+          // never joins the key.
+          widthAware: false,
+          placeholder: plain,
+          fallback: plain,
+          invalidate: ctx.invalidate,
+          render: async () => {
+            const { shown: lines, tail } = collapsedView(all, {
+              budget: COLLAPSED_LINES.find,
+              expanded: options.expanded,
+              result,
+              theme,
+            });
+            // The SDK appends truncation notices as a bracketed tail line —
+            // style the path lines, pass notices through muted.
+            const styled = lines.map((line) => {
+              // The SDK's only bracketed output form is the truncation
+              // notice (the payload is templated — `[1000 results limit
+              // reached. Use limit=2000 for more, or refine pattern]`,
+              // `[50.0KB limit reached]` — so match the shape, not the
+              // literal). Everything else — including bracketed filenames
+              // like `[note].md` — is a path.
+              if (NOTICE_TAIL.test(line)) {
+                return theme.fg("warning", inertText(line));
+              }
+              if (line === "No files found matching pattern") {
+                return theme.fg("muted", line);
+              }
+              return styleFindPath({ path: line, theme, palette, anchor, emphasis: emphasisSpec });
+            });
+            return tail ? `${styled.join("\n")}\n${tail}` : styled.join("\n");
+          },
+        }),
+      );
       return text;
     },
   });

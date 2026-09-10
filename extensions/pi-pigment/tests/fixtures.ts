@@ -201,7 +201,7 @@ export function makeRenderCtx<TState extends object = Record<string, unknown>>()
  * entry plus the text slot (grep/find/ls results). A TextDouble slice —
  * hand-written copies drift; Pick-on-TextDouble cannot.
  */
-export type DrivenTaskComponent = Pick<TextDouble, "render" | "text">;
+export type DrivenTaskComponent = Pick<TextDouble, "render" | "text" | "previewIdentity">;
 
 /**
  * A component carrying an attached preview task (write/edit results) —

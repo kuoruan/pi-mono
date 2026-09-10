@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 
 import { createToolWrapper, renderPlainTextFallback } from "#src/render/tool-factory.ts";
 import type { ResultContentBlock } from "#src/render/tool-output.ts";
+import { taskKeyOf } from "#src/render/tool-output.ts";
+import { resolveDiffPalette } from "#src/theme/palette.ts";
 import {
   makeRenderCtx,
   buildRenderTheme,
@@ -187,6 +189,28 @@ describe("renderResult error frame", () => {
     expect(rendered).toContain("Something failed badly");
     // The error frame paints a custom background.
     expect(typeof bg).toBe("function");
+  });
+
+  it("the error frame's identity carries exactly its documented stamps", () => {
+    const { orig } = makeOrig();
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    const theme = buildRenderTheme();
+    const wrapped = wrappedFor(orig, {});
+    const component = wrapped.renderResult(
+      { content: [{ type: "text", text: "exploded" }] } as never,
+      { expanded: true, isPartial: false },
+      theme,
+      ctx,
+    ) as TextDouble;
+    // The full stamp list, spelled out: a dropped or reordered input fails
+    // here (identity stability alone stays true either way).
+    // palette.identity embeds a NUL (theme key + roots key joined), so the
+    // expected value composes through the same taskKeyOf the call site uses
+    // — splitting the identity back apart cannot recover the list.
+    expect(component.previewIdentity).toBe(
+      taskKeyOf("probe", [1, "", resolveDiffPalette(theme).identity, "exploded"]),
+    );
   });
 
   it("the error frame keeps the thrown-span Took across re-renders of the same call", async () => {
