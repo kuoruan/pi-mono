@@ -14,12 +14,14 @@
  */
 import { test } from "vitest";
 
+import { parseDiff } from "#src/core/diff.ts";
 import {
   diffRowFrame,
   injectBg,
   paintWordDiff,
   plainWordDiff,
   shouldEmphasize,
+  shouldUseSplit,
   wordDiffAnalysis,
   wrapAnsi,
 } from "#src/render/render-shared.ts";
@@ -43,6 +45,7 @@ const _wordDiffAnalysis = wordDiffAnalysis;
 const _plainWordDiff = plainWordDiff;
 const _paintWordDiff = paintWordDiff;
 const _shouldEmphasize = shouldEmphasize;
+const _shouldUseSplit = shouldUseSplit;
 const _styledLine = styledLine;
 const _plainLine = plainLine;
 const _cjkLine = cjkLine;
@@ -50,6 +53,17 @@ const _diffBody = diffBody;
 const _diffPalette = diffPalette;
 const _wordOldLine = wordOldLine;
 const _wordNewLine = wordNewLine;
+
+/** A realistic split-eligible parsed diff (paired edits over 30 lines). */
+const _splitDiff = parseDiff(
+  Array.from({ length: 30 }, (_, i) => `const line${i} = compute(${i}, items, 42);`).join("\n"),
+  Array.from({ length: 30 }, (_, i) =>
+    i % 3 === 0
+      ? `const line${i} = compute(${i}, result, 42);`
+      : `const line${i} = compute(${i}, items, 42);`,
+  ).join("\n"),
+  0,
+);
 
 // One module-level sink absorbs every measured return value: an unused
 // result would let the engine eliminate the measured work entirely
@@ -198,5 +212,15 @@ test("unified plain path per pair (the over-budget fallback sequence)", async ({
       const painted = _paintWordDiff(analysis.parts, _diffPalette);
       sink += painted.old.length + painted.new.length;
     }
+  }).run();
+});
+
+test("shouldUseSplit (the split/unified verdict per diff render)", async ({ bench }) => {
+  // One call per committed diff-preview render: the verdict walks the
+  // visible window's content lines (measurePlain(expandTabs(x)) each).
+  // Pinned because a task render computes it TWICE today (seedBudget +
+  // view choice) — the duplicate call is the cost this measures.
+  await bench("split verdict over a 30-line window", () => {
+    sink += _shouldUseSplit(_splitDiff, 120, 40) ? 1 : 0;
   }).run();
 });
