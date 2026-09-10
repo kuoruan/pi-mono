@@ -228,9 +228,13 @@ export class SgrState {
  * Re-inject `bg` after each reset-like SGR (Shiki closes tokens with the
  * ESC[39m family; 0m/49m count as broader resets). One indexOf walk
  * (SIMD substring search) with the same whole-sequence semantics the
- * iterateCells walk pins: an escape cell is ESC + everything up to the
- * next "m"; a lone ESC without a terminator is a code point and copied
- * as-is (no injection there).
+ * iterateCells walk pins: a CSI escape cell runs ESC[ to the next "m";
+ * an OSC sequence (the 8;; hyperlinks tool headers carry) runs to its
+ * BEL or ST terminator and passes through UNTOUCHED — a URL's own
+ * characters must never be mistaken for an SGR end (an "m" in a path
+ * used to eat the terminator's ESC byte, corrupting the link and every
+ * width measured over it); a lone ESC without a terminator is a code
+ * point and copied as-is (no injection there).
  *
  * @param line - The ANSI-styled line.
  * @param bg - The background escape to re-inject.
@@ -245,20 +249,48 @@ export function reinjectSgr(line: string, bg: string, escIndex: number): string 
   let last = 0;
   while (i !== -1) {
     out += line.slice(last, i);
-    const end = line.indexOf("m", i + 1);
-    if (end === -1) {
-      // Lone ESC: the cell walk yields it as one code point and keeps
-      // scanning after it; copy one byte and continue the search.
-      last = i + 1;
+    const kind = line[i + 1];
+    if (kind === "[") {
+      const end = line.indexOf("m", i + 1);
+      if (end === -1) {
+        // Unterminated CSI: the cell walk yields the lone ESC as one
+        // code point; copy the byte itself and keep scanning.
+        out += ESC;
+        last = i + 1;
+        i = line.indexOf(ESC, last);
+        continue;
+      }
+      const seq = line.slice(i, end + 1);
+      out += seq;
+      if (seq === SEQ_RESET_ALL || seq === SEQ_RESET_FG || seq === SEQ_RESET_BG) {
+        out += bg;
+      }
+      last = end + 1;
       i = line.indexOf(ESC, last);
       continue;
     }
-    const seq = line.slice(i, end + 1);
-    out += seq;
-    if (seq === SEQ_RESET_ALL || seq === SEQ_RESET_FG || seq === SEQ_RESET_BG) {
-      out += bg;
+    if (kind === "]") {
+      const bel = line.indexOf("\u0007", i);
+      const st = line.indexOf(ESC + "\\", i);
+      let end = -1;
+      if (bel !== -1 && (st === -1 || bel < st)) end = bel;
+      else if (st !== -1) end = st + 1; // the ST backslash closes the sequence
+      if (end === -1) {
+        // Unterminated OSC: lone-ESC code point, same as the cell walk.
+        out += ESC;
+        last = i + 1;
+        i = line.indexOf(ESC, last);
+        continue;
+      }
+      out += line.slice(i, end + 1);
+      last = end + 1;
+      i = line.indexOf(ESC, last);
+      continue;
     }
-    last = end + 1;
+    // Lone ESC: the cell walk yields it as one code point and keeps
+    // scanning after it; copy one byte and continue the search.
+    out += ESC;
+    last = i + 1;
     i = line.indexOf(ESC, last);
   }
   return out + line.slice(last);

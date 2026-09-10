@@ -67,4 +67,63 @@ describe("iterateCells (the styled-text walk primitive)", () => {
     // Reassembly is identity.
     expect(out.map((c) => c.text).join("")).toBe(s);
   });
+
+  it("yields OSC-8 hyperlinks whole: an 'm' inside the URL never splits the sequence", () => {
+    // The tool-header link shape: OSC 8 open + URL (containing 'm' via
+    // /tmp/) + ST, then the VISIBLE label as code-point cells, then the
+    // OSC 8 close. The 'm'-to-'m' SGR scan used to cut the sequence at
+    // the URL's first 'm', mis-measuring the row and corrupting the link
+    // bytes downstream (reinjectSgr dropped the ST's ESC — the pi-tui
+    // width-assert crash).
+    const open = "\x1b]8;;file:///tmp/pi-196/src.ts\x1b\\";
+    const close = "\x1b]8;;\x1b\\";
+    const input = `← edit ${open}src.ts${close} done`;
+    const out = cells(input);
+    expect(out.map((c) => c.text)).toEqual([
+      "←",
+      " ",
+      "e",
+      "d",
+      "i",
+      "t",
+      " ",
+      open,
+      "s",
+      "r",
+      "c",
+      ".",
+      "t",
+      "s",
+      close,
+      " ",
+      "d",
+      "o",
+      "n",
+      "e",
+    ]);
+    const osc = out[7]!;
+    expect(osc).toMatchObject({ escape: true, cols: 0, chars: 0, start: 7, end: 7 + open.length });
+    // The close is an escape cell too (zero columns).
+    expect(out[14]).toMatchObject({ escape: true, cols: 0, chars: 0 });
+    // Reassembly stays identity.
+    expect(out.map((c) => c.text).join("")).toBe(input);
+  });
+
+  it("yields BEL-terminated OSC sequences whole too", () => {
+    const open = "\x1b]8;;file:///x/y\u0007";
+    const close = "\x1b]8;;\u0007";
+    const out = cells(`a${open}lb${close}c`);
+    expect(out.map((c) => c.text)).toEqual(["a", open, "l", "b", close, "c"]);
+    expect(out[1]).toMatchObject({ escape: true, cols: 0, chars: 0 });
+    expect(out[4]).toMatchObject({ escape: true, cols: 0, chars: 0 });
+  });
+
+  it("an unterminated OSC falls back to the lone-ESC code point cell", () => {
+    const out = cells("a\x1b]8;;file:///no-terminator");
+    // The open ESC has no BEL/ST ahead: code-point cells from there on,
+    // tiling intact.
+    expect(out.map((c) => c.text).join("")).toBe("a\x1b]8;;file:///no-terminator");
+    expect(out[1]!.text).toBe("\x1b");
+    expect(out[1]!.escape).toBe(false);
+  });
 });

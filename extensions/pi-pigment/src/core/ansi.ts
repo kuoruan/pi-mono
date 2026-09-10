@@ -198,18 +198,42 @@ export function* iterateCells(s: string): Generator<Cell> {
   let i = 0;
   while (i < s.length) {
     if (s[i] === ESC) {
-      const end = s.indexOf("m", i);
-      if (end !== -1) {
-        yield {
-          start: i,
-          end: end + 1,
-          text: s.slice(i, end + 1),
-          cols: 0,
-          chars: 0,
-          escape: true,
-        };
-        i = end + 1;
-        continue;
+      const kind = s[i + 1];
+      if (kind === "[") {
+        const end = s.indexOf("m", i);
+        if (end !== -1) {
+          yield {
+            start: i,
+            end: end + 1,
+            text: s.slice(i, end + 1),
+            cols: 0,
+            chars: 0,
+            escape: true,
+          };
+          i = end + 1;
+          continue;
+        }
+      } else if (kind === "]") {
+        // OSC (the 8;; hyperlinks): the cell runs to the BEL or ST
+        // terminator — a URL's characters are never escape-cell
+        // boundaries (an "m" in a path must not split the sequence).
+        const bel = s.indexOf("\u0007", i);
+        const st = s.indexOf(ESC + "\\", i);
+        let end = -1;
+        if (bel !== -1 && (st === -1 || bel < st)) end = bel;
+        else if (st !== -1) end = st + 1;
+        if (end !== -1) {
+          yield {
+            start: i,
+            end: end + 1,
+            text: s.slice(i, end + 1),
+            cols: 0,
+            chars: 0,
+            escape: true,
+          };
+          i = end + 1;
+          continue;
+        }
       }
     }
     const codePoint = s.codePointAt(i) ?? s.charCodeAt(i);
