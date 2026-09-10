@@ -15,7 +15,7 @@ import { inertText, RESET } from "#src/core/ansi.ts";
 import { linesOf } from "#src/core/lines.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 
-import { injectBg } from "./render-shared.ts";
+import { injectBg } from "./inject-bg.ts";
 
 /** Tool names that get the arrow prefix in headers. */
 const ARROW_PREFIXED_TOOL_HEADERS = new Set(["write", "create", "edit"]);

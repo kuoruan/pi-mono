@@ -34,12 +34,13 @@ import { createOnigurumaEngine } from "shiki/engine/oniguruma";
  */
 import { beforeAll, test } from "vitest";
 
-// The realistic fixture: the renderer's own source, raw-imported. Dense
+// The realistic fixture: the renderer's own source, raw-imported (the
+// word-diff module — dense real-world code). Dense
 // real-world code (long lines, token-heavy) is REQUIRED — synthetic
 // generated fixtures of short lines hide the JS engine's superlinear
 // line-length cost and shrink the measured ratio to ~1.2x.
 // oxlint-disable-next-line import/default
-import tsReal from "#src/render/render-shared.ts?raw";
+import tsReal from "#src/render/word-diff.ts?raw";
 
 const ENGINE: "js" | "onig" =
   process.env.BENCH_ENGINE === "js" ? "js" : process.env.BENCH_ENGINE === "onig" ? "onig" : "onig";

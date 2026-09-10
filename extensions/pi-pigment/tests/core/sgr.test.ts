@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import { reinjectSgr } from "#src/core/sgr.ts";
-import { injectBg } from "#src/render/render-shared.ts";
+import { injectBg } from "#src/render/inject-bg.ts";
 
 const BG = "\x1b[48;2;30;30;40m";
 

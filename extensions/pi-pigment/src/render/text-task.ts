@@ -13,9 +13,10 @@ import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { clearToolHeaderBg, padDiffBody } from "./header.ts";
-import { shouldUseSplit, type DiffViewOptions } from "./render-shared.ts";
+import { type DiffViewOptions } from "./render-shared.ts";
 import { renderSplit } from "./render-split.ts";
 import { renderUnified } from "./render-unified.ts";
+import { shouldUseSplit } from "./split-verdict.ts";
 import { termW } from "./term.ts";
 import { streamingStamp, taskKeyOf } from "./tool-output.ts";
 

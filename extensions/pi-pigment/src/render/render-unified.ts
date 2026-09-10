@@ -6,21 +6,11 @@
 import { DIM, expandTabs, measurePlain } from "#src/core/ansi.ts";
 import { sepLabel, type DiffLine } from "#src/core/diff.ts";
 
-import {
-  adaptiveWrapRows,
-  diffRowFrame,
-  highlightPairSides,
-  injectBg,
-  borderBar,
-  gutterWidth,
-  lineNumberWidth,
-  MIN_RENDER_WIDTH,
-  paintWordDiff,
-  shouldEmphasize,
-  type DiffViewOptions,
-  wordDiffAnalysis,
-  wrapAnsi,
-} from "./render-shared.ts";
+import { injectBg } from "./inject-bg.ts";
+import { type DiffViewOptions, highlightPairSides, MIN_RENDER_WIDTH } from "./render-shared.ts";
+import { borderBar, diffRowFrame, gutterWidth, lineNumberWidth } from "./row-frame.ts";
+import { paintWordDiff, shouldEmphasize, wordDiffAnalysis } from "./word-diff.ts";
+import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
 
 /**
  * Render the unified (stacked) view: one line-number gutter, full-width

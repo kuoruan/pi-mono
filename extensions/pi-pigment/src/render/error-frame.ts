@@ -22,7 +22,8 @@ import {
   setToolSuccessBg,
   type CustomBgText,
 } from "./header.ts";
-import { borderBar, injectBg } from "./render-shared.ts";
+import { injectBg } from "./inject-bg.ts";
+import { borderBar } from "./row-frame.ts";
 import { collapseTail, expandKeyHint } from "./tool-output.ts";
 import type { CallState } from "./tool-services.ts";
 
