@@ -18,7 +18,7 @@ import { inertText } from "#src/core/ansi.ts";
 import { type ParsedDiff, parseDiff } from "#src/core/diff.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { countLines, linesOf, textBeforeLine } from "#src/core/lines.ts";
-import { detectLanguage, hlBlock } from "#src/theme/highlight.ts";
+import { detectLanguage, hlBlock, needsSeed } from "#src/theme/highlight.ts";
 import { resolveDiffPalette, type DiffPalette, type PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
@@ -285,13 +285,17 @@ export function createWriteWrapper(
         // renderResult — live and restored alike). The split lives INSIDE
         // the callback — it runs only when the task's keyed render asks
         // for a seed, never per frame.
-        // The seed source for embedded grammars (vue/html): the NEW file's
+        // The seed source for embedded grammars (vue/html), and only for
+        // them (the same gate the edit wrapper applies): the NEW file's
         // text before the hunk, sliced from args (which persist into
         // renderResult — live and restored alike). The split lives INSIDE
         // the callback — it runs only when the task's keyed render asks
-        // for a seed, never per frame.
+        // for a seed, never per frame. An oversized prefix is dropped in
+        // hlBlock, where the tokenize pays for it.
         const newContent = argsOf<WriteToolInput>(ctx.args).content ?? "";
-        const seedFor = (start: number): string | undefined => textBeforeLine(newContent, start);
+        const seedFor = needsSeed(d.language)
+          ? (start: number): string | undefined => textBeforeLine(newContent, start)
+          : undefined;
         setDiffPreviewTask({
           text,
           keyPrefix: "wd",

@@ -80,6 +80,59 @@ export function detectLanguage(filePath: string): BundledLanguage | undefined {
   return EXTRA_EXT_LANG[ext];
 }
 
+/**
+ * The grammars that EMBED another syntax: vue's `<script>`, html's
+ * `<style>`, php's inline mode, a markdown fence. A mid-file hunk of such
+ * a language carries no tag in view, so a from-the-top tokenize renders
+ * the embedded part flat — the one case where a grammar seed changes the
+ * render. Everywhere else the seed would tokenize the same input to the
+ * same tokens, so the price (a disk read and a prefix-sized tokenize) is
+ * paid for nothing.
+ */
+const SEED_LANGUAGES: ReadonlySet<string> = new Set([
+  "angular-html",
+  "astro",
+  "blade",
+  "erb",
+  "haml",
+  "handlebars",
+  "hbs",
+  "html",
+  "jade",
+  "jinja",
+  "liquid",
+  "markdown",
+  "md",
+  "mdx",
+  "php",
+  "pug",
+  "razor",
+  "svelte",
+  "twig",
+  "vue",
+]);
+
+/**
+ * Whether a language embeds another syntax — the gate for the edit
+ * preview's disk-backed grammar seed (see {@link SEED_LANGUAGES}).
+ *
+ * @param language - The detected language, if any.
+ * @returns True when a seed can change the render.
+ */
+export function needsSeed(language: BundledLanguage | undefined): boolean {
+  return language !== undefined && SEED_LANGUAGES.has(language);
+}
+
+/**
+ * The seed prefix's character cap. The seed rides into the tokenizer as
+ * `grammarContextCode`, so the prefix is paid for twice — once slicing it
+ * out of the file, once (the dominant term) in the tokenize that consumes
+ * it: measured ~2-3 ms per KB (10KB ≈ 30ms, 86KB ≈ 170ms on a cold
+ * cache). Past this cap the unseeded render is the better trade — the
+ * embedded region degrades to flat, the frame stays responsive.
+ */
+export const MAX_SEED_CHARS = 64 * 1024;
+
 // ---------------------------------------------------------------------------
 // The highlight cache
 // ---------------------------------------------------------------------------
@@ -135,17 +188,23 @@ export interface HlBlockOptions {
  * lines scope-less — the "vue partial diff renders uncolored" bug. The
  * seed is the file text BEFORE the slice; tokenizing it once captures the
  * TextMate stack (which embedding we are inside), and the slice
- * tokenizes from that state.
+ * tokenizes from that state. A seed past {@link MAX_SEED_CHARS} is
+ * dropped (see the cap's note) — the block then renders unseeded.
  *
  * @param options - The block's inputs.
  * @returns The highlighted (or fallback) lines.
  */
 export async function hlBlock(options: HlBlockOptions): Promise<string[]> {
-  const { code, language, palette, piTheme, seed } = options;
+  const { code, language, palette, piTheme } = options;
   if (!code) return [""];
   if (!language || code.length > MAX_HL_CHARS) return linesOf(code);
   const theme = await resolveActiveTheme(palette, piTheme);
   if (!theme) return linesOf(code); // unresolvable selection: unstyled
+  // An oversized prefix is dropped HERE, at the one point that pays for
+  // it: the seed rides into `grammarContextCode`, so producers hand over
+  // whatever they have and the cap is enforced where the tokenize happens.
+  const seed =
+    options.seed !== undefined && options.seed.length <= MAX_SEED_CHARS ? options.seed : undefined;
   const themeId =
     typeof theme === "string"
       ? theme

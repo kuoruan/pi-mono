@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
-import { detectLanguage, hlBlock, MAX_HL_CHARS } from "#src/theme/highlight.ts";
+import {
+  detectLanguage,
+  hlBlock,
+  MAX_HL_CHARS,
+  MAX_SEED_CHARS,
+  needsSeed,
+} from "#src/theme/highlight.ts";
 import {
   currentPalette as currentPaletteOf,
   currentTheme as currentThemeOf,
@@ -56,6 +62,45 @@ describe("detectLanguage", () => {
   });
 });
 
+describe("needsSeed (the grammar-seed gate)", () => {
+  it("admits the grammars that embed another syntax", () => {
+    for (const path of [
+      "app.vue",
+      "App.svelte",
+      "page.astro",
+      "index.html",
+      "notes.md",
+      "doc.mdx",
+      "index.php",
+      "view.erb",
+      "template.hbs",
+      "page.liquid",
+    ]) {
+      expect(needsSeed(detectLanguage(path))).toBe(true);
+    }
+  });
+
+  it("turns away languages whose tokenize a seed cannot change", () => {
+    // tsx/jsx carry JSX inside the TS/JS grammar itself — the tag-looking
+    // syntax is not an embedded grammar, so no seed is warranted.
+    for (const path of [
+      "app.ts",
+      "main.tsx",
+      "view.jsx",
+      "script.py",
+      "main.go",
+      "lib.rs",
+      "data.json",
+      "conf.yaml",
+      "style.css",
+      "noext",
+    ]) {
+      expect(needsSeed(detectLanguage(path))).toBe(false);
+    }
+    expect(needsSeed(undefined)).toBe(false);
+  });
+});
+
 /**
  * A fresh syntax-colored palette per call (content-identical across calls).
  *
@@ -86,6 +131,27 @@ describe("hlBlock", () => {
     const cached1 = await call();
     const cached2 = await call();
     expect(cached2).toBe(cached1);
+  });
+
+  it("drops an oversized seed before it reaches the tokenizer", async () => {
+    const themed = buildFakeTheme({ syntaxColors: true });
+    const unseeded = await hlBlock({
+      code: CODE,
+      language: "typescript",
+      palette: paletteOf(),
+      piTheme: themed,
+    });
+    const dropped = await hlBlock({
+      code: CODE,
+      language: "typescript",
+      palette: paletteOf(),
+      piTheme: themed,
+      seed: "x".repeat(MAX_SEED_CHARS + 1),
+    });
+    // The oversized seed is dropped: identical output, and (the same
+    // cache key) the very same reference as the unseeded render.
+    expect(dropped).toEqual(unseeded);
+    expect(dropped).toBe(unseeded);
   });
 
   it("returns unhighlighted lines for unknown languages and oversized input", async () => {

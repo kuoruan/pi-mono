@@ -169,20 +169,6 @@ export interface WriteState {
 }
 
 /**
- * A file snapshot cached for render-side derivation (edit's seed source):
- * lines keyed by path + mtime — the render closure runs every frame, the
- * disk read must not.
- */
-export interface FileSnapshot {
-  /** The file's path. */
-  path: string;
-  /** The mtime the lines were read at (the invalidator). */
-  mtimeMs: number;
-  /** The file's lines. */
-  lines: string[];
-}
-
-/**
  * The parse memo: a frozen patch's ParsedDiff keyed by patch identity
  * (renderResult re-runs per frame; the parse must not).
  */
@@ -196,17 +182,18 @@ export interface ParsedDiffMemo {
 /**
  * The edit wrapper's per-call render state (bridges execute→renderResult
  * facts into the header suffix and caches the diff parse + the seed's
- * file snapshot).
+ * file lines).
  */
 export interface EditState {
   /** The edit-operation count (bridged with the diff stats). */
   editCount?: number;
   /**
-   * The seed-source cache (edit's grammar-state seeding): the post-edit
-   * file's lines, keyed by path + mtime — the render closure runs every
-   * frame, the disk read must not.
+   * The seed source's lines for embedded grammars: the edited file read
+   * once per call (undefined = not read yet, null = unreadable). The row
+   * has one path, so the memo needs no key; see the seed producer in
+   * tool-edit.ts.
    */
-  seedCache?: FileSnapshot;
+  seedLines?: string[] | null;
   /** The parse memo (identity-keyed; see {@link ParsedDiffMemo}). */
   parsedDiff?: ParsedDiffMemo;
   /** The parsed-diff line count. */

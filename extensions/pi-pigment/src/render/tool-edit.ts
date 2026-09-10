@@ -8,7 +8,7 @@
  * Shiki highlighting.
  */
 
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 import type {
   AgentToolResult,
@@ -19,7 +19,7 @@ import type {
 
 import { parsePatchFiles } from "#src/core/diff.ts";
 import { linesBefore, linesOf } from "#src/core/lines.ts";
-import { detectLanguage } from "#src/theme/highlight.ts";
+import { detectLanguage, needsSeed } from "#src/theme/highlight.ts";
 import { resolveDiffPalette, type DiffPalette, type PaletteTheme } from "#src/theme/palette.ts";
 
 import { setCallHeader } from "./error-frame.ts";
@@ -154,7 +154,7 @@ export function createEditWrapper(
       // result.details stays byte-identical to the native tool's (ADR
       // 0005: sessions must render identically with or without pi-pigment).
       const details = (result as AgentToolResult<EditToolDetails>).details;
-      // Parse memo (the seedCache shape): the patch is frozen once the
+      // Parse memo (the seed's shape): the patch is frozen once the
       // result lands, and renderResult re-runs on every updateDisplay —
       // the parse is keyed by patch identity in the render state, not
       // repeated per frame. details stays untouched (ADR 0005).
@@ -188,26 +188,30 @@ export function createEditWrapper(
         ctx.state.removed = diff.removed;
         // The seed source for embedded grammars (vue/html): the post-edit
         // file from disk (the edit already applied — the file IS the new
-        // text). Cached per path+mtime inside the state: the render closure
-        // runs on every frame, and a disk read per frame is not free.
-        const seedFor = (start: number): string | undefined => {
-          if (start <= 1 || !editPath) return undefined;
-          let cached = ctx.state.seedCache;
-          try {
-            const st = statSync(editPath);
-            if (!cached || cached.path !== editPath || cached.mtimeMs !== st.mtimeMs) {
-              cached = {
-                path: editPath,
-                mtimeMs: st.mtimeMs,
-                lines: linesOf(readFileSync(editPath, "utf-8")),
-              };
-              ctx.state.seedCache = cached;
+        // text). Two gates keep the cost where the benefit is:
+        //  - only grammars that EMBED another syntax want a seed at all;
+        //  - only a hunk below the file's first line has a prefix to hand
+        //    the tokenizer (an oversized prefix is dropped in hlBlock).
+        // The read memoizes in the row state: the task render re-runs on
+        // every re-render (attach, settle, resize) and the row has ONE
+        // path for its whole life, so the memo needs no key. The stale
+        // window (an external write landing between the call and a later
+        // re-render) is display-only and self-heals on the next call.
+        const seedFor = needsSeed(language)
+          ? (start: number): string | undefined => {
+              if (start <= 1) return undefined;
+              let lines = ctx.state.seedLines;
+              if (lines === undefined) {
+                try {
+                  lines = linesOf(readFileSync(editPath, "utf-8"));
+                } catch {
+                  lines = null; // unreadable file: memoize the miss
+                }
+                ctx.state.seedLines = lines;
+              }
+              return lines ? linesBefore(lines, start) : undefined;
             }
-          } catch {
-            return undefined; // unreadable file: render unseeded
-          }
-          return linesBefore(cached.lines, start);
-        };
+          : undefined;
         setDiffPreviewTask({
           text,
           keyPrefix: "ed",
