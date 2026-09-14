@@ -16,21 +16,11 @@ The low-contrast output heuristic is retired: enforcement subsumes it on enforce
 
 `syntaxTheme` accepts a string or an object:
 
-- **String** (pi's theme-setting grammar): `"auto"`, a single theme name — a Shiki-bundled
-  theme name or a custom theme name resolved from `themes/` directories (project
-  `<cwd>/.pi/extensions/pigment/themes/`, shadowing same-named global files, then global
-  `~/.pi/agent/extensions/pigment/themes/`) — or an explicit `light/dark` slash pair
-  (`"github-light/github-dark"`: the first half renders on light pi themes, the second on
-  dark). Bundled names take precedence over same-named files; bundled names enforce against
-  the effective backgrounds (the revision above), user files render verbatim. Unresolvable →
-  ConfigIssue + auto fallback.
+- **String** (pi's theme-setting grammar): `"auto"`, a single theme name — a Shiki-bundled theme name or a custom theme name resolved from `themes/` directories (project `<cwd>/.pi/extensions/pigment/themes/`, shadowing same-named global files, then global `~/.pi/agent/extensions/pigment/themes/`) — or an explicit `light/dark` slash pair (`"github-light/github-dark"`: the first half renders on light pi themes, the second on dark). Bundled names take precedence over same-named files; bundled names enforce against the effective backgrounds (the revision above), user files render verbatim. Unresolvable → ConfigIssue + auto fallback.
 - **Object** (theme object) resolves per the current pi polarity:
-  - **Patch mode** (`base` given): start from the base's resolved theme for
-    that polarity (a gated base falls back to auto — patches continue on it), then overlay top-level `colors`, then the current polarity's variant `colors`.
-  - **Variant mode** (no `base`): the `light`/`dark` variants ARE the theme —
-    each variant's semantic `colors` (nine keys: comment, keyword, function, variable, string, number, type, operator, punctuation) build a TextMate theme through the same scope-mapping the pi-derived theme uses, with the author's own polarity authority. A missing variant for the current polarity falls back to auto (same rule as single-polarity names). No variants at all → ConfigIssue.
-  - `diff` roots merge per polarity: top-level roots apply to both, the
-    current polarity's variant roots win per key. `diff` entries are valid in both modes and inside variants.
+  - **Patch mode** (`base` given): start from the base's resolved theme for that polarity (a gated base falls back to auto — patches continue on it), then overlay top-level `colors`, then the current polarity's variant `colors`.
+  - **Variant mode** (no `base`): the `light`/`dark` variants ARE the theme — each variant's semantic `colors` (nine keys: comment, keyword, function, variable, string, number, type, operator, punctuation) build a TextMate theme through the same scope-mapping the pi-derived theme uses, with the author's own polarity authority. A missing variant for the current polarity falls back to auto (same rule as single-polarity names). No variants at all → ConfigIssue.
+  - `diff` roots merge per polarity: top-level roots apply to both, the current polarity's variant roots win per key. `diff` entries are valid in both modes and inside variants.
 
 Custom theme files are theme JSON (JSONC-tolerant) with an optional `diff` extension key (ignored by other Shiki consumers, preserving compatibility). Two shapes: VS Code JSON requires `type` for polarity gating; TextMate JSON (a `settings` array) infers polarity from the global background's luminance (recorded in the Variant semantics section below).
 

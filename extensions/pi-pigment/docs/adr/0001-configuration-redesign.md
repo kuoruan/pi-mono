@@ -10,12 +10,9 @@ Configuration is exactly two layers of one file: global `~/.pi/agent/extensions/
 
 All rendering colors derive from the active pi theme, never from ambient terminal detection:
 
-- **The diff palette** auto-derives by blending the theme's `toolDiffAdded`/
-  `toolDiffRemoved` foregrounds into `toolSuccessBg`/`toolErrorBg`. The only override path is ADR 0002's diff roots.
-- **The "auto" syntax theme** builds a TextMate theme from the pi theme's own
-  nine `syntax*` colors (required in pi's theme schema). An unresolvable derivation (e.g. 256-color pi theme values that decode to no RGB) renders unhighlighted — honest degradation, matching the large-diff fallback. There is no substitute fallback theme; the github pair is just one of the curated families.
-- **Syntax-theme lightness always follows the pi theme's polarity** — the
-  invariant every selection form in ADR 0002 preserves.
+- **The diff palette** auto-derives by blending the theme's `toolDiffAdded`/`toolDiffRemoved` foregrounds into `toolSuccessBg`/`toolErrorBg`. The only override path is ADR 0002's diff roots.
+- **The "auto" syntax theme** builds a TextMate theme from the pi theme's own nine `syntax*` colors (required in pi's theme schema). An unresolvable derivation (e.g. 256-color pi theme values that decode to no RGB) renders unhighlighted — honest degradation, matching the large-diff fallback. There is no substitute fallback theme; the github pair is just one of the curated families.
+- **Syntax-theme lightness always follows the pi theme's polarity** — the invariant every selection form in ADR 0002 preserves.
 
 **Escape construction** goes through a forced-truecolor ansis instance (`new Ansis(3)`): the renderers' escapes are the final rendering contract and must NOT adapt to `NO_COLOR`/`FORCE_COLOR`/non-TTY detection (the pi TUI owns color-level degradation). `parseAnsiRgb` (escape → RGB, truecolor and XTerm-256) stays hand-rolled because no color library provides that direction, and pi themes hand us escapes.
 

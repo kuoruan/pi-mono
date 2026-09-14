@@ -6,16 +6,11 @@ pi-pigment's color naming follows a two-layer convention: the user-facing layer 
 
 ## Survey: what the community does
 
-- **VS Code theme colors** are the de facto standard for TextMate-format
-  themes — which is exactly what our `themes/` files are. Measured across the 65 Shiki bundled themes (66 files including the barrel index): `diffEditor.insertedTextBackground` appears in 57, `removedTextBackground` in 52, `diffEditor.insertedLineBackground`/`removedLineBackground` in 15 (github×5, catppuccin×4, rose-pine×3, tokyo-night, plastic), and `editorGutter.addedBackground` in 53. `dark-plus` carries no diff keys.
-- **VS Code's diff model has BOTH a word key and a line key**:
-  `insertedTextBackground` is the **word-level** tint (mirroring GitHub Primer's `additionWord-bgColor`); `insertedLineBackground` is the **line-level** tint (mirroring `additionLine-bgColor`). VS Code has no diff foreground keys and no context-line colors.
-- **GitHub Primer** has first-class word-level tokens:
-  `--diffBlob-additionWord-bgColor` / `deletionWord-bgColor`, alongside `additionLine-bgColor` and `additionNum-bgColor` — a Line/Word/Num granularity ladder isomorphic to our line/word/gutter blend family. GitHub's own values use a 2:1 line:word alpha ratio, matching our intensity ladder (0.15 : 0.30).
-- **Git** (`color.diff.*`) is the oldest convention: `old`/`new` lines,
-  but `context` — our context-line field's term comes from here (and from pi's own `toolDiffContext` slot).
-- The core terminology axis is _not_ unified anywhere: VS Code mixes
-  `inserted/removed` (diffEditor) with `added/deleted` (editorGutter); Git uses `old/new`; GitHub's UI uses `added/removed`. There is no single canonical vocabulary — but there is one ecosystem with real leverage: VS Code's, because our theme files are its artifacts.
+- **VS Code theme colors** are the de facto standard for TextMate-format themes — which is exactly what our `themes/` files are. Measured across the 65 Shiki bundled themes (66 files including the barrel index): `diffEditor.insertedTextBackground` appears in 57, `removedTextBackground` in 52, `diffEditor.insertedLineBackground`/`removedLineBackground` in 15 (github×5, catppuccin×4, rose-pine×3, tokyo-night, plastic), and `editorGutter.addedBackground` in 53. `dark-plus` carries no diff keys.
+- **VS Code's diff model has BOTH a word key and a line key**: `insertedTextBackground` is the **word-level** tint (mirroring GitHub Primer's `additionWord-bgColor`); `insertedLineBackground` is the **line-level** tint (mirroring `additionLine-bgColor`). VS Code has no diff foreground keys and no context-line colors.
+- **GitHub Primer** has first-class word-level tokens: `--diffBlob-additionWord-bgColor` / `deletionWord-bgColor`, alongside `additionLine-bgColor` and `additionNum-bgColor` — a Line/Word/Num granularity ladder isomorphic to our line/word/gutter blend family. GitHub's own values use a 2:1 line:word alpha ratio, matching our intensity ladder (0.15 : 0.30).
+- **Git** (`color.diff.*`) is the oldest convention: `old`/`new` lines, but `context` — our context-line field's term comes from here (and from pi's own `toolDiffContext` slot).
+- The core terminology axis is _not_ unified anywhere: VS Code mixes `inserted/removed` (diffEditor) with `added/deleted` (editorGutter); Git uses `old/new`; GitHub's UI uses `added/removed`. There is no single canonical vocabulary — but there is one ecosystem with real leverage: VS Code's, because our theme files are its artifacts.
 
 ## Decision: a two-layer convention
 
@@ -53,10 +48,8 @@ Precedence: the explicit `diff` key wins per slot over the passthrough. Passthro
 
 **Root value semantics — the key decides.** A `background` value is opaque `#RRGGBB`; a `tint` value is translucent `#RRGGBBAA`:
 
-- An **opaque background** replaces the shared blend canvas — exactly
-  today's ADR 0002 contract (`bgBase` ← `toolSuccessBg`).
-- A **translucent tint anchors the word slot** and the intensity ladder
-  scales the family: the tint's hue becomes the mix accent and its alpha anchors the word-level intensity, so `bgAddedWord = mix(canvas, tint, α)`, `bgAdded = mix(canvas, tint, α·(0.15/0.30))`, `bgAddedGutter = mix(canvas, tint, α·(0.10/0.30))` (the removed side analogously with its own ladder). `mixBg` at intensity α **is** alpha compositing — no new primitive; the author's word-level intent lands exactly, and the line level lands at the author's line intent whenever their line:word ratio matches our 2:1 ladder (it does for the github family: word 30%, line 15%). **The canvas — and therefore `bgBase`, context lines, separators, and padding — stays untouched by tints.**
+- An **opaque background** replaces the shared blend canvas — exactly today's ADR 0002 contract (`bgBase` ← `toolSuccessBg`).
+- A **translucent tint anchors the word slot** and the intensity ladder scales the family: the tint's hue becomes the mix accent and its alpha anchors the word-level intensity, so `bgAddedWord = mix(canvas, tint, α)`, `bgAdded = mix(canvas, tint, α·(0.15/0.30))`, `bgAddedGutter = mix(canvas, tint, α·(0.10/0.30))` (the removed side analogously with its own ladder). `mixBg` at intensity α **is** alpha compositing — no new primitive; the author's word-level intent lands exactly, and the line level lands at the author's line intent whenever their line:word ratio matches our 2:1 ladder (it does for the github family: word 30%, line 15%). **The canvas — and therefore `bgBase`, context lines, separators, and padding — stays untouched by tints.**
 
 By default each side composites over **its own** canvas (add → the pi theme's `toolSuccessBg`; removed → the theme's error-box canvas), consistent with the non-passthrough derivation family. A `background` root unifies the canvas for both sides (one key, one surface). When the canvas is missing or unparseable, the tint composites over black `{0,0,0}` (the existing `addBase` default).
 
@@ -78,8 +71,7 @@ The internal layer is private implementation; it optimizes for brevity at ~139 r
 
 ## Implementation notes
 
-- Root **extraction** (the `diff` key and the `colors` passthrough) lives
-  in `loadThemeFile` — session time, raw values only. **Compositing and ladder scaling live in `derivePalette`** — they need the pi theme's canvas, which only exists at derivation time. `setDiffRoots` stores the spec; the roots key keeps the raw serialized values.
+- Root **extraction** (the `diff` key and the `colors` passthrough) lives in `loadThemeFile` — session time, raw values only. **Compositing and ladder scaling live in `derivePalette`** — they need the pi theme's canvas, which only exists at derivation time. `setDiffRoots` stores the spec; the roots key keeps the raw serialized values.
 - The nested `DiffRoots` shape (sides × slots) plus the slot predicate (`isRootHex`) drive both intakes — the zod schema and the theme-file extractor derive their sides, slots, and hex forms from the one shape, so the config surface and the type stay in lockstep mechanically.
 
 ## Breaking changes
