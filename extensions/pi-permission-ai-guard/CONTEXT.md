@@ -13,7 +13,7 @@ Six directories under `src/`, one per concept cluster (the glossary sections bel
 - `session/` — session state and the operator surface: lifecycle, the `/ai-guard` command table, overrides, session-file persistence.
 - `audit/` — the decision record and its readers: record factories, the review-log reader + fs tail adapter, report candidates.
 
-Root: `extension.ts`/`index.ts` (composition + entry), `logger.ts`/`utils.ts` (shared infrastructure). Imports inside `src/` use the `#src/<dir>/x.ts` absolute form.
+Root: `extension.ts` (composition), `logger.ts`/`utils.ts` (shared infrastructure). Imports inside `src/` use the `#src/<dir>/x.ts` absolute form. The package entry `index.ts` sits beside `src/` (the `exports`/`pi.extensions` target).
 
 ## Language
 

@@ -20,6 +20,7 @@
     "directory": "extensions/pi-permission-ai-guard"
   },
   "files": [
+    "index.ts",
     "src",
     "schemas",
     "config/config.example.json"
@@ -31,8 +32,8 @@
   },
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./index.ts",
+      "default": "./index.ts"
     }
   },
   "publishConfig": {
@@ -70,7 +71,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./index.ts"
     ]
   }
 }

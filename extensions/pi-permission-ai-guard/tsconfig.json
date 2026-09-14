@@ -9,5 +9,5 @@
       "#test/*": ["./tests/*"]
     }
   },
-  "include": ["src", "tests", "scripts", "vitest.config.ts"]
+  "include": ["index.ts", "src", "tests", "scripts", "vitest.config.ts"]
 }
