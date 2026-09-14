@@ -1,5 +1,14 @@
 # pi-pigment
 
+## 0.1.4
+
+### Patch Changes
+
+- ef064a5: Fix the bash wrapper silently dropping pi's shell settings. Registering the pigment bash tool under the same name replaces pi's builtin definition wholesale, execute included, so the wrapper now reads the same `SettingsManager` pi itself uses and passes `commandPrefix`/`shellPath` into `createBashToolDefinition` — a configured shell or command prefix runs again. The read is gated on the project trust pi resolved, matching pi's own manager: an untrusted project's `.pi/settings.json` must not shape the command that runs.
+- bafc374: Derive the truncation notices from the SDK's structured `details` instead of pattern-matching the output text. grep/find/ls append the notice as the output's last line and record the same fact in `details`; the wrapper now lifts that line out of the memoized body when a limit flag is set, so `ls` no longer renders the notice as a `└── [500 entries…]` tree row, a bracketed filename stays a path, and the notice never spends the collapse budget — it paints as the warning footer under the affordance line, like pi's native renderers.
+- 98d4177: Internal restructuring, no behavior change: the pi extension entry moves out of `src/` to `index.ts` beside it, matching the other extensions in this repo. package.json `exports` and `pi.extensions` point at `./index.ts`, so loading and importing are unchanged.
+- 680e42d: Stop persisting the execution timing: the `Took` footers (grep/find/ls, and the error frame) now read the clock pi's shell renderer already keeps in the render state — armed by `renderCall` while the execution is live, fixed by the first settled `renderResult`. Nothing is written into the session for it, so a resumed or exported session shows no duration, matching pi's own renderers. This also removes the one field pi-pigment appended to every tool result (`pigmentElapsedMs`) plus the two bounded maps that backed the thrown-error path.
+
 ## 0.1.3
 
 ### Patch Changes
