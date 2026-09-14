@@ -23,8 +23,7 @@ Details worth knowing:
 - **Embedded code injection** — bash commands parse via a shell AST (@aliou/sh):
   - heredoc bodies render in their interpreter's grammar (`python3 << EOF`)
   - heredoc file-writes in the target's (`cat > app.py << EOF`)
-  - inline code args too (`python -c '...'`, `node -e '...'`)
-    parse failures degrade gracefully
+  - inline code args too (`python -c '...'`, `node -e '...'`); parse failures degrade gracefully
 - **Zero-config palette** — diff backgrounds blend the theme's `toolDiffAdded`/`toolDiffRemoved` foregrounds into its `toolSuccessBg`/`toolErrorBg`; the syntax theme follows the detection chain:
   - a `pigment-*` theme maps back to its Shiki source (full `tokenColors` precision — bundled sources AA-fitted at render time, YOUR converted sources verbatim)
   - anything else derives from its own nine `syntax*` colors, WCAG-AA-adjusted for the render backgrounds

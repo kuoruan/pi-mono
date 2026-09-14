@@ -26,18 +26,11 @@ This repo uses the [Changesets GitHub Action v2](https://github.com/changesets/a
 
 The workflow has three jobs, gated by `select-mode`:
 
-1. **`select-mode`** — inspects the changeset state and outputs `mode`:
-   `"version"` (pending changesets exist) or `"publish"` (Version PR merged,
-   packages ready to publish).
-2. **`version`** (when `mode == "version"`) — runs `changeset version` and
-   opens/updates a **"Version Packages"** PR. Does NOT publish.
-3. **`publish`** (when `mode == "publish"`) — runs `changeset publish` via
-   `changesets/action/publish@v2` with npm Trusted Publishing (OIDC) and
-   provenance. `id-token: write` is scoped to this job only.
+1. **`select-mode`** — inspects the changeset state and outputs `mode`: `"version"` (pending changesets exist) or `"publish"` (Version PR merged, packages ready to publish).
+2. **`version`** (when `mode == "version"`) — runs `changeset version` and opens/updates a **"Version Packages"** PR. Does NOT publish.
+3. **`publish`** (when `mode == "publish"`) — runs `changeset publish` via `changesets/action/publish@v2` with npm Trusted Publishing (OIDC) and provenance. `id-token: write` is scoped to this job only.
 
-This design ensures `pnpm publish` only runs when `select-mode` detects a publish state. Note that for an initial unpublished package,
-`select-mode` routes to `publish` on every push to `master` until the first
-release lands — this is expected, not a bug.
+This design ensures `pnpm publish` only runs when `select-mode` detects a publish state. Note that for an initial unpublished package, `select-mode` routes to `publish` on every push to `master` until the first release lands — this is expected, not a bug.
 
 ## Independent per-package versions
 
