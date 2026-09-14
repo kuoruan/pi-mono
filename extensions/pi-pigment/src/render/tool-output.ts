@@ -7,6 +7,11 @@
  * tool-services; wrappers import their slice by intent — a wrapper's
  * import list reads as its contract.
  */
+import type {
+  FindToolDetails,
+  GrepToolDetails,
+  LsToolDetails,
+} from "@earendil-works/pi-coding-agent";
 import { keyText } from "@earendil-works/pi-coding-agent";
 import prettyMilliseconds from "pretty-ms";
 
@@ -57,12 +62,68 @@ export function collapseTail(hidden: number, theme: PaletteTheme, expandHint: st
 export interface DerivedOutput {
   /** The full inert output text. */
   output: string;
-  /** All lines, empty lines kept (grep's budget unit). */
+  /** The content lines: empty lines kept (grep's budget unit), the SDK's limit notice excluded. */
   lines: string[];
-  /** Non-empty lines (find/ls: the SDK's path-list shape). */
+  /** Non-empty content lines (find/ls: the SDK's path-list shape), the notice excluded. */
   entries: string[];
+  /**
+   * The SDK's bracketed limit notice ("[1000 results limit reached. …]")
+   * when the result carries one, else "". Lifted out of the content so no
+   * renderer shows it as a hit, path or tree row; collapsedView paints it
+   * as the warning footer.
+   */
+  notice: string;
   /** The content fingerprint (the swap key's identity component). */
   hash: string;
+}
+
+/**
+ * The limit flags the SDK's grep/find/ls details carry — one shape built
+ * from the three tools' own details types (all SDK exports), so a flag
+ * rename upstream moves with it: exactly the fields pi's native
+ * renderers read.
+ */
+type LimitFlags = Pick<GrepToolDetails, "truncation" | "matchLimitReached" | "linesTruncated"> &
+  Pick<FindToolDetails, "resultLimitReached"> &
+  Pick<LsToolDetails, "entryLimitReached">;
+
+/** A result object's structural slice for details — the memo's read seam. */
+interface ResultDetails {
+  details?: unknown;
+}
+
+/**
+ * The SDK's limit notice, when this result carries one. grep/find/ls append
+ * it as the text's LAST non-empty line AND record the same fact in
+ * `details` (one code path does both); the structured field is the
+ * authority — exactly what pi's native renderers read — and the trailing
+ * line supplies the words, never the other way around: a bracketed filename
+ * is not a notice, and no text shape can promote one.
+ *
+ * @param output - The inert output text.
+ * @param details - The result's details.
+ * @returns The notice line, or "" when the result has none.
+ */
+function limitNoticeOf(output: string, details: unknown): string {
+  const flags = details as LimitFlags | undefined;
+  const limited =
+    flags !== undefined &&
+    (flags.matchLimitReached !== undefined ||
+      flags.resultLimitReached !== undefined ||
+      flags.entryLimitReached !== undefined ||
+      flags.linesTruncated === true ||
+      flags.truncation?.truncated === true);
+  if (!limited) return "";
+  const nonEmpty = linesOf(output).filter((line) => line.length > 0);
+  const last = nonEmpty[nonEmpty.length - 1];
+  // Keep a notice only when real content precedes it: nothing else can
+  // carry the output then (the SDK never emits a notice over an empty
+  // result), and the " > 1 " guard keeps the wrapper guards' semantics
+  // (an empty body stays empty).
+  if (nonEmpty.length < 2 || last === undefined || !last.startsWith("[") || !last.endsWith("]")) {
+    return "";
+  }
+  return last;
 }
 
 /**
@@ -162,15 +223,20 @@ export function outputMemoOf(cell: OutputMemoCell): OutputDerive {
     const hit = weak.get(result);
     if (hit) return hit;
     const output = inertText(firstTextOf(result));
+    const notice = limitNoticeOf(output, (result as ResultDetails).details);
+    // The notice's separator blank line (the SDK writes "\n\n[…]") goes
+    // with it — neither is content the wrappers window over.
+    const body = notice ? output.slice(0, output.lastIndexOf(notice)).trimEnd() : output;
     // ("" keeps the falsy guard: an empty result's line view is [], not
     // [""] — the empty-output path is intercepted by the callers' guards.)
-    const lines = output ? linesOf(output) : [];
+    const lines = body ? linesOf(body) : [];
     const derived: DerivedOutput = {
       output,
       lines,
       // find/ls filter empty lines (the SDK's path list shape); grep
       // keeps them (a blank line is still an output line for its budget).
       entries: lines.filter((l: string) => l.length > 0),
+      notice,
       hash: fnv1a(output),
     };
     weak.set(result, derived);
@@ -232,11 +298,12 @@ export function firstTextOf(result: object): string {
  * @returns The styled hint.
  */
 export function expandKeyHint(theme: PaletteTheme): string {
-  // keyText resolves the user's binding from pi's keybinding table (the
-  // app installs it into pi-tui's global at startup); outside a pi
-  // process — a bare test runner — the table is pi-tui's own defaults,
-  // which do not carry the app-level id, and the documented default
-  // ("ctrl+o", pi's core keybindings) fills in.
+  // pi's own keyHint composition, byte-identically (keybinding-hints.js:
+  // fg("dim", keyText(id)) + fg("muted", " " + description)) — pinned by
+  // upstream-contracts. The render-time theme instance replaces pi's
+  // ambient global (ours is the one pi actually passed in; a bare test
+  // process has no global at all), and the "ctrl+o" fallback covers the
+  // same bare processes (pi installs the binding table app-side).
   const key = keyText("app.tools.expand") || "ctrl+o";
   return theme.fg("dim", key) + theme.fg("muted", " to expand");
 }
@@ -312,6 +379,8 @@ export interface ViewOptions {
   expandedCap?: number;
   /** The measured execution time (undefined while pending, and on a resumed row); unset = no footer. */
   tookMs?: number;
+  /** The SDK's limit notice (DerivedOutput.notice) — painted as the warning footer line. */
+  notice?: string;
   /** The pi theme (muted fg). */
   theme: PaletteTheme;
 }
@@ -335,14 +404,14 @@ export function collapsedView(
   lines: string[],
   opts: ViewOptions,
 ): { shown: string[]; tail: string } {
-  const { budget, expanded, expandedCap, tookMs, theme } = opts;
+  const { budget, expanded, expandedCap, tookMs, notice, theme } = opts;
   // An absent result source means no footer (write's create preview —
   // the SDK's own write renderer never showed timing either).
   const collapsed = !expanded && lines.length > budget;
   const window = collapsed ? budget : (expandedCap ?? lines.length);
   const hidden = lines.length - Math.min(lines.length, window);
   const shown = lines.slice(0, window);
-  const tail = [
+  const footers = [
     // The collapsed regime advertises the expand key; an expanded cap
     // reports the remainder without an affordance.
     collapseTail(hidden, theme, expanded ? "" : expandKeyHint(theme)),
@@ -350,5 +419,11 @@ export function collapsedView(
   ]
     .filter(Boolean)
     .join(theme.fg("muted", " · "));
+  // The limit notice rides its own line under the tail: it is the SDK's
+  // warning about the whole output (the native renderers show the same
+  // information as a `[Truncated: …]` line), not part of the windowed
+  // body — so it is never counted against the budget nor hidden by it.
+  const alert = notice ? theme.fg("warning", notice) : "";
+  const tail = [footers, alert].filter(Boolean).join("\n");
   return { shown, tail };
 }

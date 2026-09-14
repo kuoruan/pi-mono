@@ -67,6 +67,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
         budget: COLLAPSED_LINES.ls,
         expanded: options.expanded,
         tookMs,
+        notice: derived.notice,
         theme,
       });
       const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
@@ -88,11 +89,14 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
               budget: COLLAPSED_LINES.ls,
               expanded: options.expanded,
               tookMs,
+              notice: derived.notice,
               theme,
             });
 
             // Tree rendering: one entry per row under a connector rule;
             // type coloring as before (directories accent, code tinted).
+            // The entries carry no limit notice (DerivedOutput lifts it
+            // into the footer), so a notice can never wear a connector.
             const rows = shown.map((entry, i) => {
               // The elbow only when this is the TRUE last entry (not the
               // collapse cut — hidden entries continue the tree).

@@ -158,6 +158,7 @@ export function createGrepWrapper(
         budget: COLLAPSED_LINES.grep,
         expanded: options.expanded,
         tookMs,
+        notice: derived.notice,
         theme,
       });
 

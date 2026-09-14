@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // find no file (a missing layer is skipped by design).
 const isolatedDir = "/nonexistent-pi-pigment-find-isolation";
 
-import { globAnchor, NOTICE_TAIL } from "#src/render/tool-find.ts";
+import { globAnchor } from "#src/render/tool-find.ts";
 import {
   buildRenderTheme,
   type DrivenTaskComponent,
@@ -68,25 +68,26 @@ describe("find result rendering", () => {
     expect(plain(text)).toContain("binary");
   });
 
-  it("passes through truncation notices and the empty result", async () => {
+  it("passes through limit-free bodies and the empty result", async () => {
     const tools = await registerTools({ cwd: isolatedDir, agentDir: isolatedDir });
     const find = tools.find((t) => t.name === "find");
     if (!find?.renderResult) throw new Error("find not registered");
     const { ctx } = makeRenderCtx();
-    const notice = find.renderResult(
+    // No limit details: the body renders whole (a trailing bracketed line
+    // without details is just the text — the notice pin lives in the
+    // "limit notices" suite above).
+    const body = find.renderResult(
       {
-        content: [{ type: "text", text: "a.ts\n\n[1000 results limit reached]" }],
+        content: [{ type: "text", text: "a.ts\nb.ts" }],
         isError: false,
       },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
     ) as DrivenTaskComponent;
-    notice.render(120);
-    await waitFor(() =>
-      plain(notice.text.text).includes("[1000 results limit reached]") ? true : undefined,
-    );
-    expect(plain(notice.text.text)).toContain("[1000 results limit reached]");
+    body.render(120);
+    await waitFor(() => (plain(body.text.text).includes("b.ts") ? true : undefined));
+    expect(plain(body.text.text)).toContain("a.ts");
 
     const empty = find.renderResult(
       { content: [{ type: "text", text: "No files found matching pattern" }], isError: false },
@@ -141,22 +142,58 @@ describe("globAnchor character classes (metacharacter wholesale)", () => {
   });
 });
 
-describe("limit-notice tail (the SDK's real bracketed forms)", () => {
-  it("matches the SDK's limit-notice tails, never paths", async () => {
-    // The SDK's find execute appends `[N results limit reached…]` /
-    // `[XKB limit reached]` tails (find/grep/ls share the shape) — the
-    // old `[Truncated:` matcher never matched any real output (that form
-    // only exists in the SDK's native renderer, which we replace).
-    // NOTICE_TAIL imported statically at the top of this file.
-    expect(
-      NOTICE_TAIL.test("[1000 results limit reached. Use limit=2000 for more, or refine pattern]"),
-    ).toBe(true);
-    expect(NOTICE_TAIL.test("[100 entries limit reached. Use limit=200 for more]")).toBe(true);
-    expect(NOTICE_TAIL.test("[50.0KB limit reached]")).toBe(true);
-    expect(NOTICE_TAIL.test("[1000 matches limit reached]")).toBe(true);
-    // Bracketed filenames and plain paths stay paths.
-    expect(NOTICE_TAIL.test("[note].md")).toBe(false);
-    expect(NOTICE_TAIL.test("src/index.ts")).toBe(false);
+describe("limit notices (the SDK's structured details)", () => {
+  it("renders the notice from details as the warning footer, never as a path", async () => {
+    const tools = await registerTools({ cwd: isolatedDir, agentDir: isolatedDir });
+    const find = tools.find((t) => t.name === "find");
+    if (!find?.renderResult) throw new Error("find not registered");
+    const { ctx } = makeRenderCtx();
+    // The SDK's real find result: the notice as the text's last line AND
+    // the same fact in details (find.js sets both in one path).
+    const limited = find.renderResult(
+      {
+        content: [
+          {
+            type: "text",
+            text: "src/a.ts\nsrc/b.ts\n\n[1000 results limit reached. Use limit=2000 for more, or refine pattern]",
+          },
+        ],
+        details: { resultLimitReached: 1000 },
+      },
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    ) as DrivenTaskComponent;
+    limited.render(120);
+    await waitFor(() => (plain(limited.text.text).includes("src/a.ts") ? true : undefined));
+    const text = plain(limited.text.text);
+    const lines = text.split("\n");
+    // The paths are body rows; the notice is the footer's last line — no
+    // `a.ts/` styling bleed, and no notice-shaped path row.
+    expect(lines[0]).toContain("src/a.ts");
+    expect(lines[1]).toContain("src/b.ts");
+    expect(lines[lines.length - 1]).toBe(
+      "[1000 results limit reached. Use limit=2000 for more, or refine pattern]",
+    );
+  });
+
+  it("keeps a bracketed FILENAME a path (details is the authority, never the text shape)", async () => {
+    const tools = await registerTools({ cwd: isolatedDir, agentDir: isolatedDir });
+    const find = tools.find((t) => t.name === "find");
+    if (!find?.renderResult) throw new Error("find not registered");
+    const { ctx } = makeRenderCtx();
+    // No details: `[note].md` is an ordinary result path, whatever it
+    // looks like (the regex era could not tell them apart from anatomy
+    // alone; the structured field can).
+    const plainResult = find.renderResult(
+      { content: [{ type: "text", text: "[note].md\nsrc/index.ts" }] },
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    ) as DrivenTaskComponent;
+    plainResult.render(120);
+    await waitFor(() => (plain(plainResult.text.text).includes("index.ts") ? true : undefined));
+    expect(plain(plainResult.text.text)).toContain("[note].md");
   });
 });
 

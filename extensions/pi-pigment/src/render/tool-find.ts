@@ -3,8 +3,8 @@
  * the tool-wrapper factory); rendering colorizes each result path by type —
  * the same family as ls (directories accent, code files a syntax tint), but
  * shaped for find's output: paths carry directory prefixes, so the dirname
- * renders dim and the basename carries the type color. The call header and
- * truncation notices delegate to the SDK's native renderer.
+ * renders dim and the basename carries the type color. The call header delegates to
+ * the SDK's native renderer; truncation notices ride the shared footer.
  */
 
 import type { FindToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -23,10 +23,6 @@ import {
   renderPlainOutput,
 } from "./tool-output.ts";
 import { argsOf, type ToolServices } from "./tool-services.ts";
-
-/** The SDK's bracketed limit-notice tail (find/grep/ls share the shape). */
-export const NOTICE_TAIL =
-  /^\[\d+(?:\.\d+)?[KMG]?B?(?: results| matches| entries)? limit reached(?:\. Use limit=[\d.]+[KMG]?B? for more[^\]]*)?\]$/;
 
 /** The styleFindPath inputs. */
 interface StyleFindPathOptions {
@@ -150,6 +146,7 @@ export function createFindWrapper(
         budget: COLLAPSED_LINES.find,
         expanded: options.expanded,
         tookMs,
+        notice: derived.notice,
         theme,
       });
       const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
@@ -168,20 +165,12 @@ export function createFindWrapper(
               budget: COLLAPSED_LINES.find,
               expanded: options.expanded,
               tookMs,
+              notice: derived.notice,
               theme,
             });
-            // The SDK appends truncation notices as a bracketed tail line —
-            // style the path lines, pass notices through muted.
+            // Every shown line is a path or the SDK's empty-result sentinel
+            // — the limit notice was lifted into the footer (DerivedOutput).
             const styled = lines.map((line) => {
-              // The SDK's only bracketed output form is the truncation
-              // notice (the payload is templated — `[1000 results limit
-              // reached. Use limit=2000 for more, or refine pattern]`,
-              // `[50.0KB limit reached]` — so match the shape, not the
-              // literal). Everything else — including bracketed filenames
-              // like `[note].md` — is a path.
-              if (NOTICE_TAIL.test(line)) {
-                return theme.fg("warning", inertText(line));
-              }
               if (line === "No files found matching pattern") {
                 return theme.fg("muted", line);
               }

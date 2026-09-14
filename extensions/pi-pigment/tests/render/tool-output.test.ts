@@ -237,6 +237,40 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     expect(text).toContain("sub/");
   });
 
+  it("ls renders the SDK's limit notice as a footer, never as a tree row", async () => {
+    const tools = await registerTools();
+    const ls = tools.find((t) => t.name === "ls");
+    if (!ls?.renderResult) throw new Error("ls not registered");
+    const { ctx } = makeRenderCtx();
+    // A limited listing's real shape: entries then the SDK's notice tail
+    // (ls.js appends `\n\n[...]` and sets entryLimitReached). Rendering it
+    // as an entry once produced `├── [500 entries limit reached…]]`.
+    const component = ls.renderResult(
+      {
+        content: [
+          {
+            type: "text",
+            text: "app.ts\nnotes.txt\n\n[500 entries limit reached. Use limit=1000 for more]",
+          },
+        ],
+        details: { entryLimitReached: 500 },
+      },
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    ) as DrivenTaskComponent;
+    const text = await settledText(component, "app.ts");
+    const lines = text.split("\n");
+    expect(lines[0]).toContain("app.ts");
+    expect(lines[1]).toContain("notes.txt");
+    expect(lines[lines.length - 1]).toBe("[500 entries limit reached. Use limit=1000 for more]");
+    // The notice is a footer row — exactly one of them, and no tree
+    // connector ever prefixes it (the pre-fix bug: `└── [500 entries…]`).
+    expect(lines.filter((line) => line.includes("limit reached"))).toEqual([
+      "[500 entries limit reached. Use limit=1000 for more]",
+    ]);
+  });
+
   it("grep collapses long output with the affordance tail and Took footer", async () => {
     const tools = await registerTools();
     const grep = tools.find((t) => t.name === "grep");
@@ -567,6 +601,64 @@ describe("the window authority (collapsedView)", () => {
     expect(shown.length).toBe(150);
     expect(tail).toContain("50 more lines");
     expect(tail).not.toContain("ctrl+o");
+  });
+
+  it("paints the limit notice as a footer line, outside the window and its budget", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `L${i}`);
+    const notice = "[50.0KB limit reached]";
+    const { shown, tail } = collapsedView(lines, {
+      budget: 15,
+      expanded: false,
+      notice,
+      theme: buildRenderTheme(),
+    });
+    // The notice is not a body line: the window still shows the full budget.
+    expect(shown.length).toBe(15);
+    expect(shown).not.toContain(notice);
+    expect(tail.split("\n")).toEqual(["... (15 more lines, ctrl+o to expand)", notice]);
+  });
+});
+
+describe("the limit notice (the SDK's details, not the text shape)", () => {
+  const derive = outputMemoOf({});
+  const limited = (text: string, details: unknown) =>
+    derive({ content: [{ type: "text", text }], details });
+
+  it("lifts the SDK's trailing notice out of the body when details flags a limit", () => {
+    const derived = limited("a.ts\nb.ts\n\n[1000 results limit reached]", {
+      resultLimitReached: 1000,
+    });
+    // Lift from BOTH views (grep's line budget and find/ls's entry list),
+    // separator blank included: the notice can never render as a hit, a
+    // path, or a tree row.
+    expect(derived.lines).toEqual(["a.ts", "b.ts"]);
+    expect(derived.entries).toEqual(["a.ts", "b.ts"]);
+    expect(derived.notice).toBe("[1000 results limit reached]");
+  });
+
+  it("reads every flag the SDK's renderers read (grep's three, find/ls's cap, truncation)", () => {
+    const text = "hit.txt:12: x\n\n[50.0KB limit reached]";
+    for (const details of [
+      { matchLimitReached: 200 },
+      { linesTruncated: true },
+      { truncation: { truncated: true } },
+      { resultLimitReached: 500 },
+      { entryLimitReached: 500 },
+    ]) {
+      expect(limited(text, details).notice).toBe("[50.0KB limit reached]");
+    }
+  });
+
+  it("keeps a bracketed line in the body without details (a filename is not a notice)", () => {
+    const derived = limited("[note].md\nsrc/index.ts", undefined);
+    expect(derived.entries).toEqual(["[note].md", "src/index.ts"]);
+    expect(derived.notice).toBe("");
+  });
+
+  it("keeps a notice-only body intact (nothing else carries the output)", () => {
+    const derived = limited("[50.0KB limit reached]", { truncation: { truncated: true } });
+    expect(derived.entries).toEqual(["[50.0KB limit reached]"]);
+    expect(derived.notice).toBe("");
   });
 });
 
