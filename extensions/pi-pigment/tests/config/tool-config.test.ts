@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
-import pigmentExtension from "#src/index.ts";
+import { createPigmentExtension } from "#src/extension.ts";
 import { vol } from "#test/memfs.ts";
 
 vi.mock("node:fs");
@@ -47,7 +47,7 @@ async function startExtension(pi: {
     getCommands: () => [...commandVocabulary].map((name) => ({ name })),
     registerCommand: (_name: string, _options: unknown) => {},
   };
-  pigmentExtension(api as never);
+  createPigmentExtension(api as never);
   // The handler is async (bundled-theme direct names import lazily); pi's
   // runner awaits every handler — mirror that or the tools aren't there yet.
   await sessionStart?.({ type: "session_start", reason: "startup" }, { cwd: process.cwd() });
@@ -86,7 +86,7 @@ describe("session_start re-registration (fork/resume)", () => {
       getCommands: () => [] as Array<{ name: string }>,
       registerCommand(_name: string, _options: unknown) {},
     };
-    await pigmentExtension(api as never);
+    await createPigmentExtension(api as never);
     for (const reason of ["startup", "resume"]) {
       for (const h of api.handlers.get("session_start") ?? []) {
         await h({ type: "session_start", reason }, { cwd: "/tmp" });

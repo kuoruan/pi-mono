@@ -27,6 +27,7 @@
   },
   "files": [
     "themes",
+    "index.ts",
     "src",
     "config",
     "schemas",
@@ -41,8 +42,8 @@
   },
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./index.ts",
+      "default": "./index.ts"
     }
   },
   "publishConfig": {
@@ -85,7 +86,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./index.ts"
     ],
     "themes": [
       "./themes"

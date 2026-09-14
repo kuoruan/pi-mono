@@ -11,7 +11,7 @@ import type {
   ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 
-import pigmentExtension from "#src/index.ts";
+import { createPigmentExtension } from "#src/extension.ts";
 import type { PreviewTask } from "#src/render/text-task.ts";
 import type { RenderContext } from "#src/render/tool-services.ts";
 import { clearHighlightCacheForTest } from "#src/theme/highlight.ts";
@@ -341,7 +341,7 @@ async function driveSession(
     // The /pigment command registers at module load (recorded, not run).
     registerCommand: (_name: string, _options: unknown) => {},
   };
-  await pigmentExtension(api as unknown as ExtensionAPI);
+  await createPigmentExtension(api as unknown as ExtensionAPI);
   await sessionStart?.(
     { type: "session_start", reason: "startup" },
     { cwd: env.cwd ?? defaultCwd ?? process.cwd() },
