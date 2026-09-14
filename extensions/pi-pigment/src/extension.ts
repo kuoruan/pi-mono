@@ -37,6 +37,7 @@ import {
   defineTool,
   type ExtensionAPI,
   getAgentDir,
+  SettingsManager,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
@@ -123,6 +124,17 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
       reportIssue(issue.message);
     }
     const disabledTools = new Set(config.disabledTools);
+    // The shell settings pi bakes into its own bash definition
+    // (agent-session's `createAllToolDefinitions(cwd, { bash: {
+    // commandPrefix, shellPath } })`). Our same-name registration replaces
+    // that definition wholesale, execute included, so the wrapper has to
+    // carry the same two options or a configured shell/prefix would be
+    // silently dropped from the command that actually runs. Same read
+    // path — and the same trust gate — as pi's own manager: an untrusted
+    // project's `.pi/settings.json` must not shape the executing command.
+    const shellSettings = SettingsManager.create(cwd, agentDir, {
+      projectTrusted: ctx.isProjectTrusted(),
+    });
     const {
       selection,
       rootsSpec,
@@ -162,7 +174,15 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
     );
     registerToolIfEnabled(
       "bash",
-      createBashWrapper(defineTool(createBashToolDefinition(cwd)), services),
+      createBashWrapper(
+        defineTool(
+          createBashToolDefinition(cwd, {
+            commandPrefix: shellSettings.getShellCommandPrefix(),
+            shellPath: shellSettings.getShellPath(),
+          }),
+        ),
+        services,
+      ),
     );
     const yieldSearchTofff = fffPresent(pi);
     registerToolIfEnabled(

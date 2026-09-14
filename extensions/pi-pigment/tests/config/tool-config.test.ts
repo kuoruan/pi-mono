@@ -12,8 +12,28 @@ vi.mock("node:fs/promises");
 vi.mock("fs/promises");
 
 interface MockApi {
-  on: (event: string, handler: (event: unknown, ctx: { cwd: string }) => void) => void;
+  on: (event: string, handler: (event: unknown, ctx: MockSessionContext) => void) => void;
   registerTool: (tool: unknown) => void;
+}
+
+/**
+ * The session-start context slice the extension reads — pi's runner hands
+ * it the same shape (cwd plus the resolved project trust, which the
+ * settings read is gated on).
+ */
+interface MockSessionContext {
+  cwd: string;
+  isProjectTrusted: () => boolean;
+}
+
+/**
+ * A trusted session context rooted at `cwd`.
+ *
+ * @param cwd - The session's working directory.
+ * @returns The mock context.
+ */
+function trustedContext(cwd: string): MockSessionContext {
+  return { cwd, isProjectTrusted: () => true };
 }
 
 /** The tool-name vocabulary the fff-presence probe reads. */
@@ -31,11 +51,11 @@ async function startExtension(pi: {
   on: MockApi["on"];
   registerTool: (tool: never) => void;
 }): Promise<MockApi> {
-  let sessionStart: ((event: unknown, ctx: { cwd: string }) => void | Promise<void>) | undefined;
+  let sessionStart: ((event: unknown, ctx: MockSessionContext) => void | Promise<void>) | undefined;
   const api = {
     on: (
       event: string,
-      handler: (event: unknown, ctx: { cwd: string }) => void | Promise<void>,
+      handler: (event: unknown, ctx: MockSessionContext) => void | Promise<void>,
     ) => {
       if (event === "session_start") sessionStart = handler;
     },
@@ -50,7 +70,7 @@ async function startExtension(pi: {
   createPigmentExtension(api as never);
   // The handler is async (bundled-theme direct names import lazily); pi's
   // runner awaits every handler — mirror that or the tools aren't there yet.
-  await sessionStart?.({ type: "session_start", reason: "startup" }, { cwd: process.cwd() });
+  await sessionStart?.({ type: "session_start", reason: "startup" }, trustedContext(process.cwd()));
   return api;
 }
 
@@ -89,7 +109,7 @@ describe("session_start re-registration (fork/resume)", () => {
     await createPigmentExtension(api as never);
     for (const reason of ["startup", "resume"]) {
       for (const h of api.handlers.get("session_start") ?? []) {
-        await h({ type: "session_start", reason }, { cwd: "/tmp" });
+        await h({ type: "session_start", reason }, trustedContext("/tmp"));
       }
     }
     expect([...api.tools.keys()].toSorted()).toEqual([

@@ -9,22 +9,27 @@
  * package — a memfs mock would break that read.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  type BashToolOptions,
   createBashToolDefinition,
   createEditToolDefinition,
   createFindToolDefinition,
   createGrepToolDefinition,
   createLsToolDefinition,
   initTheme,
+  keyHint,
+  keyText,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { Container, KeybindingsManager, setKeybindings, Text } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createShellWrapper } from "#src/render/shell-tool.ts";
+import { expandKeyHint } from "#src/render/tool-output.ts";
+import type { PaletteTheme } from "#src/theme/palette.ts";
 import {
   buildRenderTheme,
   makeRenderCtx,
@@ -44,6 +49,43 @@ beforeAll(() => {
   // initialized like a real pi session; no watcher — it polls and hangs).
   initTheme(undefined, false);
 }, 60000);
+
+// ---------------------------------------------------------------------------
+// the expand-hint composition
+// ---------------------------------------------------------------------------
+
+/**
+ * Pigment's expand affordance mirrors pi's `keyHint` byte for byte (the
+ * same `fg("dim", keyText(id)) + fg("muted", " " + description)` split).
+ * The mirror is deliberate — pi's helper paints the ambient theme global
+ * and cannot take a theme, while pigment's renderers speak the theme
+ * instance pi handed them — so this pin is what keeps the two from
+ * drifting when pi restyles its own affordance.
+ */
+/** The SDK's cross-module theme global, read directly (keyHint's own seam). */
+type GlobalThisWithTheme = typeof globalThis & Record<symbol, PaletteTheme | undefined>;
+
+/** The shared ambient-theme key (theme.js's Symbol.for). */
+const AMBIENT_THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
+describe("expand-key hint parity with the SDK's keyHint", () => {
+  it("composes the same bytes (ambient theme, app binding installed)", () => {
+    // The app installs its keybinding table at startup (its own
+    // KeybindingsManager over the app definitions); install the same
+    // expand binding here so keyText resolves pi's real default.
+    setKeybindings(
+      new KeybindingsManager({
+        "app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
+      }),
+    );
+    expect(keyText("app.tools.expand")).toBe("ctrl+o");
+    // The ambient instance initTheme parked in the SDK's cross-module
+    // global — the exact object keyHint paints (its internal key, the
+    // documented sharing seam between SDK module instances).
+    const ambient = (globalThis as unknown as GlobalThisWithTheme)[AMBIENT_THEME_KEY];
+    if (!ambient) throw new Error("ambient theme missing after initTheme");
+    expect(expandKeyHint(ambient)).toBe(keyHint("app.tools.expand", "to expand"));
+  });
+});
 
 // ---------------------------------------------------------------------------
 // bash output delegation
@@ -74,6 +116,163 @@ describe("bash output delegation (renderResult)", () => {
       expect(component).toBeDefined();
       expect(component).not.toBe(textish);
       expect((component as { children?: unknown[] }).children?.length).toBeGreaterThan(0);
+    },
+  );
+});
+
+/**
+ * The bash options pi's own runtime passes to its base definition
+ * (`agent-session`'s `createAllToolDefinitions(cwd, { bash: {
+ * commandPrefix, shellPath } })`) — the definition the wrapper's same-name
+ * registration replaces wholesale, execute included.
+ */
+type BashOptionsPiForwards = "commandPrefix" | "shellPath";
+
+/**
+ * The remaining `BashToolOptions` keys, left to the SDK's own defaults:
+ * pi passes none of them, and forwarding any would change behavior rather
+ * than preserve it (`operations` replaces execution; a `false`
+ * `exposeSessionEnvironment` also drops the tool's `promptGuidelines`; no
+ * caller sets `spawnHook`).
+ */
+type BashOptionsLeftToSdkDefault = "operations" | "exposeSessionEnvironment" | "spawnHook";
+
+/** Every `BashToolOptions` key, once the two lists above are subtracted. */
+type UnaccountedBashOptions = Exclude<
+  keyof BashToolOptions,
+  BashOptionsPiForwards | BashOptionsLeftToSdkDefault
+>;
+
+/**
+ * Compile-time canary over the two lists above: if upstream adds a
+ * `BashToolOptions` key, this line stops compiling (`'true' is not
+ * assignable to 'false'`) and whoever bumps the SDK has to decide whether
+ * pi's `_buildRuntime` started passing it — otherwise the wrapper drops it
+ * silently, exactly as it dropped the shell settings before this suite
+ * existed.
+ */
+const ALL_BASH_OPTIONS_ACCOUNTED_FOR: [UnaccountedBashOptions] extends [never] ? true : false =
+  true;
+
+describe("bash tool options (pi's own shell settings)", () => {
+  // pi builds its base bash definition from a trust-gated settings read
+  // (agent-session: `createAllToolDefinitions(cwd, { bash: {
+  // commandPrefix, shellPath } })`); pi-pigment's same-name registration
+  // REPLACES that definition, execute included, so the wrapper must carry
+  // the same options under the same gate — or a configured prefix/shell
+  // silently stops applying to the command that actually runs, while an
+  // untrusted project's `.pi/settings.json` starts applying.
+  const settingsDir = mkdtempSync(join(tmpdir(), "pi-pigment-shell-settings-"));
+  const agentDir = join(settingsDir, "agent");
+  const projectDir = join(settingsDir, "project");
+  const projectSettingsPath = join(projectDir, ".pi", "settings.json");
+  const prevAgentDir = process.env.PI_CODING_AGENT_DIR;
+  afterAll(() => {
+    if (prevAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
+    rmSync(settingsDir, { recursive: true, force: true });
+  });
+
+  /**
+   * Stage both settings layers, register the wrappers, run one command.
+   *
+   * @param agent - The agent-layer settings (written to agentDir).
+   * @param project - The project-layer settings, when the case needs them.
+   * @param projectTrusted - Pi's resolved trust, handed to session_start.
+   * @param command - The bash command to run.
+   * @returns The plain text, or the thrown error.
+   */
+  async function runBash(
+    agent: Record<string, unknown>,
+    project: Record<string, unknown> | undefined,
+    projectTrusted: boolean,
+    command: string,
+  ): Promise<{ text: string; error?: unknown }> {
+    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(agentDir, "settings.json"), JSON.stringify(agent));
+    if (project) {
+      mkdirSync(join(projectDir, ".pi"), { recursive: true });
+      writeFileSync(projectSettingsPath, JSON.stringify(project));
+    } else {
+      rmSync(projectSettingsPath, { force: true });
+    }
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const tools = await registerTools({ cwd: projectDir, agentDir, projectTrusted });
+    const bash = toolOf(tools, "bash");
+    try {
+      const result = await bash.execute("t-options", { command }, undefined, undefined, undefined);
+      return {
+        text: plain(
+          result.content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("\n"),
+        ),
+      };
+    } catch (error) {
+      return { text: "", error };
+    }
+  }
+
+  const probe = 'echo "[${PIGMENT_OPTIONS_PROBE:-unset}]"';
+
+  it("accounts for every BashToolOptions key (the forward list stays complete)", () => {
+    // The assertion is the type of ALL_BASH_OPTIONS_ACCOUNTED_FOR
+    // (compiled by `tsc`); this keeps the value in the report.
+    expect(ALL_BASH_OPTIONS_ACCOUNTED_FOR).toBe(true);
+  });
+
+  it(
+    "carries the agent layer's shellCommandPrefix into the command",
+    { timeout: 20000 },
+    async () => {
+      const { text } = await runBash(
+        { shellCommandPrefix: "export PIGMENT_OPTIONS_PROBE=carried" },
+        undefined,
+        true,
+        probe,
+      );
+      expect(text).toContain("[carried]");
+    },
+  );
+
+  it("carries the agent layer's shellPath into the spawn", { timeout: 20000 }, async () => {
+    // A path that does not exist makes the SDK's own shell resolution
+    // throw before spawning — a dropped shellPath would run the command
+    // under the default shell instead, so this can only pass when the
+    // option is forwarded.
+    const { error } = await runBash(
+      { shellPath: join(settingsDir, "no-such-shell") },
+      undefined,
+      true,
+      "echo unreachable",
+    );
+    expect(String(error)).toContain("Custom shell path not found");
+  });
+
+  it("honors the project layer when pi trusts the project", { timeout: 20000 }, async () => {
+    const { text } = await runBash(
+      {},
+      { shellCommandPrefix: "export PIGMENT_OPTIONS_PROBE=from-project" },
+      true,
+      probe,
+    );
+    expect(text).toContain("[from-project]");
+  });
+
+  it(
+    "ignores the project layer when pi does not trust the project",
+    { timeout: 20000 },
+    async () => {
+      // pi omits the project layer for an untrusted project; a wrapper that
+      // read it anyway would let a cloned repo's `.pi/settings.json` shape
+      // every command it runs.
+      const { text } = await runBash(
+        { shellCommandPrefix: "export PIGMENT_OPTIONS_PROBE=carried" },
+        { shellCommandPrefix: "export PIGMENT_OPTIONS_PROBE=from-project" },
+        false,
+        probe,
+      );
+      expect(text).toContain("[carried]");
+      expect(text).not.toContain("from-project");
     },
   );
 });

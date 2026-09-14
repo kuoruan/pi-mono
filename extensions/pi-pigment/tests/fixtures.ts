@@ -278,7 +278,7 @@ export type RegisteredTool = Omit<
  * @returns The registered tools.
  */
 export async function registerTools(
-  env: { cwd?: string; agentDir?: string } = {},
+  env: { cwd?: string; agentDir?: string; projectTrusted?: boolean } = {},
 ): Promise<RegisteredTool[]> {
   // DEFAULT ISOLATION: without env, both layers point at paths that hold
   // nothing (the extension's agentDir comes from PI_CODING_AGENT_DIR,
@@ -313,7 +313,7 @@ export async function registerTools(
 interface MockPiApi {
   on: (
     event: "session_start",
-    handler: (event: unknown, ctx: { cwd: string }) => void | Promise<void>,
+    handler: (event: unknown, ctx: MockSessionContext) => void | Promise<void>,
   ) => void;
   // RegisteredTool is the extension's own registration shape (see above).
   registerTool: (tool: RegisteredTool) => void;
@@ -329,19 +329,36 @@ interface MockPiApi {
  * @param defaultCwd - The cwd to use when env.cwd is absent.
  * @returns The registered tools.
  */
+/**
+ * The session-start context slice the extension reads. `isProjectTrusted`
+ * mirrors pi's ExtensionContext (trust-gated settings reads use it); the
+ * rest of pi's context surface is neither mocked nor driven here.
+ */
+interface MockSessionContext {
+  cwd: string;
+  isProjectTrusted: () => boolean;
+}
+
+/**
+ * Fire the extension's session_start like pi does and collect the tools.
+ *
+ * @param env - Explicit session roots (either may be undefined).
+ * @param defaultCwd - The cwd to use when env.cwd is absent.
+ * @returns The registered tools.
+ */
 async function driveSession(
-  env: { cwd?: string; agentDir?: string },
+  env: { cwd?: string; agentDir?: string; projectTrusted?: boolean },
   defaultCwd: string | undefined,
 ): Promise<RegisteredTool[]> {
   const tools: RegisteredTool[] = [];
   // The extension registers tools on session_start — fire it like pi
   // does (and await it: the handler is async — pi's runner awaits every
   // handler's promise, and the tools only exist once it settles).
-  let sessionStart: ((event: unknown, ctx: { cwd: string }) => void | Promise<void>) | undefined;
+  let sessionStart: ((event: unknown, ctx: MockSessionContext) => void | Promise<void>) | undefined;
   const api: MockPiApi = {
     on: (
       event: string,
-      handler: (event: unknown, ctx: { cwd: string }) => void | Promise<void>,
+      handler: (event: unknown, ctx: MockSessionContext) => void | Promise<void>,
     ) => {
       if (event === "session_start") sessionStart = handler;
     },
@@ -363,7 +380,13 @@ async function driveSession(
   await createPigmentExtension(api as unknown as ExtensionAPI);
   await sessionStart?.(
     { type: "session_start", reason: "startup" },
-    { cwd: env.cwd ?? defaultCwd ?? process.cwd() },
+    {
+      cwd: env.cwd ?? defaultCwd ?? process.cwd(),
+      // pi resolves trust before its first session_start; default to the
+      // trusted branch (pigment's pre-trust behavior) unless a suite
+      // stages the untrusted one.
+      isProjectTrusted: () => env.projectTrusted ?? true,
+    },
   );
   return tools;
 }

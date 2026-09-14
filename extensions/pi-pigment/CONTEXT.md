@@ -14,7 +14,7 @@ A Pi extension that provides themes and renders tool output — the Shiki bundle
 
 ### Surfaces
 
-**Tool wrapper**: A re-registration of a built-in tool (same name) that delegates execution to the SDK original and replaces only the TUI rendering.
+**Tool wrapper**: A re-registration of a built-in tool (same name) that delegates execution to the SDK original and replaces only the TUI rendering. The same-name registration replaces pi's definition wholesale, execute included — so the wrapper re-applies the options pi baked in under pi's own gates (bash carries pi's trust-gated `SettingsManager` shell settings, `commandPrefix`/`shellPath`).
 
 **Call/result stacking**: The TUI renders a tool row as TWO components in one block — renderCall's output on top, renderResult's output appended below (both re-run on every updateDisplay, including expand toggles). Every wrapper follows one shape:
 
