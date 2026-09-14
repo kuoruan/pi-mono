@@ -9,11 +9,25 @@
 
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
+
 import { DECISION_EVENT, MODEL_REPLY_EVENT } from "#src/audit/decision-record.ts";
 import { createReviewPipeline, type DenyRecord } from "#src/review/review-pipeline.ts";
 import { withAgentInstruction } from "#src/review/verdict-mode.ts";
-import { baseConfig, makeFakeCompleteSimple, makeSessionManagerWith, makeQuery, makeRecordingQuery, noLog, makeRecordingLog, makeNotifySpy, expectVerdict, defaultRegistry, makePipeline } from "./pipeline-helpers.ts";
 import { makeDetails } from "#test/fixtures.ts";
+
+import {
+  baseConfig,
+  makeFakeCompleteSimple,
+  makeSessionManagerWith,
+  makeQuery,
+  makeRecordingQuery,
+  noLog,
+  makeRecordingLog,
+  makeNotifySpy,
+  expectVerdict,
+  defaultRegistry,
+  makePipeline,
+} from "./pipeline-helpers.ts";
 
 describe("createReviewPipeline — guard clauses", () => {
   // Surface matching and target extraction are tested directly in
@@ -406,7 +420,6 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
     expect(denyHistory).toHaveLength(1);
   });
 });
-
 
 describe("createReviewPipeline — transcript stripping", () => {
   // Target extraction (matchValues/value/command/path/target/toolName/skillName)

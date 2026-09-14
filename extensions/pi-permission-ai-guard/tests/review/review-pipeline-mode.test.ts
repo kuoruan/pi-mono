@@ -6,12 +6,28 @@
 
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { BREAKER_DENY_REASON, DECISION_EVENT, MODEL_REPLY_EVENT } from "#src/audit/decision-record.ts";
+
+import {
+  BREAKER_DENY_REASON,
+  DECISION_EVENT,
+  MODEL_REPLY_EVENT,
+} from "#src/audit/decision-record.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { uncertainDenyReason, withAgentInstruction } from "#src/review/verdict-mode.ts";
-import { baseConfig, makeFakeCompleteSimple, makeQuery, noLog, makeRecordingLog, makeNotifySpy, expectVerdict, defaultRegistry, makePipeline } from "./pipeline-helpers.ts";
 import { makeDetails } from "#test/fixtures.ts";
+
+import {
+  baseConfig,
+  makeFakeCompleteSimple,
+  makeQuery,
+  noLog,
+  makeRecordingLog,
+  makeNotifySpy,
+  expectVerdict,
+  defaultRegistry,
+  makePipeline,
+} from "./pipeline-helpers.ts";
 
 describe("createReviewPipeline — mode", () => {
   it("a session-scoped override takes precedence over the config mode", async () => {
@@ -211,7 +227,6 @@ describe("createReviewPipeline — mode", () => {
     expect(modelCalls).toBe(3); // breaker short-circuited without a model call
   });
 });
-
 
 describe("createReviewPipeline — mode edges", () => {
   it("strict keeps a cached deny terminal on a cache hit (no model call, both passes notify)", async () => {

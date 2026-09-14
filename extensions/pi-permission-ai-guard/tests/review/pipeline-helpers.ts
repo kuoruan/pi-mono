@@ -5,7 +5,13 @@
  * drift on their fixtures.
  */
 
-import type { Api, AssistantMessage, Model, Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type {
+  Api,
+  AssistantMessage,
+  Model,
+  Context,
+  SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { PermissionCheckResult, PermissionQuery } from "@gotgenes/pi-permission-system";
 import { expect } from "vitest";
@@ -225,4 +231,3 @@ export function makePipeline(overrides: Partial<ReviewPipelineDeps> = {}): Revie
     ...overrides,
   };
 }
-

@@ -5,13 +5,26 @@
  */
 
 import { describe, expect, it } from "vitest";
+
 import { BREAKER_DENY_REASON, CACHE_LOOKUP_EVENT } from "#src/audit/decision-record.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
 import { withAgentInstruction } from "#src/review/verdict-mode.ts";
-import { baseConfig, makeFakeCompleteSimple, makeSessionManagerWith, makeQuery, noLog, makeRecordingLog, makeNotifySpy, expectVerdict, defaultRegistry, makePipeline } from "./pipeline-helpers.ts";
 import { bashPayload, makeDetails } from "#test/fixtures.ts";
+
+import {
+  baseConfig,
+  makeFakeCompleteSimple,
+  makeSessionManagerWith,
+  makeQuery,
+  noLog,
+  makeRecordingLog,
+  makeNotifySpy,
+  expectVerdict,
+  defaultRegistry,
+  makePipeline,
+} from "./pipeline-helpers.ts";
 
 describe("createReviewPipeline — circuit breaker", () => {
   it("the total-tier trip notifies the operator once per epoch", async () => {
@@ -455,7 +468,6 @@ describe("createReviewPipeline — verdict cache", () => {
   });
 });
 
-
 describe("createReviewPipeline — machinery failures trip the breaker (strict)", () => {
   it("a broken reviewer trips the escape valve like a miscalibrated one", async () => {
     const verdicts: Array<{ kind: string; reason?: string }> = [];
@@ -482,7 +494,6 @@ describe("createReviewPipeline — machinery failures trip the breaker (strict)"
     expect(verdicts[2]!.kind).toBe("defer");
   });
 });
-
 
 describe("createReviewPipeline — review follow-ups (cache-hit fail-open + total tier)", () => {
   it("permissive maps a cached soft deny to allow with the audit reason intact", async () => {
