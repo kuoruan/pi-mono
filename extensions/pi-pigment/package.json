@@ -56,16 +56,16 @@
     "generate:themes": "node scripts/generate-themes.ts"
   },
   "dependencies": {
-    "@aliou/sh": "^0.3.1",
-    "@ctrl/tinycolor": "^4.2.0",
+    "@aliou/sh": "^0.3.2",
+    "@ctrl/tinycolor": "^4.2.1",
     "@shikijs/themes": "^4.4.3",
-    "ansis": "^4.3.1",
+    "ansis": "^4.4.0",
     "diff": "^9.0.0",
     "get-east-asian-width": "^1.6.0",
     "jsonc-parser": "^3.3.1",
     "pretty-ms": "^9.3.1",
     "shiki": "^4.4.3",
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1",
