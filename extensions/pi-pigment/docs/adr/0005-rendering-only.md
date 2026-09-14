@@ -55,12 +55,16 @@ swap another extension's semantics for the built-ins'.
 
 ### Amendment: what "delegating execute verbatim" means in practice
 
-The wrappers re-enter execute (the factory stamps an additive
-`pigmentElapsedMs` timing key into `result.details`), so the exact
-discipline is worth writing down:
+The wrappers re-enter execute only to stash their own render-time payload
+(write's diff), so the exact discipline is worth writing down:
 
 - **The model-facing result is untouchable** — content, isError, every
   field the agent consumes passes through unchanged.
+- **A wrapper appends nothing it can derive at render time.** The factory
+  adds NO key at all: the execution timing that drives the `Took` footer
+  lives in the render state (pi's own shell-renderer clock), so a
+  pi-pigment session carries exactly the tool's own payload — see the
+  session-footprint note below.
 - **`result.details` keeps the SDK's own shape.** Wrappers may APPEND
   keys; they may not drop or retype the SDK's fields. Sessions are the
   shared boundary: a pi-pigment-created session resumed WITHOUT pi-pigment
@@ -91,3 +95,10 @@ discipline is worth writing down:
 - The extension stays dependency-light: Shiki (highlighting),
   @aliou/sh (shell-AST injection), diff. New dependencies that add
   capabilities rather than rendering fidelity are presumptively rejected.
+- **Duration is render state, never session state.** `Took`/`Elapsed`
+  footers read the clock pi's shell renderer keeps in the render state
+  (`startedAt` armed in renderCall, `endedAt` fixed by the settled
+  renderResult). Nothing about timing is persisted: a session resumed
+  without pi-pigment, or replayed into it, shows no duration — matching
+  pi's native renderers, whose timing display is live-only by the same
+  mechanism.

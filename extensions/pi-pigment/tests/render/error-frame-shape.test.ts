@@ -25,6 +25,7 @@ import {
   plain,
   registerTools,
   resetPigmentForTest,
+  seedTiming,
   toolOf,
   type TextDouble,
 } from "#test/fixtures.ts";
@@ -322,13 +323,14 @@ describe("edit error frame shape", () => {
     const { ctx } = makeRenderCtx();
     ctx.isError = true;
     ctx.args = { path: "/render-project/app.ts", edits: [] };
+    // The Took source is the render-state clock (armed by renderCall,
+    // stopped by the settled frame), never the result's details.
+    seedTiming(ctx, 42);
 
     const component = edit.renderResult!(
       {
         content: [{ type: "text", text: "nope" }],
         isError: true,
-        // elapsed sideband — the Took source for a returned error result
-        details: { pigmentElapsedMs: 42 },
       } as never,
       { expanded: false, isPartial: false },
       buildRenderTheme(),
@@ -425,6 +427,7 @@ describe("bash error frame shape", () => {
     const { ctx } = makeRenderCtx();
     ctx.isError = true;
     ctx.args = { command: "false" };
+    seedTiming(ctx, 5);
     // One long logical line: the TUI wraps it into several visual rows —
     // the bar column must lead EVERY one, not just the first.
     const message = `${"X".repeat(90)}\n\nCommand exited with code 1`;
@@ -433,7 +436,6 @@ describe("bash error frame shape", () => {
       {
         content: [{ type: "text", text: message }],
         isError: true,
-        details: { pigmentElapsedMs: 5 },
       } as never,
       { expanded: false, isPartial: false },
       buildRenderTheme(),
@@ -462,7 +464,6 @@ describe("bash error frame shape", () => {
       {
         content: [{ type: "text", text: message }],
         isError: true,
-        details: { pigmentElapsedMs: 5 },
       } as never,
       { expanded: false, isPartial: false },
       buildRenderTheme(),

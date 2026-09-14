@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseHitLine } from "#src/render/tool-grep.ts";
-import { collapsedView, elapsedOf, outputMemoOf, outputTaskKey } from "#src/render/tool-output.ts";
+import { collapsedView, outputMemoOf, outputTaskKey } from "#src/render/tool-output.ts";
 import { resolveDiffPalette } from "#src/theme/palette.ts";
 import {
   buildFakeTheme,
@@ -13,6 +13,7 @@ import {
   makeRenderCtx,
   registerTools,
   resetPigmentForTest,
+  seedTiming,
   waitFor,
   toolOf,
   plain,
@@ -190,6 +191,9 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     const theme = buildRenderTheme();
     const { ctx } = makeRenderCtx();
     ctx.args = { pattern: "value" };
+    // The duration is part of the key, and it comes from the render-state
+    // clock: seed the settled span renderCall marks.
+    seedTiming(ctx);
     const component = grep.renderResult(
       result,
       { expanded: true, isPartial: false },
@@ -198,7 +202,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     ) as DrivenTaskComponent;
     // The precomputed form: the identity IS outputTaskKey's join. Composing
     // the expectation through the same authorities (the output memo, the
-    // palette, the elapsed sideband) keeps it exact — a dropped or
+    // palette, the measured duration) keeps it exact — a dropped or
     // reordered stamp fails here.
     const derived = outputMemoOf({})(result as object);
     expect(component.previewIdentity).toBe(
@@ -206,7 +210,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
         prefix: "g",
         derived,
         identity: resolveDiffPalette(theme).identity,
-        elapsedMs: elapsedOf(result) ?? 0,
+        elapsedMs: 12,
         expanded: true,
         streaming: false,
       }),
@@ -252,6 +256,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     );
     const { ctx } = makeRenderCtx();
     ctx.args = { pattern: "match-target" };
+    seedTiming(ctx);
     const component = grep.renderResult(
       result,
       { expanded: false, isPartial: false },
@@ -300,16 +305,13 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     );
     const { ctx } = makeRenderCtx();
     ctx.args = { pattern: "match-target" };
+    // The clock is armed but not settled — the partial frame's state
+    // (seedTiming would settle the span; a live arm starts at the clock).
+    ctx.state.startedAt = Date.now();
     // Streaming partial: same output text (hence same length), but the
-    // timing sideband is not stamped yet — the pre-final result carries
-    // the partial content without pigmentElapsedMs (the factory stamps it
-    // when execute resolves).
-    const partialResult = {
-      ...result,
-      details: { ...(result.details as object), pigmentElapsedMs: undefined },
-    };
+    // clock is still running (isPartial) — no duration in the key yet.
     const partial = grep.renderResult(
-      partialResult,
+      result,
       { expanded: false, isPartial: true },
       buildRenderTheme(),
       ctx,
@@ -387,6 +389,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
       undefined,
     );
     const { ctx } = makeRenderCtx();
+    seedTiming(ctx);
     const component = find.renderResult(
       result,
       { expanded: false, isPartial: false },
@@ -407,6 +410,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     if (!ls?.renderResult) throw new Error("ls not registered");
     const result = await ls.execute("t1", { path: tempDir }, undefined, undefined, undefined);
     const { ctx } = makeRenderCtx();
+    seedTiming(ctx);
     const collapsed = ls.renderResult(
       result,
       { expanded: false, isPartial: false },
@@ -429,6 +433,44 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     expect(expandedText).not.toContain("more lines");
   });
 
+  it("Took comes from the render-state clock: a live row has one, a resumed row does not", async () => {
+    writeFileSync(join(tempDir, "app.ts"), "x\n");
+    const tools = await registerTools();
+    const ls = toolOf(tools, "ls");
+    const result = await ls.execute("t-live", { path: tempDir }, undefined, undefined, undefined);
+    const theme = buildRenderTheme();
+    const options = { expanded: false, isPartial: false };
+
+    // LIVE: the TUI renders the call while the execution runs
+    // (executionStarted), which arms the clock; the settled result stops it.
+    const live = makeRenderCtx();
+    live.ctx.toolCallId = "t-live";
+    live.ctx.args = { path: tempDir };
+    live.ctx.executionStarted = true;
+    ls.renderCall!({ path: tempDir }, theme, live.ctx);
+    const liveFrame = ls.renderResult!(result, options, theme, live.ctx) as DrivenTaskComponent;
+    expect(await settledText(liveFrame, "── ")).toMatch(/Took \d+/);
+
+    // RESUME: pi replays the row with executionStarted false and never
+    // re-arms — no duration, and nothing about the timing was persisted to
+    // recover it from. This is pi's own renderer behavior (its startedAt
+    // lives in the same render state).
+    const resumed = makeRenderCtx();
+    resumed.ctx.toolCallId = "t-live";
+    resumed.ctx.args = { path: tempDir };
+    ls.renderCall!({ path: tempDir }, theme, resumed.ctx);
+    expect(resumed.ctx.executionStarted).toBe(false);
+    const resumedFrame = ls.renderResult!(
+      result,
+      options,
+      theme,
+      resumed.ctx,
+    ) as DrivenTaskComponent;
+    const resumedText = await settledText(resumedFrame, "── ");
+    expect(resumedText).toContain("── ");
+    expect(resumedText).not.toMatch(/Took/);
+  });
+
   it("ls rows never emit a full SGR reset and the Took footer sits a blank line below the tree", async () => {
     mkdirSync(join(tempDir, "sub"));
     writeFileSync(join(tempDir, "app.ts"), "x\n");
@@ -438,6 +480,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     if (!ls?.renderResult) throw new Error("ls not registered");
     const result = await ls.execute("t1", { path: tempDir }, undefined, undefined, undefined);
     const { ctx } = makeRenderCtx();
+    seedTiming(ctx);
     // pi's real Theme closes fg/bg wrappers with channel-scoped resets
     // (\x1b[39m / \x1b[49m); pi core then wraps every result line with
     // its canvas bg (toolSuccessBg). Therefore extension output must
@@ -495,7 +538,6 @@ describe("the window authority (collapsedView)", () => {
     const { shown, tail } = collapsedView(lines, {
       budget: 15,
       expanded: false,
-      result: { details: {} },
       theme: buildRenderTheme(),
     });
     expect(shown.length).toBe(15);
@@ -508,7 +550,6 @@ describe("the window authority (collapsedView)", () => {
     const { shown, tail } = collapsedView(lines, {
       budget: 15,
       expanded: true,
-      result: { details: {} },
       theme: buildRenderTheme(),
     });
     expect(shown.length).toBe(30);
@@ -521,7 +562,6 @@ describe("the window authority (collapsedView)", () => {
       budget: 10,
       expanded: true,
       expandedCap: 150,
-      result: { details: {} },
       theme: buildRenderTheme(),
     });
     expect(shown.length).toBe(150);

@@ -18,7 +18,6 @@ import { createToolWrapper } from "./tool-factory.ts";
 import {
   COLLAPSED_LINES,
   collapsedView,
-  elapsedOf,
   outputMemoOf,
   outputTaskKey,
   renderPlainOutput,
@@ -113,7 +112,7 @@ export function createFindWrapper(
   // ctx.args (present every frame, live and restored alike).
   return createToolWrapper(origFind, services, {
     renderShell: "default",
-    renderResult: ({ text, palette, theme, ctx, result, options }) => {
+    renderResult: ({ text, palette, theme, ctx, result, options, tookMs }) => {
       // Inert at intake (ADR 0004): the result carries raw paths. The
       // derivation is memoized on the result object's identity (one
       // lookup per trigger frame for a stable result).
@@ -128,7 +127,7 @@ export function createFindWrapper(
       const callArgs = argsOf<FindToolInput>(ctx.args);
       const anchor = globAnchor(callArgs.pattern ?? "");
       const emphasisSpec = accentEmphasis(theme);
-      const elapsed = elapsedOf(result) ?? 0;
+      const elapsed = tookMs ?? 0;
       // One computed key serves BOTH roles — find has no width-dependent
       // layout (same as grep): the width never joins the key.
       const taskKey = outputTaskKey({
@@ -150,7 +149,7 @@ export function createFindWrapper(
       const { shown: shownEntries, tail: plainTail } = collapsedView(all, {
         budget: COLLAPSED_LINES.find,
         expanded: options.expanded,
-        result,
+        tookMs,
         theme,
       });
       const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
@@ -168,7 +167,7 @@ export function createFindWrapper(
             const { shown: lines, tail } = collapsedView(all, {
               budget: COLLAPSED_LINES.find,
               expanded: options.expanded,
-              result,
+              tookMs,
               theme,
             });
             // The SDK appends truncation notices as a bracketed tail line —

@@ -26,7 +26,7 @@ type Wrapped = {
     sig: AbortSignal | undefined,
     upd: unknown,
     ctx: unknown,
-  ) => Promise<{ content?: ResultContentBlock[]; isError?: boolean }>;
+  ) => Promise<{ content?: ResultContentBlock[]; isError?: boolean; details?: unknown }>;
   renderCall: (args: unknown, theme: unknown, ctx: unknown) => unknown;
   renderResult: (result: unknown, options: unknown, theme: unknown, ctx: unknown) => unknown;
 };
@@ -213,7 +213,7 @@ describe("renderResult error frame", () => {
     );
   });
 
-  it("the error frame keeps the thrown-span Took across re-renders of the same call", async () => {
+  it("the error frame keeps one Took across re-renders of the same call", async () => {
     const { orig } = makeOrig({
       async execute() {
         throw new Error("Command exited with code 1");
@@ -226,6 +226,10 @@ describe("renderResult error frame", () => {
     const { ctx, invalidated } = makeRenderCtx();
     ctx.isError = true;
     ctx.toolCallId = "call-throw";
+    // A throw still renders through the live flow (pi marks the execution
+    // started before execute), so renderCall arms the clock as usual.
+    ctx.executionStarted = true;
+    wrapped.renderCall({}, buildRenderTheme(), ctx);
     const result = {
       content: [{ type: "text", text: "output\n\nCommand exited with code 1" }],
     } as never;
@@ -244,9 +248,10 @@ describe("renderResult error frame", () => {
     };
     expect(host.previewIdentity).toBeDefined();
     // A re-run of the same error (the TUI's updateDisplay re-render) loses
-    // nothing: the span record is consumed once, but the resolved
-    // milliseconds memo keeps the footer — and the attach guard (same
-    // identity) leaves the rendered frame alone: no placeholder overwrite.
+    // nothing: the first settled frame fixed endedAt, so the duration — and
+    // with it the frame identity — is stable. The attach guard (same
+    // identity) then leaves the rendered frame alone: no placeholder
+    // overwrite.
     host.text.text = "SENTINEL";
     const again = wrapped.renderResult(
       result,
@@ -264,9 +269,26 @@ describe("renderResult error frame", () => {
     expect(invalidated.count).toBe(baselineInvalidations);
   });
 
-  it("the error frame shows Took from the result sideband when the tool RETURNED an error result", async () => {
-    // A returned (not thrown) error result carries the stampElapsed sideband
-    // — the same source the success footers read.
+  it("appends no key to the result it returns (nothing piggybacks into the session)", async () => {
+    // The session-footprint contract: the factory's execute is verbatim
+    // delegation, and the timing the footers show comes from the render
+    // state. A wrapper that needs render-time payload stashes it in its own
+    // execute (write's diff); the SKELETON adds nothing — so what a session
+    // persists is what the tool itself produced.
+    const { orig } = makeOrig({
+      async execute() {
+        return {
+          content: [{ type: "text", text: "output" }],
+          details: { sdkOwned: 1 },
+        } as never;
+      },
+    });
+    const wrapped = wrappedFor(orig);
+    const result = await wrapped.execute("call-1", {}, undefined, undefined, {});
+    expect(result.details).toEqual({ sdkOwned: 1 });
+  });
+
+  it("the error frame shows Took from the render-state clock", async () => {
     const { orig } = makeOrig({
       async execute() {
         return {
@@ -276,12 +298,14 @@ describe("renderResult error frame", () => {
       },
     });
     const wrapped = wrappedFor(orig);
-    // The real flow renders the SAME result object execute returned (the
-    // stamp lives on its details) — not a fresh clone.
     const result = await wrapped.execute("call-return", {}, undefined, undefined, {});
     const { ctx } = makeRenderCtx();
     ctx.isError = true;
     ctx.toolCallId = "call-return";
+    // The live flow: pi marks the execution started, renderCall arms the
+    // clock, the settled frame stops it.
+    ctx.executionStarted = true;
+    wrapped.renderCall({}, buildRenderTheme(), ctx);
     const component = wrapped.renderResult(
       result as never,
       { expanded: true, isPartial: false },
@@ -289,6 +313,37 @@ describe("renderResult error frame", () => {
       ctx,
     );
     expect(plain((component as TextDouble).text.text)).toMatch(/Took \d+/);
+  });
+
+  it("a replayed error row shows no Took at all (its clock was never armed)", async () => {
+    // Session replay re-runs renderCall + renderResult with
+    // executionStarted false, so nothing arms the clock — and since no
+    // timing is persisted anywhere, the frame carries no duration. This is
+    // pi's own replay semantics (its shell renderer's startedAt lives in
+    // the render state too), pinned so the footer cannot creep back into
+    // the session as a sideband.
+    const { orig } = makeOrig({
+      async execute() {
+        return {
+          content: [{ type: "text", text: "command failed" }],
+          isError: true,
+        } as never;
+      },
+    });
+    const wrapped = wrappedFor(orig);
+    const result = await wrapped.execute("call-replay", {}, undefined, undefined, {});
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    ctx.toolCallId = "call-replay";
+    wrapped.renderCall({}, buildRenderTheme(), ctx);
+    expect(ctx.executionStarted).toBe(false);
+    const component = wrapped.renderResult(
+      result as never,
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    expect(plain((component as TextDouble).text.text)).not.toMatch(/Took/);
   });
 
   it("the error frame omits Took when no timing is known (a restored session's old errors)", () => {

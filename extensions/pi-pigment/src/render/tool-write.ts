@@ -47,10 +47,8 @@ import { wrapAnsi } from "./wrap.ts";
 /**
  * The `result.details` shapes execute() stashes for renderResult(). Kept
  * minimal — details persist into the session JSONL, so every field here is
- * one renderResult actually reads. (One exception rides along: the
- * factory's pigmentElapsedMs timing sideband, stamped on every result —
- * write/edit never read it, but the uniform stamp is the contract the
- * grep/find/ls footers rely on.)
+ * one renderResult actually reads. (The factory adds nothing on top: the
+ * Took footers' timing lives in the render state, not in the result.)
  */
 type WriteResultDetails =
   | {

@@ -2,7 +2,7 @@
  * The result-BODY rendering vocabulary: the output memo (identity-keyed
  * derive), the collapsed-view window authority
  * (CONTEXT.md: one window concept, the budgets + tail grammar), and the
- * elapsed-ms sideband the Took footer reads. The TUI contract (render
+ * execution clock the Took footer reads. The TUI contract (render
  * context, per-tool states) and the assembly inputs stay in
  * tool-services; wrappers import their slice by intent — a wrapper's
  * import list reads as its contract.
@@ -14,6 +14,8 @@ import { inertText } from "#src/core/ansi.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { linesOf } from "#src/core/lines.ts";
 import type { PaletteTheme } from "#src/theme/palette.ts";
+
+import type { ExecutionTimingState } from "./tool-services.ts";
 
 /**
  * The collapsed-state line budget per tool — the same numbers the SDK's
@@ -240,11 +242,11 @@ export function expandKeyHint(theme: PaletteTheme): string {
 }
 
 /**
- * The `Took 1.2s` footer from the factory-measured execution time —
- * bash's native renderer shows one; grep/find/ls had none until this.
- * Formatting delegates to pretty-ms: same shape in the common range
- * (8ms, 1.2s), minute/hour readability for long runs (1m 5s, 1h 1m 40s),
- * and every rounding boundary is upstream's to keep correct.
+ * The `Took 1.2s` footer from the measured execution time — bash's native
+ * renderer shows one; grep/find/ls had none until this. Formatting
+ * delegates to pretty-ms: same shape in the common range (8ms, 1.2s),
+ * minute/hour readability for long runs (1m 5s, 1h 1m 40s), and every
+ * rounding boundary is upstream's to keep correct.
  *
  * @param ms - The measured duration in milliseconds.
  * @param theme - The pi theme (muted fg).
@@ -256,38 +258,44 @@ export function tookFooter(ms: number | undefined, theme: PaletteTheme): string 
 }
 
 /**
- * The details field the execute timing writes (sideband, pi-pigment-only).
- * A STRING key, not a Symbol — details persists into the session JSONL,
- * and JSON.stringify silently drops symbol-keyed properties (verified:
- * the restored object would lose every footer's Took time).
- */
-const ELAPSED_MS_KEY = "pigmentElapsedMs";
-
-/**
- * Stamp the elapsed milliseconds onto a result's details — the sideband
- * WRITER, called by the factory's execute wrapper (this module is the
- * contract's one home: key, writer, and reader together).
+ * Arm the execution clock — pi's shell-renderer renderCall body, applied to
+ * every wrapper's state. Called on every renderCall frame; only the live
+ * execution arms it (a resumed row re-runs renderCall with
+ * `executionStarted` false, which is exactly how pi keeps a replayed tool
+ * row from showing a duration), and the `startedAt === undefined` guard
+ * keeps the clock at the FIRST frame.
  *
- * @param result - The tool result (mutated additively).
- * @param elapsedMs - The measured execution time.
+ * @param state - The wrapper's render state (the timing fields).
+ * @param executionStarted - Whether pi marked this call's execution started.
  */
-export function stampElapsed(result: { details?: unknown }, elapsedMs: number): void {
-  // The SDK tools leave details undefined when empty — create it: the
-  // sideband is the one field every wrapper's footer can rely on.
-  ((result.details ??= {}) as Record<string, unknown>)[ELAPSED_MS_KEY] = elapsedMs;
+export function armTiming(state: ExecutionTimingState, executionStarted: boolean): void {
+  if (executionStarted && state.startedAt === undefined) {
+    state.startedAt = Date.now();
+    state.endedAt = undefined;
+  }
 }
 
 /**
- * Read the factory-measured execution time from a result's details — the
- * typed reader for the sideband {@link ELAPSED_MS_KEY} writes.
+ * Stop the execution clock and read the duration — pi's shell-renderer
+ * renderResult body. The first settled frame (or any error frame) fixes
+ * `endedAt`, so repeated renders of the same row keep one value: the
+ * frame cache keys include this duration, and a recomputed one would
+ * re-arm the preview task on every updateDisplay.
  *
- * @param result - The tool result.
- * @returns The elapsed milliseconds, or undefined when unmeasured.
+ * @param state - The wrapper's render state (the timing fields).
+ * @param isPartial - Whether the result is still streaming.
+ * @param isError - Whether the call settled as an error.
+ * @returns The measured milliseconds, or undefined while pending (and on a
+ *   resumed row, whose clock was never armed).
  */
-export function elapsedOf(result: { details?: unknown } | undefined): number | undefined {
-  const value = result?.details as Record<string, unknown> | undefined;
-  const ms = value?.[ELAPSED_MS_KEY];
-  return typeof ms === "number" && Number.isFinite(ms) ? ms : undefined;
+export function stopTiming(
+  state: ExecutionTimingState,
+  isPartial: boolean,
+  isError: boolean,
+): number | undefined {
+  if (!isPartial || isError) state.endedAt ??= Date.now();
+  if (state.startedAt === undefined || state.endedAt === undefined) return undefined;
+  return state.endedAt - state.startedAt;
 }
 
 /** The view's inputs: the budgets and the footer sources. */
@@ -302,8 +310,8 @@ export interface ViewOptions {
    * tail grammar. Unset = the expanded view shows everything.
    */
   expandedCap?: number;
-  /** The tool result (the Took footer's time source); unset = no footer. */
-  result?: { details?: unknown };
+  /** The measured execution time (undefined while pending, and on a resumed row); unset = no footer. */
+  tookMs?: number;
   /** The pi theme (muted fg). */
   theme: PaletteTheme;
 }
@@ -319,7 +327,7 @@ export interface ViewOptions {
  * grammar.
  *
  * @param lines - The full output lines (already derived per tool).
- * @param opts - The view options (budgets and footer sources).
+ * @param opts - The view options (budgets and the measured duration).
  * @returns The shown lines and the tail line ("" when nothing is hidden
  * and no time was measured).
  */
@@ -327,7 +335,7 @@ export function collapsedView(
   lines: string[],
   opts: ViewOptions,
 ): { shown: string[]; tail: string } {
-  const { budget, expanded, expandedCap, result, theme } = opts;
+  const { budget, expanded, expandedCap, tookMs, theme } = opts;
   // An absent result source means no footer (write's create preview —
   // the SDK's own write renderer never showed timing either).
   const collapsed = !expanded && lines.length > budget;
@@ -338,7 +346,7 @@ export function collapsedView(
     // The collapsed regime advertises the expand key; an expanded cap
     // reports the remainder without an affordance.
     collapseTail(hidden, theme, expanded ? "" : expandKeyHint(theme)),
-    result ? tookFooter(elapsedOf(result), theme) : "",
+    tookFooter(tookMs, theme),
   ]
     .filter(Boolean)
     .join(theme.fg("muted", " · "));

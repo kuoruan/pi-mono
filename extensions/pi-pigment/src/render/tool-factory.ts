@@ -18,7 +18,6 @@ import type {
 import type { Component } from "@earendil-works/pi-tui";
 
 import { inertText } from "#src/core/ansi.ts";
-import { createBoundedMap } from "#src/core/bounded-map.ts";
 import { resolveDiffPalette, type DiffPalette, type PaletteTheme } from "#src/theme/palette.ts";
 
 import { ERROR_FRAME_DEFAULT_WIDTH, formatToolErrorResult, setToolErrorBg } from "./error-frame.ts";
@@ -30,8 +29,9 @@ import {
   getWidthAwareText,
   type PreviewTextHost,
 } from "./text-task.ts";
-import { elapsedOf, firstTextOf, stampElapsed, tookFooter } from "./tool-output.ts";
+import { armTiming, firstTextOf, stopTiming, tookFooter } from "./tool-output.ts";
 import {
+  type ExecutionTimingState,
   type ShellState,
   callStateOf,
   type RenderContext,
@@ -53,6 +53,13 @@ export type RenderResultBody<TState extends object> = (args: {
   result: AgentToolResult<unknown>;
   /** The render options (expanded, isPartial). */
   options: ToolRenderResultOptions;
+  /**
+   * The measured execution time, from the render-state clock
+   * ({@link armTiming}/{@link stopTiming}): undefined while the result
+   * streams, and on a row replayed from the session (whose clock was
+   * never armed).
+   */
+  tookMs: number | undefined;
   /**
    * The wrapped SDK tool's own renderResult — for wrappers that delegate
    * output rendering wholesale (bash: the command is ours, the output is
@@ -144,51 +151,6 @@ export function renderPlainTextFallback(
 }
 
 /**
- * Elapsed times of THROWN executions, keyed by tool call id: a throw
- * never reaches stampElapsed (the agent loop builds a fresh `details: {}`
- * around the message), so the error frame's Took footer reads here. Bounded
- * like its sibling memos; entries die on read (each id renders once).
- */
-const thrownElapsed = createBoundedMap<string, number>(64);
-
-/**
- * The error frame's Took MILLISECONDS, memoized per call id: the TUI's
- * updateDisplay re-runs renderResult for the same error repeatedly, and the
- * first render consumes the thrown record — a re-run recomputing took from
- * the (now-deleted) record yielded "" and a changed frameKey, which re-armed
- * the task and dropped the Took footer from every later frame. The memo
- * holds the resolved milliseconds; tookFooter re-renders per theme, so a
- * theme switch recolors the footer through the regular key change.
- */
-const errorTookMs = createBoundedMap<string, number | undefined>(64);
-
-/**
- * Resolve the error frame's Took milliseconds, once per tool call: the
- * result's stamped sideband when the tool RETURNED an error result, the
- * thrown-span record when it threw (read-once — consumed here and
- * memoized so re-runs stay stable). An UNMEASURED memo value (undefined)
- * re-resolves on every re-run — idempotent and cheap (both sources are
- * already gone), so the map's missing-vs-undefined distinction needs no
- * extra bookkeeping.
- *
- * @param toolCallId - The tool call's id (the memo key).
- * @param result - The errored result (its details may stamp elapsed).
- * @returns The elapsed milliseconds, or undefined when unmeasurable.
- */
-function resolveErrorTookMs(
-  toolCallId: string,
-  result: AgentToolResult<unknown>,
-): number | undefined {
-  const memo = errorTookMs.get(toolCallId);
-  if (memo !== undefined) return memo;
-  const thrown = thrownElapsed.get(toolCallId);
-  thrownElapsed.delete(toolCallId);
-  const ms = elapsedOf(result) ?? thrown;
-  errorTookMs.set(toolCallId, ms);
-  return ms;
-}
-
-/**
  * Build a tool wrapper around `orig`: the factory owns the skeleton, the
  * spec supplies the per-tool variance. `TState` types the wrapper's render
  * state — the runtime shape is the TUI's `{}` either way; the generic only
@@ -222,24 +184,20 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       upd: AgentToolUpdateCallback<unknown> | undefined,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<unknown>> {
-      const start = performance.now();
-      let result: AgentToolResult<unknown>;
-      try {
-        result = spec.execute
-          ? await spec.execute(tid, params, sig, upd, ctx)
-          : await orig.execute(tid, params as never, sig, upd, ctx);
-      } catch (err) {
-        // The error frame owns this call's final render — record the span
-        // it cannot otherwise see (the thrown path's details are fresh).
-        thrownElapsed.set(tid, performance.now() - start);
-        throw err;
-      }
-      if (result) stampElapsed(result, performance.now() - start);
-      return result;
+      // Verbatim delegation — the wrapper never touches the result. Timing
+      // lives in the render state (armTiming/stopTiming), so nothing a
+      // footer shows is written into the session.
+      return spec.execute
+        ? await spec.execute(tid, params, sig, upd, ctx)
+        : await orig.execute(tid, params as never, sig, upd, ctx);
     },
 
     renderCall(args: unknown, theme: Theme, ctx: RenderContext<TState>): Component {
       const text = getWidthAwareText(ctx.lastComponent, textFactory);
+      // pi's renderCall timing contract, applied to every wrapper: the live
+      // execution arms the clock, and a resumed row renders with
+      // executionStarted false, so it never gets one.
+      armTiming(ctx.state as ExecutionTimingState, ctx.executionStarted);
       if (spec.renderCall) return spec.renderCall({ text, theme, ctx, renderArgs: args });
       return orig.renderCall?.(args, theme, ctx as never) ?? text;
     },
@@ -253,6 +211,11 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       const text = getWidthAwareText(ctx.lastComponent, textFactory);
       const palette = resolveDiffPalette(theme);
       const status = callStateOf(ctx);
+      // Stop the clock before any branch renders: the error frame reads the
+      // duration too, and the first settled frame fixes endedAt (repeated
+      // renders of one row must read one value — it is part of the frame
+      // cache key).
+      const tookMs = stopTiming(ctx.state as ExecutionTimingState, options.isPartial, ctx.isError);
       // Every FINAL frame sweeps the streaming interval: the native shell
       // renderer arms it while partial output streams and clears it only
       // on the frames it renders itself — the error frame below bypasses
@@ -272,11 +235,9 @@ export function createToolWrapper<TState extends object = Record<string, unknown
         // released its own resources in the final render we bypass).
         spec.onError?.(ctx);
         const message = firstTextOf(result) || "Error";
-        // The Took footer the bypassed native renderer would have shown:
-        // the result's sideband when the tool RETURNED an error result,
-        // the thrown-span record when it threw (read-once — consumed by
-        // the first render, then memoized below so re-runs stay stable).
-        const tookMs = resolveErrorTookMs(ctx.toolCallId, result);
+        // The Took footer the bypassed native renderer would have shown,
+        // from the same armed clock — undefined on a row that never armed
+        // one (a resumed error row, exactly like pi's own renderers).
         const took = tookMs !== undefined ? tookFooter(tookMs, theme) : "";
         // ONE builder drives both the synchronous placeholder and the
         // width-aware preview task: the task re-renders at the TUI's real
@@ -320,6 +281,7 @@ export function createToolWrapper<TState extends object = Record<string, unknown
           ctx,
           result,
           options,
+          tookMs,
           origRenderResult: (res, opts, th, ctx2) =>
             orig.renderResult?.(res, opts, th as Theme, ctx2 as never) ?? text,
         });

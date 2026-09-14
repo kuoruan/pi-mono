@@ -116,10 +116,11 @@ describe("write execute (memfs)", () => {
       undefined,
       undefined,
     );
-    // The factory's timing sideband rides along (grep/find/ls footers
-    // read it); the write discriminant stays the payload.
+    // The write discriminant is the whole payload: the wrapper adds
+    // NOTHING to details (timing lives in the render state), so what the
+    // session persists is exactly what the tool produced.
     expect(result.details).toMatchObject({ kind: "noChange" });
-    expect((result.details as Record<string, unknown>).pigmentElapsedMs).toBeTypeOf("number");
+    expect(Object.keys(result.details as object)).toEqual(["kind"]);
   });
 
   it("captures multi-line diffs with stats in the result details", async () => {

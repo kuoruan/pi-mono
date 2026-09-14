@@ -104,10 +104,8 @@ export function createEditWrapper(
 
   // Execution delegates verbatim (the factory's default path): the SDK's
   // details shape (diff, patch, firstChangedLine) persists into the
-  // session JSONL untouched (one exception rides along on every result —
-  // the factory's pigmentElapsedMs timing sideband; edit never reads it,
-  // but the uniform stamp is the contract the grep/find/ls Took footers
-  // rely on), so the NATIVE renderer still works on
+  // session JSONL untouched — the factory adds no key of its own (the Took
+  // footer's clock is render state) — so the NATIVE renderer still works on
   // pi-pigment-created sessions resumed without pi-pigment, and renderResult
   // below parses the stashed patch lazily. Errors never reach here as
   // results — the SDK edit tool throws, and the harness converts throws

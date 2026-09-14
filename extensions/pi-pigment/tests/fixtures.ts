@@ -197,6 +197,25 @@ export function makeRenderCtx<TState extends object = Record<string, unknown>>()
 }
 
 /**
+ * Seed a settled execution span into a render ctx — the Took footers read
+ * their duration from here (pi's render-state clock, armed by renderCall
+ * while the execution is live and stopped by the first settled frame), not
+ * from the result. Suites asserting a `Took` line seed the span; suites
+ * asserting its ABSENCE leave the clock unarmed (which is also what a row
+ * replayed from a session looks like).
+ *
+ * @param ctx - The render context whose state carries the clock.
+ * @param ms - The span to seed, in milliseconds.
+ */
+export function seedTiming(ctx: RenderContext<object>, ms = 12): void {
+  const state = ctx.state as Record<string, unknown>;
+  // Fixed base, not Date.now(): only the SPAN is ever read, and a clock
+  // read here would make an exact-duration assertion flake at a ms boundary.
+  state.startedAt = 1_000_000;
+  state.endedAt = 1_000_000 + ms;
+}
+
+/**
  * A preview-task component driven by tests: the swap protocol's render
  * entry plus the text slot (grep/find/ls results). A TextDouble slice —
  * hand-written copies drift; Pick-on-TextDouble cannot.

@@ -18,7 +18,6 @@ import { createToolWrapper } from "./tool-factory.ts";
 import {
   COLLAPSED_LINES,
   collapsedView,
-  elapsedOf,
   outputMemoOf,
   outputTaskKey,
   renderPlainOutput,
@@ -109,7 +108,7 @@ export function createGrepWrapper(
   // args are present every frame, live and restored alike).
   return createToolWrapper(origGrep, services, {
     renderShell: "default",
-    renderResult: ({ text, palette, theme, ctx, result, options }) => {
+    renderResult: ({ text, palette, theme, ctx, result, options, tookMs }) => {
       // Inert at intake (ADR 0004): the grep result carries raw file
       // bytes, and EVERY downstream surface — the placeholder's first
       // frame, the fallback, the plain rendering, the highlighted swap —
@@ -127,8 +126,8 @@ export function createGrepWrapper(
       // (a mid-session theme switch re-derives emphasis colors), the
       // footer state (the last streaming partial and the final frame can
       // share content exactly — only the Took footer differs, so the
-      // elapsed sideband is part of the key), and the expand state.
-      const elapsed = elapsedOf(result) ?? 0;
+      // measured duration is part of the key), and the expand state.
+      const elapsed = tookMs ?? 0;
       // One computed key serves BOTH roles: the width-neutral identity
       // (the attach guard) and the render-loop cache key — grep's output
       // has no width-dependent layout, so the width never joins the key
@@ -158,7 +157,7 @@ export function createGrepWrapper(
       const { shown: shownLines, tail } = collapsedView(lines, {
         budget: COLLAPSED_LINES.grep,
         expanded: options.expanded,
-        result,
+        tookMs,
         theme,
       });
 

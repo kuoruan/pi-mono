@@ -104,23 +104,36 @@ export function resultStreaming(ctx: RenderContext<object>): boolean {
 }
 
 /**
+ * The execution-timing fields every wrapper's render state carries. pi's
+ * shell renderer owns the mechanism (renderCall arms `startedAt` while
+ * the execution is live, renderResult fixes `endedAt` on the settled
+ * frame) and reads them for bash/powershell's own `Took`/`Elapsed`
+ * footer; the factory drives the SAME two fields for every wrapper so the
+ * grep/find/ls footers and the error frame read one source. Nothing about
+ * timing is persisted into the session: a resumed row never armed
+ * `startedAt`, so it shows no duration — matching pi's native renderers.
+ */
+export interface ExecutionTimingState {
+  /** Armed by renderCall while the execution is live (pi's contract). */
+  startedAt?: number;
+  /** Fixed by the first settled renderResult (pi's contract). */
+  endedAt?: number;
+}
+
+/**
  * The shell tools' render state. Co-authored with the SDK: our renderCall
  * stashes the command fields, and the SDK's native bash/powershell
  * renderResult (which the wrapper delegates output rendering to) reads
- * startedAt and writes startedAt/endedAt/interval for its timing display —
+ * the timing fields and owns the ticking `interval` for its live display —
  * this type is the contract both sides write into.
  */
-export interface ShellState {
+export interface ShellState extends ExecutionTimingState {
   /** The command string (stashed by renderCall). */
   command?: string;
   /** The command + theme identity the highlighted form was computed for (staleness). */
   commandHighlightFor?: string;
   /** The shell-grammar highlighted command (swapped in by renderCall). */
   commandHighlight?: string;
-  /** Execution start (the SDK result renderer's timing display). */
-  startedAt?: number;
-  /** Execution end (the SDK result renderer's timing display). */
-  endedAt?: number;
   /**
    * The native result renderer's elapsed-time interval — it re-renders
    * every second while a partial result streams, and clears it in its own

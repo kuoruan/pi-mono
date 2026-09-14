@@ -15,7 +15,6 @@ import { createToolWrapper } from "./tool-factory.ts";
 import {
   COLLAPSED_LINES,
   collapsedView,
-  elapsedOf,
   outputMemoOf,
   outputTaskKey,
   renderPlainOutput,
@@ -36,7 +35,7 @@ const ELBOW = "└── ";
 export function createLsWrapper(origLs: ToolDefinition, services: ToolServices): ToolDefinition {
   return createToolWrapper(origLs, services, {
     renderShell: "default",
-    renderResult: ({ text, palette, theme, ctx, result, options }) => {
+    renderResult: ({ text, palette, theme, ctx, result, options, tookMs }) => {
       // Inert at intake (ADR 0004): filenames can carry control bytes too.
       // The derivation is memoized on the result object's identity.
       const derive = outputMemoOf(ctx.state);
@@ -47,7 +46,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
       // The tree styling runs in the async preview task (the grep/find
       // shape): trigger frames only check the key; the per-entry work
       // (connectors, type coloring) happens off the frame.
-      const elapsed = elapsedOf(result) ?? 0;
+      const elapsed = tookMs ?? 0;
       // One computed key serves BOTH roles — ls has no width-dependent
       // layout: the width never joins the key.
       const taskKey = outputTaskKey({
@@ -67,7 +66,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
       const { shown: shownEntries, tail: plainTail } = collapsedView(entries, {
         budget: COLLAPSED_LINES.ls,
         expanded: options.expanded,
-        result,
+        tookMs,
         theme,
       });
       const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
@@ -88,7 +87,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
             const { shown, tail } = collapsedView(entries, {
               budget: COLLAPSED_LINES.ls,
               expanded: options.expanded,
-              result,
+              tookMs,
               theme,
             });
 
