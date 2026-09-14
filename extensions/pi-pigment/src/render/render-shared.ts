@@ -46,6 +46,21 @@ export interface DiffViewOptions {
 /** Renders below this width fall back to the unified view (split needs two code columns). */
 export const MIN_RENDER_WIDTH = 40;
 
+/**
+ * The "N more lines" tail both diff views close their visible window with.
+ * One home for the styled row: the views compute a different N (split
+ * counts the hidden logical lines across its paired rows, unified the
+ * sliced-off tail of `diff.lines`) but the glyph shape and colors are the
+ * same bytes in both.
+ *
+ * @param hidden - The hidden logical-line count.
+ * @param palette - The resolved diff palette (the row frame's colors).
+ * @returns The styled tail row.
+ */
+export function hiddenLinesTail(hidden: number, palette: DiffPalette): string {
+  return `${palette.bgBase}${palette.fgDim}  ... (${hidden} more lines)${palette.rowReset}`;
+}
+
 /** The highlightPairSides inputs. */
 export interface HighlightSidesOptions {
   /** Old-side source lines. */

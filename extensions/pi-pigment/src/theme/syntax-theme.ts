@@ -257,34 +257,35 @@ export function buildPiSyntaxTheme(
   }
 
   const backgrounds = aaCheckBackgrounds(palette);
-  const adjusted = new Map<SemanticKey, string>();
+  // Total by construction, and typed as such: `raw` holds every
+  // SEMANTIC_KEYS entry (the loop above bails on any miss) and every entry
+  // is written here — so the reads below need no fallback, and none can
+  // silently hand out a different (pre-AA) color.
+  const adjusted = {} as Record<SemanticKey, string>;
   for (const [key, rgb] of raw) {
     const patched = userColors?.[key];
-    if (patched) {
-      adjusted.set(key, patched); // user color: verbatim
-    } else {
-      adjusted.set(key, rgbToHex(enforceWcag(rgb, backgrounds, !palette.isLight)));
-    }
+    // A user patch is verbatim; anything falsy (including an empty string,
+    // which no schema allows) falls through to the enforced variant.
+    adjusted[key] = patched || rgbToHex(enforceWcag(rgb, backgrounds, !palette.isLight));
   }
 
-  const fgHex = rgbToHex(raw.get("punctuation") ?? { r: 128, g: 128, b: 128 });
   // The canvas color's hex: the parsed palette bg, else the polarity's
   // neutral (the fallback only fires when bgBase carries no truecolor).
   const bgHex = canvasBgHex(palette);
   // Stable identity for Shiki's name-based dedup: derived colors + theme key
   // + user patches (so config reloads produce a fresh name/cache entry).
-  const identity = `${[...adjusted.values()].join("")}|${themeKey}|${JSON.stringify(userColors ?? {})}`;
+  const identity = `${SEMANTIC_KEYS.map((key) => adjusted[key]).join("")}|${themeKey}|${JSON.stringify(userColors ?? {})}`;
 
   return {
     name: `pi-${palette.isLight ? "light" : "dark"}-${fnv1a(identity)}`,
     type: palette.isLight ? "light" : "dark",
     colors: {
       "editor.background": bgHex,
-      "editor.foreground": adjusted.get("punctuation") ?? fgHex,
+      "editor.foreground": adjusted.punctuation,
     },
     tokenColors: SCOPE_MAP.map(({ scopes, color }) => ({
       scope: [...scopes],
-      settings: { foreground: adjusted.get(semanticKeyOfPiName(color)) ?? fgHex },
+      settings: { foreground: adjusted[semanticKeyOfPiName(color)] },
     })),
   };
 }

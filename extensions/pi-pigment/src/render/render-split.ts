@@ -8,7 +8,12 @@ import { DIM, expandTabs, fitAnsi } from "#src/core/ansi.ts";
 import { type DiffLine, sepLabel } from "#src/core/diff.ts";
 
 import { injectBg } from "./inject-bg.ts";
-import { type DiffViewOptions, highlightPairSides, MIN_RENDER_WIDTH } from "./render-shared.ts";
+import {
+  type DiffViewOptions,
+  hiddenLinesTail,
+  highlightPairSides,
+  MIN_RENDER_WIDTH,
+} from "./render-shared.ts";
 import { borderBar, diffRowFrame, gutterWidth } from "./row-frame.ts";
 import { type CharRange, shouldEmphasize, wordDiffAnalysis } from "./word-diff.ts";
 import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
@@ -258,9 +263,7 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
     // window covers fewer logical lines than unified's at the same
     // maxLines. Same unit, not the same number.
     const hiddenLines = rows.slice(visible.length).reduce((sum, row) => sum + row.hiddenLines, 0);
-    output.push(
-      `${palette.bgBase}${palette.fgDim}  ... (${hiddenLines} more lines)${palette.rowReset}`,
-    );
+    output.push(hiddenLinesTail(hiddenLines, palette));
   }
   return output.join("\n");
 }

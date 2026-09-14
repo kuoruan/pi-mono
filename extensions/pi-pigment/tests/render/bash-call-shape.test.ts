@@ -34,6 +34,7 @@ import {
   registerTools,
   resetPigmentForTest,
   toolOf,
+  waitFor,
   type TextDouble,
 } from "#test/fixtures.ts";
 import { vol } from "#test/memfs.ts";
@@ -42,24 +43,6 @@ vi.mock("node:fs");
 vi.mock("fs");
 vi.mock("node:fs/promises");
 vi.mock("fs/promises");
-
-/**
- * A polled wait (the highlight swap lands on a microtask+invalidate).
- *
- * @param cond - The awaited condition (undefined = not yet).
- * @param ms - The timeout budget.
- * @returns Resolves when the condition holds; rejects on timeout.
- */
-async function waitFor(cond: () => boolean | undefined, ms = 2000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < ms) {
-    if (cond()) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error("condition not met within timeout");
-}
 
 beforeEach(() => {
   resetPigmentForTest();

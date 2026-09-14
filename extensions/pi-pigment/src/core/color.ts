@@ -119,8 +119,7 @@ export function parseHexColor(hex: string): RgbColor | null {
  * @returns Whether it is the exact 6-digit opaque form.
  */
 export function isOpaqueHex6(hex: string): boolean {
-  const parsed = parseHexForm(hex);
-  return parsed !== null && !parsed.isAlphaForm && hex.length === 7;
+  return parseHexColor(hex) !== null;
 }
 
 /**

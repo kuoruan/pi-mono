@@ -7,7 +7,12 @@ import { DIM, expandTabs, measurePlain } from "#src/core/ansi.ts";
 import { sepLabel, type DiffLine } from "#src/core/diff.ts";
 
 import { injectBg } from "./inject-bg.ts";
-import { type DiffViewOptions, highlightPairSides, MIN_RENDER_WIDTH } from "./render-shared.ts";
+import {
+  type DiffViewOptions,
+  hiddenLinesTail,
+  highlightPairSides,
+  MIN_RENDER_WIDTH,
+} from "./render-shared.ts";
 import { borderBar, diffRowFrame, gutterWidth, lineNumberWidth } from "./row-frame.ts";
 import { paintWordDiff, shouldEmphasize, wordDiffAnalysis } from "./word-diff.ts";
 import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
@@ -177,9 +182,7 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
   }
 
   if (diff.lines.length > visible.length) {
-    output.push(
-      `${palette.bgBase}${palette.fgDim}  ... (${diff.lines.length - visible.length} more lines)${palette.rowReset}`,
-    );
+    output.push(hiddenLinesTail(diff.lines.length - visible.length, palette));
   }
   return output.join("\n");
 }
