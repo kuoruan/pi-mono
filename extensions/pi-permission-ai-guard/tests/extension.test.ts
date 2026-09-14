@@ -16,6 +16,7 @@ import { createAiGuardExtension } from "#src/extension.ts";
 import type { ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
 import type { CompletionItem } from "#src/session/runtime-settings.ts";
 import { SETTING_ENTRY_TYPE } from "#src/session/session-settings-store.ts";
+import { makeUiCtx } from "#test/host-ctx.ts";
 
 // vi.mock is hoisted ABOVE the static import above, so the mock factory
 // may only close over vi.hoisted() bindings — the spies live there.
@@ -224,24 +225,6 @@ function setupExtension(sessionCtxOverrides: Parameters<typeof makeSessionCtx>[0
   return { pi, calls };
 }
 
-/**
- * UI context mock for command/shortcut handlers (notify, setStatus, select).
- *
- * @returns A mock `ctx.ui` with spies for the three methods the handlers use.
- */
-function makeUiCtx() {
-  return {
-    hasUI: true,
-    ui: {
-      notify: vi.fn<(message: string, type?: "info" | "warning" | "error") => void>(),
-      setStatus: vi.fn<(key: string, text: string | undefined) => void>(),
-      select: vi.fn<(title: string, options: string[]) => Promise<string | undefined>>(
-        async () => undefined,
-      ),
-    },
-  };
-}
-
 beforeEach(() => {
   mocks.getPermissionsService.mockReturnValue(undefined);
 });
@@ -342,7 +325,7 @@ describe("createAiGuardExtension lifecycle", () => {
     // registration; it must not rebuild the session (loadConfig would run
     // again, resetting breaker counts and cache entries).
     let loadCalls = 0;
-    const config = configSchema.parse({ provider: "test", model: "test" });
+    const config = makeBaselineConfig();
     const { pi } = installExtension(undefined, {
       loadConfig: () => {
         loadCalls++;
@@ -671,7 +654,7 @@ describe("createAiGuardExtension — save-config actions", () => {
         changed: boolean;
       }
     >((target) => ({ path: `/agent/config-${target}.json`, created: false, changed: true }));
-    const config = configSchema.parse({ provider: "test", model: "test" });
+    const config = makeBaselineConfig();
     const { pi } = installExtension(undefined, {
       loadConfig: () => ({ config, issues: [] }),
       saveConfig,
@@ -701,7 +684,7 @@ describe("createAiGuardExtension — save-config actions", () => {
   });
 
   it("production wiring: an untrusted session's save-config project is refused by the real persist", async () => {
-    const config = configSchema.parse({ provider: "test", model: "test" });
+    const config = makeBaselineConfig();
     // No saveConfig injected: the production persistConfigLayer runs.
     const { pi } = installExtension(undefined, {
       loadConfig: () => ({ config, issues: [] }),

@@ -5,7 +5,6 @@
  * surface (SessionLifecycle satisfies it structurally in production).
  */
 
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { Keybinding } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
@@ -23,6 +22,7 @@ import {
   verbWord,
 } from "#src/session/runtime-settings.ts";
 import type { SessionOverrides } from "#src/session/session-overrides.ts";
+import { makeUiCtx } from "#test/host-ctx.ts";
 
 const SPECS: readonly EnumSettingSpec[] = [
   {
@@ -35,26 +35,6 @@ const SPECS: readonly EnumSettingSpec[] = [
     optionDetails: MODE_BLURBS,
   },
 ];
-
-/**
- * A command/shortcut UI context mock with spies.
- *
- * @param selectResult - What ui.select resolves with (undefined = cancel).
- * @returns The mock ctx.
- */
-function makeUiCtx(selectResult?: string) {
-  return {
-    hasUI: true,
-    ui: {
-      notify: vi.fn<(message: string, type?: "info" | "warning" | "error") => void>(),
-      setStatus: vi.fn<(key: string, text: string | undefined) => void>(),
-      select: vi.fn<() => Promise<string | undefined>>(async () => selectResult),
-      custom: vi.fn<() => Promise<string>>(
-        async () => "closed",
-      ) as unknown as ExtensionUIContext["custom"],
-    },
-  };
-}
 
 /**
  * Build settings over a plain surface with the config default.
