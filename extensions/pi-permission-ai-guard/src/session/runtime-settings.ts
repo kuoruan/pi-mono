@@ -2,7 +2,9 @@
  * The runtime settings surface: everything a session-scoped setting needs
  * around its value — the /ai-guard command (menu, dispatch, completion),
  * the ctrl+alt+g cycle shortcut, footer projection, session-file
- * persistence, and restore from the active branch.
+ * persistence, and restore from the active branch. The read-only audit
+ * panels (`report`, `denied`) live in panels.ts, wired here as command
+ * entries like any other action verb.
  *
  * The interface is deliberately registration-shaped: the extension wires
  * `command` / `shortcut` into pi.registerCommand / registerShortcut and
@@ -31,15 +33,19 @@ import type {
   RegisteredCommand,
 } from "@earendil-works/pi-coding-agent";
 
-import type { LogEntry } from "#src/audit/decision-log-reader.ts";
-import { buildReportCandidates } from "#src/audit/report.ts";
 import type { ConfigLayerTarget, SaveConfigFn } from "#src/config/config-layer.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import { CYCLE_DESCRIPTION } from "#src/config/mode-table.ts";
 import type { BreakerTier } from "#src/review/circuit-breaker.ts";
-import type { DenyRecord, NotifyFn } from "#src/review/review-pipeline.ts";
+import type { NotifyFn } from "#src/review/review-pipeline.ts";
 
-import { type RecordDetail, showRecordDetail } from "./record-detail.ts";
+import {
+  openDeniedPanel,
+  openReportPanel,
+  type PanelDeps,
+  type PanelReaders,
+  pickItem,
+} from "./panels.ts";
 import { effectiveConfig, effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
 import {
   type SessionBranchReader,
@@ -182,24 +188,6 @@ export interface RuntimeSettingsDeps {
 }
 
 /**
- * The read-only panels' collaborators (`report`, `denied`): the review-log read and the session's
- * deny history. Kept apart from {@link
- * RuntimeSettingsDeps} so the settings seam carries no report
- * facts (panel feedback rides the shared `notify` seam) — `denyHistory` is read through an accessor
- * because the live array is recreated at each session_start, after this object is wired once.
- */
-export interface PanelDeps {
-  /**
-   * Reads the permission-review log's tail for the report command —
-   * injected (production reads the real file; tests inject fixtures).
-   * Returns undefined when the log cannot be read.
-   */
-  readDecisionLog: () => LogEntry[] | undefined;
-  /** This session's model-gate deny history (empty when no session). */
-  readDenyHistory: () => readonly DenyRecord[];
-}
-
-/**
  * One option in a setting's picker and completion surface: an enum value,
  * or the reset action. The union keeps the reset ACTION out of the value
  * channel — a spec whose values someday include a literal "reset" stays
@@ -306,7 +294,7 @@ const SAVE_TARGETS = ["global", "project"] as const;
  */
 export class RuntimeSettings {
   readonly #deps: RuntimeSettingsDeps;
-  readonly #panels: PanelDeps;
+  readonly #panelCollaborators: PanelReaders;
   readonly #specs: readonly EnumSettingSpec[];
   /** The command table: settings first (spec order), then action verbs. */
   readonly #entries: readonly CommandEntry[];
@@ -316,9 +304,9 @@ export class RuntimeSettings {
    * @param panels - The read-only panels' collaborators (report / denied).
    * @param specs - The settings this extension exposes.
    */
-  constructor(deps: RuntimeSettingsDeps, panels: PanelDeps, specs: readonly EnumSettingSpec[]) {
+  constructor(deps: RuntimeSettingsDeps, panels: PanelReaders, specs: readonly EnumSettingSpec[]) {
     this.#deps = deps;
-    this.#panels = panels;
+    this.#panelCollaborators = panels;
     this.#specs = specs;
     this.#entries = [...specs.map((spec) => this.#settingEntry(spec)), ...this.#actionEntries()];
   }
@@ -452,7 +440,7 @@ export class RuntimeSettings {
     const rows = this.#entries.flatMap((e) =>
       e.menuRows ? e.menuRows().map((r) => ({ entry: e, row: r })) : [],
     );
-    const picked = await this.#pickItem(
+    const picked = await pickItem(
       ctx,
       "ai-guard settings — pick a setting to adjust or an action to run",
       rows,
@@ -599,13 +587,13 @@ export class RuntimeSettings {
         name: "report",
         completionLabel: "report — suggest permission rules for repeated asks",
         menuRows: () => [{ label: "report suggested rules", args: [] }],
-        run: (_args, ctx) => this.#applyReport(ctx),
+        run: (_args, ctx) => openReportPanel(this.#panelDeps(), ctx),
       },
       {
         name: "denied",
         completionLabel: "denied — browse this session's model denies",
         menuRows: () => [{ label: "browse model denies", args: [] }],
-        run: (_args, ctx) => this.#applyDenied(ctx),
+        run: (_args, ctx) => openDeniedPanel(this.#panelDeps(), ctx),
       },
     ];
   }
@@ -721,103 +709,14 @@ export class RuntimeSettings {
   }
 
   /**
-   * The report action: aggregate the review log's repeated same-context
-   * asks and offer copy-paste permission-rule fragments — evidence for the
-   * operator, never an applied rule. Reads the log tail read-only.
+   * Assemble the read-only panels' collaborators: their read seams plus
+   * the shared feedback `notify` (panel notices ride the session's notify
+   * seam — never level-gated, same as every other command feedback).
    *
-   * @param ctx - The command context (notify + optional picker).
+   * @returns The deps every panel open function takes.
    */
-  async #applyReport(ctx: AiGuardUiContext): Promise<void> {
-    const entries = this.#panels.readDecisionLog();
-    if (entries === undefined) {
-      this.#deps.notify("no review log found — nothing to report yet", "info");
-      return;
-    }
-    const candidates = buildReportCandidates(entries);
-    if (candidates.length === 0) {
-      this.#deps.notify("no repeated same-context asks found in the recent review log", "info");
-      return;
-    }
-    // Summary lines first (feedback channel — a direct answer to the typed
-    // command, never level-gated), then the standard list, then the
-    // overlay detail for the picked suggestion.
-    const top = candidates.slice(0, 10);
-    for (const c of top.slice(0, 5)) {
-      this.#deps.notify(`${c.occurrences}× ${c.target} (${c.surface})`, "info");
-    }
-    if (!ctx.hasUI) {
-      this.#deps.notify("pass a picker-capable UI to browse the suggested rule fragments", "info");
-      return;
-    }
-    const picked = await this.#pickItem(
-      ctx,
-      "ai-guard report — pick a suggestion to view its rule",
-      top,
-      (c) => `${c.occurrences}× ${c.target} (${c.surface})`,
-    );
-    if (!picked) return;
-    const detail: RecordDetail = {
-      title: `suggested rule · ${picked.occurrences}× · ${picked.surface}`,
-      command: picked.target,
-      body: [
-        {
-          kind: "text",
-          text: "reviewed 3+ times in one context with no terminal deny — confirm, then paste into pi-permission-system config",
-          tone: "muted",
-        },
-        { kind: "emphasis", text: picked.suggestedRule },
-      ],
-    };
-    await showRecordDetail(ctx.ui.custom, detail);
-  }
-
-  /**
-   * The denied panel: this session's model-gate denies, most recent
-   * first — what the reviewer itself refused. Read-only memory, no log
-   * dependency (the panel is session-scoped by construction).
-   *
-   * @param ctx - The command context (notify + optional picker).
-   */
-  async #applyDenied(ctx: AiGuardUiContext): Promise<void> {
-    const history = this.#panels.readDenyHistory();
-    if (history.length === 0) {
-      this.#deps.notify("no model-gate denies in this session", "info");
-      return;
-    }
-    if (!ctx.hasUI) {
-      this.#deps.notify(
-        `pass a picker-capable UI to browse the ${history.length} deny record(s)`,
-        "info",
-      );
-      return;
-    }
-    const recent = history.toReversed();
-    // The list line is a scan index (metadata + truncated command, the
-    // pick seam's uniqueness discipline); the overlay detail is the
-    // reading surface — the command and the reason whole, no notify
-    // ceiling (the old single-line echo truncated at 200).
-    const record = await this.#pickItem(
-      ctx,
-      "ai-guard denied — pick a record to view its reason",
-      recent,
-      (d) =>
-        `deny${d.riskLevel ? ` (${d.riskLevel})` : ""} — ${d.target} [${d.surface}] (${d.timestamp.slice(11, 23)})`,
-    );
-    if (!record) return;
-    const detail: RecordDetail = {
-      title: `model deny · ${record.timestamp}`,
-      command: record.target,
-      body: [
-        ...(record.reason
-          ? [{ kind: "text" as const, text: record.reason, tone: "text" as const }]
-          : [{ kind: "text" as const, text: "no reason recorded", tone: "muted" as const }]),
-        ...(record.riskLevel
-          ? [{ kind: "field" as const, label: "risk level", value: record.riskLevel }]
-          : []),
-        { kind: "field" as const, label: "request id", value: record.requestId },
-      ],
-    };
-    await showRecordDetail(ctx.ui.custom, detail);
+  #panelDeps(): PanelDeps {
+    return { notify: this.#deps.notify, ...this.#panelCollaborators };
   }
 
   /**
@@ -940,16 +839,6 @@ export class RuntimeSettings {
    * @param render - The label renderer (one per item).
    * @returns The picked item, or undefined on cancel.
    */
-  async #pickItem<T>(
-    ctx: AiGuardUiContext,
-    title: string,
-    items: readonly T[],
-    render: (item: T) => string,
-  ): Promise<T | undefined> {
-    const labels = items.map(render);
-    const choice = await ctx.ui.select(title, labels);
-    return choice === undefined ? undefined : items[labels.indexOf(choice)];
-  }
 
   /**
    * Open the spec's value picker and apply the choice.
@@ -963,7 +852,7 @@ export class RuntimeSettings {
     // allow is the only pass`) — plain text, resolved by item so the
     // pretty line never has to be parsed back.
     const options = this.#options(spec);
-    const option = await this.#pickItem(ctx, title, options, (o) =>
+    const option = await pickItem(ctx, title, options, (o) =>
       spec.optionDetails?.[o.text] ? `${o.text} — ${spec.optionDetails[o.text]}` : o.text,
     );
     if (option) {

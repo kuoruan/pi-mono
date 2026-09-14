@@ -14,6 +14,7 @@ const NOTIFY_SOURCES = [
   "#src/session/session-lifecycle.ts",
   "#src/review/review-pipeline.ts",
   "#src/session/runtime-settings.ts",
+  "#src/session/panels.ts",
   "#src/review/verdict-mode.ts",
 ] as const;
 
