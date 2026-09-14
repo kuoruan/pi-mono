@@ -46,7 +46,7 @@
   },
   "overrides": [
     {
-      "files": ["**/*.{test,spec,bench}.{ts,tsx,js,mjs,cjs}"],
+      "files": ["**/*.{test,spec,bench}.{ts,tsx,js,mjs,cjs}", "**/tests/**/*.{ts,tsx,js,mjs,cjs}"],
       "env": {
         "vitest": true
       },
