@@ -6,17 +6,11 @@ import { themeNames } from "@shikijs/themes";
 import { describe, expect, it } from "vitest";
 
 import { parseDiff } from "#src/core/diff.ts";
-import { renderUnified } from "#src/render/render-unified.ts";
+import { renderUnified } from "#src/render/unified-view.ts";
 import { flattenTranslucentTokens, loadBundledTheme } from "#src/theme/bundled-intake.ts";
-import { resetPaletteForTest, resolveDiffPalette } from "#src/theme/palette.ts";
 import { type LoadedThemeFile } from "#src/theme/theme-file.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
-import {
-  resetSyntaxThemeForTest,
-  resolveActiveTheme,
-  setSyntaxThemeSelection,
-} from "#src/theme/theme-selection.ts";
-import { buildFakeTheme } from "#test/fixtures.ts";
+import { buildFakeTheme, makeRenderSession } from "#test/fixtures.ts";
 
 // FIXED virtual paths: this file does NOT mock node:fs, so the paths must
 // exist nowhere on the host (a real /project or /agent would hijack
@@ -26,10 +20,6 @@ const ENV = { cwd: "/project", agentDir: "/agent" };
 async function installDirect(name: string): Promise<LoadedThemeFile | undefined> {
   const { selection } = await resolveSyntaxThemeSelection(name, ENV);
   if (selection.kind !== "file") return undefined;
-  // Mirror session_start's assembly: the selection must be INSTALLED for
-  // render-time resolution to see it.
-  resetSyntaxThemeForTest();
-  setSyntaxThemeSelection(selection);
   return selection.file;
 }
 
@@ -86,27 +76,26 @@ describe("bundled-intake contract", () => {
 
 describe("direct-name render-time behavior", () => {
   it("polarity-gates like any file: a dark direct name falls back to auto on light", async () => {
-    resetPaletteForTest();
     const file = await installDirect("vesper");
     expect(file?.theme.type).toBe("dark");
-    const lightPalette = resolveDiffPalette(
-      buildFakeTheme({ successBg: "\x1b[48;2;250;250;250m" }),
-    );
-    const onLight = await resolveActiveTheme(lightPalette, buildFakeTheme());
+    // A session whose selection is the installed direct name, framed with
+    // a LIGHT pi theme: the polarity gate falls through to auto.
+    const { selection } = await resolveSyntaxThemeSelection("vesper", ENV);
+    const onLight = await makeRenderSession({ selection })
+      .forTheme(buildFakeTheme({ successBg: "\x1b[48;2;250;250;250m" }))
+      .activeTheme();
     // Whatever auto resolves to (an id, an object, or null when the fake
     // theme cannot derive), it is never vesper — the gate held.
     const identity =
       onLight === null ? "null" : typeof onLight === "string" ? onLight : onLight.name;
     expect(identity).not.toMatch(/vesper/);
-    resetSyntaxThemeForTest();
   });
 
   it("renders AA-enforced on matching polarity — translucent tokens flattened to 6-digit", async () => {
-    resetPaletteForTest();
     const file = await installDirect("vesper");
     expect(file).toBeDefined();
-    const darkPalette = resolveDiffPalette(buildFakeTheme());
-    const onDark = await resolveActiveTheme(darkPalette, buildFakeTheme());
+    const { selection } = await resolveSyntaxThemeSelection("vesper", ENV);
+    const onDark = await makeRenderSession({ selection }).forTheme(buildFakeTheme()).activeTheme();
     // B boundary: a bundled name enforces against the effective
     // backgrounds — the enforced object carries the -aa- identity (or the
     // clean id when nothing needed enforcement; vesper on this fake dark
@@ -120,7 +109,6 @@ describe("direct-name render-time behavior", () => {
     expect(
       onDark !== null && typeof onDark !== "string" ? JSON.stringify(onDark.tokenColors) : "",
     ).not.toMatch(/#[0-9a-fA-F]{8}/);
-    resetSyntaxThemeForTest();
   });
 });
 
@@ -184,18 +172,15 @@ describe("direct-name shadowing and normalization edges", () => {
   });
 
   it("direct-name e2e bytes: the override renders on the pi canvas", async () => {
-    resetPaletteForTest();
     const { selection } = await resolveSyntaxThemeSelection("github-dark", ENV);
-    setSyntaxThemeSelection(selection);
-    const fake = buildFakeTheme();
-    const palette = resolveDiffPalette(fake);
+    const view = makeRenderSession({ selection }).forTheme(buildFakeTheme());
     const diff = parseDiff("const a = 1;\n", "const a = 2;\n");
     const out = await renderUnified({
       diff,
       language: undefined,
       maxLines: 20,
       width: 120,
-      palette,
+      view,
       indicator: "bar",
     });
     // ADR 0006: the override layer renders TOKEN colors; the box canvas
@@ -203,6 +188,5 @@ describe("direct-name shadowing and normalization edges", () => {
     // github-dark's #24292e).
     expect(out).toContain("\x1b[48;2;30;30;40m");
     expect(out).not.toContain("\x1b[48;2;36;41;46m");
-    resetSyntaxThemeForTest();
   });
 });

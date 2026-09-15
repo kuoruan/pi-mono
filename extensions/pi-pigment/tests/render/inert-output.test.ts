@@ -7,19 +7,19 @@ import { afterAll, describe, expect, it } from "vitest";
 import { parseDiff, sepLabel } from "#src/core/diff.ts";
 import { formatToolErrorResult } from "#src/render/error-frame.ts";
 import { formatToolHeaderPath } from "#src/render/header.ts";
-import { renderUnified } from "#src/render/render-unified.ts";
 import { renderPlainTextFallback } from "#src/render/tool-factory.ts";
 import { parseHitLine } from "#src/render/tool-grep.ts";
-import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
+import { renderUnified } from "#src/render/unified-view.ts";
 import {
-  buildRenderTheme,
-  makeRenderCtx,
-  makeTextComponent,
-  plain,
-  registerTools,
-  waitFor,
   type DrivenTaskComponent,
   type TextDouble,
+  buildRenderTheme,
+  plain,
+  makeRenderCtx,
+  makeTextComponent,
+  registerTools,
+  viewFor,
+  waitFor,
 } from "#test/fixtures.ts";
 
 // REAL fs (not memfs): these tests EXECUTE the SDK's grep/find tools,
@@ -50,7 +50,7 @@ describe("inert output property (ADR 0004)", () => {
       language: undefined,
       maxLines: 40,
       width: 120,
-      palette: FALLBACK_PALETTE,
+      view: viewFor(),
       indicator: "bar",
     });
     expect(NON_SGR_ESCAPE.test(out)).toBe(false);
@@ -77,7 +77,7 @@ describe("inert output property (ADR 0004)", () => {
       language: undefined,
       maxLines: 40,
       width: 80,
-      palette: FALLBACK_PALETTE,
+      view: viewFor(),
       indicator: "bar",
     });
     expect(NON_SGR_ESCAPE.test(out)).toBe(false);

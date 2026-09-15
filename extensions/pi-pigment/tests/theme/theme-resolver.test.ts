@@ -3,10 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { configSchema } from "#src/config/config-schema.ts";
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
-import { resolveDiffPalette, resetPaletteForTest, setDiffRoots } from "#src/theme/palette.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
-import { resolveActiveTheme, setSyntaxThemeSelection } from "#src/theme/theme-selection.ts";
-import { buildFakeTheme, resetPigmentForTest } from "#test/fixtures.ts";
+import { buildFakeTheme, makeRenderSession, viewFor } from "#test/fixtures.ts";
 import { vol, writeFile } from "#test/memfs.ts";
 
 vi.mock("node:fs");
@@ -458,26 +456,25 @@ describe("VS Code colors passthrough (ADR 0003)", () => {
     // ADR 0006: the file channel's tints ride the converter (generation
     // time); the USER's config tints remain the palette's roots — this
     // e2e pins that surviving path with the real github-dark values.
-    setDiffRoots({
-      topLevel: { added: { tint: "#3fb9504d" }, removed: { tint: "#ff7b724d" } },
-    });
-    resetPaletteForTest();
-    try {
+    {
       // Fake pi theme: dark canvas (13,17,23) ≈ github-dark's #0d1117.
-      const palette = resolveDiffPalette(
+      const palette = viewFor(
         buildFakeTheme({
           successBg: "\x1b[48;2;13;17;23m",
           errorBg: "\x1b[48;2;13;17;23m",
         }),
-      );
+        {
+          diffRoots: {
+            topLevel: { added: { tint: "#3fb9504d" }, removed: { tint: "#ff7b724d" } },
+          },
+        },
+      ).palette;
       // Word slot = composite(#3fb950 at 77/255 over #0d1117) = (28,68,40).
       expect(palette.bgAddedWord).toBe("\x1b[48;2;28;68;40m");
       // Line slot = alpha/2 = the author's own 15% line intent → (21,42,32).
       expect(palette.bgAdded).toBe("\x1b[48;2;21;42;32m");
       // The canvas stays the pi theme's — context rows untouched.
       expect(palette.bgBase).toBe("\x1b[48;2;13;17;23m");
-    } finally {
-      resetPigmentForTest();
     }
   });
 });
@@ -628,8 +625,7 @@ describe("per-polarity variant bases (user theme pairs)", () => {
       env(),
     );
     expect(issues).toHaveLength(0);
-    setSyntaxThemeSelection(selection);
-    const active = await resolveActiveTheme(resolveDiffPalette(buildFakeTheme()), buildFakeTheme());
+    const active = await makeRenderSession({ selection }).forTheme(buildFakeTheme()).activeTheme();
     const tc =
       (active as { tokenColors?: { settings?: { foreground?: string } }[] }).tokenColors ?? [];
     expect(tc.some((r) => r.settings?.foreground?.toLowerCase() === "#ff00ff")).toBe(true);
@@ -677,16 +673,15 @@ describe("file pairs (the explicit slash grammar)", () => {
     writeFile(`${PROJECT_THEMES}/solo-dark.json`, DARK_THEME);
     const { selection } = await resolveSyntaxThemeSelection("solo-dark", env());
     expect(selection.kind).toBe("file");
-    setSyntaxThemeSelection(selection);
+    const session = makeRenderSession({ selection });
     // Light terminal + dark-only pair → the auto path (null here — the fake
     // theme has no syntax colors to derive from), NEVER the dark half's
     // colors; dark terminal uses the half.
-    const onLight = await resolveActiveTheme(
-      resolveDiffPalette(buildFakeTheme({ successBg: "\x1b[48;2;250;250;250m" })),
-      buildFakeTheme({ successBg: "\x1b[48;2;250;250;250m" }),
-    );
+    const onLight = await session
+      .forTheme(buildFakeTheme({ successBg: "\x1b[48;2;250;250;250m" }))
+      .activeTheme();
     expect(onLight === null || !JSON.stringify(onLight).includes("#c678dd")).toBe(true);
-    const onDark = await resolveActiveTheme(resolveDiffPalette(buildFakeTheme()), buildFakeTheme());
+    const onDark = await session.forTheme(buildFakeTheme()).activeTheme();
     expect(JSON.stringify(onDark)).toContain("#c678dd"); // DARK_THEME's keyword
   });
 
@@ -705,8 +700,7 @@ describe("file pairs (the explicit slash grammar)", () => {
       env(),
     );
     expect(selection.kind).toBe("object");
-    setSyntaxThemeSelection(selection);
-    const onDark = await resolveActiveTheme(resolveDiffPalette(buildFakeTheme()), buildFakeTheme());
+    const onDark = await makeRenderSession({ selection }).forTheme(buildFakeTheme()).activeTheme();
     expect(JSON.stringify(onDark)).toContain("#c678dd");
   });
 });

@@ -108,7 +108,8 @@ export function createFindWrapper(
   // ctx.args (present every frame, live and restored alike).
   return createToolWrapper(origFind, services, {
     renderShell: "default",
-    renderResult: ({ text, palette, theme, ctx, result, options, tookMs }) => {
+    renderResult: ({ text, view, ctx, result, options, tookMs }) => {
+      const { palette, piTheme: theme } = view;
       // Inert at intake (ADR 0004): the result carries raw paths. The
       // derivation is memoized on the result object's identity (one
       // lookup per trigger frame for a stable result).

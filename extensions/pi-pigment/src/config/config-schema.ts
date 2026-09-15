@@ -8,7 +8,7 @@ import { SEMANTIC_KEYS, type SemanticColors } from "#src/theme/syntax-theme.ts";
 export const CONFIG_HOME = "pigment";
 
 /** The built-in tools pi-pigment can wrap. */
-const TOOL_NAMES = ["write", "edit", "bash", "powershell", "grep", "ls", "find"] as const;
+export const TOOL_NAMES = ["write", "edit", "bash", "powershell", "grep", "ls", "find"] as const;
 /** A wrappable built-in tool. */
 export type ToolName = (typeof TOOL_NAMES)[number];
 

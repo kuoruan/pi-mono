@@ -8,11 +8,12 @@
 import type { GrepToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import { FG_DEFAULT, inertText } from "#src/core/ansi.ts";
-import { detectLanguage, hlBlock, MAX_HL_CHARS } from "#src/theme/highlight.ts";
+import { detectLanguage, MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
-import { accentEmphasis, emphasize } from "./pattern-emphasis.ts";
+import { accentEmphasis, emphasize, type MatchFlags } from "./pattern-emphasis.ts";
+import type { RenderView } from "./session.ts";
 import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import {
@@ -23,14 +24,6 @@ import {
   renderPlainOutput,
 } from "./tool-output.ts";
 import { argsOf, resultStreaming, type ToolServices } from "./tool-services.ts";
-
-/** Grep's matching flags (read from ctx.args in renderResult, honored by emphasize). */
-interface GrepFlags {
-  /** The pattern is a literal string (no regex). */
-  literal: boolean;
-  /** Matching is case-insensitive. */
-  ignoreCase: boolean;
-}
 
 /** A parsed hit line: the file/line prefix vs the content. */
 interface HitLine {
@@ -108,7 +101,8 @@ export function createGrepWrapper(
   // args are present every frame, live and restored alike).
   return createToolWrapper(origGrep, services, {
     renderShell: "default",
-    renderResult: ({ text, palette, theme, ctx, result, options, tookMs }) => {
+    renderResult: ({ text, view, ctx, result, options, tookMs }) => {
+      const { palette, piTheme: theme } = view;
       // Inert at intake (ADR 0004): the grep result carries raw file
       // bytes, and EVERY downstream surface — the placeholder's first
       // frame, the fallback, the plain rendering, the highlighted swap —
@@ -188,13 +182,9 @@ export function createGrepWrapper(
           render: async () =>
             pending
               ? plain
-              : `${await renderHighlighted({
-                  lines: shownLines,
-                  pattern,
-                  flags,
-                  theme,
-                  palette,
-                })}${tail ? `\n${tail}` : ""}`,
+              : `${await renderHighlighted({ lines: shownLines, pattern, flags, view })}${
+                  tail ? `\n${tail}` : ""
+                }`,
         }),
       );
       return text;
@@ -256,7 +246,7 @@ export interface RenderHitLineOptions {
   /** The grep pattern source. */
   pattern: string;
   /** The grep flags (literal / ignoreCase). */
-  flags: GrepFlags;
+  flags: MatchFlags;
   /** The pi theme. */
   theme: PaletteTheme;
   /** The palette. */
@@ -296,11 +286,9 @@ interface RenderHighlightedOptions {
   /** The grep pattern source (emphasis). */
   pattern: string;
   /** The grep flags (literal / ignoreCase). */
-  flags: GrepFlags;
-  /** The pi theme. */
-  theme: PaletteTheme;
-  /** The palette (emphasis colors). */
-  palette: DiffPalette;
+  flags: MatchFlags;
+  /** The frame's view (the highlight entry; palette/theme ride along). */
+  view: RenderView;
 }
 
 /**
@@ -313,7 +301,8 @@ interface RenderHighlightedOptions {
  * @returns The rendered text (async — highlighting per file).
  */
 async function renderHighlighted(options: RenderHighlightedOptions): Promise<string> {
-  const { lines, pattern, flags, theme, palette } = options;
+  const { lines, pattern, flags, view } = options;
+  const { palette, piTheme: theme } = view;
   // Parse pass: every line classified; the file's language resolved once.
   const langByFile = new Map<string, BundledLanguage | undefined>();
   const parsed = lines.map((line) => {
@@ -361,11 +350,9 @@ async function renderHighlighted(options: RenderHighlightedOptions): Promise<str
       i++;
     }
     for (const chunk of chunkRun(members, MAX_HL_CHARS)) {
-      const hlLines = await hlBlock({
+      const hlLines = await view.highlight({
         code: chunk.map((m) => m.content).join("\n"),
         language: entry.lang,
-        palette,
-        piTheme: theme,
       });
       for (let k = 0; k < chunk.length; k++) {
         const member = chunk[k];

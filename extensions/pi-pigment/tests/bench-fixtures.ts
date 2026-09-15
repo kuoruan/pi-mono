@@ -18,7 +18,7 @@ export const cjkLine = "  // 中文注释宽度按双列计算，确保不溢出
 /** A 150-line diff body (one frame's worth at the render budget). */
 export const diffBody = Array.from({ length: 150 }, (_, i) => `${plainLine} // ${i}`).join("\n");
 
-/** The full diff palette (same escape shapes as resolveDiffPalette). */
+/** The full diff palette (the same escape shapes the derivation emits). */
 export const diffPalette: DiffPalette = {
   bgBase: "\x1b[48;2;30;30;40m",
   rowReset: "\x1b[0m",

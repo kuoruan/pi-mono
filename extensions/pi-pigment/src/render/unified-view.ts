@@ -6,13 +6,13 @@
 import { DIM, expandTabs, measurePlain } from "#src/core/ansi.ts";
 import { sepLabel, type DiffLine } from "#src/core/diff.ts";
 
-import { injectBg } from "./inject-bg.ts";
 import {
   type DiffViewOptions,
   hiddenLinesTail,
   highlightPairSides,
   MIN_RENDER_WIDTH,
-} from "./render-shared.ts";
+} from "./diff-view.ts";
+import { injectBg } from "./inject-bg.ts";
 import { borderBar, diffRowFrame, gutterWidth, lineNumberWidth } from "./row-frame.ts";
 import { paintWordDiff, shouldEmphasize, wordDiffAnalysis } from "./word-diff.ts";
 import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
@@ -26,7 +26,8 @@ import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
  * @returns The rendered view, newline-joined.
  */
 export async function renderUnified(options: DiffViewOptions): Promise<string> {
-  const { diff, language, maxLines, width, palette, piTheme, indicator, seed } = options;
+  const { diff, language, maxLines, width, view, indicator, seed } = options;
+  const palette = view.palette;
   if (!diff.lines.length) return "";
   const visible = diff.lines.slice(0, maxLines);
   const renderWidth = Math.max(MIN_RENDER_WIDTH, width);
@@ -53,8 +54,7 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
     oldSource,
     newSource,
     language,
-    palette,
-    piTheme,
+    view,
     seed,
   });
 

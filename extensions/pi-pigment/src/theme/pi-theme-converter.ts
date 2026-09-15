@@ -29,6 +29,7 @@
 import type { RgbColor } from "@earendil-works/pi-tui";
 
 import { isLightRgb, mixRgb, parseOpaqueHex, parseRootColor, rgbToHex } from "#src/core/color.ts";
+import type { Issue } from "#src/core/issue.ts";
 
 import {
   enforceWcag,
@@ -129,12 +130,6 @@ export const PI_OPTIONAL_TOKENS = ["thinkingMax", "searchMatchBg", "searchMatchT
 /** Pi's theme schema URL (editor validation for hand-edited copies). */
 const PI_THEME_SCHEMA =
   "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json";
-
-/** A color that failed conversion — reported, never half-emitted. */
-interface ConverterIssue {
-  /** The human-readable problem. */
-  message: string;
-}
 
 /**
  * The hue-anchored state colors per polarity: green/red/amber references
@@ -358,6 +353,17 @@ export interface ConvertOptions {
 }
 
 /**
+ * A conversion product: the pi theme document (`undefined` when the theme was rejected) and what
+ * stopped it.
+ */
+export interface PiThemeConversion {
+  /** The pi theme JSON document (`undefined` when the theme was rejected). */
+  doc: PiThemeJson | undefined;
+  /** What went wrong (empty when the conversion succeeded). */
+  issues: Issue[];
+}
+
+/**
  * Convert a materialized shiki theme into a pi theme JSON document.
  * Themes missing `editor.background` or `type` are rejected (an issue is
  * returned) — a pi theme without a canvas is not a theme.
@@ -365,16 +371,16 @@ export interface ConvertOptions {
  * @param theme - The materialized shiki theme (verbatim, flattened).
  * @param name - The pi theme name (the registered, prefixed identity).
  * @param options - The conversion options.
- * @returns The document and issues; doc is undefined when unconvertible.
+ * @returns The document and issues; `doc` is undefined when unconvertible.
  */
 export function convertToPiTheme(
   theme: MaterializedTheme,
   name: string,
   options?: ConvertOptions,
-): { doc: PiThemeJson | undefined; issues: ConverterIssue[] } {
+): PiThemeConversion {
   const enforceAa = options?.enforceAa ?? true;
   const diffOverrides = options?.diff;
-  const issues: ConverterIssue[] = [];
+  const issues: Issue[] = [];
   // The canvas is the theme's own editor.background — never a root
   // (ADR 0006): the generated theme's canvas IS its editor background.
   const canvas = optionalOpaqueHex(theme.colors?.["editor.background"]);

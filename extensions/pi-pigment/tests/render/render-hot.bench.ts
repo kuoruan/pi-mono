@@ -201,7 +201,7 @@ test("word-diff pair (the fallback/unhighlighted analysis)", async ({ bench }) =
 });
 
 test("unified plain path per pair (the over-budget fallback sequence)", async ({ bench }) => {
-  // Mirrors render-unified's per-pair sequence when the highlight budget
+  // Mirrors unified-view's per-pair sequence when the highlight budget
   // is exceeded: the verdict (wordDiffAnalysis) gates the plain painter,
   // and the painter consumes the analysis's parts — one diffWords per
   // pair (plainWordDiff, the standalone two-pass form, is benched above).

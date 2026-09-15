@@ -1,17 +1,17 @@
 /**
- * The theme registry (ADR 0006): the runtime authority for "which pi
- * themes are OURS and what shiki source each maps back to". Detection
- * reads it; resources_discover feeds it.
+ * The theme registry (ADR 0006): the name→source mapping deciding "which pi
+ * themes are OURS and what shiki source each maps back to".
  *
  * Two sources:
  *
  * - Bundled: the 65 pre-generated package themes (themes/pigment-*.json, built by
- *   scripts/generate-themes.ts). The mapping is derivable from the naming scheme alone — no I/O.
+ *   scripts/generate-themes.ts). The mapping is derivable from the naming scheme alone — no I/O
+ *   (`bundledSourceOf`).
  * - User: theme files in the config `themes/` directories, converted ON DEMAND by `/pigment convert`
- *   (outputs next to their sources); resources_discover only LISTS the outputs as themePaths. Their
- *   mapping comes from that scan.
+ *   (outputs next to their sources). The session collects each output whose source is still live
+ *   (`collectConvertedThemes`) and the rows ride the session as a value.
  *
- * A pi theme whose name is NOT in the registry is external (built-in,
+ * A pi theme whose name is NOT in the mapping is external (built-in,
  * third-party, user-custom, or a copied-and-renamed pi-pigment file): the
  * follower path (auto) applies — its own nine syntax colors, gracefully
  * degraded from full tokenColors precision.
@@ -25,8 +25,17 @@ export const PIGMENT_PREFIX = "pigment-";
 /** What a registered name maps back to. */
 type RegisteredSource = { kind: "bundled"; themeName: string } | { kind: "user"; fileName: string };
 
-/** The session's registry: name → source (set at session_start). */
-const registry = new Map<string, RegisteredSource>();
+/**
+ * One of the session's user conversions: the converted output's stem plus
+ * its still-live source file. `collectConvertedThemes` collects these at
+ * session_start; the session hands them to ours-detection as a value.
+ */
+export interface ConvertedTheme {
+  /** The registered pi theme name (`pigment-<stem>`, the output file's stem). */
+  name: string;
+  /** The source file's stem, as `loadUserTheme` reads it (the config-side identity). */
+  stem: string;
+}
 
 /**
  * The bundled registration: name scheme alone, no state.
@@ -41,28 +50,18 @@ function bundledSourceOf(name: string): RegisteredSource | undefined {
 }
 
 /**
- * Register a user TextMate theme file's converted pi theme (called by the
- * resources_discover listing pass).
- *
- * @param fileName - The TextMate theme file's stem (the config-side identity).
- * @param piName - The registered pi theme name.
- */
-export function registerUserTheme(fileName: string, piName: string): void {
-  registry.set(piName, { kind: "user", fileName });
-}
-
-/** Reset the user registrations (test seam; bundled derivations are pure). */
-export function resetRegistryForTest(): void {
-  registry.clear();
-}
-
-/**
  * Whether an active pi theme name is one of ours, and what it maps to.
  *
  * @param name - The active pi theme's name (undefined = not detectable).
+ * @param converted - The session's collected user conversions.
  * @returns The registered source, or undefined for external themes.
  */
-export function registeredSourceOf(name: string | undefined): RegisteredSource | undefined {
+export function registeredSourceOf(
+  name: string | undefined,
+  converted: ReadonlyArray<ConvertedTheme>,
+): RegisteredSource | undefined {
   if (!name) return undefined;
-  return registry.get(name) ?? bundledSourceOf(name);
+  const found = converted.find((entry) => entry.name === name);
+  if (found) return { kind: "user", fileName: found.stem };
+  return bundledSourceOf(name);
 }

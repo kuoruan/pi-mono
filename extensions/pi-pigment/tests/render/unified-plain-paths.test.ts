@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { parseDiff } from "#src/core/diff.ts";
-import { renderUnified } from "#src/render/render-unified.ts";
-import { resolveDiffPalette, resetPaletteForTest } from "#src/theme/palette.ts";
-import { buildFakeTheme, plain } from "#test/fixtures.ts";
+import { renderUnified } from "#src/render/unified-view.ts";
+import { buildFakeTheme, plain, viewFor } from "#test/fixtures.ts";
 
 /**
  * Build a line whose unique marker rides ~11.5k chars of padding.
@@ -21,8 +20,7 @@ const mk = (marker: string): string => `${marker} ${"x".repeat(11_500)}`;
  */
 describe("unified view over the highlight budget (plain-text paths)", () => {
   it("renders every ctx row's own content after a del block", async () => {
-    resetPaletteForTest();
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const view = viewFor(buildFakeTheme());
     const oldFile = Array.from({ length: 30 }, (_, i) => mk(`L${i + 1}`));
     const newFile = oldFile.map((line, i) => (i === 9 ? mk("CHANGED") : line));
     const diff = parseDiff(oldFile.join("\n") + "\n", newFile.join("\n") + "\n");
@@ -31,7 +29,7 @@ describe("unified view over the highlight budget (plain-text paths)", () => {
       language: undefined,
       maxLines: 20,
       width: 160,
-      palette,
+      view,
       indicator: "bar",
     });
     const rows = plain(out).split("\n");

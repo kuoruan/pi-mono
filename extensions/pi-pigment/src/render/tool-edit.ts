@@ -20,7 +20,7 @@ import type {
 import { parsePatchFiles } from "#src/core/diff.ts";
 import { linesBefore, linesOf } from "#src/core/lines.ts";
 import { detectLanguage, needsSeed } from "#src/theme/highlight.ts";
-import { resolveDiffPalette, type DiffPalette, type PaletteTheme } from "#src/theme/palette.ts";
+import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 
 import { setCallHeader } from "./error-frame.ts";
 import { summarize, resultLine } from "./header.ts";
@@ -120,10 +120,10 @@ export function createEditWrapper(
   return createToolWrapper<EditState>(origEdit, services, {
     // Render the in-flight call header: "← edit" + path + stats, framed
     // once the edit arguments complete.
-    renderCall: ({ text, theme, ctx, renderArgs }) => {
+    renderCall: ({ text, view, ctx, renderArgs }) => {
+      const { palette, piTheme: theme } = view;
       const callArgs = argsOf<EditToolInput>(renderArgs);
       const fp = callArgs.path ?? "";
-      const palette = resolveDiffPalette(theme);
 
       // Pre-bridge (streaming) the stats are "" — the same header as the
       // suffix-less shape, so one call serves both frames.
@@ -146,7 +146,8 @@ export function createEditWrapper(
       return text;
     },
 
-    renderResult: ({ text, palette, theme, ctx, result }) => {
+    renderResult: ({ text, view, ctx, result }) => {
+      const { piTheme: theme } = view;
       // Lazily adapt the SDK's own stashed patch (the text it actually
       // matched) into our ParsedDiff — parse on render, not execute, so
       // result.details stays byte-identical to the native tool's (ADR
@@ -189,7 +190,7 @@ export function createEditWrapper(
         // text). Two gates keep the cost where the benefit is:
         //  - only grammars that EMBED another syntax want a seed at all;
         //  - only a hunk below the file's first line has a prefix to hand
-        //    the tokenizer (an oversized prefix is dropped in hlBlock).
+        //    the tokenizer (an oversized prefix is dropped in hlBlockResolved).
         // The read memoizes in the row state: the task render re-runs on
         // every re-render (attach, settle, resize) and the row has ONE
         // path for its whole life, so the memo needs no key. The stale
@@ -216,8 +217,7 @@ export function createEditWrapper(
           diff,
           language,
           maxLines: MAX_PREVIEW_LINES,
-          palette,
-          theme,
+          view,
           ctx,
           indicatorStyle,
           seedFor,

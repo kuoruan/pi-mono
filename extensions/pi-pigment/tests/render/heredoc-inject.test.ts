@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { astInjectRegions, fallbackHeredocRegions } from "#src/render/heredoc-inject.ts";
-import { hlBlock } from "#src/theme/highlight.ts";
-import { resolveDiffPalette } from "#src/theme/palette.ts";
-import { buildFakeTheme, plain, resetPigmentForTest } from "#test/fixtures.ts";
+import { buildFakeTheme, plain, resetPigmentForTest, viewFor } from "#test/fixtures.ts";
 
 describe("astInjectRegions", () => {
   it("finds interpreter heredocs with byte-precise offsets", () => {
@@ -161,7 +159,7 @@ describe("injection rendering (discriminating colors, end-to-end)", () => {
   it("colors a python heredoc body with python token colors, not the shell string blob", async () => {
     resetPigmentForTest();
     const theme = buildFakeTheme({ syntaxColors: true });
-    const palette = resolveDiffPalette(theme);
+    const view = viewFor(theme);
     const command = "python3 << 'PYEOF'\nimport sys\nprint('hello')\nPYEOF";
 
     const regions = astInjectRegions(command)!;
@@ -171,29 +169,23 @@ describe("injection rendering (discriminating colors, end-to-end)", () => {
       const gap = command.slice(cursor, region.start);
       if (gap)
         parts.push(
-          ...(await hlBlock({
+          ...(await view.highlight({
             code: gap,
             language: "shellscript",
-            palette,
-            piTheme: theme,
           })),
         );
       parts.push(
-        ...(await hlBlock({
+        ...(await view.highlight({
           code: command.slice(region.start, region.end),
           language: "python",
-          palette,
-          piTheme: theme,
         })),
       );
       cursor = region.end;
     }
     parts.push(
-      ...(await hlBlock({
+      ...(await view.highlight({
         code: command.slice(cursor),
         language: "shellscript",
-        palette,
-        piTheme: theme,
       })),
     );
     const rendered = parts.join("\n");
@@ -214,16 +206,14 @@ describe("injection rendering (discriminating colors, end-to-end)", () => {
   it("colors a cat file-write heredoc by the target's extension", async () => {
     resetPigmentForTest();
     const theme = buildFakeTheme({ syntaxColors: true });
-    const palette = resolveDiffPalette(theme);
+    const view = viewFor(theme);
     const command = "cat > app.py << 'EOF'\nimport os\nEOF";
 
     const regions = astInjectRegions(command)!;
     expect(regions[0]!.language).toBe("python");
-    const body = await hlBlock({
+    const body = await view.highlight({
       code: command.slice(regions[0]!.start, regions[0]!.end),
       language: "python",
-      palette,
-      piTheme: theme,
     });
     // "import" is python-colored, not the shell string blob.
     expect(body[0] ?? "").not.toContain("38;2;224;185;169mimport");

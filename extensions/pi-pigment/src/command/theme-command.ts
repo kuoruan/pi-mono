@@ -35,10 +35,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
-import type { ThemeEnv } from "#src/theme/theme-file.ts";
+import type { SessionEnv } from "#src/core/session-env.ts";
 import {
   convertThemes,
-  getUserThemeEnv,
   listConvertCandidateEntries,
   listConvertCandidates,
   piNameForUserStem,
@@ -69,11 +68,11 @@ interface Subcommand {
   /** One-line what-this-does — shown in completions and the picker. */
   readonly description: string;
   /** The argument completion for the tokens after the name; absent = none. */
-  readonly completeArgument?: (prefix: string, env: ThemeEnv) => AutocompleteItem[] | null;
+  readonly completeArgument?: (prefix: string, env: SessionEnv) => AutocompleteItem[] | null;
   /** Run the subcommand with the tokens after its name. */
   readonly run: (
     args: readonly string[],
-    env: ThemeEnv,
+    env: SessionEnv,
     ctx: PigmentUiContext,
     report: ReportFn,
   ) => Promise<void>;
@@ -180,10 +179,21 @@ function subcommandOf(name: string): Subcommand | undefined {
  * Register the `/pigment` command (called once at extension setup).
  *
  * @param pi - The extension API.
+ * @param options - The assembly's session-env getter (the command cannot
+ *   reach a render ctx; the completer needs the session's env).
  */
-export function registerPigmentCommand(pi: {
-  registerCommand: (name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">) => void;
-}): void {
+export function registerPigmentCommand(
+  pi: {
+    registerCommand: (
+      name: string,
+      options: Omit<RegisteredCommand, "name" | "sourceInfo">,
+    ) => void;
+  },
+  options: {
+    /** The latest session's environment (undefined before any session). */
+    getEnv: () => SessionEnv | undefined;
+  },
+): void {
   pi.registerCommand("pigment", {
     description: "Convert TextMate theme files into registered pi themes",
     getArgumentCompletions: (argumentPrefix: string) => {
@@ -200,10 +210,13 @@ export function registerPigmentCommand(pi: {
       // Past the name: the subcommand's argument grammar, when it has one.
       const entry = subcommandOf(trimmed.slice(0, spaceAt));
       if (!entry?.completeArgument) return null;
-      // The session's recorded env is the truth remote/RPC modes may not
+      // The session's environment is the truth remote/RPC modes may not
       // share with process.cwd(); before the first session_start there is
       // no session yet — the process env stands in.
-      const env: ThemeEnv = getUserThemeEnv() ?? { cwd: process.cwd(), agentDir: getAgentDir() };
+      const env: SessionEnv = options.getEnv() ?? {
+        cwd: process.cwd(),
+        agentDir: getAgentDir(),
+      };
       return entry.completeArgument(trimmed.slice(spaceAt + 1), env);
     },
     handler: async (args: string, ctx: PigmentUiContext) => {
@@ -214,7 +227,7 @@ export function registerPigmentCommand(pi: {
           console.error(`[pi-pigment] ${message}`);
         }
       };
-      const env: ThemeEnv = { cwd: ctx.cwd, agentDir: getAgentDir() };
+      const env: SessionEnv = { cwd: ctx.cwd, agentDir: getAgentDir() };
       const tokens = args.trim().split(/\s+/).filter(Boolean);
       const first = tokens[0];
       if (first === undefined) {

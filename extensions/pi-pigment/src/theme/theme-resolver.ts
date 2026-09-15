@@ -14,14 +14,14 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { type ThemeObject, type ThemeVariant } from "#src/config/config-schema.ts";
+import type { Issue } from "#src/core/issue.ts";
+import type { SessionEnv } from "#src/core/session-env.ts";
 
 import { isBundledThemeName } from "./bundled-intake.ts";
 import { type DiffRoots, type DiffRootsSpec } from "./palette.ts";
 import type { SemanticColors } from "./syntax-theme.ts";
 import {
   type LoadedThemeFile,
-  type ThemeEnv,
-  type ThemeIssue,
   findThemeFile,
   loadBundledThemeByName,
   loadThemeFile,
@@ -71,7 +71,7 @@ export interface ThemeResolution {
   /** The diff-roots spec for the palette. */
   rootsSpec: DiffRootsSpec | undefined;
   /** Issues to stderr at session_start. */
-  issues: ThemeIssue[];
+  issues: Issue[];
 }
 
 /**
@@ -86,8 +86,8 @@ export interface ThemeResolution {
  */
 async function resolveName(
   name: string,
-  env: ThemeEnv,
-  issues: ThemeIssue[],
+  env: SessionEnv,
+  issues: Issue[],
   position: string,
 ): Promise<LoadedThemeFile | undefined> {
   if (name === "auto") {
@@ -142,8 +142,8 @@ async function resolveName(
  */
 async function resolveBase(
   value: string,
-  env: ThemeEnv,
-  issues: ThemeIssue[],
+  env: SessionEnv,
+  issues: Issue[],
 ): Promise<ThemeSelection> {
   if (value === "auto") {
     warnIfShadowed("auto", env, issues);
@@ -204,7 +204,7 @@ async function resolveBase(
  * @param env - The environment.
  * @param issues - The issue accumulator.
  */
-function warnIfShadowed(name: string, env: ThemeEnv, issues: ThemeIssue[]): void {
+function warnIfShadowed(name: string, env: SessionEnv, issues: Issue[]): void {
   for (const dir of themeDirs(env)) {
     for (const ext of THEME_FILE_EXTS) {
       // Exact files AND pair halves (name-light/name-dark) are both
@@ -235,9 +235,9 @@ function warnIfShadowed(name: string, env: ThemeEnv, issues: ThemeIssue[]): void
  */
 export async function resolveSyntaxThemeSelection(
   value: string | ThemeObject,
-  env: ThemeEnv,
+  env: SessionEnv,
 ): Promise<ThemeResolution> {
-  const issues: ThemeIssue[] = [];
+  const issues: Issue[] = [];
 
   if (typeof value === "string") {
     const selection = await resolveBase(value, env, issues);
@@ -270,8 +270,8 @@ export async function resolveSyntaxThemeSelection(
  */
 async function resolveVariant(
   variant: ThemeVariant | undefined,
-  env: ThemeEnv,
-  issues: ThemeIssue[],
+  env: SessionEnv,
+  issues: Issue[],
 ): Promise<SelectedVariant | undefined> {
   if (!variant) return undefined;
   const resolved: SelectedVariant = { colors: variant.colors };

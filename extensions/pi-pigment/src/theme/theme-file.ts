@@ -18,28 +18,15 @@ import { type ParseError, parse } from "jsonc-parser";
 import { CONFIG_HOME } from "#src/config/config-schema.ts";
 import { isLightRgb, isOpaqueHex6, parseRootColor } from "#src/core/color.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
+import type { Issue } from "#src/core/issue.ts";
+import type { SessionEnv } from "#src/core/session-env.ts";
 
 import { flattenTranslucentTokens, loadBundledTheme } from "./bundled-intake.ts";
 import { DIFF_SIDES, isRootHex, type DiffRoots } from "./palette.ts";
 import type { MaterializedTheme } from "./syntax-theme.ts";
 import { parsePlistTheme } from "./tmtheme-plist.ts";
 
-/** The environment theme resolution reads from. */
-export interface ThemeEnv {
-  /** Project working directory (the project themes/ root). */
-  cwd: string;
-  /** Explicit agent directory (test seam); defaults handled by the caller. */
-  agentDir: string;
-}
-
 /** One resolution problem: reported to stderr at session_start, never fatal. */
-export interface ThemeIssue {
-  /** The human-readable problem. */
-  message: string;
-  /** The file it came from (when applicable). */
-  sourcePath?: string;
-}
-
 /** A theme-file load: the parsed theme plus its diff extension key. */
 export interface LoadedThemeFile {
   /** The theme's name (its file stem). */
@@ -96,7 +83,7 @@ export const THEME_FILE_EXTS = [".json", ".jsonc", ".tmTheme"] as const;
  * @param env - The environment.
  * @returns Project-then-global theme directory paths.
  */
-export function themeDirs(env: ThemeEnv): readonly [string, string] {
+export function themeDirs(env: SessionEnv): readonly [string, string] {
   return [projectThemesDir(env.cwd), globalThemesDir(env.agentDir)];
 }
 
@@ -109,7 +96,7 @@ export function themeDirs(env: ThemeEnv): readonly [string, string] {
  * @param env - The environment.
  * @returns The file path, or undefined when absent everywhere.
  */
-export function findThemeFile(name: string, env: ThemeEnv): string | undefined {
+export function findThemeFile(name: string, env: SessionEnv): string | undefined {
   if (!/^[\w.-]+$/.test(name)) return undefined;
   for (const dir of themeDirs(env)) {
     for (const ext of THEME_FILE_EXTS) {
@@ -146,7 +133,7 @@ interface ConvertedTextMateTheme {
 function convertTextMateSettings(
   settings: unknown[],
   name: string,
-  issues: ThemeIssue[],
+  issues: Issue[],
   path: string,
 ): ConvertedTextMateTheme | undefined {
   let global: Record<string, unknown> | undefined;
@@ -242,7 +229,7 @@ function isTextMateShape(
  * @param issues - The issue accumulator.
  * @returns The loaded theme file, or undefined when unusable.
  */
-export function loadThemeFile(path: string, issues: ThemeIssue[]): LoadedThemeFile | undefined {
+export function loadThemeFile(path: string, issues: Issue[]): LoadedThemeFile | undefined {
   let text: string;
   try {
     text = readFileSync(path, "utf-8");
@@ -356,7 +343,7 @@ function extractDiffRoots(
   diff: unknown,
   colors: unknown,
   name: string,
-  issues: ThemeIssue[],
+  issues: Issue[],
 ): DiffRoots | undefined {
   let roots: DiffRoots | undefined;
   if (typeof diff === "object" && diff !== null && !Array.isArray(diff)) {

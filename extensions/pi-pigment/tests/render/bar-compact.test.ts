@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { parseDiff } from "#src/core/diff.ts";
-import { renderSplit } from "#src/render/render-split.ts";
-import { renderUnified } from "#src/render/render-unified.ts";
-import { resolveDiffPalette, resetPaletteForTest } from "#src/theme/palette.ts";
-import { buildFakeTheme, plain } from "#test/fixtures.ts";
+import { renderSplit } from "#src/render/split-view.ts";
+import { renderUnified } from "#src/render/unified-view.ts";
+import { buildFakeTheme, plain, viewFor } from "#test/fixtures.ts";
 
 /**
  * The ▌ bar is indicatorStyle's ONLY rendering surface. A removed
@@ -15,8 +14,7 @@ import { buildFakeTheme, plain } from "#test/fixtures.ts";
  */
 describe("the ▌ bar renders unconditionally", () => {
   it("unified view carries the bar on changed rows; none removes it", async () => {
-    resetPaletteForTest();
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const view = viewFor(buildFakeTheme());
     const diff = parseDiff("const a = 1;\n", "const b = 2;\n");
 
     const bar = await renderUnified({
@@ -24,7 +22,7 @@ describe("the ▌ bar renders unconditionally", () => {
       language: undefined,
       maxLines: 20,
       width: 120,
-      palette,
+      view,
       indicator: "bar",
     });
     expect(bar).toContain("▌");
@@ -33,15 +31,14 @@ describe("the ▌ bar renders unconditionally", () => {
       language: undefined,
       maxLines: 20,
       width: 120,
-      palette,
+      view,
       indicator: "none",
     });
     expect(none).not.toContain("▌");
   });
 
   it("none mode collapses the indicator column entirely (one leading space total — the frame Box's pad)", async () => {
-    resetPaletteForTest();
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const view = viewFor(buildFakeTheme());
     const diff = parseDiff("keep\nconst a = 1;\n", "keep\nconst b = 2;\n");
 
     const bar = await renderUnified({
@@ -49,7 +46,7 @@ describe("the ▌ bar renders unconditionally", () => {
       language: undefined,
       maxLines: 20,
       width: 120,
-      palette,
+      view,
       indicator: "bar",
     });
     const none = await renderUnified({
@@ -57,7 +54,7 @@ describe("the ▌ bar renders unconditionally", () => {
       language: undefined,
       maxLines: 20,
       width: 120,
-      palette,
+      view,
       indicator: "none",
     });
     // Bar mode: changed rows lead with the glyph; context rows hold the
@@ -82,8 +79,7 @@ describe("the ▌ bar renders unconditionally", () => {
   });
 
   it("split view carries the bar on wrapped and unwrapped rows alike", async () => {
-    resetPaletteForTest();
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const view = viewFor(buildFakeTheme());
     const oldFile = Array.from({ length: 8 }, (_, i) => `line ${i + 1} old`);
     const newFile = oldFile.map((line, i) => (i < 6 ? `line ${i + 1} new` : line));
     const diff = parseDiff(oldFile.join("\n") + "\n", newFile.join("\n") + "\n");
@@ -93,15 +89,14 @@ describe("the ▌ bar renders unconditionally", () => {
       language: undefined,
       maxLines: 20,
       width: 200,
-      palette,
+      view,
       indicator: "bar",
     });
     expect(out).toContain("▌");
   });
 
   it("split none mode puts a boundary space where the bar's column sat (the seam between halves)", async () => {
-    resetPaletteForTest();
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const view = viewFor(buildFakeTheme());
     const diff = parseDiff("const a = 1;\n", "const b = 2;\n");
     const width = 120;
 
@@ -110,7 +105,7 @@ describe("the ▌ bar renders unconditionally", () => {
       language: undefined,
       maxLines: 20,
       width,
-      palette,
+      view,
       indicator: "bar",
     });
     const none = await renderSplit({
@@ -118,7 +113,7 @@ describe("the ▌ bar renders unconditionally", () => {
       language: undefined,
       maxLines: 20,
       width,
-      palette,
+      view,
       indicator: "none",
     });
     // Bar mode: the seam IS the right gutter's glyph — `▌1 +` (the left

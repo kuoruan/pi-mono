@@ -1,7 +1,8 @@
 /**
  * Shiki syntax highlighting — the highlight LRU cache, language detection,
- * and the hlBlock entry (ADR 0001/0002). Render-time theme interpretation
- * lives in theme-selection.ts.
+ * and the highlight entries (`RenderView.highlight`, `hlBlockResolved`;
+ * ADR 0001/0002). Render-time theme interpretation lives in
+ * theme-selection.ts.
  */
 
 import { getLanguageFromPath } from "@earendil-works/pi-coding-agent";
@@ -12,23 +13,27 @@ import { fnv1a } from "#src/core/fingerprint.ts";
 import { linesOf } from "#src/core/lines.ts";
 
 import { loadBundledTheme } from "./bundled-intake.ts";
-import type { DiffPalette, PaletteTheme } from "./palette.ts";
 import { ensureCore, renderTokenLinesAnsi, type BundledLanguage } from "./shiki-core.ts";
 import type { ShikiThemeInput } from "./syntax-theme.ts";
-import { resolveActiveTheme } from "./theme-selection.ts";
 
 /** Skip highlighting above this size — the diff still renders, unstyled. */
 export const MAX_HL_CHARS = 80_000;
 
 /**
- * Themes the core has registered: theme name → the EXACT object it loaded.
- * Every block's render calls core.loadTheme(themeObject), which
- * re-normalizes the input each time; when the same object is already
- * registered under its name, the call is skipped. A DIFFERENT object
- * under the same name (enforced variants rebuild per palette identity)
- * still re-registers — same name ≠ same colors.
+ * Themes the core has registered: registered theme name → the content
+ * stamp it was loaded from — the theme object itself, or (file-channel
+ * themes, which carry `contentFingerprint`) that fingerprint.
+ *
+ * Every block's render calls core.loadTheme(...); when the stamp for the
+ * name is unchanged, the call is skipped. The fingerprint form matters
+ * because shiki keys its registry by theme NAME and an already-created
+ * grammar's color map does not follow a later same-name loadTheme:
+ * without a content-distinct registered name, a same-stem file edited
+ * between sessions (same name, new colors) would re-tokenize under the
+ * OLD color map and cache the wrong bytes under the new cache key (see
+ * renderThemeToAnsi).
  */
-const registeredThemeObjects = createBoundedMap<string, object>(64);
+const registeredThemeObjects = createBoundedMap<string, object | string>(64);
 
 /**
  * LRU capacity for highlighted blocks. Entry-count bound, not a byte
@@ -162,25 +167,43 @@ export function clearHighlightCacheForTest(): void {
   highlightCache.clear();
 }
 
-/** The hlBlock inputs. */
-export interface HlBlockOptions {
+/**
+ * A theme's content identity: a bundled id itself, an enforced/pi-derived
+ * variant its own (already content-distinct) name, a file-channel theme
+ * name~contentFingerprint — shiki keys its registry by theme NAME and a
+ * created grammar's color map does not follow a later same-name loadTheme,
+ * so two contents must never share a registered name. The highlight cache
+ * keys on this same identity (see hlBlockResolved), so registration and
+ * caching can never disagree.
+ *
+ * @param theme - The resolved theme input.
+ * @returns The identity string.
+ */
+function themeIdentity(theme: ShikiThemeInput): string {
+  return typeof theme === "string"
+    ? theme
+    : theme.contentFingerprint
+      ? `${theme.name}~${theme.contentFingerprint}`
+      : theme.name;
+}
+
+/**
+ * The seam's highlight input (session.ts): the session binds the
+ * theme; a block carries only its own content.
+ */
+export interface HighlightBlock {
   /** The code block. */
   code: string;
   /** The Shiki language (undefined skips highlighting). */
   language: BundledLanguage | undefined;
-  /** The resolved palette (drives theme enforcement). */
-  palette: DiffPalette;
-  /** The pi theme (the auto theme's color source). */
-  piTheme?: PaletteTheme;
   /** Optional pre-slice file text (grammar-state seeding). */
   seed?: string;
 }
 
 /**
  * Highlight a code block with Shiki → ANSI lines (memoized, per the
- * resolved theme's tokens over the palette-enforced colors). Falls back
- * to unhighlighted lines when the language is unknown, the block is too
- * large, or Shiki fails.
+ * resolved theme's tokens). Falls back to unhighlighted lines when the
+ * language is unknown, the block is too large, or Shiki fails.
  *
  * The optional seed is grammar-state seeding for embedded grammars (vue,
  * html): a diff hunk is a mid-file slice with no `<script>`/`<template>`
@@ -191,26 +214,24 @@ export interface HlBlockOptions {
  * tokenizes from that state. A seed past {@link MAX_SEED_CHARS} is
  * dropped (see the cap's note) — the block then renders unseeded.
  *
- * @param options - The block's inputs.
+ * @param block - The block's own inputs.
+ * @param theme - The resolved theme (null = unresolvable → unstyled).
  * @returns The highlighted (or fallback) lines.
  */
-export async function hlBlock(options: HlBlockOptions): Promise<string[]> {
-  const { code, language, palette, piTheme } = options;
+export async function hlBlockResolved(
+  block: HighlightBlock,
+  theme: ShikiThemeInput | null,
+): Promise<string[]> {
+  const { code, language } = block;
   if (!code) return [""];
   if (!language || code.length > MAX_HL_CHARS) return linesOf(code);
-  const theme = await resolveActiveTheme(palette, piTheme);
   if (!theme) return linesOf(code); // unresolvable selection: unstyled
   // An oversized prefix is dropped HERE, at the one point that pays for
   // it: the seed rides into `grammarContextCode`, so producers hand over
   // whatever they have and the cap is enforced where the tokenize happens.
   const seed =
-    options.seed !== undefined && options.seed.length <= MAX_SEED_CHARS ? options.seed : undefined;
-  const themeId =
-    typeof theme === "string"
-      ? theme
-      : theme.contentFingerprint
-        ? `${theme.name}~${theme.contentFingerprint}`
-        : theme.name;
+    block.seed !== undefined && block.seed.length <= MAX_SEED_CHARS ? block.seed : undefined;
+  const themeId = themeIdentity(theme);
   const seedKey = seed ? fnv1a(seed) : "";
   const key = [themeId, language, seedKey, code].join("\0");
   // BoundedMap's get refreshes recency (the LRU touch).
@@ -259,18 +280,25 @@ async function renderThemeToAnsi(
   const themeObject =
     typeof themeInput === "string" ? await loadBundledTheme(themeInput) : themeInput;
   if (!themeObject) return linesOf(code);
-  // Skip the per-block loadTheme when this exact object is already
-  // registered under its name (see registeredThemeObjects).
-  if (registeredThemeObjects.get(themeObject.name) !== themeObject) {
-    await core.loadTheme(themeObject);
-    registeredThemeObjects.set(themeObject.name, themeObject);
+  // File-channel themes register under a CONTENT-DISTINCT name (the bare
+  // stem would collide across contents — see themeIdentity).
+  const registeredName = themeIdentity(themeObject);
+  // Skip the per-block loadTheme when the content under this name is
+  // unchanged (see registeredThemeObjects — the fingerprint is the stamp
+  // for file-channel themes, the object itself otherwise).
+  const stamp: object | string = themeObject.contentFingerprint ?? themeObject;
+  if (registeredThemeObjects.get(registeredName) !== stamp) {
+    await core.loadTheme(
+      registeredName === themeObject.name ? themeObject : { ...themeObject, name: registeredName },
+    );
+    registeredThemeObjects.set(registeredName, stamp);
   }
   // Grammar-state seeding (embedded grammars) through shiki's own
   // `grammarContextCode`: the seed participates in grammar inference as
   // prepended code and never reaches the output.
   const tokens = await core.codeToTokensBase(code, {
     lang: language,
-    theme: themeObject.name,
+    theme: registeredName,
     grammarContextCode: seed,
   });
   return renderTokenLinesAnsi(tokens);

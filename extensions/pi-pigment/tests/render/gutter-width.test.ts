@@ -2,9 +2,8 @@ import { Text } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
-import { renderUnified } from "#src/render/render-unified.ts";
-import { resolveDiffPalette } from "#src/theme/palette.ts";
-import { buildFakeTheme, plain } from "#test/fixtures.ts";
+import { renderUnified } from "#src/render/unified-view.ts";
+import { buildFakeTheme, plain, viewFor } from "#test/fixtures.ts";
 import { vol } from "#test/memfs.ts";
 
 vi.mock("node:fs");
@@ -54,14 +53,13 @@ describe("line-number width covers both sides (the phantom-blank fix)", () => {
     expect(parsed).toBeDefined();
     const diff = parsed!;
 
-    const theme = buildFakeTheme({ syntaxColors: true });
+    const view = viewFor(buildFakeTheme({ syntaxColors: true }));
     const out = await renderUnified({
       diff,
       language: "markdown",
       maxLines: 60,
       width: 120,
-      palette: resolveDiffPalette(theme),
-      piTheme: theme,
+      view,
       indicator: "bar",
     });
 

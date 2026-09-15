@@ -1,8 +1,8 @@
 /**
- * The diff palette — one module singleton, resolved per pi theme and diff-root
- * overrides. The derivation path is auto-derive: add/context surfaces blend
- * the theme's `toolDiffAdded` foreground into its `toolSuccessBg`; removed
- * surfaces blend `toolDiffRemoved` into `toolErrorBg`. Diff-root overrides
+ * The diff palette: theme + diff-root overrides → every diff color. The
+ * derivation is pure (`deriveDiffPalette`); the session owns memoization,
+ * the polarity warning, and threading the snapshot into renders
+ * (session.ts). Diff-root overrides
  * (ADR 0003) replace the derivation INPUTS: a translucent tint anchors the
  * word slot with the intensity ladder scaling the family, a text root sets
  * the side's line color — the blend family stays internally consistent and
@@ -310,43 +310,8 @@ export function themeCacheKey(theme?: PaletteTheme): string {
 const themeKeyMemo = new WeakMap<PaletteTheme, ThemeKeyMemo>();
 
 // ---------------------------------------------------------------------------
-// Singleton state and resolution
+// Derivation (pure)
 // ---------------------------------------------------------------------------
-
-/**
- * The singleton's entire mutable state — one explicit object, mutated only
- * by setDiffRoots, resolveDiffPalette, and resetPaletteForTest. Everything
- * else in this module is pure.
- */
-const state = {
-  /** The current snapshot (FALLBACK_PALETTE until the first resolve). */
-  palette: FALLBACK_PALETTE as DiffPalette,
-  /** The memo key (theme identity + roots identity). */
-  themeKey: "",
-  /** The theme behind the current snapshot. */
-  theme: undefined as PaletteTheme | undefined,
-  /** The session's diff-root spec (set at session_start; ADR 0002). */
-  rootsSpec: undefined as DiffRootsSpec | undefined,
-  /** The roots identity in the current memo (topLevel + variants serialized). */
-  rootsKey: "",
-  /** One-shot polarity-contradiction warning flag (reset by setDiffRoots). */
-  warned: false,
-};
-
-/**
- * Set the session's diff-root overrides (the `diff` entries of the
- * syntaxTheme selection, including theme-file diff keys).
- *
- * @param spec - The roots spec, or undefined to clear.
- */
-export function setDiffRoots(spec: DiffRootsSpec | undefined): void {
-  state.rootsSpec = spec;
-  state.rootsKey = rootsKey(spec);
-  state.warned = false;
-  // Force re-derivation on the next resolve: even identical roots must
-  // re-run (the one-shot warning flag was reset).
-  state.themeKey = "";
-}
 
 /**
  * A stable identity for a roots spec.
@@ -392,65 +357,37 @@ function mergeRoots(a: DiffRoots | undefined, b: DiffRoots | undefined): DiffRoo
 }
 
 /**
- * The current palette snapshot (refreshed by resolveDiffPalette).
- * Test seam only: production renders receive the palette EXPLICITLY (the
- * wrapper's resolveDiffPalette return value threaded through the pipeline);
- * nothing in src/ reads this — tests use it to inspect the singleton.
+ * The pure palette derivation the seam calls per frame: theme + roots →
+ * snapshot. No memo, no warning I/O — the session (session.ts) owns
+ * both. The snapshot identity (theme content + roots) is recomputed here,
+ * so every snapshot is self-describing and comparable.
  *
- * @returns The last resolved palette.
+ * @param theme - The active pi theme (undefined or unreadable → the fallback palette).
+ * @param rootsSpec - The session's diff-root spec.
+ * @returns The snapshot and its polarity audit.
  */
-export function currentPalette(): DiffPalette {
-  return state.palette;
-}
-
-/**
- * The theme behind the current palette snapshot (undefined until the first
- * resolve, or when the theme was unreadable). Test seam only, same as
- * currentPalette.
- *
- * @returns The last resolved pi theme.
- */
-export function currentTheme(): PaletteTheme | undefined {
-  return state.theme;
-}
-
-/**
- * Resolve the palette for `theme`, re-deriving when the theme changed since
- * the last call. Always returns the current snapshot; safe to call on every
- * render. Falls back to the last snapshot when the theme is unreadable.
- *
- * @param theme - The active pi theme.
- * @returns The resolved palette snapshot.
- */
-export function resolveDiffPalette(theme?: PaletteTheme): DiffPalette {
-  const key = [themeCacheKey(theme), state.rootsKey].join("\0");
-  if (key === state.themeKey) return state.palette;
-  state.themeKey = key;
-  state.theme = theme;
-  if (!theme?.getFgAnsi) {
-    state.palette = FALLBACK_PALETTE;
-    return state.palette;
-  }
+export function deriveDiffPalette(
+  theme: PaletteTheme | undefined,
+  rootsSpec: DiffRootsSpec | undefined,
+): DerivedPalette {
+  if (!theme?.getFgAnsi) return { palette: FALLBACK_PALETTE, polarityOffenders: [] };
   const isLight = deriveIsLight(theme);
-  const roots = effectiveRoots(state.rootsSpec, isLight);
-  const derived = derivePalette(theme, roots, isLight, key);
-  state.palette = derived.palette;
-  if (derived.polarityOffenders.length > 0 && !state.warned) {
-    // The module's only I/O: one stderr warning per roots set (the
-    // session_start issue printing in extension.ts is the other boundary).
-    state.warned = true;
-    console.error(
-      `[pi-pigment] diff root override(s) ${derived.polarityOffenders.join(", ")} contradict ` +
-        `the pi theme's polarity — WCAG enforcement assumes a consistent palette.`,
-    );
-  }
-  return state.palette;
+  const roots = effectiveRoots(rootsSpec, isLight);
+  const identity = [themeCacheKey(theme), rootsKey(rootsSpec)].join("\0");
+  return derivePalette(theme, roots, isLight, identity);
 }
 
-/** Force re-derivation on the next resolve() (test seam). */
-export function resetPaletteForTest(): void {
-  state.themeKey = "";
-  state.theme = undefined;
+/**
+ * The one-shot polarity warning's exact text.
+ *
+ * @param offenders - The contradicting root slots.
+ * @returns The full warning line.
+ */
+export function polarityWarning(offenders: ReadonlyArray<PolarityOffense>): string {
+  return (
+    `[pi-pigment] diff root override(s) ${offenders.join(", ")} contradict ` +
+    `the pi theme's polarity — WCAG enforcement assumes a consistent palette.`
+  );
 }
 
 /**
@@ -528,18 +465,21 @@ function polarityOffenders(
   return offenders;
 }
 
+/** A background override or tint root contradicting the theme's polarity (ADR 0002). */
+type PolarityOffense = "background" | `${DiffSide}.tint`;
+
 /** The pure derivation result: the palette plus its polarity audit. */
 interface DerivedPalette {
   /** The derived palette. */
   palette: DiffPalette;
   /** Background-root overrides contradicting the theme's polarity (ADR 0002). */
-  polarityOffenders: Array<"background" | `${DiffSide}.tint`>;
+  polarityOffenders: PolarityOffense[];
 }
 
 /**
  * Derive the full palette from a theme and the effective diff roots — pure
- * (no I/O; resolveDiffPalette owns reporting). Every reader shares this one
- * result through the singleton. Roots replace the derivation inputs
+ * (no I/O; the session owns the one-shot polarity report). Roots replace the
+ * derivation inputs
  * (added.text→toolDiffAdded, removed.text→toolDiffRemoved,
  * background→the box canvas (both sides blend over it),
  * the del canvas; translucent roots anchor the word slot per ADR 0003);

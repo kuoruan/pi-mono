@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { measurePlain } from "#src/core/ansi.ts";
 import { parseDiff, parsePatchFiles } from "#src/core/diff.ts";
-import { renderSplit } from "#src/render/render-split.ts";
-import { resolveDiffPalette, resetPaletteForTest } from "#src/theme/palette.ts";
-import { buildFakeTheme, plain } from "#test/fixtures.ts";
+import { renderSplit } from "#src/render/split-view.ts";
+import { buildFakeTheme, plain, viewFor } from "#test/fixtures.ts";
 
 const PATCH = [
   "--- a/app.ts",
@@ -22,17 +21,15 @@ const PATCH = [
 ].join("\n");
 
 async function renderTestSplit(): Promise<string[]> {
-  resetPaletteForTest();
   const files = parsePatchFiles(PATCH);
   const theme = buildFakeTheme({ syntaxColors: true });
-  const palette = resolveDiffPalette(theme);
+  const view = viewFor(theme);
   const output = await renderSplit({
     diff: files[0]!,
     language: "ts",
     maxLines: 999,
     width: 120,
-    palette,
-    piTheme: theme,
+    view,
     indicator: "bar",
   });
   return output.split("\n").map(plain);
@@ -60,18 +57,16 @@ describe("split view geometry", () => {
     // shares one DiffLine across both halves — consumes exactly ONE (a
     // past bug counted it twice, inflating N by one per hidden ctx row).
     // maxLines=3 → visible rows: sep(1) + ctx(1) + del/add pair(2).
-    resetPaletteForTest();
     const files = parsePatchFiles(PATCH);
     const diff = files[0]!;
     const theme = buildFakeTheme({ syntaxColors: true });
-    const palette = resolveDiffPalette(theme);
+    const view = viewFor(theme);
     const split = await renderSplit({
       diff,
       language: "ts",
       maxLines: 3,
       width: 120,
-      palette,
-      piTheme: theme,
+      view,
       indicator: "bar",
     });
     const m = plain(split).match(/\.\.\. \((\d+) more lines\)/);
@@ -112,8 +107,7 @@ describe("split view geometry", () => {
 
 describe("split column alignment (wrapped and padded rows)", () => {
   it("every row's right half starts at the same column (trailing-space and CJK-wrap lines)", async () => {
-    resetPaletteForTest();
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const view = viewFor(buildFakeTheme());
     // Left half: a line with trailing spaces (the old trimEnd stripped its
     // padding) and a 60-column CJK line that wraps inside the half.
     const cjk = "中".repeat(30);
@@ -123,7 +117,7 @@ describe("split column alignment (wrapped and padded rows)", () => {
       language: undefined,
       maxLines: 40,
       width: 160,
-      palette,
+      view,
       indicator: "bar",
     });
     const plains = out.split("\n").map((r) => plain(r));

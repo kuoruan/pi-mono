@@ -49,8 +49,8 @@ describe("reinjectSgr (reset re-injection vs non-SGR sequences)", () => {
 
 describe("injectBg on hyperlinked rows (the setCallHeader bg painter)", () => {
   it("wraps a styled header row with a hyperlink without corrupting the link or the width", () => {
-    const url = "file:///workspace/pi-mono/extensions/pi-pigment/src/render/render-shared.ts";
-    const link = `\x1b]8;;${url}\x1b\\extensions/pi-pigment/src/render/render-shared.ts\x1b]8;;\x1b\\`;
+    const url = "file:///workspace/pi-mono/extensions/pi-pigment/src/render/diff-view.ts";
+    const link = `\x1b]8;;${url}\x1b\\extensions/pi-pigment/src/render/diff-view.ts\x1b]8;;\x1b\\`;
     const line = `\x1b[1m← edit\x1b[22m ${link}`;
     const out = injectBg(line, { baseBg: BG });
     // The hyperlink's escape bytes are intact.

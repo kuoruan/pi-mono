@@ -18,8 +18,8 @@ import { inertText } from "#src/core/ansi.ts";
 import { type ParsedDiff, parseDiff } from "#src/core/diff.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { countLines, linesOf, textBeforeLine } from "#src/core/lines.ts";
-import { detectLanguage, hlBlock, needsSeed } from "#src/theme/highlight.ts";
-import { resolveDiffPalette, type DiffPalette, type PaletteTheme } from "#src/theme/palette.ts";
+import { detectLanguage, needsSeed } from "#src/theme/highlight.ts";
+import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { setCallHeader } from "./error-frame.ts";
@@ -227,7 +227,8 @@ export function createWriteWrapper(
     // Render the in-flight call header: "← write/← create" + path + the
     // streaming line count. The content preview is the result render's
     // (every wrapper's shape: call = header/feedback, result = content).
-    renderCall: ({ text, theme, ctx, renderArgs }) => {
+    renderCall: ({ text, view, ctx, renderArgs }) => {
+      const { palette, piTheme: theme } = view;
       const callArgs = argsOf<WriteToolInput>(renderArgs);
       const fp = callArgs.path ?? "";
       // Cache the existence probe per path in the render state — renderCall
@@ -245,7 +246,6 @@ export function createWriteWrapper(
       }
       const isNew = !ctx.state.existsProbes[fp];
       const label = isNew ? "create" : "write";
-      const palette = resolveDiffPalette(theme);
       // The result-summary suffix grammar (one position, the header's
       // tail — every wrapper's summaries live here, the result slot
       // carries only content): streaming counts while args grow, then the
@@ -277,7 +277,8 @@ export function createWriteWrapper(
 
     // Render the finished call: the diff preview (async task), the new-file
     // preview, the no-change notice, or a plain fallback.
-    renderResult: ({ text, palette, theme, ctx, result, options }) => {
+    renderResult: ({ text, view, ctx, result, options }) => {
+      const { palette, piTheme: theme } = view;
       const { details: d } = result as { details: WriteResultDetails | undefined };
       if (d?.kind === "diff") {
         // The stats bridge (the edit wrapper's shape): the call header
@@ -296,7 +297,7 @@ export function createWriteWrapper(
         // renderResult — live and restored alike). The split lives INSIDE
         // the callback — it runs only when the task's keyed render asks
         // for a seed, never per frame. An oversized prefix is dropped in
-        // hlBlock, where the tokenize pays for it.
+        // hlBlockResolved, where the tokenize pays for it.
         const newContent = argsOf<WriteToolInput>(ctx.args).content ?? "";
         const seedFor = needsSeed(d.language)
           ? (start: number): string | undefined => textBeforeLine(newContent, start)
@@ -307,8 +308,7 @@ export function createWriteWrapper(
           diff: d.diff,
           language: d.language,
           maxLines: MAX_RENDER_LINES,
-          palette,
-          theme,
+          view,
           ctx,
           indicatorStyle,
           seedFor,
@@ -386,11 +386,9 @@ export function createWriteWrapper(
               // the settled frame highlights and populates the cache.
               const bodyLines = pending
                 ? linesOf(content)
-                : await hlBlock({
+                : await view.highlight({
                     code: content,
                     language: lg,
-                    palette,
-                    piTheme: theme,
                   });
               // The shared window authority: the collapsed budget AND the
               // expanded cap (MAX_RENDER_LINES) flow through one call, one

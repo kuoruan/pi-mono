@@ -12,8 +12,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PiThemeJson } from "#src/theme/pi-theme-converter.ts";
-import { registeredSourceOf, resetRegistryForTest } from "#src/theme/theme-registry.ts";
+import { registeredSourceOf } from "#src/theme/theme-registry.ts";
 import {
+  collectConvertedThemes,
   convertThemes,
   listConvertCandidateEntries,
   listConvertCandidates,
@@ -21,7 +22,6 @@ import {
   loadUserTheme,
   outputFileName,
   piNameForUserStem,
-  registerConvertedThemes,
 } from "#src/theme/user-themes.ts";
 import { vol, writeFile } from "#test/memfs.ts";
 
@@ -69,13 +69,12 @@ const TM_THEME_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 
 describe("the manual conversion channel", () => {
   beforeEach(() => {
-    resetRegistryForTest();
     vol.reset();
     vol.mkdirSync(projectThemes(), { recursive: true });
     vol.mkdirSync(globalThemes(), { recursive: true });
   });
   afterEach(() => {
-    resetRegistryForTest();
+    vol.reset();
   });
 
   it("converts a source into a pigment-*.json output NEXT TO it", () => {
@@ -142,11 +141,14 @@ describe("the manual conversion channel", () => {
     expect(listed[0]).toBe(join(projectThemes(), "pigment-shared.json"));
   });
 
-  it("registerConvertedThemes maps output+source pairs to the precise pipeline", () => {
+  it("collectConvertedThemes maps output+source pairs to the precise pipeline", () => {
     writeFile(join(projectThemes(), "mine.json"), DARK_SOURCE);
     convertThemes({ cwd, agentDir }, ["mine"]);
-    registerConvertedThemes({ cwd, agentDir });
-    expect(registeredSourceOf("pigment-mine")).toEqual({ kind: "user", fileName: "mine" });
+    const converted = collectConvertedThemes({ cwd, agentDir });
+    expect(registeredSourceOf("pigment-mine", converted)).toEqual({
+      kind: "user",
+      fileName: "mine",
+    });
     // loadUserTheme reloads the SOURCE (full tokenColors precision).
     expect(loadUserTheme("mine", { cwd, agentDir })?.name).toBe("mine");
   });
@@ -156,8 +158,9 @@ describe("the manual conversion channel", () => {
       join(projectThemes(), "pigment-orphan.json"),
       JSON.stringify({ name: "pigment-orphan", colors: {} }),
     );
-    registerConvertedThemes({ cwd, agentDir });
-    expect(registeredSourceOf("pigment-orphan")).toBeUndefined();
+    const converted = collectConvertedThemes({ cwd, agentDir });
+    expect(registeredSourceOf("pigment-orphan", converted)).toBeUndefined();
+    expect(converted).toEqual([]);
   });
 
   it("an invalid source (no tokenColors) is not convertable — issue, no output", () => {

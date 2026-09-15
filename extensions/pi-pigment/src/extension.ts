@@ -45,7 +45,10 @@ import { Text } from "@earendil-works/pi-tui";
 import { registerPigmentCommand } from "#src/command/theme-command.ts";
 import { loadPigmentConfig } from "#src/config/config-layer.ts";
 import type { ToolName } from "#src/config/config-schema.ts";
+import type { SessionEnv } from "#src/core/session-env.ts";
+import { publishRenderKit } from "#src/render/kit.ts";
 import { shortPath } from "#src/render/paths.ts";
+import { autoRenderSession } from "#src/render/session.ts";
 import { createBashWrapper } from "#src/render/tool-bash.ts";
 import { createEditWrapper } from "#src/render/tool-edit.ts";
 import { createFindWrapper } from "#src/render/tool-find.ts";
@@ -54,14 +57,7 @@ import { createLsWrapper } from "#src/render/tool-ls.ts";
 import { createPowerShellWrapper } from "#src/render/tool-powershell.ts";
 import type { ToolServices } from "#src/render/tool-services.ts";
 import { createWriteWrapper } from "#src/render/tool-write.ts";
-import { setDiffRoots } from "#src/theme/palette.ts";
-import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
-import { setSyntaxThemeSelection } from "#src/theme/theme-selection.ts";
-import {
-  listConvertedThemes,
-  registerConvertedThemes,
-  setUserThemeEnv,
-} from "#src/theme/user-themes.ts";
+import { listConvertedThemes } from "#src/theme/user-themes.ts";
 
 /**
  * Whether the pi-fff search extension is present — the yield signal for
@@ -106,9 +102,18 @@ function fffPresent(pi: ExtensionAPI): boolean {
  * @param pi - The extension API.
  */
 export function createPigmentExtension(pi: ExtensionAPI): void {
+  // Channel B of the render kit (render-kit.ts): publish the borrowing
+  // surface for consumers that do not depend on this package. Idempotent,
+  // first publisher wins — a /reload must not replace the object a
+  // consumer already holds.
+  publishRenderKit();
+  // The latest session_start environment — the `/pigment` completer's read
+  // (the assembly holds the session value; the command cannot reach ctx).
+  let sessionEnv: SessionEnv | undefined;
   pi.on("session_start", async (_event, ctx) => {
     const cwd = ctx.cwd;
     const agentDir = getAgentDir();
+    sessionEnv = { cwd, agentDir };
     // Config/theme issues surface through the documented channel — the
     // TUI notification area (or RPC client) when present; stderr only in
     // headless modes (print/json), where it is the visible medium.
@@ -119,7 +124,7 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
         console.error(`[pi-pigment] ${message}`);
       }
     };
-    const { config, issues } = loadPigmentConfig({ cwd });
+    const { config, issues } = loadPigmentConfig({ cwd, agentDir });
     for (const issue of issues) {
       reportIssue(issue.message);
     }
@@ -135,23 +140,14 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
     const shellSettings = SettingsManager.create(cwd, agentDir, {
       projectTrusted: ctx.isProjectTrusted(),
     });
-    const {
-      selection,
-      rootsSpec,
-      issues: themeIssues,
-    } = await resolveSyntaxThemeSelection(config.syntaxTheme, { cwd, agentDir });
-    for (const issue of themeIssues) {
-      reportIssue(issue.message);
-    }
-    setDiffRoots(rootsSpec);
-    setSyntaxThemeSelection(selection);
-    // The user-theme environment for the registry's lazy reloads (render
-    // time has no env of its own).
-    setUserThemeEnv({ cwd, agentDir });
+    // The session seam (session.ts): config + env → the immutable session
+    // value; no setters — a new session is a new value.
+    const session = await autoRenderSession(sessionEnv, config, reportIssue);
     const services: ToolServices = {
       shortPath: (p: string) => shortPath(cwd, p),
       indicatorStyle: config.indicatorStyle,
       textFactory: Text,
+      render: session,
     };
 
     const registerToolIfEnabled = (toolName: ToolName, tool: ToolDefinition | undefined): void => {
@@ -217,17 +213,16 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
   // The registration channel for converted user themes (ADR 0006): the
   // `/pigment convert` command writes outputs next to their sources; this
   // lists them (individual files — the directory also holds TextMate theme sources
-  // pi must not load) and populates the ours-detection registry. Pure
-  // listing, zero conversion at startup. The bundled themes need no
-  // runtime registration — they ship as package assets pi discovers via
+  // pi must not load). Pure listing, zero conversion at startup; the
+  // ours-detection side of the mapping is collected by the session itself at
+  // session_start (autoRenderSession). The bundled themes need no runtime
+  // registration — they ship as package assets pi discovers via
   // the manifest's pi.themes entry.
   pi.on("resources_discover", async (_event, ctx) => {
-    const env = { cwd: ctx.cwd, agentDir: getAgentDir() };
-    registerConvertedThemes(env);
-    const outputs = listConvertedThemes(env);
+    const outputs = listConvertedThemes({ cwd: ctx.cwd, agentDir: getAgentDir() });
     return outputs.length > 0 ? { themePaths: outputs } : {};
   });
 
   // Manual conversion: /pigment convert [stem] (TUI selector without one).
-  registerPigmentCommand(pi);
+  registerPigmentCommand(pi, { getEnv: () => sessionEnv });
 }

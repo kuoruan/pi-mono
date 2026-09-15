@@ -9,19 +9,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
 import type { WriteState } from "#src/render/tool-services.ts";
-import { resolveDiffPalette } from "#src/theme/palette.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
   makeRenderCtx,
   plain,
   registerTools,
-  type RegisteredTool,
   resetPigmentForTest,
+  type RegisteredTool,
   type TaskCarrier,
   type TextComponent,
-  waitFor,
   type TextDouble,
+  viewFor,
+  waitFor,
 } from "#test/fixtures.ts";
 import { vol, writeFile } from "#test/memfs.ts";
 
@@ -736,7 +736,7 @@ describe("grep renderResult highlight swap", () => {
     const { ctx: staleCtx } = makeRenderCtx();
     resetPigmentForTest();
     const coloredTheme = buildFakeTheme({ syntaxColors: true });
-    resolveDiffPalette(coloredTheme);
+    viewFor(coloredTheme);
     grep.renderCall({ pattern: "value" }, coloredTheme, staleCtx);
     const stale = grep.renderResult(
       { content: [{ type: "text", text: "src/a.ts:12: const value = `tmpl`;" }] },
@@ -778,7 +778,7 @@ describe("grep renderResult highlight swap", () => {
     const { ctx } = makeRenderCtx();
     // A counting theme: fg/bold are the payload builders the plain
     // placeholder path uses (renderPlainOutput per line + the collapse
-    // tail). getFgAnsi/getBgAnsi are NOT counted — resolveDiffPalette's
+    // tail). getFgAnsi/getBgAnsi are NOT counted — the palette derivation's
     // content-validated key reads them on every frame by design.
     const base = buildRenderTheme();
     let built = 0;

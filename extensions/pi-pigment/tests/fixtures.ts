@@ -12,11 +12,17 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { createPigmentExtension } from "#src/extension.ts";
+import {
+  createRenderSession,
+  type RenderSession,
+  type RenderView,
+  type RenderSessionInputs,
+} from "#src/render/session.ts";
 import type { PreviewTask } from "#src/render/text-task.ts";
 import type { RenderContext } from "#src/render/tool-services.ts";
 import { clearHighlightCacheForTest } from "#src/theme/highlight.ts";
-import { resetPaletteForTest, setDiffRoots, type PaletteTheme } from "#src/theme/palette.ts";
-import { resetSyntaxThemeForTest } from "#src/theme/theme-selection.ts";
+import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { ThemeSelection } from "#src/theme/theme-resolver.ts";
 
 /**
  * Fetch one registered tool by name — the suite's standard guard form.
@@ -65,16 +71,50 @@ export async function waitFor<T>(
 }
 
 /**
- * The suite's one aggregate reset: theme-selection memos, the palette
- * snapshot, the session roots, and the highlight cache — the full set of
- * module-level mutable state a render depends on (short of the shiki
- * core singleton, which is process-scoped by design).
+ * The suite's one aggregate reset: the highlight cache (the only
+ * module-level state left in the render path — keyed on content, so most
+ * suites don't need it, but theme-swap suites do).
  */
 export function resetPigmentForTest(): void {
-  resetSyntaxThemeForTest();
-  resetPaletteForTest();
-  setDiffRoots(undefined);
   clearHighlightCacheForTest();
+}
+
+/** The default session inputs for tests: auto selection, no roots, no env. */
+const DEFAULT_TEST_ENV = {
+  cwd: "/nonexistent-pi-pigment-test/project",
+  agentDir: "/nonexistent-pi-pigment-test/agent",
+};
+
+/**
+ * Build a RenderSession from explicit inputs, with auto/no-root defaults —
+ * the tests' session-seam entry.
+ *
+ * @param inputs - Partial overrides (undefined fields take the defaults).
+ * @returns A session the wrapper suites can drive renders through.
+ */
+export function makeRenderSession(inputs: Partial<RenderSessionInputs> = {}): RenderSession {
+  return createRenderSession({
+    diffRoots: undefined,
+    selection: { kind: "auto" } satisfies ThemeSelection,
+    themeEnv: DEFAULT_TEST_ENV,
+    convertedThemes: [],
+    ...inputs,
+  });
+}
+
+/**
+ * A RenderView bound to a fake theme — the theme/render suites' entry to
+ * the session seam.
+ *
+ * @param theme - The pi theme (defaults to the fake).
+ * @param inputs - Optional session input overrides (selection, roots, ...).
+ * @returns The frame view.
+ */
+export function viewFor(
+  theme: PaletteTheme = buildFakeTheme(),
+  inputs: Partial<RenderSessionInputs> = {},
+): RenderView {
+  return makeRenderSession(inputs).forTheme(theme);
 }
 
 /** Fake theme overrides for buildFakeTheme. */

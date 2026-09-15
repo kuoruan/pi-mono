@@ -4,48 +4,49 @@
  * per-tool render states.
  */
 
-import type { Component } from "@earendil-works/pi-tui";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
 
+import type { RenderSession } from "./session.ts";
 import type { TextComponentFactory } from "./text-task.ts";
 
 /**
- * The render context the TUI passes to renderCall/renderResult — the SDK's
- * ToolRenderContext, hand-projected: the type exists upstream
- * (dist/core/extensions/types.d.ts, where 0.85.0 introduced it) but is
- * not re-exported from the package root on 0.85.1, and the exports map
- * blocks the deep path — re-derive from it (Omit expanded/showImages)
- * once a version exports it at the root. `TState` is the wrapper's own
- * render state: the TUI initializes it as `{}` and the wrapper's fields
- * populate lazily, so every state field is optional by contract.
+ * The SDK's render context for the default generics (the render slot of
+ * `ToolDefinition`); `TState` is the wrapper's own render state: the TUI
+ * initializes it as `{}` and the wrapper's fields populate lazily, so
+ * every state field is optional by contract.
  */
-export interface RenderContext<TState extends object = Record<string, unknown>> {
-  /** Current tool call arguments. */
+type SdkRenderContext = Parameters<NonNullable<ToolDefinition["renderResult"]>>[3];
+
+/**
+ * The render context the TUI passes to renderCall/renderResult — the
+ * SDK's shape, narrowed: `args` stays `unknown` at the boundary and
+ * `state` is the wrapper's own `TState`. The compile-time canary below
+ * fails when upstream adds a context field, so carrying it is a decision.
+ */
+export interface RenderContext<TState extends object = Record<string, unknown>> extends Omit<
+  SdkRenderContext,
+  "args" | "expanded" | "showImages" | "state"
+> {
+  /** Current tool call arguments (unknown at the boundary). */
   args: unknown;
-  /**
-   * Unique id for this tool execution (stable across call/result renders — the thrown-error timing
-   * key).
-   */
-  toolCallId: string;
-  /** Invalidate just this tool execution component for redraw. */
-  invalidate: () => void;
-  /** Previously returned component for this render slot, if any. */
-  lastComponent: Component | undefined;
   /** Shared renderer state for this tool row (the wrapper's own shape). */
   state: TState;
-  /** Whether the tool call arguments are complete. */
-  argsComplete: boolean;
-  /** Whether the result is partial/streaming (false once final, and on session restore). */
-  isPartial: boolean;
-  /** Whether the current result is an error. */
-  isError: boolean;
-  /** Whether the tool execution has started (the TUI sets it on execute). */
-  executionStarted: boolean;
-  /** The session working directory (path resolution for display links). */
-  cwd: string;
 }
+
+// Upstream adding a render-context field stops the build here until the
+// projection above decides to carry it (same canary pattern as
+// upstream-contracts.test.ts).
+// eslint-disable-next-line no-unused-vars -- the type check IS the usage
+const CONTEXT_FIELDS_ACCOUNTED_FOR: Exclude<keyof SdkRenderContext, keyof RenderContext> extends
+  | "args"
+  | "expanded"
+  | "showImages"
+  | "state"
+  ? true
+  : false = true;
 
 /**
  * Read a render slot's arguments as a partial tool input — the one cast
@@ -225,4 +226,11 @@ export interface ToolServices {
   indicatorStyle: IndicatorStyle;
   /** The pi-tui Text class (for fresh components). */
   textFactory: TextComponentFactory;
+  /**
+   * The per-session render seam (session.ts) — the one read path
+   * for the session's derived state (palette, resolved token theme,
+   * highlighting). The factory binds it per frame (`forTheme(theme)`);
+   * nothing else in the render pipeline reads session state.
+   */
+  render: RenderSession;
 }

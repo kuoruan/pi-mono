@@ -1,26 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
-import {
-  detectLanguage,
-  hlBlock,
-  MAX_HL_CHARS,
-  MAX_SEED_CHARS,
-  needsSeed,
-} from "#src/theme/highlight.ts";
-import {
-  currentPalette as currentPaletteOf,
-  currentTheme as currentThemeOf,
-  resolveDiffPalette,
-  setDiffRoots,
-} from "#src/theme/palette.ts";
+import { detectLanguage, MAX_HL_CHARS, MAX_SEED_CHARS, needsSeed } from "#src/theme/highlight.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
-import {
-  resetSyntaxThemeForTest,
-  resolveActiveTheme,
-  setSyntaxThemeSelection,
-} from "#src/theme/theme-selection.ts";
-import { buildFakeTheme, resetPigmentForTest } from "#test/fixtures.ts";
+import { buildFakeTheme, makeRenderSession, resetPigmentForTest, viewFor } from "#test/fixtures.ts";
 
 const DARK_BG = "\x1b[48;2;20;20;30m";
 const LIGHT_BG = "\x1b[48;2;250;250;250m";
@@ -28,8 +11,9 @@ const LIGHT_BG = "\x1b[48;2;250;250;250m";
 const CODE = "const answer = 42;\n";
 
 /**
- * The loose theme-object view tests read from resolveActiveTheme: a name
- * plus optional token rules (scope may be string or array).
+ * The loose theme-object view tests read from the frame view's
+ * activeTheme(): a name plus optional token rules (scope may be string or
+ * array).
  */
 interface LooseTheme {
   name: string;
@@ -101,16 +85,35 @@ describe("needsSeed (the grammar-seed gate)", () => {
   });
 });
 
+/** The language + code every highlight test shares. */
+const TS = { code: CODE, language: "typescript" } as const;
+/** The nonexistent-path env: selections resolve without touching the host. */
+const ENV = { cwd: "/nonexistent-project", agentDir: "/nonexistent-agent" };
+
 /**
- * A fresh syntax-colored palette per call (content-identical across calls).
+ * A syntax-colored fake theme — the derivable (follower) input.
  *
- * @returns The resolved palette.
+ * @param overrides - Optional fake-theme overrides.
+ * @returns The fake theme.
  */
-function paletteOf(): ReturnType<typeof resolveDiffPalette> {
-  return resolveDiffPalette(buildFakeTheme({ syntaxColors: true }));
+function themed(overrides?: Parameters<typeof buildFakeTheme>[0]) {
+  return buildFakeTheme({ syntaxColors: true, ...overrides });
 }
 
-describe("hlBlock", () => {
+/**
+ * The resolved theme's identity: the bundled id, the theme object's name,
+ * or "<none>" when the selection resolves to no theme.
+ *
+ * @param view - The frame view.
+ * @returns The theme name string.
+ */
+async function themeName(view: ReturnType<typeof viewFor>): Promise<string> {
+  const theme = await view.activeTheme();
+  if (!theme) return "<none>";
+  return typeof theme === "string" ? theme : theme.name;
+}
+
+describe("highlight (the session's render entry)", () => {
   beforeEach(() => {
     resetPigmentForTest();
   });
@@ -118,15 +121,9 @@ describe("hlBlock", () => {
     resetPigmentForTest();
   });
 
-  it("caches every render (the transient cache:false API is gone — callers skip hlBlock while streaming)", async () => {
-    const themed = buildFakeTheme({ syntaxColors: true });
-    const call = () =>
-      hlBlock({
-        code: CODE,
-        language: "typescript",
-        palette: paletteOf(),
-        piTheme: themed,
-      });
+  it("caches every render (the transient cache:false API is gone — callers skip while streaming)", async () => {
+    const view = viewFor(themed());
+    const call = () => view.highlight(TS);
     // A repeated render is a reference hit (the LRU holds it).
     const cached1 = await call();
     const cached2 = await call();
@@ -134,20 +131,9 @@ describe("hlBlock", () => {
   });
 
   it("drops an oversized seed before it reaches the tokenizer", async () => {
-    const themed = buildFakeTheme({ syntaxColors: true });
-    const unseeded = await hlBlock({
-      code: CODE,
-      language: "typescript",
-      palette: paletteOf(),
-      piTheme: themed,
-    });
-    const dropped = await hlBlock({
-      code: CODE,
-      language: "typescript",
-      palette: paletteOf(),
-      piTheme: themed,
-      seed: "x".repeat(MAX_SEED_CHARS + 1),
-    });
+    const view = viewFor(themed());
+    const unseeded = await view.highlight(TS);
+    const dropped = await view.highlight({ ...TS, seed: "x".repeat(MAX_SEED_CHARS + 1) });
     // The oversized seed is dropped: identical output, and (the same
     // cache key) the very same reference as the unseeded render.
     expect(dropped).toEqual(unseeded);
@@ -155,31 +141,11 @@ describe("hlBlock", () => {
   });
 
   it("returns unhighlighted lines for unknown languages and oversized input", async () => {
-    expect(
-      await hlBlock({
-        code: "",
-        language: "typescript",
-        palette: currentPaletteOf(),
-        piTheme: currentThemeOf(),
-      }),
-    ).toEqual([""]);
-    expect(
-      await hlBlock({
-        code: "plain",
-        language: undefined,
-        palette: currentPaletteOf(),
-        piTheme: currentThemeOf(),
-      }),
-    ).toEqual(["plain"]);
+    const view = viewFor(themed());
+    expect(await view.highlight({ code: "", language: "typescript" })).toEqual([""]);
+    expect(await view.highlight({ code: "plain", language: undefined })).toEqual(["plain"]);
     const big = "x".repeat(MAX_HL_CHARS + 1);
-    expect(
-      await hlBlock({
-        code: big,
-        language: "typescript",
-        palette: currentPaletteOf(),
-        piTheme: currentThemeOf(),
-      }),
-    ).toEqual([big]);
+    expect(await view.highlight({ code: big, language: "typescript" })).toEqual([big]);
   });
 
   it("highlights code and strips the trailing newline", async () => {
@@ -187,12 +153,7 @@ describe("hlBlock", () => {
     // auto theme, the trailing newline's empty line is cut, and the
     // tokens carry truecolor escapes (the plain fallback would keep a
     // trailing empty line AND carry no escapes).
-    const lines = await hlBlock({
-      code: CODE,
-      language: "typescript",
-      palette: resolveDiffPalette(buildFakeTheme({ syntaxColors: true })),
-      piTheme: buildFakeTheme({ syntaxColors: true }),
-    });
+    const lines = await viewFor(themed()).highlight(TS);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("const");
     // eslint-disable-next-line no-control-regex -- matches the SGR escape
@@ -200,87 +161,24 @@ describe("hlBlock", () => {
   });
 
   it("follows the palette's light/dark bit for the syntax theme", async () => {
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG, syntaxColors: true }));
-    expect(await resolvedThemeName()).toMatch(/^pi-dark-/);
-
-    resolveDiffPalette(buildFakeTheme({ successBg: LIGHT_BG, syntaxColors: true }));
-    expect(await resolvedThemeName()).toMatch(/^pi-light-/);
+    const session = makeRenderSession();
+    expect(await themeName(session.forTheme(themed({ successBg: DARK_BG })))).toMatch(/^pi-dark-/);
+    expect(await themeName(session.forTheme(themed({ successBg: LIGHT_BG })))).toMatch(
+      /^pi-light-/,
+    );
 
     // The theme participates in the cache key: prime both variants, then
     // confirm the dark entry is returned unchanged on the way back.
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    const dark = await hlBlock({
-      code: CODE,
-      language: "typescript",
-      palette: currentPaletteOf(),
-      piTheme: currentThemeOf(),
-    });
-    resolveDiffPalette(buildFakeTheme({ successBg: LIGHT_BG }));
-    await hlBlock({
-      code: CODE,
-      language: "typescript",
-      palette: currentPaletteOf(),
-      piTheme: currentThemeOf(),
-    });
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    const again = await hlBlock({
-      code: CODE,
-      language: "typescript",
-      palette: currentPaletteOf(),
-      piTheme: currentThemeOf(),
-    });
+    const darkView = session.forTheme(buildFakeTheme({ successBg: DARK_BG }));
+    const dark = await darkView.highlight(TS);
+    const lightView = session.forTheme(buildFakeTheme({ successBg: LIGHT_BG }));
+    await lightView.highlight(TS);
+    const again = await darkView.highlight(TS);
     expect(again).toEqual(dark);
   });
 });
 
-/**
- * The curated pairs (the former built-in families, now ordinary explicit
- * selections — CONFIG.md's recommended-pairs table).
- */
-const RECOMMENDED_PAIRS: Record<string, { light?: string; dark?: string }> = {
-  github: { light: "github-light", dark: "github-dark" },
-  catppuccin: { light: "catppuccin-latte", dark: "catppuccin-mocha" },
-  one: { light: "one-light", dark: "one-dark-pro" },
-  gruvbox: { light: "gruvbox-light-medium", dark: "gruvbox-dark-medium" },
-  solarized: { light: "solarized-light", dark: "solarized-dark" },
-  "rose-pine": { light: "rose-pine-dawn", dark: "rose-pine" },
-  everforest: { light: "everforest-light", dark: "everforest-dark" },
-  kanagawa: { light: "kanagawa-lotus", dark: "kanagawa-wave" },
-  ayu: { light: "ayu-light", dark: "ayu-dark" },
-  vitesse: { light: "vitesse-light", dark: "vitesse-dark" },
-  min: { light: "min-light", dark: "min-dark" },
-  "night-owl": { light: "night-owl-light", dark: "night-owl" },
-};
-
-/**
- * Select a config string through the real resolver (direct bundled names
- * resolve to the virtual-file selection — the direct channel).
- *
- * @param value - The syntaxTheme string value.
- */
-async function selectString(value: string): Promise<void> {
-  const { selection } = await resolveSyntaxThemeSelection(value, {
-    cwd: "/nonexistent-project",
-    agentDir: "/nonexistent-agent",
-  });
-  setSyntaxThemeSelection(selection);
-}
-
-/**
- * The resolved theme's identity: the bundled id, the theme object's name,
- * or "<none>" when the selection resolves to no theme.
- *
- * @returns The theme name string.
- */
-async function resolvedThemeName(): Promise<string> {
-  const theme = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
-  if (!theme) return "<none>";
-  // The active theme is either the raw id (a bundled name, AA-clean) or
-  // the enforced object (whose name the materialization always sets).
-  return typeof theme === "string" ? theme : theme.name;
-}
-
-describe("syntax theme selections (the pair grammar)", () => {
+describe("theme selections (the session's inputs)", () => {
   beforeEach(() => {
     resetPigmentForTest();
   });
@@ -288,106 +186,39 @@ describe("syntax theme selections (the pair grammar)", () => {
     resetPigmentForTest();
   });
 
-  it("auto renders unhighlighted when the pi theme lacks syntax colors", async () => {
-    // No substitute fallback: honest degradation, like the large-diff path.
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    expect(await resolveActiveTheme(currentPaletteOf(), currentThemeOf())).toBeNull();
-    expect(
-      await hlBlock({
-        code: CODE,
-        language: "typescript",
-        palette: currentPaletteOf(),
-        piTheme: currentThemeOf(),
-      }),
-    ).toEqual(CODE.split("\n"));
-  });
-
-  it("every recommended pair resolves through the slash grammar and follows the palette's light/dark bit", async () => {
-    for (const pair of Object.values(RECOMMENDED_PAIRS)) {
-      const value = `${pair.light}/${pair.dark}`;
-      await selectString(value);
-      resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG, syntaxColors: true }));
-      expect(await resolvedThemeName()).toMatch(
-        pair.dark ? new RegExp(`^${pair.dark}-aa-`) : /^pi-dark-/,
-      );
-      resolveDiffPalette(buildFakeTheme({ successBg: LIGHT_BG, syntaxColors: true }));
-      expect(await resolvedThemeName()).toMatch(
-        pair.light ? new RegExp(`^${pair.light}-aa-`) : /^pi-light-/,
-      );
-    }
-  });
-
-  it("single-polarity bundled names render on match (AA boundary), auto on the other polarity", async () => {
-    // nord/dracula/monokai/tokyo-night are bundled names — B boundary:
-    // enforced against the canvas (the clean id or an -aa- object), never
-    // verbatim; polarity-gated to auto when the pi theme is light.
-    for (const name of ["nord", "dracula", "monokai", "tokyo-night"] as const) {
-      await selectString(name);
-      resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG, syntaxColors: true }));
-      const dark = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
-      // B boundary, strictly: the clean id OR an -aa- object — but a
-      // verbatim object (bare name, no suffix) must never appear.
-      expect(typeof dark === "string" ? dark : (dark as LooseTheme).name).toMatch(
-        new RegExp(`^${name}(-aa-.+|$)`),
-      );
-      expect(typeof dark === "string" ? dark : (dark as LooseTheme).name).not.toBe(name);
-
-      resolveDiffPalette(buildFakeTheme({ successBg: LIGHT_BG, syntaxColors: true }));
-      const light = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
-      expect(typeof light).toBe("object");
-      expect((light as LooseTheme).name).toMatch(/^pi-light-/); // gated → auto
-    }
-  });
-
-  it("every recommended-pair half is a real Shiki bundled theme", async () => {
-    // The bundled-theme registry lookup is the oracle: a typo'd entry in
-    // the table fails here instead of degrading to plain text at render
-    // time (the intake's per-name import resolves to the theme object).
-    for (const pair of Object.values(RECOMMENDED_PAIRS)) {
-      for (const variant of [pair.dark, pair.light]) {
-        if (!variant) continue;
-        await expect(loadBundledTheme(variant as "github-dark")).resolves.toMatchObject({
-          name: expect.any(String),
-        });
-      }
-    }
-  });
-
-  it("resetSyntaxThemeForTest restores auto", async () => {
-    await selectString("catppuccin-latte/catppuccin-mocha");
-    resetSyntaxThemeForTest();
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG, syntaxColors: true }));
-    expect(await resolvedThemeName()).toMatch(/^pi-dark-/);
-  });
-});
-
-describe("theme selections (ADR 0002)", () => {
-  beforeEach(() => {
-    resetPigmentForTest();
-  });
-  afterEach(() => {
-    resetPigmentForTest();
-  });
+  /**
+   * A view for the github-dark direct selection over the given theme.
+   *
+   * @param theme - The frame's pi theme.
+   * @returns The bound view.
+   */
+  async function githubDarkView(theme: ReturnType<typeof buildFakeTheme>) {
+    const { selection } = await resolveSyntaxThemeSelection("github-dark", ENV);
+    return makeRenderSession({ selection }).forTheme(theme);
+  }
 
   it("bundled-name enforcement produces an -aa- object keyed per background set", async () => {
-    await selectString("github-dark");
     // A theme WITHOUT syntax colors, so the bundled-name path (not auto) triggers.
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    const theme = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
+    const view = await githubDarkView(buildFakeTheme({ successBg: DARK_BG }));
+    const theme = await view.activeTheme();
     // Either the raw id (nothing to enforce) or the enforced object.
     expect(theme === null || typeof theme === "string" || theme.name.includes("-aa-")).toBe(true);
   });
 
   it("diff roots change enforcement backgrounds → fresh theme identity (dynamic AA)", async () => {
-    await selectString("github-dark");
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    const before = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
+    const { selection } = await resolveSyntaxThemeSelection("github-dark", ENV);
+    const before = await makeRenderSession({ selection })
+      .forTheme(buildFakeTheme({ successBg: DARK_BG }))
+      .activeTheme();
 
     // Anchor the add-side word slot to a very different tint (the
     // enforcement backgrounds change with the roots).
-    setDiffRoots({ topLevel: { added: { tint: "#1a2b3cdd" } } });
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    const after = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
+    const after = await makeRenderSession({
+      selection,
+      diffRoots: { topLevel: { added: { tint: "#1a2b3cdd" } } },
+    })
+      .forTheme(buildFakeTheme({ successBg: DARK_BG }))
+      .activeTheme();
 
     // New background set → the enforced identity (name suffix) changes;
     // when nothing needed enforcement both sides stay raw ids.
@@ -401,14 +232,16 @@ describe("theme selections (ADR 0002)", () => {
   });
 
   it("inline variant colors render verbatim (no -aa- enforcement)", async () => {
-    setSyntaxThemeSelection({
-      kind: "object",
-      base: { kind: "auto" },
-      colors: {},
-      dark: { colors: { keyword: "#123456" } },
-    });
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    const theme = (await resolveActiveTheme(currentPaletteOf(), currentThemeOf())) as LooseTheme;
+    const theme = (await makeRenderSession({
+      selection: {
+        kind: "object",
+        base: { kind: "auto" },
+        colors: {},
+        dark: { colors: { keyword: "#123456" } },
+      },
+    })
+      .forTheme(buildFakeTheme({ successBg: DARK_BG }))
+      .activeTheme()) as LooseTheme;
     expect(theme.name).toMatch(/^inline-dark-/);
     expect(theme.name).not.toMatch(/-aa-/);
     const keywordRule = theme.tokenColors?.find((rule) =>
@@ -419,30 +252,27 @@ describe("theme selections (ADR 0002)", () => {
   });
 
   it("inline variant-mode without the current polarity's variant falls back to auto", async () => {
-    setSyntaxThemeSelection({
-      kind: "object",
-      base: { kind: "auto" },
-      colors: {},
-      dark: { colors: { keyword: "#123456" } },
-    });
-    resolveDiffPalette(buildFakeTheme({ successBg: LIGHT_BG, syntaxColors: true }));
-    const theme = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
+    const theme = await makeRenderSession({
+      selection: {
+        kind: "object",
+        base: { kind: "auto" },
+        colors: {},
+        dark: { colors: { keyword: "#123456" } },
+      },
+    })
+      .forTheme(buildFakeTheme({ successBg: LIGHT_BG, syntaxColors: true }))
+      .activeTheme();
     expect(typeof theme).toBe("object");
     expect((theme as LooseTheme).name).toMatch(/^pi-light-/);
   });
 
   it("patch mode on a pair base rewrites rules with the user's colors verbatim", async () => {
-    const { selection } = await resolveSyntaxThemeSelection("github-light/github-dark", {
-      cwd: "/nonexistent-project",
-      agentDir: "/nonexistent-agent",
-    });
-    setSyntaxThemeSelection({
-      kind: "object",
-      base: selection,
-      colors: { keyword: "#00ff00" },
-    });
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    const theme = (await resolveActiveTheme(currentPaletteOf(), currentThemeOf())) as LooseTheme;
+    const { selection: pair } = await resolveSyntaxThemeSelection("github-light/github-dark", ENV);
+    const theme = (await makeRenderSession({
+      selection: { kind: "object", base: pair, colors: { keyword: "#00ff00" } },
+    })
+      .forTheme(buildFakeTheme({ successBg: DARK_BG }))
+      .activeTheme()) as LooseTheme;
     expect(theme.name).toMatch(/github/);
     const keywordRules = (theme.tokenColors ?? []).filter((rule) => {
       const scopes = typeof rule.scope === "string" ? [rule.scope] : (rule.scope ?? []);
@@ -460,14 +290,21 @@ describe("theme selections (ADR 0002)", () => {
       type: "dark" as const,
       tokenColors: [{ scope: "keyword", settings: { foreground: "#050505" } }],
     };
+    const selection = {
+      kind: "file" as const,
+      file: { name: "user-dark", theme: fileTheme },
+    };
     // Dark pi theme: the file theme is used verbatim (never enforced).
-    setSyntaxThemeSelection({ kind: "file", file: { name: "user-dark", theme: fileTheme } });
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    expect(await resolveActiveTheme(currentPaletteOf(), currentThemeOf())).toBe(fileTheme);
+    expect(
+      await makeRenderSession({ selection })
+        .forTheme(buildFakeTheme({ successBg: DARK_BG }))
+        .activeTheme(),
+    ).toBe(fileTheme);
 
     // Light pi theme: gated → auto fallback.
-    resolveDiffPalette(buildFakeTheme({ successBg: LIGHT_BG, syntaxColors: true }));
-    const gated = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
+    const gated = await makeRenderSession({ selection })
+      .forTheme(buildFakeTheme({ successBg: LIGHT_BG, syntaxColors: true }))
+      .activeTheme();
     expect(typeof gated).toBe("object");
     expect((gated as LooseTheme).name).toMatch(/^pi-light-/);
   });
@@ -478,14 +315,16 @@ describe("theme selections (ADR 0002)", () => {
       type: "dark" as const,
       tokenColors: [{ scope: "keyword", settings: { foreground: "#050505" } }],
     };
-    setSyntaxThemeSelection({
-      kind: "object",
-      base: { kind: "file", file: { name: "user-dark", theme: fileTheme } },
-      colors: { keyword: "#00ff00" },
-    });
     // Light pi theme: the file is gated, patches continue on the auto theme.
-    resolveDiffPalette(buildFakeTheme({ successBg: LIGHT_BG, syntaxColors: true }));
-    const theme = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
+    const theme = await makeRenderSession({
+      selection: {
+        kind: "object",
+        base: { kind: "file", file: { name: "user-dark", theme: fileTheme } },
+        colors: { keyword: "#00ff00" },
+      },
+    })
+      .forTheme(buildFakeTheme({ successBg: LIGHT_BG, syntaxColors: true }))
+      .activeTheme();
     expect(typeof theme).toBe("object");
     expect((theme as LooseTheme).name).toMatch(/^pi-light-/);
     const keywordRule = (
@@ -496,10 +335,102 @@ describe("theme selections (ADR 0002)", () => {
     expect(keywordRule?.settings.foreground).toBe("#00ff00");
   });
 
-  it("memoizes the active theme: same inputs return the same object", async () => {
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG, syntaxColors: true }));
-    const first = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
-    const second = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
+  it("memoizes the active theme within a session: same inputs return the same object", async () => {
+    const view = viewFor(themed({ successBg: DARK_BG }));
+    const first = await view.activeTheme();
+    const second = await view.activeTheme();
     expect(first).toBe(second);
+  });
+});
+
+/**
+ * The curated pairs (the former built-in families, now ordinary explicit
+ * selections — config.md's recommended-pairs table).
+ */
+const RECOMMENDED_PAIRS: Record<string, { light?: string; dark?: string }> = {
+  github: { light: "github-light", dark: "github-dark" },
+  catppuccin: { light: "catppuccin-latte", dark: "catppuccin-mocha" },
+  one: { light: "one-light", dark: "one-dark-pro" },
+  gruvbox: { light: "gruvbox-light-medium", dark: "gruvbox-dark-medium" },
+  solarized: { light: "solarized-light", dark: "solarized-dark" },
+  "rose-pine": { light: "rose-pine-dawn", dark: "rose-pine" },
+  everforest: { light: "everforest-light", dark: "everforest-dark" },
+  kanagawa: { light: "kanagawa-lotus", dark: "kanagawa-wave" },
+  ayu: { light: "ayu-light", dark: "ayu-dark" },
+  vitesse: { light: "vitesse-light", dark: "vitesse-dark" },
+  min: { light: "min-light", dark: "min-dark" },
+  "night-owl": { light: "night-owl-light", dark: "night-owl" },
+};
+
+describe("the recommended pairs (the slash grammar)", () => {
+  beforeEach(() => {
+    resetPigmentForTest();
+  });
+  afterEach(() => {
+    resetPigmentForTest();
+  });
+
+  /**
+   * The slash grammar's product for a value (the session's selection).
+   *
+   * @param value - The syntaxTheme config value.
+   * @returns The resolved selection.
+   */
+  async function selectionFor(value: string) {
+    const { selection } = await resolveSyntaxThemeSelection(value, ENV);
+    return selection;
+  }
+
+  it("every recommended pair resolves through the slash grammar and follows the palette's light/dark bit", async () => {
+    for (const pair of Object.values(RECOMMENDED_PAIRS)) {
+      const session = makeRenderSession({
+        selection: await selectionFor(`${pair.light}/${pair.dark}`),
+      });
+      const dark = await themeName(session.forTheme(themed({ successBg: DARK_BG })));
+      expect(dark).toMatch(pair.dark ? new RegExp(`^${pair.dark}-aa-`) : /^pi-dark-/);
+      const light = await themeName(session.forTheme(themed({ successBg: LIGHT_BG })));
+      expect(light).toMatch(pair.light ? new RegExp(`^${pair.light}-aa-`) : /^pi-light-/);
+    }
+  });
+
+  it("every recommended-pair half is a real Shiki bundled theme", async () => {
+    // The bundled-theme registry lookup is the oracle: a typo'd entry in
+    // the table fails here instead of degrading to plain text at render
+    // time (the intake's per-name import resolves to the theme object).
+    for (const pair of Object.values(RECOMMENDED_PAIRS)) {
+      for (const variant of [pair.dark, pair.light]) {
+        if (!variant) continue;
+        await expect(loadBundledTheme(variant as "github-dark")).resolves.toMatchObject({
+          name: expect.any(String),
+        });
+      }
+    }
+  });
+
+  it("single-polarity bundled names render on match (AA boundary), auto on the other polarity", async () => {
+    // nord/dracula/monokai/tokyo-night are bundled names — B boundary:
+    // enforced against the canvas (the clean id or an -aa- object), never
+    // verbatim; polarity-gated to auto when the pi theme is light.
+    for (const name of ["nord", "dracula", "monokai", "tokyo-night"] as const) {
+      const session = makeRenderSession({ selection: await selectionFor(name) });
+      const dark = await session.forTheme(themed({ successBg: DARK_BG })).activeTheme();
+      // B boundary, strictly: the clean id OR an -aa- object — but a
+      // verbatim object (bare name, no suffix) must never appear.
+      expect(typeof dark === "string" ? dark : (dark as LooseTheme).name).toMatch(
+        new RegExp(`^${name}(-aa-.+|$)`),
+      );
+      expect(typeof dark === "string" ? dark : (dark as LooseTheme).name).not.toBe(name);
+
+      const light = await session.forTheme(themed({ successBg: LIGHT_BG })).activeTheme();
+      expect(typeof light).toBe("object");
+      expect((light as LooseTheme).name).toMatch(/^pi-light-/); // gated → auto
+    }
+  });
+
+  it("auto renders unhighlighted when the pi theme lacks syntax colors", async () => {
+    // No substitute fallback: honest degradation, like the large-diff path.
+    const view = viewFor(buildFakeTheme({ successBg: DARK_BG }));
+    expect(await view.activeTheme()).toBeNull();
+    expect(await view.highlight(TS)).toEqual(CODE.split("\n"));
   });
 });

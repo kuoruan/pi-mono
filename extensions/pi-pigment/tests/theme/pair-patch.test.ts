@@ -1,13 +1,8 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
-import { resolveDiffPalette, setDiffRoots } from "#src/theme/palette.ts";
-import {
-  hasPatches,
-  resolveActiveTheme,
-  setSyntaxThemeSelection,
-} from "#src/theme/theme-selection.ts";
-import { buildFakeTheme, resetPigmentForTest } from "#test/fixtures.ts";
+import { hasPatches } from "#src/theme/theme-selection.ts";
+import { buildFakeTheme, makeRenderSession, resetPigmentForTest } from "#test/fixtures.ts";
 
 /**
  * An object selection (a slash-pair base of bundled names + semantic
@@ -17,39 +12,32 @@ import { buildFakeTheme, resetPigmentForTest } from "#test/fixtures.ts";
  * theme reaches under any tested diff roots, so this guards the
  * restructured branch and the load-and-patch fallback for future themes.
  */
-// Roots set inside these tests must not leak past the file (the sibling
-// suites restore theirs; this file historically didn't).
-afterEach(() => {
-  setDiffRoots(undefined);
-});
-
 describe("pair-base object selection applies patches", () => {
   it("applies the patch color over the enforced bundled base", async () => {
     resetPigmentForTest();
-    setDiffRoots({
-      topLevel: { removed: { tint: "#2b1a1a66" } },
-    });
     const theme = buildFakeTheme({ syntaxColors: true });
-    const palette = resolveDiffPalette(theme);
     // The dark half of the pair (the fake theme reads as dark).
-    setSyntaxThemeSelection({
-      kind: "object",
-      base: {
-        kind: "pair",
-        light: {
-          name: "github-light",
-          theme: { name: "github-light", type: "light" } as never,
-          bundled: true,
+    const view = makeRenderSession({
+      diffRoots: { topLevel: { removed: { tint: "#2b1a1a66" } } },
+      selection: {
+        kind: "object",
+        base: {
+          kind: "pair",
+          light: {
+            name: "github-light",
+            theme: { name: "github-light", type: "light" } as never,
+            bundled: true,
+          },
+          dark: {
+            name: "github-dark",
+            theme: { name: "github-dark", type: "dark" } as never,
+            bundled: true,
+          },
         },
-        dark: {
-          name: "github-dark",
-          theme: { name: "github-dark", type: "dark" } as never,
-          bundled: true,
-        },
+        colors: { keyword: "#ff00ff" },
       },
-      colors: { keyword: "#ff00ff" },
-    });
-    const active = await resolveActiveTheme(palette, theme);
+    }).forTheme(theme);
+    const active = await view.activeTheme();
     expect(typeof active).toBe("object");
     const tc =
       (active as { tokenColors?: { settings?: { foreground?: string } }[] }).tokenColors ?? [];
@@ -61,14 +49,16 @@ describe("variant-mode color merge (top-level colors under variants)", () => {
   it("merges the top-level colors with the variant's (variant wins per key)", async () => {
     resetPigmentForTest();
     const theme = buildFakeTheme({ syntaxColors: true });
-    const palette = resolveDiffPalette(theme);
-    setSyntaxThemeSelection({
-      kind: "object",
-      base: { kind: "auto" },
-      colors: { comment: "#657b83", keyword: "#top-level-must-lose" },
-      dark: { colors: { keyword: "#bb9af7" } },
-    });
-    const active = await resolveActiveTheme(palette, theme);
+    const active = await makeRenderSession({
+      selection: {
+        kind: "object",
+        base: { kind: "auto" },
+        colors: { comment: "#657b83", keyword: "#top-level-must-lose" },
+        dark: { colors: { keyword: "#bb9af7" } },
+      },
+    })
+      .forTheme(theme)
+      .activeTheme();
     expect(typeof active).toBe("object");
     const tc =
       (

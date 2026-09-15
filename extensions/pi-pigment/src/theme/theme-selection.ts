@@ -10,6 +10,7 @@
 import type { BundledTheme } from "shiki";
 
 import { createBoundedMap, type BoundedMap } from "#src/core/bounded-map.ts";
+import type { SessionEnv } from "#src/core/session-env.ts";
 
 import { loadBundledTheme } from "./bundled-intake.ts";
 import { themeCacheKey, type DiffPalette, type PaletteTheme } from "./palette.ts";
@@ -24,65 +25,65 @@ import {
   type ShikiThemeInput,
 } from "./syntax-theme.ts";
 import type { LoadedThemeFile } from "./theme-file.ts";
-import { registeredSourceOf } from "./theme-registry.ts";
+import { registeredSourceOf, type ConvertedTheme } from "./theme-registry.ts";
 import type { ThemeSelection } from "./theme-resolver.ts";
 import { loadUserTheme } from "./user-themes.ts";
 
-/** The session's resolved theme selection (set at session_start). */
-let selection: ThemeSelection = { kind: "auto" };
 /**
- * The selection's serialized form — computed once per selection (file/object
- * selections embed whole theme objects, and the identity runs per block).
+ * The session's render-time theme inputs — the selection plus everything
+ * ours-detection and the user-file load need. The resolution is a pure
+ * function of these; the session value carries them (session.ts).
  */
-let selectionFingerprint = JSON.stringify(selection);
-
-/**
- * The memo for the active theme: identity key → resolved theme promise.
- * Keyed by identity (a small map, not a single slot): interleaved callers
- * with different identities each hit their own entry — a single-slot memo
- * thrashes under parallel test workers sharing this module, and a thrashed
- * resolve handed the wrong theme's colors to the wrong renderer.
- */
-const activeThemeMemo = createBoundedMap<string, Promise<ShikiThemeInput | null>>(8);
-
-/**
- * Select the syntax theme (the theme-resolver's session-time product) and
- * reset the render-time memo. No prewarming (measured: the
- * engine import is paid at load time, the first tokenize's regex compile
- * is inherently first-use — see highlight.ts's note).
- *
- * @param next - The resolved selection.
- */
-export function setSyntaxThemeSelection(next: ThemeSelection): void {
-  selection = next;
-  selectionFingerprint = JSON.stringify(next);
-  activeThemeMemo.clear();
+export interface ThemeResolveInputs {
+  /** The resolved selection. */
+  selection: ThemeSelection;
+  /** The collected user conversions (ours-detection's user half). */
+  convertedThemes: ReadonlyArray<ConvertedTheme>;
+  /** The environment user-file loads read. */
+  themeEnv: SessionEnv;
 }
 
+/** The active-theme memo: identity key → resolved theme promise. */
+export type ActiveThemeMemo = BoundedMap<string, Promise<ShikiThemeInput | null>>;
+
 /**
- * Reset the selection to auto and drop the memos (test seam). The enforced
- * variant cache is keyed by background, not by theme — without clearing it,
- * a parallel test's theme locks the auto-derived variant under a shared
- * background key and later tests render with the wrong polarity's syntax
- * colors.
+ * The selection's serialized form — memoized per object (file/object
+ * selections embed whole theme objects, and the identity runs per block).
+ * WeakMap-keyed: the resolver hands a fresh selection object each
+ * session_start, so a changed selection is always a new key.
  */
-export function resetSyntaxThemeForTest(): void {
-  selection = { kind: "auto" };
-  selectionFingerprint = JSON.stringify(selection);
-  activeThemeMemo.clear();
-  enforcedCache.clear();
+const selectionFingerprints = new WeakMap<ThemeSelection, string>();
+
+/**
+ * The serialized form of a selection, computed once per object.
+ *
+ * @param target - The selection.
+ * @returns Its stable fingerprint.
+ */
+function fingerprintOf(target: ThemeSelection): string {
+  let fingerprint = selectionFingerprints.get(target);
+  if (fingerprint === undefined) {
+    fingerprint = JSON.stringify(target);
+    selectionFingerprints.set(target, fingerprint);
+  }
+  return fingerprint;
 }
 
 /**
  * The identity the active-theme memo keys on: the selection, the pi theme
- * (name included — the ours-detection input), and the palette roots
+ * (name included — the ours-detection input), the palette roots
  * (backgrounds) — every input that changes the output.
  *
+ * @param inputs - The session's render-time theme inputs.
  * @param palette - The resolved palette (backgrounds drive enforcement).
  * @param theme - The pi theme (its name drives ours-detection).
  * @returns A string unique to the resolution inputs.
  */
-function activeThemeIdentity(palette: DiffPalette, theme: PaletteTheme | undefined): string {
+function activeThemeIdentity(
+  inputs: ThemeResolveInputs,
+  palette: DiffPalette,
+  theme: PaletteTheme | undefined,
+): string {
   // The background key carries ALL four blend backgrounds — the same key
   // enforceLoadedFile caches on — so identity and enforcement can never
   // disagree about which backgrounds a resolution saw (bgAdded/bgRemoved alone
@@ -96,12 +97,34 @@ function activeThemeIdentity(palette: DiffPalette, theme: PaletteTheme | undefin
     .map((slot) => theme?.getFgAnsi(slot) ?? "")
     .join(",");
   return [
-    selectionFingerprint,
+    fingerprintOf(inputs.selection),
     theme?.name ?? "",
     palette.identity,
     paletteBgKey(palette),
     syntaxColors,
+    convertedThemeIdentity(inputs.convertedThemes),
   ].join("\0");
+}
+
+/**
+ * Memoized per collection: a session's conversions never change, and the session never mutates the
+ * array.
+ */
+const convertedIdentities = new WeakMap<ReadonlyArray<ConvertedTheme>, string>();
+
+/**
+ * The collected conversions as an identity segment (name → source stem).
+ *
+ * @param converted - The session's collected conversions.
+ * @returns A string unique to the collection.
+ */
+function convertedThemeIdentity(converted: ReadonlyArray<ConvertedTheme>): string {
+  let identity = convertedIdentities.get(converted);
+  if (identity === undefined) {
+    identity = converted.map((entry) => `${entry.name}=${entry.stem}`).join("|");
+    convertedIdentities.set(converted, identity);
+  }
+  return identity;
 }
 
 /**
@@ -116,58 +139,61 @@ function paletteBgKey(palette: DiffPalette): string {
 }
 
 /**
- * Resolve the active Shiki theme for the current render (async: name
- * enforcement loads bundled theme objects). Memoized on the full identity —
- * theme switches, root overrides, and config reloads all produce a fresh
- * resolution and a fresh highlight-cache key.
+ * The memoized resolution over EXPLICIT inputs — the session seam's entry
+ * (session.ts owns the memo instance, so two sessions in one process
+ * can never share or clobber each other's resolutions).
  *
+ * @param memo - The session's memo instance.
+ * @param inputs - The session's selection, conversions, and environment.
  * @param palette - The resolved palette the render uses.
  * @param theme - The pi theme behind it.
- * @returns The active theme — a bundled id or a theme object — or null when
- *   the selection resolves to no theme (auto derivation impossible).
+ * @returns The active theme, or null when unresolvable.
  */
-export async function resolveActiveTheme(
+export async function resolveActiveThemeMemoized(
+  memo: ActiveThemeMemo,
+  inputs: ThemeResolveInputs,
   palette: DiffPalette,
   theme: PaletteTheme | undefined,
 ): Promise<ShikiThemeInput | null> {
-  const identity = activeThemeIdentity(palette, theme);
-  const memoized = activeThemeMemo.get(identity);
+  const identity = activeThemeIdentity(inputs, palette, theme);
+  const memoized = memo.get(identity);
   if (memoized) return memoized;
-  const resolving = resolveSelection(selection, palette, theme);
+  const resolving = resolveSelection(inputs, palette, theme);
   // Bounded (a session sees few identities; the bound only matters for
   // long test runs).
-  activeThemeMemo.set(identity, resolving);
+  memo.set(identity, resolving);
   return resolving;
 }
 
 /**
  * Resolve a selection against the render's palette polarity.
  *
- * @param target - The selection to resolve.
+ * @param inputs - The session's theme inputs.
  * @param palette - The resolved palette (polarity + enforcement backgrounds).
  * @param theme - The pi theme (the auto path's syntax color source).
  * @returns The theme input for codeToANSI, or null when unresolvable.
  */
 async function resolveSelection(
-  target: ThemeSelection,
+  inputs: ThemeResolveInputs,
   palette: DiffPalette,
   theme: PaletteTheme | undefined,
 ): Promise<ShikiThemeInput | null> {
-  if (target.kind === "auto") return resolveAuto(palette, theme, {});
+  const target = inputs.selection;
+  if (target.kind === "auto") return resolveAuto(inputs, palette, theme, {});
   if (target.kind === "file") {
     const variantType = target.file.theme.type;
     if (variantType === (palette.isLight ? "light" : "dark"))
       return enforceLoadedFile(target.file, palette);
     // Polarity-gated: fall through to auto (patches would continue via the
     // object wrapper; a bare file selection has none).
-    return resolveAuto(palette, theme, {});
+    return resolveAuto(inputs, palette, theme, {});
   }
   if (target.kind === "pair") {
     const half = palette.isLight ? target.light : target.dark;
     if (half && half.theme.type === (palette.isLight ? "light" : "dark"))
       return enforceLoadedFile(half, palette);
     // Missing half or mismatched type: fall through to auto.
-    return resolveAuto(palette, theme, {});
+    return resolveAuto(inputs, palette, theme, {});
   }
 
   // Object selection: resolve the base for the current polarity, then
@@ -190,7 +216,7 @@ async function resolveSelection(
         "variant",
       );
     }
-    return resolveAuto(palette, theme, patches);
+    return resolveAuto(inputs, palette, theme, patches);
   }
   // File/pair base: bundled names AA-enforce, user files render verbatim;
   // polarity-gated halves fall through to auto (patches continue on
@@ -204,7 +230,7 @@ async function resolveSelection(
           : base.dark
         : undefined;
   if (!half || half.theme.type !== (palette.isLight ? "light" : "dark")) {
-    return resolveAuto(palette, theme, patches);
+    return resolveAuto(inputs, palette, theme, patches);
   }
   if (!half.bundled) return applySemanticPatches(half.theme, patches, identityOf(target));
   const enforced = await enforceLoadedFile(half, palette);
@@ -233,6 +259,7 @@ async function resolveSelection(
  * values), the honest behavior is unhighlighted code, matching the
  * large-diff fallback philosophy.
  *
+ * @param inputs - The session's theme inputs (selection + conversions + env).
  * @param palette - The resolved palette (backgrounds drive enforcement).
  * @param theme - The pi theme (name drives ours-detection; syntax colors
  *   drive the derived fallback).
@@ -240,19 +267,20 @@ async function resolveSelection(
  * @returns The theme input, or null when derivation is impossible.
  */
 async function resolveAuto(
+  inputs: ThemeResolveInputs,
   palette: DiffPalette,
   theme: PaletteTheme | undefined,
   patches: SemanticColors,
 ): Promise<ShikiThemeInput | null> {
-  const ours = registeredSourceOf(theme?.name);
+  const ours = registeredSourceOf(theme?.name, inputs.convertedThemes);
   if (ours) {
-    // Source dispatch lives HERE (the consumer): the registry is a pure
-    // name→source table; loading each source kind is the caller's business
-    // (one-directional imports — no registry⇄user-themes cycle).
+    // Source dispatch lives HERE (the consumer): the collected conversions
+    // are a pure name→source value; loading each source kind is the caller's
+    // business.
     const loaded =
       ours.kind === "bundled"
         ? await loadBundledTheme(ours.themeName)
-        : loadUserTheme(ours.fileName);
+        : loadUserTheme(ours.fileName, inputs.themeEnv);
     if (loaded) {
       // The precise pipeline. BUNDLED sources ride full tokenColors,
       // AA-enforced against the palette's blend backgrounds (pi-pigment

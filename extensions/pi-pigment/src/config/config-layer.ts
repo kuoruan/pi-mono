@@ -12,33 +12,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { type ParseError, parse, printParseErrorCode } from "jsonc-parser";
 
-import { configSchema, CONFIG_HOME, type PigmentConfig } from "./config-schema.ts";
+import type { Issue } from "#src/core/issue.ts";
+import type { SessionEnv } from "#src/core/session-env.ts";
 
-/** A single validation or read issue from config loading. */
-interface ConfigIssue {
-  /** Human-readable message. */
-  message: string;
-  /** File path that produced the issue. */
-  sourcePath?: string;
-}
+import { configSchema, CONFIG_HOME, type PigmentConfig } from "./config-schema.ts";
 
 /** Result of loading and validating the layered config. */
 interface LoadConfigResult {
   /** Validated config — always present (schema defaults when no layer applies). */
   config: PigmentConfig;
   /** All issues encountered (missing files are not issues). */
-  issues: ConfigIssue[];
-}
-
-/** The environment the config layer resolves paths from. */
-interface ConfigEnv {
-  /** Project working directory (the project-layer root). */
-  cwd: string;
-  /** Explicit agent directory (test seam); defaults to getAgentDir(). */
-  agentDir?: string;
+  issues: Issue[];
 }
 
 /** Candidate config file names, in discovery order (`config.jsonc` preferred). */
@@ -111,7 +98,7 @@ export type ConfigLayer = "global" | "project";
 function readLayer(
   dir: string,
   layer: ConfigLayer,
-  issues: ConfigIssue[],
+  issues: Issue[],
 ): Record<string, unknown> | undefined {
   const path = resolveLayerFile(dir);
   if (!path) return undefined;
@@ -189,15 +176,15 @@ function deepMerge(
  * `disabledTools`/`indicatorStyle` too); any OTHER key failing keeps the
  * whole-config defaults — a config error never disables the renderer.
  *
- * @param env - The environment (cwd + agentDir test seam).
+ * @param env - The environment (the shared `SessionEnv`: project cwd + agent dir).
  * @returns The effective config and any recorded issues.
  */
-export function loadPigmentConfig(env: ConfigEnv): LoadConfigResult {
-  const agentDir = env.agentDir ?? getAgentDir();
-  const issues: ConfigIssue[] = [];
+export function loadPigmentConfig(env: SessionEnv): LoadConfigResult {
+  const { cwd, agentDir } = env;
+  const issues: Issue[] = [];
 
   const global = readLayer(globalConfigDir(agentDir), "global", issues);
-  const project = readLayer(projectConfigDir(env.cwd), "project", issues);
+  const project = readLayer(projectConfigDir(cwd), "project", issues);
 
   let merged: Record<string, unknown>;
   if (global && project) {

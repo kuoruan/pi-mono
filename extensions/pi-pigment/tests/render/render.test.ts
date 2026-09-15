@@ -3,21 +3,21 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseDiff, parsePatchFiles } from "#src/core/diff.ts";
-import { renderUnified } from "#src/render/render-unified.ts";
 import { taskKeyOf } from "#src/render/tool-output.ts";
-import { resolveDiffPalette } from "#src/theme/palette.ts";
+import { renderUnified } from "#src/render/unified-view.ts";
 import {
-  buildFakeTheme,
-  buildRenderTheme,
-  makeRenderCtx,
-  registerTools,
-  resetPigmentForTest,
-  waitFor,
-  toolOf,
-  plain,
   type TaskCarrier,
   type TextComponent,
   type TextDouble,
+  buildFakeTheme,
+  buildRenderTheme,
+  plain,
+  makeRenderCtx,
+  toolOf,
+  registerTools,
+  resetPigmentForTest,
+  viewFor,
+  waitFor,
 } from "#test/fixtures.ts";
 import { vol } from "#test/memfs.ts";
 
@@ -81,14 +81,13 @@ describe("grammar-state seeding (embedded grammars)", () => {
     // derives from them (buildRenderTheme carries none, so everything
     // would render in the unstyled gray).
     const theme = buildFakeTheme({ syntaxColors: true });
-    const palette = resolveDiffPalette(theme);
+    const view = viewFor(theme);
     const seeded = await renderUnified({
       diff,
       language: "vue",
       maxLines: 50,
       width: 120,
-      palette,
-      piTheme: theme,
+      view,
       indicator: "bar",
       seed,
     });
@@ -97,8 +96,7 @@ describe("grammar-state seeding (embedded grammars)", () => {
       language: "vue",
       maxLines: 50,
       width: 120,
-      palette,
-      piTheme: theme,
+      view,
       indicator: "bar",
     });
 
@@ -346,12 +344,12 @@ describe("rendering pipeline", () => {
     // composes through taskKeyOf rather than splitting the identity.
     const parsed = parsePatchFiles(patch)[0]!;
     expect(attach(false).previewIdentity).toBe(
-      taskKeyOf("ed", [resolveDiffPalette(theme).identity, parsed.lines.length, "typescript", ""]),
+      taskKeyOf("ed", [viewFor(theme).palette.identity, parsed.lines.length, "typescript", ""]),
     );
     // The settle bit: the same inputs mid-stream must key differently, or
     // the final frame never re-renders in color.
     expect(attach(true).previewIdentity).toBe(
-      taskKeyOf("ed", [resolveDiffPalette(theme).identity, parsed.lines.length, "typescript", "s"]),
+      taskKeyOf("ed", [viewFor(theme).palette.identity, parsed.lines.length, "typescript", "s"]),
     );
   });
 

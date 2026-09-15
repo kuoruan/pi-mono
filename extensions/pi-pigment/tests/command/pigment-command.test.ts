@@ -52,31 +52,34 @@ describe("/pigment", () => {
     // The completions build their env from process.cwd() — the REAL cwd,
     // not the test's /project. Pin it so the memfs project layer shows up.
     cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwd);
-    registerPigmentCommand({
-      registerCommand: (_name, registered) => {
-        complete = (prefix) =>
-          (registered.getArgumentCompletions?.(prefix) ?? null) as
-            | {
-                value: string;
-                label: string;
-              }[]
-            | null;
-        run = (args, runOpts = {}) =>
-          registered.handler(args, {
-            hasUI: runOpts.hasUI ?? false,
-            cwd,
-            ui: {
-              select: async (title: string, choices: string[]) => {
-                dialogues.push({ title, options: choices });
-                return (runOpts.selects ?? []).shift();
+    registerPigmentCommand(
+      {
+        registerCommand: (_name, registered) => {
+          complete = (prefix) =>
+            (registered.getArgumentCompletions?.(prefix) ?? null) as
+              | {
+                  value: string;
+                  label: string;
+                }[]
+              | null;
+          run = (args, runOpts = {}) =>
+            registered.handler(args, {
+              hasUI: runOpts.hasUI ?? false,
+              cwd,
+              ui: {
+                select: async (title: string, choices: string[]) => {
+                  dialogues.push({ title, options: choices });
+                  return (runOpts.selects ?? []).shift();
+                },
+                notify: (message: string) => {
+                  notified.push(message);
+                },
               },
-              notify: (message: string) => {
-                notified.push(message);
-              },
-            },
-          } as never);
+            } as never);
+        },
       },
-    });
+      { getEnv: () => ({ cwd, agentDir: join(cwd, "agent") }) },
+    );
   });
   afterEach(() => {
     consoleSpy.mockRestore();

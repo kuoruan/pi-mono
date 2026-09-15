@@ -18,10 +18,11 @@ import type {
 import type { Component } from "@earendil-works/pi-tui";
 
 import { inertText } from "#src/core/ansi.ts";
-import { resolveDiffPalette, type DiffPalette, type PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/palette.ts";
 
 import { ERROR_FRAME_DEFAULT_WIDTH, formatToolErrorResult, setToolErrorBg } from "./error-frame.ts";
 import { clearToolHeaderBg, resultLine } from "./header.ts";
+import type { RenderView } from "./session.ts";
 import {
   attachPreviewTask,
   clearPreviewTask,
@@ -40,14 +41,13 @@ import {
 
 /**
  * A renderResult implementation the factory calls with extracted text. The
- * theme arrives as PaletteTheme (the render vocabulary — the SDK's Theme class is
- * structurally assignable, so wrappers never cast).
+ * frame's view carries the palette and the pi theme (the render vocabulary —
+ * the SDK's Theme class is structurally assignable, so wrappers never cast).
  */
 export type RenderResultBody<TState extends object> = (args: {
   text: PreviewTextHost;
-  /** The resolved palette (one walk per renderResult, shared with the error frame). */
-  palette: DiffPalette;
-  theme: PaletteTheme;
+  /** The frame's derived view: `palette` + `piTheme`, and `highlight` (the session seam). */
+  view: RenderView;
   ctx: RenderContext<TState>;
   /** The raw SDK result (details carry the execute-side payload). */
   result: AgentToolResult<unknown>;
@@ -76,7 +76,8 @@ export type RenderResultBody<TState extends object> = (args: {
 /** A renderCall implementation the factory calls. */
 export type RenderCallBody<TState extends object> = (args: {
   text: PreviewTextHost;
-  theme: PaletteTheme;
+  /** The frame's derived view: `palette` + `piTheme`, and `highlight` (the session seam). */
+  view: RenderView;
   ctx: RenderContext<TState>;
   /** The raw render args (may be partial while streaming). */
   renderArgs: unknown;
@@ -90,12 +91,8 @@ export interface WrapperSpec<TState extends object> {
   renderResult?: RenderResultBody<TState>;
   /** A custom execute (write/edit stash diffs into details). */
   execute?: (
-    tid: string,
-    params: unknown,
-    sig: AbortSignal | undefined,
-    upd: AgentToolUpdateCallback<unknown> | undefined,
-    ctx: ExtensionContext,
-  ) => Promise<AgentToolResult<unknown>>;
+    ...args: Parameters<ToolDefinition["execute"]>
+  ) => ReturnType<ToolDefinition["execute"]>;
   /**
    * Cleanup before the factory's error frame renders — for wrappers whose
    * delegated SDK renderer owns resources that its own (bypassed)
@@ -198,7 +195,13 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       // execution arms the clock, and a resumed row renders with
       // executionStarted false, so it never gets one.
       armTiming(ctx.state as ExecutionTimingState, ctx.executionStarted);
-      if (spec.renderCall) return spec.renderCall({ text, theme, ctx, renderArgs: args });
+      if (spec.renderCall)
+        return spec.renderCall({
+          text,
+          view: services.render.forTheme(theme),
+          ctx,
+          renderArgs: args,
+        });
       return orig.renderCall?.(args, theme, ctx as never) ?? text;
     },
 
@@ -209,7 +212,11 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       ctx: RenderContext<TState>,
     ): Component {
       const text = getWidthAwareText(ctx.lastComponent, textFactory);
-      const palette = resolveDiffPalette(theme);
+      // The session seam binds this frame's derived state: one object
+      // carries the palette and the resolved token theme, so the two can
+      // never diverge inside a frame.
+      const view = services.render.forTheme(theme);
+      const palette = view.palette;
       const status = callStateOf(ctx);
       // Stop the clock before any branch renders: the error frame reads the
       // duration too, and the first settled frame fixes endedAt (repeated
@@ -276,8 +283,7 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       if (spec.renderResult) {
         return spec.renderResult({
           text,
-          palette,
-          theme,
+          view,
           ctx,
           result,
           options,

@@ -10,9 +10,11 @@
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
-import { hlBlock, MAX_HL_CHARS } from "#src/theme/highlight.ts";
-import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
+import { MAX_HL_CHARS } from "#src/theme/highlight.ts";
+import type { DiffPalette } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
+
+import type { RenderView } from "./session.ts";
 
 /** The inputs both diff views share (split and unified take one frame). */
 export interface DiffViewOptions {
@@ -24,10 +26,12 @@ export interface DiffViewOptions {
   maxLines: number;
   /** Render width in columns (the views clamp to MIN_RENDER_WIDTH). */
   width: number;
-  /** The resolved palette (all diff colors). */
-  palette: DiffPalette;
-  /** The active pi theme (syntax highlighting source). */
-  piTheme?: PaletteTheme;
+  /**
+   * The frame's derived view (the session seam): `palette` for the row
+   * frames and word emphasis, `highlight` for the code blocks. One input
+   * — the palette and the highlighter can never diverge.
+   */
+  view: RenderView;
   /**
    * Left-edge change indicator style (config: indicatorStyle) — the
    * caller's configured style, always explicit (no default: the config
@@ -62,19 +66,19 @@ export function hiddenLinesTail(hidden: number, palette: DiffPalette): string {
 }
 
 /** The highlightPairSides inputs. */
-export interface HighlightSidesOptions {
+export interface HighlightSidesOptions extends Pick<DiffViewOptions, "language" | "view" | "seed"> {
   /** Old-side source lines. */
   oldSource: string[];
   /** New-side source lines. */
   newSource: string[];
-  /** The language (undefined = plain pass-through). */
-  language: BundledLanguage | undefined;
-  /** The resolved palette (hlBlock's theme input). */
-  palette: DiffPalette;
-  /** The pi theme behind it. */
-  piTheme: PaletteTheme | undefined;
-  /** The grammar-state seed (embedded grammars). */
-  seed?: string;
+}
+
+/** The highlightPairSides product. */
+export interface HighlightPairSidesResult {
+  /** The [old, new] line arrays (highlighted or passed through). */
+  sides: [string[], string[]];
+  /** Whether highlighting ran (the views freeze their cursors when it did not). */
+  highlighted: boolean;
 }
 
 /**
@@ -85,14 +89,12 @@ export interface HighlightSidesOptions {
  * one choke point where those sources become highlighted (or don't).
  *
  * @param options - The sides to highlight.
- * @returns The [old, new] line arrays (highlighted or passed through) and
- *   whether highlighting ran — the views freeze their cursors when it
- *   did not (the plain-text paths consume nothing).
+ * @returns The highlighted (or passed-through) sides.
  */
 export async function highlightPairSides(
   options: HighlightSidesOptions,
-): Promise<{ sides: [string[], string[]]; highlighted: boolean }> {
-  const { oldSource, newSource, language, palette, piTheme, seed } = options;
+): Promise<HighlightPairSidesResult> {
+  const { oldSource, newSource, language, view, seed } = options;
   // Gate on what will actually be highlighted (the visible window's
   // sources), not the whole files — a large file with a small edit still
   // highlights.
@@ -101,20 +103,8 @@ export async function highlightPairSides(
     newSource.reduce((n, line) => n + line.length, 0);
   if (sourceChars > MAX_HL_CHARS) return { sides: [oldSource, newSource], highlighted: false };
   const sides = await Promise.all([
-    hlBlock({
-      code: oldSource.join("\n"),
-      language,
-      palette,
-      piTheme,
-      seed,
-    }),
-    hlBlock({
-      code: newSource.join("\n"),
-      language,
-      palette,
-      piTheme,
-      seed,
-    }),
+    view.highlight({ code: oldSource.join("\n"), language, seed }),
+    view.highlight({ code: newSource.join("\n"), language, seed }),
   ]);
   return { sides, highlighted: true };
 }

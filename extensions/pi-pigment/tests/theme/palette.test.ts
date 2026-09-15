@@ -1,18 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  currentPalette,
+  deriveDiffPalette,
   FALLBACK_PALETTE,
   type PaletteTheme,
-  resolveDiffPalette,
-  resetPaletteForTest,
-  setDiffRoots,
   themeCacheKey,
 } from "#src/theme/palette.ts";
 import {
-  buildFakeTheme as fakeTheme,
   buildFakeTheme,
+  buildFakeTheme as fakeTheme,
+  makeRenderSession,
   resetPigmentForTest,
+  viewFor,
 } from "#test/fixtures.ts";
 
 /** A dark-theme success-bg escape (30,30,40). */
@@ -63,30 +62,27 @@ describe("themeCacheKey", () => {
       getBgAnsi: (name: string) => slots[name] ?? "",
       bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
     };
+    const session = makeRenderSession();
     const firstKey = themeCacheKey(proxyLike);
-    const firstPalette = resolveDiffPalette(proxyLike);
+    const firstPalette = session.forTheme(proxyLike).palette;
     // The proxy object never changes; the instance behind it does.
     slots.toolDiffAdded = "\x1b[38;2;1;2;3m";
     slots.toolSuccessBg = "\x1b[48;2;250;250;250m";
     expect(themeCacheKey(proxyLike)).not.toBe(firstKey);
-    const second = resolveDiffPalette(proxyLike);
+    const second = session.forTheme(proxyLike).palette;
     expect(second).not.toBe(firstPalette);
     expect(second.bgBase).toBe("\x1b[48;2;250;250;250m");
     expect(second.fgAdded).toBe("\x1b[38;2;1;2;3m");
   });
 });
 
-describe("resolveDiffPalette", () => {
-  afterEach(() => {
-    resetPaletteForTest();
-  });
-
+describe("deriveDiffPalette", () => {
   it("returns the fallback palette for a theme-less context", () => {
-    expect(resolveDiffPalette(undefined)).toBe(FALLBACK_PALETTE);
+    expect(deriveDiffPalette(undefined, undefined).palette).toBe(FALLBACK_PALETTE);
   });
 
   it("auto-derives backgrounds by blending diff fg into tool box bg", () => {
-    const palette = resolveDiffPalette(fakeTheme());
+    const palette = deriveDiffPalette(fakeTheme(), undefined).palette;
     // add base = toolSuccessBg(30,30,40) blended 15% toward toolDiffAdded(80,220,120)
     expect(palette.bgAdded).toBe("\x1b[48;2;38;59;52m");
     // del base = toolErrorBg(40,30,30) blended 18% toward toolDiffRemoved(240,90,90)
@@ -98,64 +94,71 @@ describe("resolveDiffPalette", () => {
   });
 
   it("uses the error background as the delete base when present", () => {
-    const palette = resolveDiffPalette(fakeTheme({ errorBg: "\x1b[48;2;80;10;10m" }));
+    const palette = deriveDiffPalette(
+      fakeTheme({ errorBg: "\x1b[48;2;80;10;10m" }),
+      undefined,
+    ).palette;
     // del base = (80,10,10) blended 18% toward (240,90,90)
     expect(palette.bgRemoved).toBe("\x1b[48;2;109;24;24m");
   });
 
   it("carries the theme's diff foregrounds", () => {
-    const palette = resolveDiffPalette(fakeTheme());
+    const palette = deriveDiffPalette(fakeTheme(), undefined).palette;
     expect(palette.fgAdded).toBe("\x1b[38;2;80;220;120m");
     expect(palette.fgRemoved).toBe("\x1b[38;2;240;90;90m");
     expect(palette.fgContext).toBe("\x1b[38;2;130;130;130m");
   });
 
   it("flags light themes via the tool box background luminance", () => {
-    expect(resolveDiffPalette(fakeTheme({ successBg: "\x1b[48;2;250;250;250m" })).isLight).toBe(
-      true,
-    );
-    expect(resolveDiffPalette(fakeTheme({ successBg: "\x1b[48;2;20;20;30m" })).isLight).toBe(false);
+    expect(
+      deriveDiffPalette(fakeTheme({ successBg: "\x1b[48;2;250;250;250m" }), undefined).palette
+        .isLight,
+    ).toBe(true);
+    expect(
+      deriveDiffPalette(fakeTheme({ successBg: "\x1b[48;2;20;20;30m" }), undefined).palette.isLight,
+    ).toBe(false);
   });
 
   it("re-derives the whole palette when the theme changes", () => {
-    const first = resolveDiffPalette(fakeTheme());
-    const second = resolveDiffPalette(
+    const session = makeRenderSession();
+    const first = session.forTheme(fakeTheme()).palette;
+    const second = session.forTheme(
       fakeTheme({ diffAdded: "\x1b[38;2;1;2;3m", successBg: "\x1b[48;2;10;10;10m" }),
-    );
+    ).palette;
     expect(second).not.toBe(first);
     expect(second.bgAdded).not.toBe(first.bgAdded);
     expect(second.bgBase).toBe("\x1b[48;2;10;10;10m");
-    // resolving the original theme again re-derives the original palette
-    const again = resolveDiffPalette(fakeTheme());
+    // resolving the original theme content again reuses its snapshot
+    const again = session.forTheme(fakeTheme()).palette;
+    expect(again).toBe(first);
     expect(again.bgBase).toBe(first.bgBase);
     expect(again.bgAdded).toBe(first.bgAdded);
   });
 
-  it("caches the snapshot between calls with the same theme", () => {
-    const a = resolveDiffPalette(fakeTheme());
-    const b = resolveDiffPalette(fakeTheme());
+  it("caches the snapshot between calls with the same theme content", () => {
+    const session = makeRenderSession();
+    const a = session.forTheme(fakeTheme()).palette;
+    const b = session.forTheme(fakeTheme()).palette;
     expect(b).toBe(a);
   });
 });
 
-describe("palette unification (header/body consistency)", () => {
-  afterEach(() => {
-    resetPaletteForTest();
-  });
-
-  it("resolveDiffPalette refreshes the one snapshot every path reads", () => {
+describe("session palette refresh (one value per theme content)", () => {
+  it("a session follows the theme content across frames, never a stale snapshot", () => {
     const dark = fakeTheme();
     const light = fakeTheme({ successBg: "\x1b[48;2;250;250;250m" });
+    const session = makeRenderSession();
 
-    // A render under dark, then a render under light — the singleton must
-    // follow (background is the field that DIFFERS between the two themes;
-    // a stale singleton would still serve the dark base).
-    resolveDiffPalette(dark);
-    expect(currentPalette().bgBase).toBe(resolveDiffPalette(dark).bgBase);
-    resolveDiffPalette(light);
-    const lightBody = resolveDiffPalette(light);
-    expect(currentPalette()).toBe(lightBody); // same refreshed snapshot
+    // A render under dark, then a render under light — the session's frame
+    // binding must follow (background is the field that DIFFERS between the
+    // two themes; a stale snapshot would still serve the dark base).
+    const darkBody = session.forTheme(dark).palette;
+    expect(session.forTheme(dark).palette).toBe(darkBody); // same content → same snapshot
+    const lightBody = session.forTheme(light).palette;
+    expect(lightBody).not.toBe(darkBody);
     expect(lightBody.bgBase).toContain("250;250;250");
+    // Back to the dark content: the memo still holds its own entry.
+    expect(session.forTheme(dark).palette).toBe(darkBody);
   });
 });
 
@@ -168,10 +171,11 @@ describe("diff root overrides", () => {
   });
 
   it("replaces the derivation inputs and keeps the blend family consistent", () => {
-    setDiffRoots({
-      topLevel: { added: { text: "#ff8800" } },
-    });
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const palette = viewFor(buildFakeTheme(), {
+      diffRoots: {
+        topLevel: { added: { text: "#ff8800" } },
+      },
+    }).palette;
     // fgAdded follows the root verbatim.
     expect(palette.fgAdded).toBe("\x1b[38;2;255;136;0m");
     // The canvas stays the theme's own (a root never replaces it).
@@ -183,26 +187,25 @@ describe("diff root overrides", () => {
   });
 
   it("keeps fgCode on the theme-derived fg (a diff root restyles diffs, not file listings)", () => {
-    setDiffRoots({
-      topLevel: { added: { text: "#ff8800" } },
-    });
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const palette = viewFor(buildFakeTheme(), {
+      diffRoots: { topLevel: { added: { text: "#ff8800" } } },
+    }).palette;
     // fgAdded follows the root; fgCode keeps the pi theme's toolDiffAdded
     // derivation — the slot's documented isolation.
     expect(palette.fgAdded).toBe("\x1b[38;2;255;136;0m");
     expect(palette.fgCode).not.toBe(palette.fgAdded);
     // Without a root override, both stay the theme-derived value.
-    setDiffRoots(undefined);
-    const plain = resolveDiffPalette(buildFakeTheme());
+    const plain = viewFor(buildFakeTheme()).palette;
     expect(plain.fgCode).toBe(plain.fgAdded);
   });
 
   it("merges variant roots over top-level roots per key (polarity wins)", () => {
-    setDiffRoots({
-      topLevel: { added: { text: "#ff8800" }, removed: { text: "#ff0000" } },
-      dark: { added: { text: "#00ff88" } },
-    });
-    const dark = resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG_ESCAPE }));
+    const dark = viewFor(buildFakeTheme({ successBg: DARK_BG_ESCAPE }), {
+      diffRoots: {
+        topLevel: { added: { text: "#ff8800" }, removed: { text: "#ff0000" } },
+        dark: { added: { text: "#00ff88" } },
+      },
+    }).palette;
     expect(dark.fgAdded).toBe("\x1b[38;2;0;255;136m"); // dark variant wins
     expect(dark.fgRemoved).toBe("\x1b[38;2;255;0;0m"); // top-level survives
   });
@@ -210,15 +213,16 @@ describe("diff root overrides", () => {
   it("keeps isLight and the canvas on the pi theme's own background", () => {
     // Dark pi theme: polarity and canvas both stay the theme's — a root
     // cannot touch either (ADR 0006: the canvas is the pi theme's).
-    setDiffRoots({ topLevel: { added: { text: "#ffffff" } } });
-    const palette = resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG_ESCAPE }));
+    const palette = viewFor(buildFakeTheme({ successBg: DARK_BG_ESCAPE }), {
+      diffRoots: { topLevel: { added: { text: "#ffffff" } } },
+    }).palette;
     expect(palette.isLight).toBe(false);
     expect(palette.bgBase).not.toBe("\x1b[48;2;255;255;255m");
   });
 
   it("derives muted chrome (fgDim/fgGutter) from the theme's dim/muted slots", () => {
     const theme = buildFakeTheme();
-    const palette = resolveDiffPalette(theme);
+    const palette = deriveDiffPalette(theme, undefined).palette;
     // dim slot → separators/more-lines; muted slot → line numbers.
     expect(palette.fgDim).toBe("\x1b[38;2;110;110;120m");
     expect(palette.fgGutter).toBe("\x1b[38;2;130;130;140m");
@@ -232,16 +236,17 @@ describe("diff root overrides", () => {
       bg: (_n, text) => text,
       bold: (text) => text,
     };
-    const palette = resolveDiffPalette(theme);
+    const palette = deriveDiffPalette(theme, undefined).palette;
     expect(palette.fgDim).toBe(FALLBACK_PALETTE.fgDim);
     expect(palette.fgGutter).toBe(FALLBACK_PALETTE.fgGutter);
   });
 
   it("re-derives when the roots spec changes under the same theme", () => {
     const theme = buildFakeTheme();
-    resolveDiffPalette(theme);
-    setDiffRoots({ topLevel: { added: { text: "#ff8800" } } });
-    const palette = resolveDiffPalette(theme);
+    expect(viewFor(theme).palette.fgAdded).not.toBe("\x1b[38;2;255;136;0m");
+    const palette = viewFor(theme, {
+      diffRoots: { topLevel: { added: { text: "#ff8800" } } },
+    }).palette;
     expect(palette.fgAdded).toBe("\x1b[38;2;255;136;0m");
   });
 });
@@ -257,8 +262,9 @@ describe("translucent tint roots (ADR 0003 tint anchoring)", () => {
   it("anchors the word slot and scales the ladder — the canvas stays untouched", () => {
     // github-dark's word tint: #3fb950 at alpha 0x4d (77/255) over the
     // canvas. mixBg(base, tint, alpha) IS the composite.
-    setDiffRoots({ topLevel: { added: { tint: "#3fb9504d" } } });
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const palette = viewFor(buildFakeTheme(), {
+      diffRoots: { topLevel: { added: { tint: "#3fb9504d" } } },
+    }).palette;
     // Word slot = the exact composite: mix((30,30,40), (63,185,80), 77/255).
     const a = 77 / 255;
     const expectedWord = {
@@ -287,8 +293,9 @@ describe("translucent tint roots (ADR 0003 tint anchoring)", () => {
   it("composes a tint over the theme's own canvas (the canvas is never a root)", () => {
     // ADR 0006: the tint anchors over the pi theme's canvas — the add
     // side's canvas is toolSuccessBg (30,30,40 in the fake theme).
-    setDiffRoots({ topLevel: { added: { tint: "#3fb95080" } } });
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const palette = viewFor(buildFakeTheme(), {
+      diffRoots: { topLevel: { added: { tint: "#3fb95080" } } },
+    }).palette;
     expect(palette.bgBase).toBe("\x1b[48;2;30;30;40m"); // the theme's canvas
     // Word = mix((30,30,40), (63,185,80), 0x80/255); line = α×(0.15/0.3).
     const a = 0x80 / 255;
@@ -304,8 +311,9 @@ describe("translucent tint roots (ADR 0003 tint anchoring)", () => {
   });
 
   it("anchors the del side over the del canvas with its own ladder", () => {
-    setDiffRoots({ topLevel: { removed: { tint: "#f8514966" } } });
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const palette = viewFor(buildFakeTheme(), {
+      diffRoots: { topLevel: { removed: { tint: "#f8514966" } } },
+    }).palette;
     // Del canvas = toolErrorBg (40,30,30); word slot = composite at 0x66.
     const a = 0x66 / 255;
     const expected = {
@@ -329,15 +337,17 @@ describe("translucent tint roots (ADR 0003 tint anchoring)", () => {
   });
 
   it("applies per side (inserted tint alone leaves the del family derived)", () => {
-    setDiffRoots({ topLevel: { added: { tint: "#3fb9504d" } } });
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const palette = viewFor(buildFakeTheme(), {
+      diffRoots: { topLevel: { added: { tint: "#3fb9504d" } } },
+    }).palette;
     // The del family keeps the pi-derived value (18% toward toolDiffRemoved).
     expect(palette.bgRemoved).toBe("\x1b[48;2;76;41;41m");
   });
 
   it("ignores translucent FOREGROUND roots (fgs are never composited)", () => {
-    setDiffRoots({ topLevel: { added: { text: "#ff88004d" } } });
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const palette = viewFor(buildFakeTheme(), {
+      diffRoots: { topLevel: { added: { text: "#ff88004d" } } },
+    }).palette;
     // The theme's own fg survives; the translucent root is meaningless.
     expect(palette.fgAdded).toBe("\x1b[38;2;80;220;120m");
   });
@@ -347,14 +357,16 @@ describe("translucent tint roots (ADR 0003 tint anchoring)", () => {
     try {
       // A LIGHT hue at a FAINT alpha over a dark canvas composites dark —
       // no contradiction, no warning.
-      setDiffRoots({ topLevel: { added: { tint: "#ffffff26" } } });
-      resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG_ESCAPE }));
+      viewFor(buildFakeTheme({ successBg: DARK_BG_ESCAPE }), {
+        diffRoots: { topLevel: { added: { tint: "#ffffff26" } } },
+      });
       expect(errorSpy).not.toHaveBeenCalled();
 
       // A near-opaque light tint over the dark canvas composites light —
-      // contradiction, one warning.
-      setDiffRoots({ topLevel: { added: { tint: "#ffffffe6" } } });
-      resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG_ESCAPE }));
+      // contradiction, one warning (per session).
+      viewFor(buildFakeTheme({ successBg: DARK_BG_ESCAPE }), {
+        diffRoots: { topLevel: { added: { tint: "#ffffffe6" } } },
+      });
       expect(errorSpy).toHaveBeenCalledTimes(1);
       expect(errorSpy.mock.calls[0]?.[0]).toMatch(/contradict/);
     } finally {
@@ -363,8 +375,9 @@ describe("translucent tint roots (ADR 0003 tint anchoring)", () => {
   });
 
   it("roots never touch the canvas (ADR 0006: the canvas is the pi theme's)", () => {
-    setDiffRoots({ topLevel: { added: { text: "#123456" } } });
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const palette = viewFor(buildFakeTheme(), {
+      diffRoots: { topLevel: { added: { text: "#123456" } } },
+    }).palette;
     // The fake theme's toolSuccessBg (30,30,40), not any root.
     expect(palette.bgBase).toBe("\x1b[48;2;30;30;40m");
   });

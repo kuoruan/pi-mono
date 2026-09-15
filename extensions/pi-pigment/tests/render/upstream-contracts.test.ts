@@ -15,6 +15,7 @@ import { join } from "node:path";
 
 import {
   type BashToolOptions,
+  type ToolDefinition,
   createBashToolDefinition,
   createEditToolDefinition,
   createFindToolDefinition,
@@ -29,13 +30,15 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createShellWrapper } from "#src/render/shell-tool.ts";
 import { expandKeyHint } from "#src/render/tool-output.ts";
+import type { RenderContext } from "#src/render/tool-services.ts";
 import type { PaletteTheme } from "#src/theme/palette.ts";
 import {
   buildRenderTheme,
   makeRenderCtx,
+  makeRenderSession,
+  plain,
   registerTools,
   toolOf,
-  plain,
   type TextDouble,
 } from "#test/fixtures.ts";
 
@@ -277,6 +280,33 @@ describe("bash tool options (pi's own shell settings)", () => {
   );
 });
 
+/** The SDK's render slot (the 4th `renderResult` parameter) for the default generics. */
+type SdkRenderContext = Parameters<NonNullable<ToolDefinition["renderResult"]>>[3];
+
+/** The SDK context fields `RenderContext` deliberately does not carry. */
+type ProjectedContextFields = "args" | "expanded" | "showImages" | "state";
+
+/**
+ * Compile-time canary, same pattern as ALL_BASH_OPTIONS_ACCOUNTED_FOR: an
+ * upstream field added to the render context stops this line compiling,
+ * and whoever bumps the SDK decides whether `RenderContext` (and so every
+ * wrapper renderer) should carry it — otherwise the TUI starts passing a
+ * field no renderer ever sees.
+ */
+const CONTEXT_FIELDS_ACCOUNTED_FOR: [Exclude<keyof SdkRenderContext, keyof RenderContext>] extends [
+  ProjectedContextFields,
+]
+  ? true
+  : false = true;
+
+describe("render context projection (upstream drift)", () => {
+  it("accounts for every SDK render-context field", () => {
+    // The assertion is the type of CONTEXT_FIELDS_ACCOUNTED_FOR (compiled
+    // by `tsc`); this keeps the value in the report.
+    expect(CONTEXT_FIELDS_ACCOUNTED_FOR).toBe(true);
+  });
+});
+
 describe("bash onError: the native timing interval", () => {
   // The SDK bash result renderer parks a 1-second invalidate interval in
   // state while output streams and clears it in its own final render — the
@@ -290,6 +320,7 @@ describe("bash onError: the native timing interval", () => {
         shortPath: (p: string) => p,
         indicatorStyle: "bar",
         textFactory: Text,
+        render: makeRenderSession(),
       },
       { language: "shellscript", prompt: "$" },
     ) as unknown as {

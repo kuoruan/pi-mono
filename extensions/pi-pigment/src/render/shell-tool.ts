@@ -22,11 +22,10 @@
 import type { BashToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import { inertText } from "#src/core/ansi.ts";
-import { hlBlock } from "#src/theme/highlight.ts";
-import { resolveDiffPalette, type DiffPalette, type PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { astInjectRegions, fallbackHeredocRegions } from "./heredoc-inject.ts";
+import type { RenderView } from "./session.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import { argsSettled, type ShellState, type ToolServices, argsOf } from "./tool-services.ts";
 
@@ -59,7 +58,8 @@ export function createShellWrapper(
     onError: (ctx) => {
       ctx.state.endedAt ??= Date.now();
     },
-    renderCall: ({ text, theme, ctx, renderArgs }) => {
+    renderCall: ({ text, view, ctx, renderArgs }) => {
+      const { palette, piTheme: theme } = view;
       const callArgs = argsOf<BashToolInput>(renderArgs);
       const command = callArgs.command ?? "";
       ctx.state.command = command;
@@ -76,8 +76,7 @@ export function createShellWrapper(
       // AND theme identity — a mid-session theme switch re-highlights
       // instead of serving the old theme's colors; arg-streaming frames
       // re-render cheaply until args complete.
-      const paletteNow = resolveDiffPalette(theme);
-      const cacheKey = `${paletteNow.identity}\u0000${command}`;
+      const cacheKey = `${palette.identity}\u0000${command}`;
       const cached =
         ctx.state.commandHighlightFor === cacheKey
           ? (ctx.state.commandHighlight as string | undefined)
@@ -102,7 +101,7 @@ export function createShellWrapper(
         // control bytes in it must not reach the terminal as sequences.
         // (The highlighter's own escapes are OUR chrome and pass through.)
         // safeCommand is the SAME inert form computed above — reuse it.
-        void renderShellCommand(safeCommand, profile.language, paletteNow, theme)
+        void renderShellCommand(safeCommand, profile.language, view)
           .then((highlighted) => {
             // Compose over the base: renderTokensAnsi closes each token's
             // fg with ESC[39m — re-open the base after every close so
@@ -129,8 +128,8 @@ export function createShellWrapper(
     // timing, preview windows, truncation footers. lastComponent is
     // withheld (undefined): the native renderer builds its own Container
     // and must not receive our width-aware Text.
-    renderResult: ({ text, theme, ctx, result, options, origRenderResult }) =>
-      origRenderResult(result, options, theme, { ...ctx, lastComponent: undefined }) ?? text,
+    renderResult: ({ text, view, ctx, result, options, origRenderResult }) =>
+      origRenderResult(result, options, view.piTheme, { ...ctx, lastComponent: undefined }) ?? text,
   });
 }
 
@@ -142,27 +141,22 @@ export function createShellWrapper(
  * only), and its failures degrade to pure shell coloring.
  *
  * @param command - The inert command text.
- * @param shellLanguage - The command's shell grammar.
- * @param palette - The resolved palette.
- * @param theme - The active pi theme.
+ * @param shellLanguage - The shell grammar to highlight with.
+ * @param view - The frame view (the session's highlight entry).
  * @returns The highlighted command text.
  */
 async function renderShellCommand(
   command: string,
   shellLanguage: "shellscript" | "powershell",
-  palette: DiffPalette,
-  theme: PaletteTheme,
+  view: RenderView,
 ): Promise<string> {
   // Powershell has no @aliou/sh grammar — the AST path is bash-only; its
   // commands render purely in the powershell grammar.
-  const regions =
-    shellLanguage === "shellscript" ? await bashInjectRender(command, palette, theme) : null;
+  const regions = shellLanguage === "shellscript" ? await bashInjectRender(command, view) : null;
   if (regions !== null) return regions;
-  const lines = await hlBlock({
+  const lines = await view.highlight({
     code: command,
     language: shellLanguage,
-    palette,
-    piTheme: theme,
   });
   return lines.join("\n");
 }
@@ -172,16 +166,11 @@ async function renderShellCommand(
  * scanner fallback when it throws.
  *
  * @param command - The inert command text.
- * @param palette - The resolved palette.
- * @param theme - The active pi theme.
+ * @param view - The frame view (the session's highlight entry).
  * @returns The rendered command, or null when even the fallback fails
  *   (never — the scanner always yields segments).
  */
-async function bashInjectRender(
-  command: string,
-  palette: DiffPalette,
-  theme: PaletteTheme,
-): Promise<string> {
+async function bashInjectRender(command: string, view: RenderView): Promise<string> {
   // One region model, two producers: the AST path when the parse holds,
   // the line scanner when it throws (garbage input, or the upstream
   // control-flow+heredoc bug). Both emit InjectRegion[] in source order —
@@ -190,18 +179,16 @@ async function bashInjectRender(
   // Byte-faithful reassembly: every piece highlights in its own grammar,
   // then rejoins the ORIGINAL line structure. Each piece carries its text
   // plus the boundary it ENDS at (the separator to the next piece: "\n"
-  // when the boundary is a line break — hlBlock trims one trailing
+  // when the boundary is a line break — hlBlockResolved trims one trailing
   // newline — and "" when the boundary is mid-line, an inline code
   // region's edges). The LAST piece's joinAfter is never consumed (the
   // assembler's pinned convention: a trailing newline the command ends
   // with stays trimmed, the shape tests pin its absence).
   const pieces: Array<{ text: string; joinAfter: string }> = [];
   const take = async (from: number, to: number, language: BundledLanguage): Promise<void> => {
-    const lines = await hlBlock({
+    const lines = await view.highlight({
       code: command.slice(from, to),
       language,
-      palette,
-      piTheme: theme,
     });
     pieces.push({
       text: lines.join("\n"),

@@ -20,20 +20,20 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import type { ConfigLayer } from "#src/config/config-layer.ts";
+import type { Issue } from "#src/core/issue.ts";
+import type { SessionEnv } from "#src/core/session-env.ts";
 
 import { isBundledThemeName } from "./bundled-intake.ts";
 import { convertToPiTheme } from "./pi-theme-converter.ts";
 import type { MaterializedTheme } from "./syntax-theme.ts";
 import {
   type LoadedThemeFile,
-  type ThemeEnv,
-  type ThemeIssue,
   loadThemeFile,
   sanitizedStemOf,
   THEME_FILE_EXTS,
   themeDirs,
 } from "./theme-file.ts";
-import { PIGMENT_PREFIX, registerUserTheme } from "./theme-registry.ts";
+import { type ConvertedTheme, PIGMENT_PREFIX } from "./theme-registry.ts";
 
 /**
  * The output file name for a source stem.
@@ -122,7 +122,7 @@ function loadLayerSources(
   scan: DirScan | undefined,
   layer: ConfigLayer,
   retired: ReadonlySet<string>,
-  issues: ThemeIssue[],
+  issues: Issue[],
 ): ScannedFile[] {
   if (scan === undefined) return [];
   const files: ScannedFile[] = [];
@@ -156,7 +156,7 @@ interface ScannedFile {
  * @param issues - The issue accumulator (load failures).
  * @returns The loaded, unretired sources with their layers.
  */
-function scanUserThemeFiles(env: ThemeEnv, issues: ThemeIssue[]): ScannedFile[] {
+function scanUserThemeFiles(env: SessionEnv, issues: Issue[]): ScannedFile[] {
   const [projectDir, globalDir] = themeDirs(env);
   const projectScan = scanThemesDir(projectDir);
   const globalScan = scanThemesDir(globalDir);
@@ -191,11 +191,11 @@ export interface ConvertCandidate {
  * @param env - The environment.
  * @returns The candidates and any load issues.
  */
-export function listConvertCandidateEntries(env: ThemeEnv): {
+export function listConvertCandidateEntries(env: SessionEnv): {
   entries: ConvertCandidate[];
-  issues: ThemeIssue[];
+  issues: Issue[];
 } {
-  const issues: ThemeIssue[] = [];
+  const issues: Issue[] = [];
   const entries = scanUserThemeFiles(env, issues).map((scanned) => ({
     stem: scanned.file.name,
     layer: scanned.layer,
@@ -210,7 +210,7 @@ export function listConvertCandidateEntries(env: ThemeEnv): {
  * @param env - The environment.
  * @returns The convertible stems.
  */
-export function listConvertCandidates(env: ThemeEnv): string[] {
+export function listConvertCandidates(env: SessionEnv): string[] {
   return listConvertCandidateEntries(env).entries.map((entry) => entry.stem);
 }
 
@@ -232,10 +232,10 @@ type ConvertResult =
  * @returns The per-stem results and the issues (never fatal).
  */
 export function convertThemes(
-  env: ThemeEnv,
+  env: SessionEnv,
   stems: string[],
-): { results: ConvertResult[]; issues: ThemeIssue[] } {
-  const issues: ThemeIssue[] = [];
+): { results: ConvertResult[]; issues: Issue[] } {
+  const issues: Issue[] = [];
   const loadable = new Map(
     scanUserThemeFiles(env, issues).map((scanned) => [scanned.file.name, scanned] as const),
   );
@@ -288,7 +288,7 @@ export function convertThemes(
  * @param stem - The source stem.
  * @returns The directory path, or undefined when absent everywhere.
  */
-function sourceDirOf(env: ThemeEnv, stem: string): string | undefined {
+function sourceDirOf(env: SessionEnv, stem: string): string | undefined {
   for (const dir of themeDirs(env)) {
     for (const [s] of scanThemesDir(dir)?.sources ?? []) {
       if (s === stem) return dir;
@@ -305,7 +305,7 @@ function sourceDirOf(env: ThemeEnv, stem: string): string | undefined {
  * @param env - The environment.
  * @returns The output file paths (existing files only).
  */
-export function listConvertedThemes(env: ThemeEnv): string[] {
+export function listConvertedThemes(env: SessionEnv): string[] {
   const byStem = new Map<string, string>();
   for (const dir of themeDirs(env)) {
     if (!existsSync(dir)) continue;
@@ -325,20 +325,23 @@ export function listConvertedThemes(env: ThemeEnv): string[] {
 }
 
 /**
- * Populate the ours-detection registry from the outputs + sources: an
- * output pigment-X with a live source X maps to the precise pipeline.
+ * Collect the session's user conversions: each converted output whose
+ * SOURCE is still live. The session collects these at session_start and
+ * ours-detection reads the collection.
  *
  * @param env - The environment.
+ * @returns The collected conversions (project-layer shadowing preserved).
  */
-export function registerConvertedThemes(env: ThemeEnv): void {
+export function collectConvertedThemes(env: SessionEnv): ConvertedTheme[] {
+  const collected: ConvertedTheme[] = [];
   for (const outPath of listConvertedThemes(env)) {
     const name = basename(outPath).replace(/\.json$/, "");
     const stem = name.slice(PIGMENT_PREFIX.length);
     // The precise pipeline needs the SOURCE; without it the output stands
-    // alone (external theme — not registered here).
-    const source = findSourcePath(env, stem);
-    if (source !== undefined) registerUserTheme(stem, name);
+    // alone (external theme — not collected).
+    if (findSourcePath(env, stem) !== undefined) collected.push({ name, stem });
   }
+  return collected;
 }
 
 /**
@@ -348,7 +351,7 @@ export function registerConvertedThemes(env: ThemeEnv): void {
  * @param stem - The source stem.
  * @returns The file path, or undefined when absent.
  */
-function findSourcePath(env: ThemeEnv, stem: string): string | undefined {
+function findSourcePath(env: SessionEnv, stem: string): string | undefined {
   for (const dir of themeDirs(env)) {
     for (const ext of THEME_FILE_EXTS) {
       const candidate = join(dir, `${stem}${ext}`);
@@ -359,42 +362,15 @@ function findSourcePath(env: ThemeEnv, stem: string): string | undefined {
 }
 
 /**
- * Reload a user theme by stem (the precise pipeline's input — the
- * render-time counterpart of the registry's source mapping).
+ * Load a user theme source by stem (the precise pipeline's input — the
+ * load behind a collected conversion's mapping).
  *
  * @param stem - The theme file stem.
- * @param env - The environment (defaults to the session's; see below).
+ * @param env - The session environment.
  * @returns The materialized theme, or undefined when unreadable.
  */
-export function loadUserTheme(stem: string, env?: ThemeEnv): MaterializedTheme | undefined {
-  const theEnv = env ?? currentEnv;
-  if (!theEnv) return undefined;
-  const path = findSourcePath(theEnv, stem);
+export function loadUserTheme(stem: string, env: SessionEnv): MaterializedTheme | undefined {
+  const path = findSourcePath(env, stem);
   if (!path) return undefined;
   return loadThemeFile(path, [])?.theme;
-}
-
-/** The last-seen environment (set per session_start; the lazy reload seam). */
-let currentEnv: ThemeEnv | undefined;
-
-/**
- * Record the session's environment for the lazy user-theme reloads
- * (render time has no env of its own).
- *
- * @param env - The environment.
- */
-export function setUserThemeEnv(env: ThemeEnv): void {
-  currentEnv = env;
-}
-
-/**
- * The session's recorded environment, or undefined before the first
- * session_start. The command's completions prefer this over
- * `process.cwd()` — the session cwd is the truth any remote/RPC mode's
- * process may not share.
- *
- * @returns The recorded environment, or undefined.
- */
-export function getUserThemeEnv(): ThemeEnv | undefined {
-  return currentEnv;
 }

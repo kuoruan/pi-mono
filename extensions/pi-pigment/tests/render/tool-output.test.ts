@@ -6,18 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseHitLine } from "#src/render/tool-grep.ts";
 import { collapsedView, outputMemoOf, outputTaskKey } from "#src/render/tool-output.ts";
-import { resolveDiffPalette } from "#src/theme/palette.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
   makeRenderCtx,
+  plain,
   registerTools,
   resetPigmentForTest,
   seedTiming,
-  waitFor,
   toolOf,
-  plain,
   type DrivenTaskComponent,
+  viewFor,
+  waitFor,
 } from "#test/fixtures.ts";
 
 // The SDK grep/find/ls tools spawn REAL subprocesses (ripgrep/fd) against
@@ -107,7 +107,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
       // The reset also clears the highlight cache, which is the retry
       // loop's entry point below.
       const fakeTheme = buildFakeTheme({ syntaxColors: true });
-      resolveDiffPalette(fakeTheme);
+      viewFor(fakeTheme);
 
       // The upstream first-use tokenize fragments under concurrent
       // forks and the wrong output CACHES (docs/open-issues/grammar-
@@ -209,7 +209,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
       outputTaskKey({
         prefix: "g",
         derived,
-        identity: resolveDiffPalette(theme).identity,
+        identity: viewFor(theme).palette.identity,
         elapsedMs: 12,
         expanded: true,
         streaming: false,

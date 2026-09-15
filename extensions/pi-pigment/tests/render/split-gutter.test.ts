@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { parseDiff } from "#src/core/diff.ts";
-import { renderSplit } from "#src/render/render-split.ts";
-import { resolveDiffPalette, resetPaletteForTest } from "#src/theme/palette.ts";
-import { buildFakeTheme, plain } from "#test/fixtures.ts";
+import { renderSplit } from "#src/render/split-view.ts";
+import { buildFakeTheme, plain, viewFor } from "#test/fixtures.ts";
 
 /**
  * The randomized enumerator's first shear case, frozen: at maxLines=113
@@ -254,15 +253,14 @@ const NEW_FILE = [
 
 describe("split gutter width (paired rows pull far-away numbers into view)", () => {
   it("sizes the gutter to the visible rows' own numbers, not any line-prefix window", async () => {
-    resetPaletteForTest();
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const view = viewFor(buildFakeTheme());
     const diff = parseDiff(OLD_FILE.join("\n") + "\n", NEW_FILE.join("\n") + "\n");
     const out = await renderSplit({
       diff,
       language: undefined,
       maxLines: 113,
       width: 160,
-      palette,
+      view,
       indicator: "bar",
     });
     const lines = plain(out).split("\n");

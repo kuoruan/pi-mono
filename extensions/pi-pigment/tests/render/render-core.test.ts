@@ -11,13 +11,13 @@ import type { DiffLine, ParsedDiff } from "#src/core/diff.ts";
 import { parseDiff, parsePatchFiles } from "#src/core/diff.ts";
 import { formatToolErrorResult, setToolErrorBg } from "#src/render/error-frame.ts";
 import { summarize } from "#src/render/header.ts";
-import { renderSplit } from "#src/render/render-split.ts";
-import { renderUnified } from "#src/render/render-unified.ts";
 import { borderBar, lineNumberWidth } from "#src/render/row-frame.ts";
 import { shouldUseSplit } from "#src/render/split-verdict.ts";
+import { renderSplit } from "#src/render/split-view.ts";
+import { renderUnified } from "#src/render/unified-view.ts";
 import { adaptiveWrapRows } from "#src/render/wrap.ts";
 import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
-import { plain } from "#test/fixtures.ts";
+import { plain, viewFor } from "#test/fixtures.ts";
 
 /**
  * The suite's view caller: the fixed frame (no language, the fallback
@@ -39,7 +39,7 @@ async function renderView(
     language: undefined,
     maxLines,
     width,
-    palette: FALLBACK_PALETTE,
+    view: viewFor(),
     indicator: "bar",
   });
 }
@@ -121,17 +121,26 @@ describe("renderUnified", () => {
 
   it("word emphasis covers exactly the changed word — no bleed into indentation", async () => {
     const diff = parseDiff("\toldValue = 1;\n", "\tnewValue = 1;\n", 0);
-    const out = await renderView(renderUnified, diff, { maxLines: 10 });
+    const frame = viewFor();
+    const out = await renderUnified({
+      diff,
+      language: undefined,
+      maxLines: 10,
+      width: 80,
+      view: frame,
+      indicator: "bar",
+    });
     // Cell-level walk of the final ANSI rows: collect the visible chars
     // under each word background, then assert the changed words carry
     // them EXACTLY — the tab (jsdiff merges it into the changed chunk,
     // and the renderer expands it to two columns) must stay out.
+    const palette = frame.palette;
     const bgClasses = [
-      FALLBACK_PALETTE.bgRemovedWord,
-      FALLBACK_PALETTE.bgAddedWord,
-      FALLBACK_PALETTE.bgRemoved,
-      FALLBACK_PALETTE.bgAdded,
-      FALLBACK_PALETTE.bgBase,
+      palette.bgRemovedWord,
+      palette.bgAddedWord,
+      palette.bgRemoved,
+      palette.bgAdded,
+      palette.bgBase,
     ];
     const spanOf = (bg: string): string => {
       let chars = "";
@@ -148,8 +157,8 @@ describe("renderUnified", () => {
       }
       return chars;
     };
-    expect(spanOf(FALLBACK_PALETTE.bgRemovedWord)).toBe("oldValue");
-    expect(spanOf(FALLBACK_PALETTE.bgAddedWord)).toBe("newValue");
+    expect(spanOf(palette.bgRemovedWord)).toBe("oldValue");
+    expect(spanOf(palette.bgAddedWord)).toBe("newValue");
   });
 
   it("returns an empty string for an empty diff", async () => {

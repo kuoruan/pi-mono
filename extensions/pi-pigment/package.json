@@ -28,22 +28,28 @@
   "files": [
     "themes",
     "index.ts",
+    "render-kit.ts",
     "src",
     "config",
     "schemas",
     "README.md",
-    "CONFIG.md",
     "LICENSE",
     "docs"
   ],
   "type": "module",
   "imports": {
-    "#src/*": "./src/*"
+    "#src/*": "./src/*",
+    "#test/*": "./tests/*",
+    "#root/*": "./*"
   },
   "exports": {
     ".": {
       "types": "./index.ts",
       "default": "./index.ts"
+    },
+    "./render-kit": {
+      "types": "./render-kit.ts",
+      "default": "./render-kit.ts"
     }
   },
   "publishConfig": {

@@ -175,13 +175,12 @@ export function compositeHexOver(hex: string, base: RgbColor): RgbColor | null {
   return { r: over.r, g: over.g, b: over.b };
 }
 
-/** A diff-root color: an RGB hue plus an optional alpha channel. */
-export interface RootColor {
-  /** The color's RGB channels. */
-  rgb: RgbColor;
-  /** Alpha in [0,1]; 1 for opaque 6-digit hex, < 1 for 8-digit `#rrggbbaa`. */
-  alpha: number;
-}
+/**
+ * A diff-root color: an RGB hue plus an optional alpha channel — the parsed
+ * hex form without its `isAlphaForm` marker (1 = opaque 6-digit, < 1 =
+ * 8-digit `#rrggbbaa`).
+ */
+export type RootColor = Omit<ParsedHex, "isAlphaForm">;
 
 /**
  * Parse a diff-root color: `#rrggbb` (opaque base) or `#rrggbbaa`

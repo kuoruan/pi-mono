@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { emphasize, riskyPattern } from "#src/render/pattern-emphasis.ts";
 import { parseHitLine, renderHitLine } from "#src/render/tool-grep.ts";
-import { FALLBACK_PALETTE, resolveDiffPalette } from "#src/theme/palette.ts";
-import { buildFakeTheme, buildRenderTheme } from "#test/fixtures.ts";
+import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
+import { buildRenderTheme, viewFor } from "#test/fixtures.ts";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -66,7 +66,7 @@ describe("renderHitLine (plain-text hit lines carry their own fg)", () => {
     const hit = parseHitLine("src/a.ts:1: const aa = 1; // aa");
     expect(hit).not.toBeNull();
     const theme = buildRenderTheme();
-    const palette = resolveDiffPalette(buildFakeTheme());
+    const palette = viewFor().palette;
     const out = renderHitLine({
       hit: hit!,
       content: "const aa = 1; // aa",

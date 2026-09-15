@@ -1,11 +1,4 @@
-import { hlBlock } from "#src/theme/highlight.ts";
-import {
-  currentPalette as currentPaletteOf,
-  currentTheme as currentThemeOf,
-  resetPaletteForTest,
-  resolveDiffPalette,
-  themeCacheKey,
-} from "#src/theme/palette.ts";
+import { themeCacheKey } from "#src/theme/palette.ts";
 import {
   applySemanticPatches,
   buildPiSyntaxTheme,
@@ -14,8 +7,13 @@ import {
   SEMANTIC_KEYS,
   type PiSyntaxTheme,
 } from "#src/theme/syntax-theme.ts";
-import { resolveActiveTheme } from "#src/theme/theme-selection.ts";
-import { buildFakeTheme, type FakeThemeOverrides, resetPigmentForTest } from "#test/fixtures.ts";
+import {
+  buildFakeTheme,
+  makeRenderSession,
+  resetPigmentForTest,
+  type FakeThemeOverrides,
+  viewFor,
+} from "#test/fixtures.ts";
 
 const DARK_BG = "\x1b[48;2;40;50;40m";
 const LIGHT_BG = "\x1b[48;2;232;240;232m";
@@ -35,8 +33,7 @@ const CODE = "const answer = 42; // note";
  */
 function derive(overrides?: FakeThemeOverrides): PiSyntaxTheme | null {
   const theme = buildFakeTheme(overrides);
-  const palette = resolveDiffPalette(theme);
-  return buildPiSyntaxTheme(theme, palette, themeCacheKey(theme));
+  return buildPiSyntaxTheme(theme, viewFor(theme).palette, themeCacheKey(theme));
 }
 
 // ---------------------------------------------------------------------------
@@ -111,8 +108,7 @@ function themeForegrounds(theme: PiSyntaxTheme): string[] {
  */
 function backgroundHexes(overrides: FakeThemeOverrides | typeof LIGHT | typeof DARK): string[] {
   const theme = buildFakeTheme(overrides);
-  const palette = resolveDiffPalette(theme);
-  resetPaletteForTest();
+  const palette = viewFor(theme).palette;
   return [palette.bgAdded, palette.bgRemoved, palette.bgAddedWord, palette.bgRemovedWord]
     .map((escape) => escape.match(/48;2;(\d+);(\d+);(\d+)m/))
     .filter((m): m is RegExpMatchArray => m !== null)
@@ -237,50 +233,41 @@ describe("shikiTheme integration", () => {
   });
 
   it("auto uses the pi-derived theme when syntax colors resolve", async () => {
-    const theme = buildFakeTheme(DARK);
-    resolveDiffPalette(theme);
-    const selected = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
+    const selected = await viewFor(buildFakeTheme(DARK)).activeTheme();
     expect(typeof selected).toBe("object");
     expect((selected as PiSyntaxTheme).name).toMatch(/^pi-dark-/);
   });
 
   it("auto resolves to no theme without syntax colors (honest, unhighlighted)", async () => {
-    resolveDiffPalette(buildFakeTheme({ successBg: DARK_BG }));
-    expect(await resolveActiveTheme(currentPaletteOf(), currentThemeOf())).toBeNull();
-    resolveDiffPalette(buildFakeTheme({ successBg: LIGHT_BG }));
-    expect(await resolveActiveTheme(currentPaletteOf(), currentThemeOf())).toBeNull();
+    expect(await viewFor(buildFakeTheme({ successBg: DARK_BG })).activeTheme()).toBeNull();
+    expect(await viewFor(buildFakeTheme({ successBg: LIGHT_BG })).activeTheme()).toBeNull();
+  });
+
+  it("highlight passes the code through unstyled when no theme resolves", async () => {
+    const view = viewFor(buildFakeTheme({ successBg: DARK_BG }));
+    expect(await view.highlight({ code: CODE, language: "typescript" })).toEqual(CODE.split("\n"));
   });
 
   it("memoizes per theme: same theme returns the same object", async () => {
-    const theme = buildFakeTheme(DARK);
-    resolveDiffPalette(theme);
-    const first = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
-    const second = await resolveActiveTheme(currentPaletteOf(), currentThemeOf());
+    const view = viewFor(buildFakeTheme(DARK));
+    const first = await view.activeTheme();
+    const second = await view.activeTheme();
     expect(first).toBe(second);
   });
 
   it("re-derives when the theme changes", async () => {
-    const dark = buildFakeTheme(DARK);
-    resolveDiffPalette(dark);
-    const first = (await resolveActiveTheme(currentPaletteOf(), currentThemeOf())) as PiSyntaxTheme;
-    const light = buildFakeTheme(LIGHT);
-    resolveDiffPalette(light);
-    const second = (await resolveActiveTheme(
-      currentPaletteOf(),
-      currentThemeOf(),
-    )) as PiSyntaxTheme;
+    // One session, two frame themes: the memo follows the content.
+    const session = makeRenderSession();
+    const first = (await session.forTheme(buildFakeTheme(DARK)).activeTheme()) as PiSyntaxTheme;
+    const second = (await session.forTheme(buildFakeTheme(LIGHT)).activeTheme()) as PiSyntaxTheme;
     expect(second).not.toBe(first);
     expect(second.name).toMatch(/^pi-light-/);
   });
 
-  it("hlBlock renders through the generated theme", async () => {
-    const theme = buildFakeTheme(DARK);
-    resolveDiffPalette(theme);
-    const lines = await hlBlock({
+  it("highlight renders through the generated theme", async () => {
+    const lines = await viewFor(buildFakeTheme(DARK)).highlight({
       code: CODE,
       language: "typescript",
-      palette: currentPaletteOf(),
-      piTheme: currentThemeOf(),
     });
     expect(lines[0]).toContain("const");
     // A Shiki failure would fall back to plain lines; the generated theme
@@ -467,7 +454,7 @@ describe("buildPiSyntaxTheme user patches", () => {
 
   it("replaces patched keys verbatim and enforces the rest", () => {
     const theme = buildFakeTheme(DARK);
-    const palette = resolveDiffPalette(theme);
+    const palette = viewFor(theme).palette;
     const patched = buildPiSyntaxTheme(theme, palette, "k", { keyword: "#123456" })!;
     const keywordRule = patched.tokenColors.find((rule) => rule.scope.includes("keyword"));
     // Verbatim — NOT lifted to AA.
@@ -479,7 +466,7 @@ describe("buildPiSyntaxTheme user patches", () => {
 
   it("folds user colors into the identity hash (reload freshness)", () => {
     const theme = buildFakeTheme(DARK);
-    const palette = resolveDiffPalette(theme);
+    const palette = viewFor(theme).palette;
     const a = buildPiSyntaxTheme(theme, palette, "k")!;
     const b = buildPiSyntaxTheme(theme, palette, "k", { keyword: "#123456" })!;
     expect(a.name).not.toBe(b.name);

@@ -35,7 +35,8 @@ const ELBOW = "└── ";
 export function createLsWrapper(origLs: ToolDefinition, services: ToolServices): ToolDefinition {
   return createToolWrapper(origLs, services, {
     renderShell: "default",
-    renderResult: ({ text, palette, theme, ctx, result, options, tookMs }) => {
+    renderResult: ({ text, view, ctx, result, options, tookMs }) => {
+      const { palette, piTheme: theme } = view;
       // Inert at intake (ADR 0004): filenames can carry control bytes too.
       // The derivation is memoized on the result object's identity.
       const derive = outputMemoOf(ctx.state);

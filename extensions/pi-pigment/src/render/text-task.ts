@@ -9,16 +9,14 @@ import type { Component } from "@earendil-works/pi-tui";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
-import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
-import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
+import { type DiffViewOptions } from "./diff-view.ts";
 import { clearToolHeaderBg, padDiffBody } from "./header.ts";
-import { type DiffViewOptions } from "./render-shared.ts";
-import { renderSplit } from "./render-split.ts";
-import { renderUnified } from "./render-unified.ts";
 import { shouldUseSplit } from "./split-verdict.ts";
+import { renderSplit } from "./split-view.ts";
 import { termW } from "./term.ts";
 import { streamingStamp, taskKeyOf } from "./tool-output.ts";
+import { renderUnified } from "./unified-view.ts";
 
 /**
  * The async preview task attached to a Text component — the swap
@@ -227,21 +225,14 @@ export function definePreviewTask(spec: DefinePreviewTaskSpec): PreviewTask {
 }
 
 /** The diff preview's inputs — one object (the positional form drifted to ten). */
-export interface DiffPreviewInput {
+export interface DiffPreviewInput extends Pick<
+  DiffViewOptions,
+  "diff" | "language" | "maxLines" | "view"
+> {
   /** The host Text component to attach the task to. */
   text: PreviewTextHost;
   /** Cache-key prefix distinguishing preview kinds ("ed", "wd"). */
   keyPrefix: string;
-  /** The parsed diff to render. */
-  diff: ParsedDiff;
-  /** The Shiki language for highlighting. */
-  language: BundledLanguage | undefined;
-  /** Row budget for the visible window. */
-  maxLines: number;
-  /** The resolved palette the views render with (its identity keys the cache). */
-  palette: DiffPalette;
-  /** The active pi theme (the views' syntax source). */
-  theme: PaletteTheme;
   /** The render context (invalidate callback). */
   ctx: Pick<PreviewTask, "invalidate">;
   /** Configured change-indicator style. */
@@ -269,13 +260,14 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
     diff,
     language,
     maxLines,
-    palette,
-    theme,
+    view,
     ctx,
     indicatorStyle,
     seedFor,
     streaming = false,
   } = input;
+  const theme = view.piTheme;
+  const palette = view.palette;
   clearToolHeaderBg(text);
   // ONE stamp list feeds both compares: the identity (the attach guard)
   // and the width-appended render key derive from the same list through
@@ -317,8 +309,7 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
           language: streaming ? undefined : language,
           maxLines,
           width,
-          palette,
-          theme,
+          view,
           indicatorStyle,
           seed,
           useSplit,
@@ -337,30 +328,27 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
  * @returns The rendered view.
  */
 async function renderPaddedDiff(
-  options: Omit<DiffViewOptions, "piTheme" | "indicator"> & {
-    theme: PaletteTheme;
+  options: Omit<DiffViewOptions, "indicator"> & {
     indicatorStyle: IndicatorStyle;
     useSplit: boolean;
   },
 ): Promise<string> {
-  const { diff, language, maxLines, width, palette, theme, indicatorStyle, seed, useSplit } =
-    options;
+  const { diff, language, maxLines, width, view, indicatorStyle, seed, useSplit } = options;
   // One frame for both views: the split-vs-unified choice picks the
   // renderer, never the inputs (DiffViewOptions). The verdict arrives
   // from the caller — it also sizes the seed budget, and scanning
   // twice per render was pure waste.
-  const view = {
+  const frame = {
     diff,
     language,
     maxLines,
     width,
-    palette,
-    piTheme: theme,
+    view,
     indicator: indicatorStyle,
     seed,
   };
-  const body = await (useSplit ? renderSplit : renderUnified)(view);
-  return padDiffBody(body, palette);
+  const body = await (useSplit ? renderSplit : renderUnified)(frame);
+  return padDiffBody(body, view.palette);
 }
 
 /**

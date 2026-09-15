@@ -7,13 +7,13 @@
 import { DIM, expandTabs, fitAnsi } from "#src/core/ansi.ts";
 import { type DiffLine, sepLabel } from "#src/core/diff.ts";
 
-import { injectBg } from "./inject-bg.ts";
 import {
   type DiffViewOptions,
   hiddenLinesTail,
   highlightPairSides,
   MIN_RENDER_WIDTH,
-} from "./render-shared.ts";
+} from "./diff-view.ts";
+import { injectBg } from "./inject-bg.ts";
 import { borderBar, diffRowFrame, gutterWidth } from "./row-frame.ts";
 import { type CharRange, shouldEmphasize, wordDiffAnalysis } from "./word-diff.ts";
 import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
@@ -86,7 +86,8 @@ function buildSplitRows(lines: readonly DiffLine[]): SplitRow[] {
  * @returns The rendered view, newline-joined.
  */
 export async function renderSplit(options: DiffViewOptions): Promise<string> {
-  const { diff, language, maxLines, width, palette, piTheme, indicator, seed } = options;
+  const { diff, language, maxLines, width, view, indicator, seed } = options;
+  const palette = view.palette;
   if (!diff.lines.length) return "";
 
   const rows = buildSplitRows(diff.lines);
@@ -141,8 +142,7 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
     oldSource: leftSource,
     newSource: rightSource,
     language,
-    palette,
-    piTheme,
+    view,
     seed,
   });
 

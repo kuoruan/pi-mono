@@ -8,14 +8,15 @@ import { describe, expect, it } from "vitest";
 import { createToolWrapper, renderPlainTextFallback } from "#src/render/tool-factory.ts";
 import type { ResultContentBlock } from "#src/render/tool-output.ts";
 import { taskKeyOf } from "#src/render/tool-output.ts";
-import { resolveDiffPalette } from "#src/theme/palette.ts";
 import {
-  makeRenderCtx,
   buildRenderTheme,
+  makeRenderCtx,
+  makeRenderSession,
   makeTextComponent,
   plain,
   type TextComponent,
   type TextDouble,
+  viewFor,
 } from "#test/fixtures.ts";
 
 /** Callable view of a wrapped tool (ToolDefinition marks methods optional). */
@@ -89,6 +90,7 @@ const services = {
   cwd: "/project",
   shortPath: (p: string) => p,
   indicatorStyle: "bar" as const,
+  render: makeRenderSession(),
   textFactory: class {
     text: { text: string };
     constructor(t: string) {
@@ -209,7 +211,7 @@ describe("renderResult error frame", () => {
     // expected value composes through the same taskKeyOf the call site uses
     // — splitting the identity back apart cannot recover the list.
     expect(component.previewIdentity).toBe(
-      taskKeyOf("probe", [1, "", resolveDiffPalette(theme).identity, "exploded"]),
+      taskKeyOf("probe", [1, "", viewFor(theme).palette.identity, "exploded"]),
     );
   });
 

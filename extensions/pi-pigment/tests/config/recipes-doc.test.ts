@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { configSchema } from "#src/config/config-schema.ts";
 
-describe("CONFIG.md recipes", () => {
+describe("config.md recipes", () => {
   it("diff-only recipe parses (base:auto + diff roots)", () => {
     const r = configSchema.safeParse({
       syntaxTheme: {
