@@ -11,7 +11,7 @@ If you do want to bend things, the whole surface is one file, read from two laye
 
 Both layers are JSONC (comments and trailing commas allowed); `config.json` is accepted as a fallback filename. The **project layer overrides the global layer** (deep-merged: nested objects merge, arrays and scalars replace). The global path honors `PI_CODING_AGENT_DIR` (it uses pi's own agent-directory resolution).
 
-There is nothing else to configure — no environment variables, no pi `settings.json` keys. See [ADR 0001](./docs/adr/0001-configuration-redesign.md) for why the surface is this small.
+There is nothing else to configure — no environment variables, no pi `settings.json` keys. See [ADR 0001](./adr/0001-configuration-redesign.md) for why the surface is this small.
 
 ## Options
 
@@ -113,7 +113,7 @@ Objects deep-merge across the two config layers (global `colors` + project `colo
 
 **Canvas**: the tool frame's background is the pi theme's own, per call state — `toolPendingBg` while streaming, `toolSuccessBg` on success, `toolErrorBg` on error. For a `pigment-*` theme the converter wrote all three at generation time: `toolPendingBg` is the original theme's `editor.background` verbatim; the success/error slots blend the state green/red into that canvas at a polarity-gated ratio (25% on light canvases, 10% on dark). The canvas is not configurable: if it doesn't work for you, pick another theme (`/settings` → Theme) — that's the whole point of the theme provider.
 
-The `auto` default goes further still: a `pigment-*` pi theme maps back to its original Shiki source (full `tokenColors` precision) — bundled sources AA-fitted at render time, YOUR converted sources verbatim — and any other pi theme — including custom ones — derives from its own `syntax*` colors, WCAG-adjusted for the diff backgrounds. A user source deleted after registration degrades to that derived path (the registered theme's nine baked `syntax*` colors) — degraded, never broken. See [ADR 0001](./docs/adr/0001-configuration-redesign.md).
+The `auto` default goes further still: a `pigment-*` pi theme maps back to its original Shiki source (full `tokenColors` precision) — bundled sources AA-fitted at render time, YOUR converted sources verbatim — and any other pi theme — including custom ones — derives from its own `syntax*` colors, WCAG-adjusted for the diff backgrounds. A user source deleted after registration degrades to that derived path (the registered theme's nine baked `syntax*` colors) — degraded, never broken. See [ADR 0001](./adr/0001-configuration-redesign.md).
 
 **Recommended pairs** — the former built-in families' curation, as plain reference (these are ordinary explicit pairs now):
 

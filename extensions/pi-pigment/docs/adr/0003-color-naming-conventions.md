@@ -71,7 +71,7 @@ The internal layer is private implementation; it optimizes for brevity at ~139 r
 
 ## Implementation notes
 
-- Root **extraction** (the `diff` key and the `colors` passthrough) lives in `loadThemeFile` — session time, raw values only. **Compositing and ladder scaling live in `derivePalette`** — they need the pi theme's canvas, which only exists at derivation time. `setDiffRoots` stores the spec; the roots key keeps the raw serialized values.
+- Root **extraction** (the `diff` key and the `colors` passthrough) lives in `loadThemeFile` — session time, raw values only. **Compositing and ladder scaling live in `derivePalette`** — they need the pi theme's canvas, which only exists at derivation time. The session's roots spec rides the `RenderSession` value (see `session.ts`); the roots key keeps the raw serialized values.
 - The nested `DiffRoots` shape (sides × slots) plus the slot predicate (`isRootHex`) drive both intakes — the zod schema and the theme-file extractor derive their sides, slots, and hex forms from the one shape, so the config surface and the type stay in lockstep mechanically.
 
 ## Breaking changes

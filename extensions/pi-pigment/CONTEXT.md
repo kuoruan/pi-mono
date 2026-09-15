@@ -67,7 +67,7 @@ _Avoid_: setActiveTools to force-activate dormant tools (extending the agent's t
 
 **Color math**: src/core/color.ts — the pure color conversions (ANSI-color decode, hex parse/render, alpha compositing, RGB blend) and WCAG measures (luminance, contrast) that every palette and syntax-theme derivation flows through. No SGR escape production here — ansi.ts owns the escape layer; this module maps colors to colors or numbers (TinyColor-backed; ADR 0001's colord rejection note). _Avoid_: color math in ansi.ts (escape production and color math are separate concerns — the split keeps each to one home).
 
-**Palette**: The set of diff background/foreground ANSI variables — one snapshot, resolved once per pi theme and diff-root overrides by the palette module's singleton memo. The resolved snapshot is an EXPLICIT render input: wrappers pass `resolveDiffPalette(theme)`'s return value down through the views, layout primitives, and header painters — nobody re-reads the singleton mid-render. _Avoid_: ambient palette reads.
+**Palette**: The set of diff background/foreground ANSI variables — one snapshot per frame, derived by the pure `deriveDiffPalette(theme, roots)` and memoized per theme content on the session's `RenderSession` (see `session.ts`). The resolved snapshot is an EXPLICIT render input: the factory binds it per frame via `services.render.forTheme(theme)`, and wrappers pass `view.palette` down through the views, layout primitives, and header painters — nobody re-derives or reads ambient state mid-render. _Avoid_: ambient palette reads.
 
 **Auto-derive**: The palette derivation path: add/context surfaces blend `toolDiffAdded` foreground into `toolSuccessBg`; removed surfaces use `toolDiffRemoved`/`toolErrorBg`. Runs when the pi theme or the effective diff roots change; no presets, no environment variables. _Avoid_: theme config (the palette is only configurable through diff roots).
 
@@ -79,20 +79,20 @@ _Avoid_: setActiveTools to force-activate dormant tools (extending the agent's t
 
 Three homes: the file channel (discovery, parsing, the virtual bundled file) lives in theme-file; session-time selection strategy lives in theme-resolver; render-time interpretation (detection chain, polarity gating, patches-continue-on-auto) lives in theme-selection. _Avoid_: diff theme (reserved for the palette).
 
-**Theme pair**: An explicit "light/dark" slash pair ("github-light/github-dark"): the half matching the pi theme's polarity renders. Shiki-bundled names are AA-enforced against the blend backgrounds (matching auto's precise pipeline); user files render verbatim. The former curated families survive as CONFIG.md's recommended-pairs table. _Avoid_: family, preset.
+**Theme pair**: An explicit "light/dark" slash pair ("github-light/github-dark"): the half matching the pi theme's polarity renders. Shiki-bundled names are AA-enforced against the blend backgrounds (matching auto's precise pipeline); user files render verbatim. The former curated families survive as config.md's recommended-pairs table. _Avoid_: family, preset.
 
 **Custom theme**: A user-authored TextMate theme file in a config `themes/` directory (global or project layer) — VS Code JSON, TextMate JSON, or the original .tmTheme XML plist — optionally carrying a `diff` extension key for root overrides. Before conversion it is selectable as a token override by file stem; `/pigment convert` turns it into a generated theme (the output lands next to it; the source keeps working as the token override — conversion never retires it). _Avoid_: user theme (redundant).
 
 **Theme object**: The inline `syntaxTheme` object. **Patch mode** (a `base` is given) overlays semantic `colors` and `diff` entries on the resolved base. **Variant mode** (no `base`) defines a new theme from per-polarity variants (`light`/`dark`), each carrying semantic `colors` and optional `diff` roots — the polarity authority belongs to the author. Only listed keys deviate; user-set values render verbatim. _Avoid_: theme patch (patch is one mode, not the whole object).
 
-**Generated theme**: A pi theme pi-pigment produced from a TextMate theme through the converter — the bundled set ships pre-generated in the package `themes/` directory (pi's manifest discovers it); user theme files convert ON DEMAND through `/pigment convert` (the output lands NEXT TO the source, never in a cache). Registered under the `pigment-` prefix; the theme registry maps each name back to its source for ours-detection. _Avoid_: registered theme (registration is the mechanism, not the identity), converted theme (same).
+**Generated theme**: A pi theme pi-pigment produced from a TextMate theme through the converter — the bundled set ships pre-generated in the package `themes/` directory (pi's manifest discovers it); user theme files convert ON DEMAND through `/pigment convert` (the output lands NEXT TO the source, never in a cache). Registered under the `pigment-` prefix; the session's collected conversions (`collectConvertedThemes`, a pure value) map each name back to its source for ours-detection. _Avoid_: registered theme (registration is the mechanism, not the identity), converted theme (same).
 
 **External theme**: Any pi theme that is not one of ours — built-ins (dark/light), third-party, user-custom, or a copied-and-renamed generated file. The detection chain treats them identically: the follower path (auto) derives from their nine syntax colors. _Avoid_: foreign theme.
 
 **Detection chain**: The render-time resolution of the token layer, in order:
 
 1. an explicit `syntaxTheme` override
-2. ours-detection — the active pi theme's name is in the registry → the mapped Shiki theme, full precision (BUNDLED sources AA-enforced, USER sources verbatim)
+2. ours-detection — the active pi theme's name is in the session's collected conversions (or the built-in prefix map) → the mapped Shiki theme, full precision (BUNDLED sources AA-enforced, USER sources verbatim)
 3. the follower path — the pi theme's nine colors, AA-adjusted; also the degraded landing when a registered USER source file is gone (the precise pipeline never breaks)
 
 Runs per render on the live theme (mid-session `/theme` switches follow automatically; identity-keyed memos re-resolve).
@@ -143,13 +143,13 @@ _Avoid_: emphasis via the palette's fgCode (the code-file type color — invisib
 
 **Hunk gap**: The skipped unmodified lines between two hunks — carried on the separator line's `gap` field (never overloaded onto `newNum`) and computed by one authority (`hunkGap`) shared by both parsers. Renders as the `+N lines` separator label.
 
-**Row frame**: The per-line gutter composition (border + line number + sign + backgrounds) both views render rows through — one authority in row-frame.ts (the render module family: wrap.ts for wrapping, row-frame.ts for the gutter, word-diff.ts for word-level emphasis, inject-bg.ts for backgrounds, split-verdict.ts for the split/unified choice; render-shared.ts keeps the shared view contract and the one highlight choke point); the views keep only pairing, column split, and separator styling.
+**Row frame**: The per-line gutter composition (border + line number + sign + backgrounds) both views render rows through — one authority in row-frame.ts (the render module family: wrap.ts for wrapping, row-frame.ts for the gutter, word-diff.ts for word-level emphasis, inject-bg.ts for backgrounds, split-verdict.ts for the split/unified choice; diff-view.ts keeps the shared view contract and the one highlight choke point); the views keep only pairing, column split, and separator styling.
 
 **Grammar-state seed**: The embedded-grammar coloring input for diff hunks (vue/html): a diff slice shows no `<script>`/`<template>` tag, so tokenizing from the grammar's top level leaves script lines scope-less (the "vue partial diff renders uncolored" bug).
 
 - The seed is the file text BEFORE the deepest visible hunk's newStart (`lastHunkNewStart` — the last hunk header inside the render window), so the prepended source covers EVERY visible hunk, not just the first (a hunk below its coverage renders uncolored — the vue bug's second face).
 - The slice is passed to shiki's own `grammarContextCode` option (prepended code that participates in grammar inference but never in the output — token-identical to the manual `getLastGrammarState`→`grammarState` dance, one official option instead of a memo layer).
-- It lives in `hlBlock`'s options `seed` field; the highlight cache key carries the seed's fingerprint.
+- It lives in the highlight entry's options `seed` field (`RenderView.highlight` / `hlBlockResolved`); the highlight cache key carries the seed's fingerprint.
 
 Callers own the source: write slices `args.content` at the last visible hunk's newStart (zero I/O — the text is already in the call arguments); edit reads the post-edit file from disk (cached per path+mtime) — its render inputs (args = edit ops, details.patch = hunk slices) carry no full file text, and stashing one in details would duplicate the whole file into the session JSONL. _Avoid_: seeding from the wrong side's line numbers.
 
@@ -194,9 +194,9 @@ _Avoid_: hand-rolled escape-skipping loops (the pre-Cell walkers — five varian
 
 **Highlight cache**: Module-level LRU memo of Shiki-highlighted code blocks keyed by theme + language + code.
 
-- No engine prewarm, by design and by measurement: the shiki module's ~28ms import is paid at extension load (the static registry import), ensureCore's remaining work is ~4ms (engine 0.5ms + grammar 3ms), and every hlBlock consumer renders through an async plain-then-styled upgrade that hides any load latency — the dominant first-use cost (regex compilation at first tokenize, 10-60ms) was never warmable by preloading a grammar anyway.
+- No engine prewarm, by design and by measurement: the shiki module's ~28ms import is paid at extension load (the static registry import), ensureCore's remaining work is ~4ms (engine 0.5ms + grammar 3ms), and every highlight consumer renders through an async plain-then-styled upgrade that hides any load latency — the dominant first-use cost (regex compilation at first tokenize, 10-60ms) was never warmable by preloading a grammar anyway.
 - Shiki's own guidance is the lazy singleton (ensureCore's promise memo); VS Code renders plain and restyles when the tokenizer catches up — the same model.
-- One adjacent memo: the theme REGISTRATION (core.loadTheme) is skipped when the same theme object is already registered under its name — a theme switch's per-block re-normalization was ~0.3s across a loaded session.
+- One adjacent memo: the theme REGISTRATION (core.loadTheme) is skipped while the content under a name is unchanged (file-channel themes stamp on `contentFingerprint`, others on the object) — a theme switch's per-block re-normalization was ~0.3s across a loaded session.
 
 _Avoid_: warmup timers, "kick" side effects on the highlight path (a timed front-run of 4ms behind an invisible path is superstition, not strategy).
 

@@ -20,7 +20,7 @@ pi-pigment began as a renderer for pi's built-in tool output (syntax-highlighted
 
 Registered-but-dormant wrappers are the intended steady state: whatever the environment activates, pi-pigment decorates; what nobody activates, idles harmlessly.
 
-The corollary already in force: **yield, don't crowd.** When another extension's tool vocabulary is present (pi-fff's `ffgrep`/`fffind`), pi-pigment does not register same-name wrappers that would displace it — first-wins registration from an earlier-loaded renderer would silently swap another extension's semantics for the built-ins'.
+The corollary already in force: **yield, don't crowd.** When another extension's tool vocabulary is present (pi-fff's `ffgrep`/`fffind`), pi-pigment does not register same-name wrappers that would displace it — first-wins registration from an earlier-loaded renderer would silently swap another extension's semantics for the built-ins'. The rule is scoped to the presence probes that exist, not a general priority mechanism (see "The occupied slot" below).
 
 ### Amendment: what "delegating execute verbatim" means in practice
 
@@ -30,6 +30,23 @@ The wrappers re-enter execute only to stash their own render-time payload (write
 - **A wrapper appends nothing it can derive at render time.** The factory adds NO key at all: the execution timing that drives the `Took` footer lives in the render state (pi's own shell-renderer clock), so a pi-pigment session carries exactly the tool's own payload — see the session-footprint note below.
 - **`result.details` keeps the SDK's own shape.** Wrappers may APPEND keys; they may not drop or retype the SDK's fields. Sessions are the shared boundary: a pi-pigment-created session resumed WITHOUT pi-pigment renders through the SDK's native renderers, which read their own details fields (`diff`, `patch`, `firstChangedLine`) — a renderer that rewrites details in execute breaks that resume path. (Added after the edit wrapper replaced the SDK's details with a parsed payload, breaking native rendering of pi-pigment-created sessions; parsing moved to renderResult.)
 - **Documented exception — write**: the SDK's own write execute stashes `details: undefined`, so the write wrapper's diff payload (old/new content for the split preview) is the only thing details has ever carried there. It is an addition to an empty slot, not a replacement of native fields.
+
+### The occupied slot, and why it stays
+
+Same-name registration is the API's only expression of a rendering override: pi documents it under "Overriding Built-in Tools", and pi's own shipped `built-in-tool-renderer.ts` example ("Custom rendering for built-in tools without changing their behavior") is built exactly this way — re-register the name, delegate `execute`. There is no renderer-only channel to migrate to: `ExtensionAPI`'s rendering registrations are `registerMessageRenderer` and `registerEntryRenderer`, both keyed by an extension's own custom type, never by a tool name.
+
+The cost is that each wrapper occupies the name. Registration is first-wins across extensions, and extension tools are then laid over the built-ins, so a later extension that wants to own `bash` is silently dropped. 0.85.1 also emits no warning for that, although `docs/extensions.md` claims interactive mode warns (verified against the shipped `dist`, where the only override diagnostics are for shortcuts and commands).
+
+Upstream has been asked for a renderer-only API repeatedly and declined every time, so this is not a gap we can close locally:
+
+- [#3541](https://github.com/earendil-works/pi/issues/3541) render-only tool override API (e.g. `pi.registerToolRenderer`) — "sorry, not planned atm."
+- [#6700](https://github.com/earendil-works/pi/issues/6700) rendering override without taking over execution — "this will change in pi server mode. not planed for old pi."
+- [#3553](https://github.com/earendil-works/pi/issues/3553) silent built-in override — "works as intended."
+- #7800, #8347, #7615 (decorating an already-registered tool, the same `pi.registerToolRenderer` proposal, override fragility) — auto-closed, no reply.
+
+The companion gap: no public API returns a built-in tool's own definition either. `getAllTools()` yields `ToolInfo` (name, parameters, description) with no `execute` (#7800, auto-closed), so a renderer that wants to decorate a tool it does not itself own has to rebuild the definition through the SDK factories (`createBashToolDefinition`, and siblings) — and re-apply by hand the options pi baked in under its own gates (bash's trust-gated `shellCommandPrefix`/`shellPath`; see the tool-wrapper entry in [CONTEXT.md](../../CONTEXT.md)). Live with the factories until upstream exposes the definition itself; do not re-implement execution to avoid them.
+
+The yield rule above is therefore scoped to the one case where a cheap, order-safe presence probe exists: pi-fff's `/fff-mode` command registers at module load, before any `session_start`, so it is visible no matter which extension loads first (see FFF yield in [CONTEXT.md](../../CONTEXT.md)). A general "yield to whoever registers the name" is not implementable against this API — there is no unregister, nothing exposes a tool that registers after us, and deferring our own registration to a later event only trades the occupancy for a registry refresh that ACTIVATES the newly seen names, which would surface dormant `grep`/`find`/`ls`/`powershell` to the model and break this ADR's own boundary. Track a render-decoration layer upstream; do not work around its absence by giving up the rendering.
 
 ## Consequences
 

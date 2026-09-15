@@ -48,7 +48,7 @@ Restart pi and the rendering takes over — no config needed.
 
 pi-pigment ships the whole Shiki bundle as **pi themes**: after install, `/settings` → Theme lists every one under the `pigment-` prefix (`pigment-solarized-light`, `pigment-github-dark`, …). Pick one and the **entire pi follows** — borders, boxes, backgrounds, and the diff renderer, which maps the selection back to the original Shiki theme for full-precision syntax colors (AA-protected on the actual canvas). The selection persists in your pi settings like any theme; pi's `"theme": "pigment-solarized-light/pigment-solarized-dark"` pairing syntax follows your terminal's light/dark automatically.
 
-Your own themes: drop TextMate theme files (JSON or the original `.tmTheme` plist) into the `themes/` config directory and run `/pigment` (a subcommand picker) or `/pigment convert` (a TUI selector, or `/pigment convert <name>`) — the converted `pigment-<name>.json` lands next to the source and, after `/reload`, registers like any bundled theme. See [CONFIG.md](CONFIG.md).
+Your own themes: drop TextMate theme files (JSON or the original `.tmTheme` plist) into the `themes/` config directory and run `/pigment` (a subcommand picker) or `/pigment convert` (a TUI selector, or `/pigment convert <name>`) — the converted `pigment-<name>.json` lands next to the source and, after `/reload`, registers like any bundled theme. See [config.md](docs/config.md).
 
 > **A note on the startup banner**: the loaded-resources list (`[Themes]`) now names all 65 registered themes — about ten extra lines at startup. That's pi's native rendering of registered themes, not a defect; `--no-themes` or the settings' theme filters can quiet it.
 
@@ -71,12 +71,12 @@ Three keys — that is the entire surface:
   "indicatorStyle": "bar",
   // Token override (default "auto" follows the pi theme): a theme name,
   // a "light/dark" pair (pi's grammar), or an inline object — see
-  // CONFIG.md.
+  // config.md.
   "syntaxTheme": "auto",
 }
 ```
 
-Config failures are scoped, never fatal: a malformed file skips its layer, an invalid value falls back per key — a config error never disables the renderer. See [CONFIG.md](CONFIG.md) for the `syntaxTheme` object form, theme-file discovery, and diff-root overrides, [`config/config.example.json`](config/config.example.json) for a complete example, and [`schemas/pi-pigment.schema.json`](schemas/pi-pigment.schema.json) for editor validation (add `"$schema": "https://raw.githubusercontent.com/kuoruan/pi-mono/master/extensions/pi-pigment/schemas/pi-pigment.schema.json"` to your config for completion).
+Config failures are scoped, never fatal: a malformed file skips its layer, an invalid value falls back per key — a config error never disables the renderer. See [config.md](docs/config.md) for the `syntaxTheme` object form, theme-file discovery, and diff-root overrides, [`config/config.example.json`](config/config.example.json) for a complete example, and [`schemas/pi-pigment.schema.json`](schemas/pi-pigment.schema.json) for editor validation (add `"$schema": "https://raw.githubusercontent.com/kuoruan/pi-mono/master/extensions/pi-pigment/schemas/pi-pigment.schema.json"` to your config for completion).
 
 ## How it works
 
@@ -100,6 +100,12 @@ pi-pigment was inspired by [pi-diff](https://github.com/phongndo/pi-diff) by pho
 Shell-command highlighting and heredoc language injection run on [@aliou/sh](https://github.com/aliou/sh) — thanks to its author, [Aliou Diallo](https://github.com/aliou), for the shell AST.
 
 The two are complementary: pi-pigment renders each tool call inline; pi-diff adds a `/diff` review UI for session and git changes. If you want to review what the agent changed across the whole session, `pi install npm:pi-diff`.
+
+Building an extension that wraps the same tools? See [docs/integrating.md](docs/integrating.md) for the `render-kit` borrowing API and the first-wins coexistence rules.
+
+## For extension authors
+
+If your extension registers its own `bash` (a sandboxed execute, an access gate) or ships themes, it can borrow pi-pigment's rendering instead of racing it for the tool name — `pi-pigment/render-kit` installs pi-pigment's renderers on YOUR tool definitions and leaves your `execute` untouched. There is also a zero-dependency channel (`globalThis` publication) for extensions that must not depend on this package. See [docs/integrating.md](docs/integrating.md) — it covers the API, the pitfalls (load order, shell settings, silent first-wins), and the coexistence rules.
 
 ## Development
 
