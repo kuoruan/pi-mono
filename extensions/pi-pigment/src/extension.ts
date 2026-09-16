@@ -27,6 +27,7 @@
  */
 
 import {
+  type ExtensionContext,
   createBashToolDefinition,
   createEditToolDefinition,
   createFindToolDefinition,
@@ -38,7 +39,9 @@ import {
   type ExtensionAPI,
   getAgentDir,
   SettingsManager,
+  type SessionStartEvent,
   type ToolDefinition,
+  type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
@@ -60,8 +63,29 @@ import { createWriteWrapper } from "#src/render/tool-write.ts";
 import { listConvertedThemes } from "#src/theme/user-themes.ts";
 
 /**
+ * Names this extension registered on the previous session_start, for the
+ * self-shadowing guard (see claimedByOther below). Without this, a
+ * resume/fork re-fire served from the same registry would see our own
+ * first-fire wrappers and yield every name to ourselves — seven skips
+ * plus seven spurious notices. Cleared on fresh (re)starts —
+ * startup/new/reload — where no prior registration of ours can exist.
+ * Defensive either way: if pi rebuilds the runtime per session the set
+ * is always empty and the guard is a no-op; if registrations persist,
+ * it is the only thing standing between us and total self-yield.
+ */
+let registeredByUs = new Set<string>();
+
+/**
  * Whether the pi-fff search extension is present — the yield signal for
  * grep/find.
+ *
+ * Kept as the explicit fast path: the generic occupancy check
+ * (claimedByOther below) also catches FFF's override-mode tools, but
+ * only when FFF registered before our session_start fires. The command
+ * signal fires at module load (before ANY session_start), so it is
+ * order-safe where the tool vocabulary is not — and it stays silent,
+ * where a generic yield reports. Both stay: explicit for the known
+ * neighbor, generic for everyone else.
  *
  * Pi-fff compat: when FFF is loaded, pi-pigment YIELDS the grep/find names
  * in ALL its modes — a same-name registration from pi-pigment (which loads
@@ -81,23 +105,54 @@ import { listConvertedThemes } from "#src/theme/user-themes.ts";
  * coexisting renderer silently shadowing another extension's tools is
  * the worse failure, and ADR 0005 keeps activation the user's call.
  *
- * @param pi - The extension API (commands and tools registered so far).
+ * @param tools - Tool names visible at session_start (one snapshot).
+ * @param commands - Command names visible at session_start (one snapshot).
  * @returns True when an FFF signal is present.
  */
-function fffPresent(pi: ExtensionAPI): boolean {
-  const signals = [
-    ...pi.getCommands().map((command) => command.name),
-    ...pi.getAllTools().map((tool) => tool.name),
-  ];
-  return signals.includes("fff-mode") || signals.includes("ffgrep") || signals.includes("fffind");
+function fffPresent(tools: readonly string[], commands: readonly string[]): boolean {
+  return ["fff-mode", "ffgrep", "fffind"].some(
+    (name) => tools.includes(name) || commands.includes(name),
+  );
+}
+
+/**
+ * Whether `name` is already claimed by another extension — the generic
+ * yield check. Reads pi's merged registry through `getAllTools`: a tool
+ * entry whose source is anything but `builtin` is either another
+ * extension's definition or an SDK-passed custom tool, and registering
+ * our wrapper under the same name would shadow it (extension
+ * registrations win the slot over built-ins, so our wrap is the
+ * shadowing one, not the victim). Our own prior registration is
+ * excluded via `registeredByUs` — without that, a resume/fork re-fire
+ * would see our own wrappers and yield every name to ourselves.
+ *
+ * Order caveat (documented, not worked around): the check only sees
+ * tools registered before our session_start fires. A neighbor that
+ * loads after us and registers in its own session_start loses the name
+ * to us — pi merges by load order, not registration time — no matter
+ * what its session_start does afterwards; our wrapper stays live and
+ * the only honest signal we can emit is none. The loader logs a name
+ * conflict for the dropped registration; three escape hatches remain:
+ * the neighbor registers in its factory (visible to us, so we yield),
+ * borrows our renderers through the render kit (both render), or the
+ * user lists the name in disabledTools.
+ *
+ * @param tools - Registry entries visible at session_start (one snapshot).
+ * @param name - The tool name to probe.
+ * @returns True when another extension already owns the name.
+ */
+function claimedByOther(tools: readonly ToolInfo[], name: string): boolean {
+  if (registeredByUs.has(name)) return false;
+  return tools.some((tool) => tool.name === name && tool.sourceInfo.source !== "builtin");
 }
 
 /**
  * Wire pi-pigment into the session: resolve the two-layer config and the
  * override selection on every session_start, then register the seven
- * tool wrappers (minus config-disabled tools and the FFF-yielded names).
- * The bundled themes ship as package assets (pi's manifest discovers
- * themes/); the user's theme files convert at resources_discover time.
+ * tool wrappers (minus config-disabled tools, the FFF-yielded names,
+ * and any name claimedByOther reports as taken). The bundled
+ * themes ship as package assets (pi's manifest discovers themes/); the
+ * user's theme files convert at resources_discover time.
  *
  * @param pi - The extension API.
  */
@@ -110,10 +165,16 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
   // The latest session_start environment — the `/pigment` completer's read
   // (the assembly holds the session value; the command cannot reach ctx).
   let sessionEnv: SessionEnv | undefined;
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
     const cwd = ctx.cwd;
     const agentDir = getAgentDir();
     sessionEnv = { cwd, agentDir };
+    // Fresh session starts cannot carry our prior registration — reset
+    // the self-shadowing guard (resume/fork keep it; see registeredByUs).
+    const reason = event.reason;
+    if (reason === "startup" || reason === "new" || reason === "reload") {
+      registeredByUs = new Set<string>();
+    }
     // Config/theme issues surface through the documented channel — the
     // TUI notification area (or RPC client) when present; stderr only in
     // headless modes (print/json), where it is the visible medium.
@@ -150,8 +211,28 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
       render: session,
     };
 
+    // One registry snapshot per session_start: the merged registry does
+    // not change mid-startup (registrations here only take effect for
+    // the runner merge), so every yield check below reads the same
+    // frozen view instead of re-querying pi per tool.
+    const registryTools = pi.getAllTools();
+    const registryToolNames = registryTools.map((tool) => tool.name);
+    const registryCommandNames = pi.getCommands().map((command) => command.name);
+
     const registerToolIfEnabled = (toolName: ToolName, tool: ToolDefinition | undefined): void => {
-      if (tool && !disabledTools.has(toolName)) pi.registerTool(tool);
+      if (!tool || disabledTools.has(toolName)) return;
+      // Generic yield: another extension already owns this name — skip
+      // our wrap so we don't shadow it. Reported once per session_start
+      // through the issue channel (the FFF path above stays silent: it
+      // is the documented default, not a surprise).
+      if (claimedByOther(registryTools, toolName)) {
+        reportIssue(
+          `${toolName} is already provided by another extension — pi-pigment skips its rendering for this tool.`,
+        );
+        return;
+      }
+      pi.registerTool(tool);
+      registeredByUs.add(toolName);
     };
 
     // Wrap the DEFINITIONS (not the AgentTool wrappers): the AgentTool
@@ -180,7 +261,7 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
         services,
       ),
     );
-    const yieldSearchTofff = fffPresent(pi);
+    const yieldSearchTofff = fffPresent(registryToolNames, registryCommandNames);
     registerToolIfEnabled(
       "grep",
       yieldSearchTofff
@@ -218,7 +299,7 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
   // session_start (autoRenderSession). The bundled themes need no runtime
   // registration — they ship as package assets pi discovers via
   // the manifest's pi.themes entry.
-  pi.on("resources_discover", async (_event, ctx) => {
+  pi.on("resources_discover", async (_event, ctx: ExtensionContext) => {
     const outputs = listConvertedThemes({ cwd: ctx.cwd, agentDir: getAgentDir() });
     return outputs.length > 0 ? { themePaths: outputs } : {};
   });

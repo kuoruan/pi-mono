@@ -188,9 +188,12 @@ See [ADR 0006](adr/0006-theme-provider-architecture.md) for the two-layer model 
 The rules your extension lives under when pi-pigment is installed:
 
 1. **pi-pigment occupies the seven built-in names** (`write`, `edit`, `bash`, `powershell`, `grep`, `ls`, `find`) by same-name registration — the API's only rendering-override mechanism ([ADR 0005](adr/0005-rendering-only.md)). If your extension registers one of these names and loads AFTER pi-pigment, your registration is silently dropped by pi.
-2. **Search yields to pi-fff.** When pi-fff's vocabulary (`/fff-mode`) is present, pi-pigment does not register `grep`/`find` at all, so pi-fff owns them regardless of load order. If you wrap search tools, yield the same way or use the kit.
-3. **Everything else is yours via the kit.** Any other extension that wins one of the seven names can borrow the rendering back (samples A/B). That is the intended division: the winner owns semantics; pi-pigment supplies rendering on request.
-4. **Users can opt out per tool**: `disabledTools` in pi-pigment's config layer stops the wrapper for that tool, leaving the name to whoever registers it next.
+2. **Occupied names are yielded, not shadowed.** Before registering, pi-pigment reads pi's merged registry: any of the seven names already claimed by another extension (or an SDK-passed custom tool — anything whose source is not `builtin`) is skipped, with a one-line notice per session. So if you own `bash` and you registered before pi-pigment's `session_start` fires (factory-time registration always qualifies), pi-pigment never touches it.
+3. **Search yields to pi-fff.** When pi-fff's vocabulary (`/fff-mode`) is present, pi-pigment does not register `grep`/`find` at all, so pi-fff owns them regardless of load order. If you wrap search tools, yield the same way or use the kit.
+4. **Everything else is yours via the kit.** Any other extension that wins one of the seven names can borrow the rendering back (samples A/B). That is the intended division: the winner owns semantics; pi-pigment supplies rendering on request.
+5. **Users can opt out per tool**: `disabledTools` in pi-pigment's config layer stops the wrapper for that tool, leaving the name to whoever registers it next.
+
+Order caveat: the yield only sees tools registered before pi-pigment's `session_start` fires. If you load after pi-pigment and register in your own `session_start`, pi's load-order merge keeps pi-pigment's wrapper live and drops yours (with a conflict log) — and pi-pigment emits no notice, because from its snapshot nothing was taken. Prefer factory-time registration (visible, so pi-pigment yields), or the kit, or `disabledTools`.
 
 ## API stability
 

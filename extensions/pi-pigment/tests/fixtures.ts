@@ -315,10 +315,14 @@ export type RegisteredTool = Omit<
  * an empty temp dir for both roots.
  *
  * @param env - Explicit session roots; defaults to the process's own.
+ * @param foreignTools - Tool names another extension already owns.
+ * @param sharedRegistry - Optional cross-fire registry (see driveSession).
  * @returns The registered tools.
  */
 export async function registerTools(
   env: { cwd?: string; agentDir?: string; projectTrusted?: boolean } = {},
+  foreignTools: string[] = [],
+  sharedRegistry?: RegisteredTool[],
 ): Promise<RegisteredTool[]> {
   // DEFAULT ISOLATION: without env, both layers point at paths that hold
   // nothing (the extension's agentDir comes from PI_CODING_AGENT_DIR,
@@ -335,7 +339,12 @@ export async function registerTools(
   const prevAgentDir = process.env.PI_CODING_AGENT_DIR;
   if (isolated) process.env.PI_CODING_AGENT_DIR = "/nonexistent-pi-pigment-test/agent";
   try {
-    return await driveSession(env, isolated ? "/nonexistent-pi-pigment-test/project" : undefined);
+    return await driveSession(
+      env,
+      isolated ? "/nonexistent-pi-pigment-test/project" : undefined,
+      foreignTools,
+      sharedRegistry,
+    );
   } finally {
     if (isolated) {
       if (prevAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -357,7 +366,10 @@ interface MockPiApi {
   ) => void;
   // RegisteredTool is the extension's own registration shape (see above).
   registerTool: (tool: RegisteredTool) => void;
-  getAllTools: () => Array<{ name: string }>;
+  // Mirrors pi's merged registry entry shape the yield check reads
+  // (name + sourceInfo.source): foreign tools staged by a suite carry
+  // their owner's source, the extension's own re-registrations builtin.
+  getAllTools: () => Array<{ name: string; sourceInfo: { source: string } }>;
   getCommands: () => Array<{ name: string }>;
   registerCommand: (name: string, options: unknown) => void;
 }
@@ -384,13 +396,22 @@ interface MockSessionContext {
  *
  * @param env - Explicit session roots (either may be undefined).
  * @param defaultCwd - The cwd to use when env.cwd is absent.
+ * @param foreignTools - Tool names another extension already owns: staged
+ *   into the mock registry with a non-builtin source so the yield check
+ *   sees them as taken.
+ * @param sharedRegistry - Optional cross-fire registry: pass the same
+ *   array across registerTools calls to model a registry where our own
+ *   prior registrations persist (resume/fork re-fire exercises the
+ *   self-shadowing guard against these, not the source check).
  * @returns The registered tools.
  */
 async function driveSession(
   env: { cwd?: string; agentDir?: string; projectTrusted?: boolean },
   defaultCwd: string | undefined,
+  foreignTools: string[] = [],
+  sharedRegistry?: RegisteredTool[],
 ): Promise<RegisteredTool[]> {
-  const tools: RegisteredTool[] = [];
+  const tools = sharedRegistry ?? [];
   // The extension registers tools on session_start — fire it like pi
   // does (and await it: the handler is async — pi's runner awaits every
   // handler's promise, and the tools only exist once it settles).
@@ -412,7 +433,21 @@ async function driveSession(
     },
     // The presence surfaces the fff probe reads (commands register at
     // module load, before any session_start — the order-safe signal).
-    getAllTools: () => tools.map((tool) => ({ name: tool.name })),
+    // Foreign tools staged by the suite read back as taken (non-builtin
+    // source); the extension's own registrations read back as local —
+    // exactly like real pi — so a re-fire exercises the self-shadowing
+    // guard (registeredByUs), not the source check. The seven builtins
+    // sit underneath with source builtin (a bare-name collision at the
+    // source check would yield nothing: the reverse assertion — builtin
+    // alone never triggers a skip — pins this).
+    getAllTools: () => [
+      ...foreignTools.map((name) => ({ name, sourceInfo: { source: "some-other-extension" } })),
+      ...["write", "edit", "bash", "powershell", "grep", "ls", "find"].map((name) => ({
+        name,
+        sourceInfo: { source: "builtin" },
+      })),
+      ...tools.map((tool) => ({ name: tool.name, sourceInfo: { source: "local" } })),
+    ],
     getCommands: () => [],
     // The /pigment command registers at module load (recorded, not run).
     registerCommand: (_name: string, _options: unknown) => {},
