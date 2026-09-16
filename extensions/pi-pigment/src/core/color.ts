@@ -210,6 +210,21 @@ export function mixRgb(base: RgbColor, accent: RgbColor, intensity: number): Rgb
 }
 
 /**
+ * Tint the CANVAS with a little of a color (the background slots' mix:
+ * canvas stays the body, the color is the hint). Named for its direction
+ * on purpose — a bg slot taking the fade-into-canvas direction renders
+ * 97% foreground as a background (gray-on-gray text).
+ *
+ * @param color - The tint color (the fg, usually).
+ * @param canvas - The canvas (the body).
+ * @param amount - The tint amount (0 = pure canvas, 1 = pure color).
+ * @returns The tinted canvas.
+ */
+export function tintCanvas(color: RgbColor, canvas: RgbColor, amount: number): RgbColor {
+  return mixRgb(canvas, color, amount);
+}
+
+/**
  * WCAG relative luminance (pi's own terminal-background detection uses the
  * same formula). >= 0.5 reads as a light surface.
  *

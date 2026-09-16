@@ -15,6 +15,26 @@ export const plainLine = "  const total = items.reduce((sum, item) => sum + item
 /** A CJK-carrying line (the case the column gate exists for). */
 export const cjkLine = "  // 中文注释宽度按双列计算，确保不溢出行宽限制边界情况";
 
+/**
+ * A line with cluster content: a flag pair and a ZWJ family among ASCII
+ * text (the case the cluster tier exists for — the two clusters draw as 2
+ * columns each, but hold 4 and 11 code units).
+ */
+export const riskyLine =
+  "  deploy \u{1f1fa}\u{1f1f8} \u{1f468}\u200d\u{1f469}\u200d\u{1f467}\u200d\u{1f466} pipeline done";
+
+/** The riskyLine skeleton in plain ASCII, for the in-group mechanism ratio. */
+export const riskyLineAscii = "  deploy US family pipeline done";
+
+/**
+ * A gate-positive line that is nearly all single-code-point clusters: CJK
+ * text with one combining mark at the end. The gate fires (marks are
+ * cluster-forming) so the line takes the cluster walk, but every CJK code
+ * point still measures by the fast rule — the split between "gate hit" and
+ * "visibleWidth per cluster".
+ */
+export const cjkMarkLine = "  // 中文注释与一点组合标记\u0301";
+
 /** A 150-line diff body (one frame's worth at the render budget). */
 export const diffBody = Array.from({ length: 150 }, (_, i) => `${plainLine} // ${i}`).join("\n");
 

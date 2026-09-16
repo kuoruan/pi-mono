@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { iterateCells } from "#src/core/ansi.ts";
+import { forEachCell, type CellVisitor } from "#src/core/ansi.ts";
+
+/** One visited cell, materialized for assertions. */
+interface WalkCell {
+  start: number;
+  end: number;
+  cols: number;
+  chars: number;
+  escape: boolean;
+  text: string;
+}
 
 /**
  * Collect a string's cells for assertions.
@@ -8,10 +18,23 @@ import { iterateCells } from "#src/core/ansi.ts";
  * @param s - The string to walk.
  * @returns The cells, left to right.
  */
-const cells = (s: string) => [...iterateCells(s)];
+const cells = (s: string): WalkCell[] => {
+  const out: WalkCell[] = [];
+  forEachCell(s, (start, end, cols, isEscape) => {
+    out.push({
+      start,
+      end,
+      cols,
+      chars: isEscape ? 0 : 1,
+      escape: isEscape,
+      text: s.slice(start, end),
+    });
+  });
+  return out;
+};
 
-describe("iterateCells (the styled-text walk primitive)", () => {
-  it("yields plain ASCII one cell per character with one column each", () => {
+describe("forEachCell (the styled-text walk primitive)", () => {
+  it("visits plain ASCII one cell per character with one column each", () => {
     const out = cells("abc");
     expect(out.map((c) => c.text)).toEqual(["a", "b", "c"]);
     expect(out.every((c) => c.cols === 1 && c.chars === 1 && !c.escape)).toBe(true);
@@ -19,7 +42,7 @@ describe("iterateCells (the styled-text walk primitive)", () => {
     expect(out[2]).toMatchObject({ start: 2, end: 3 });
   });
 
-  it("yields SGR escapes whole: zero columns, zero characters", () => {
+  it("visits SGR escapes whole: zero columns, zero characters", () => {
     const out = cells("\x1b[38;2;1;2;3mA\x1b[39mB");
     expect(out.map((c) => c.text)).toEqual(["\x1b[38;2;1;2;3m", "A", "\x1b[39m", "B"]);
     expect(out[0]).toMatchObject({ cols: 0, chars: 0, escape: true, start: 0, end: 13 });
@@ -32,14 +55,41 @@ describe("iterateCells (the styled-text walk primitive)", () => {
     expect(out[1]).toMatchObject({ text: "x", cols: 1, start: 1, end: 2 });
   });
 
-  it("counts regional indicators (flags) as two columns", () => {
-    // U+1F1FA U+1F1F8 (🇺🇸): two surrogate pairs, two cells, 2 columns each.
+  it("visits a regional-indicator pair (flag) as ONE cell of two columns", () => {
+    // U+1F1FA U+1F1F8 (🇺🇸): one grapheme cluster — the renderer draws one
+    // two-column flag, so the walk must not offer the pair as two cells a
+    // wrap could split (the earlier per-code-point model measured 4 columns).
     const out = cells("🇺🇸");
-    expect(out).toHaveLength(2);
-    expect(out.every((c) => c.cols === 2 && c.end - c.start === 2)).toBe(true);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ cols: 2, chars: 1, escape: false, start: 0, end: 4 });
   });
 
-  it("yields astral code points (emoji) as single cells with surrogate spans", () => {
+  it("keeps a cluster whole: a ZWJ family is one cell, and its marks are not cells", () => {
+    const out = cells("👨‍👩‍👧‍👦x");
+    // 11 code units of family, then the ASCII letter.
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ cols: 2, start: 0, end: 11 });
+    expect(out[1]).toMatchObject({ text: "x", cols: 1, start: 11, end: 12 });
+  });
+
+  it("measures a zero-width cluster as zero columns (lone combining mark)", () => {
+    const out = cells("a\u0301b");
+    // "a" + U+0301 is one cluster of one column; the mark alone is zero.
+    expect(out.map((c) => c.text)).toEqual(["a\u0301", "b"]);
+    expect(out.map((c) => c.cols)).toEqual([1, 1]);
+    expect(cells("\u0301")[0]).toMatchObject({ cols: 0, chars: 1 });
+  });
+
+  it("keeps the escape grammar in a cluster-walked line, tiling intact", () => {
+    const s = "🇺🇸\x1b[1m🇯🇵\x1b[0m";
+    const out = cells(s);
+    expect(out.map((c) => c.escape)).toEqual([false, true, false, true]);
+    expect(out.map((c) => c.cols)).toEqual([2, 0, 2, 0]);
+    expect(out[1]!.text).toBe("\x1b[1m");
+    expect(out.map((c) => c.text).join("")).toBe(s);
+  });
+
+  it("visits astral code points (emoji) as single cells with surrogate spans", () => {
     const out = cells("👍");
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ cols: 2, chars: 1, start: 0, end: 2 });
@@ -51,7 +101,7 @@ describe("iterateCells (the styled-text walk primitive)", () => {
     expect(out[1]!.escape).toBe(false);
   });
 
-  it("empty string yields nothing", () => {
+  it("empty string visits nothing", () => {
     expect(cells("")).toEqual([]);
   });
 
@@ -68,7 +118,7 @@ describe("iterateCells (the styled-text walk primitive)", () => {
     expect(out.map((c) => c.text).join("")).toBe(s);
   });
 
-  it("yields OSC-8 hyperlinks whole: an 'm' inside the URL never splits the sequence", () => {
+  it("visits OSC-8 hyperlinks whole: an 'm' inside the URL never splits the sequence", () => {
     // The tool-header link shape: OSC 8 open + URL (containing 'm' via
     // /tmp/) + ST, then the VISIBLE label as code-point cells, then the
     // OSC 8 close. The 'm'-to-'m' SGR scan used to cut the sequence at
@@ -109,7 +159,7 @@ describe("iterateCells (the styled-text walk primitive)", () => {
     expect(out.map((c) => c.text).join("")).toBe(input);
   });
 
-  it("yields BEL-terminated OSC sequences whole too", () => {
+  it("visits BEL-terminated OSC sequences whole too", () => {
     const open = "\x1b]8;;file:///x/y\u0007";
     const close = "\x1b]8;;\u0007";
     const out = cells(`a${open}lb${close}c`);
@@ -125,5 +175,17 @@ describe("iterateCells (the styled-text walk primitive)", () => {
     expect(out.map((c) => c.text).join("")).toBe("a\x1b]8;;file:///no-terminator");
     expect(out[1]!.text).toBe("\x1b");
     expect(out[1]!.escape).toBe(false);
+  });
+
+  it("stops the walk when the visitor returns true", () => {
+    const visits: number[] = [];
+    // Typed as the exported visitor on purpose: the stop signal is part of
+    // the walk's contract (truncation and row budgets rely on it).
+    const stopAfterFirst: CellVisitor = (start, _end, _cols, _isEscape) => {
+      visits.push(start);
+      return true;
+    };
+    forEachCell("a漢\x1b[1mb", stopAfterFirst);
+    expect(visits).toEqual([0]);
   });
 });

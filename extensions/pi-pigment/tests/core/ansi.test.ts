@@ -6,7 +6,7 @@ import {
   expandTabs,
   fgRgb,
   fitAnsi,
-  iterateCells,
+  forEachCell,
   measurePlain,
   mixBg,
 } from "#src/core/ansi.ts";
@@ -413,36 +413,41 @@ function referenceWrapAnsi(
       effectiveWidth = width > 2 ? width - 1 : width;
     }
   };
-  for (const cell of iterateCells(content)) {
+  let truncated = false;
+  forEachCell(content, (start, end, cols, isEscape) => {
     if (!onLastRow && rows.length >= maxRows - 1) {
       onLastRow = true;
       effectiveWidth = width > 2 ? width - 1 : width;
     }
-    if (cell.escape) {
-      row += cell.text;
-      continue;
+    if (isEscape) {
+      row += content.slice(start, end);
+      return;
     }
-    if (rowCols + cell.cols > effectiveWidth) {
+    if (rowCols + cols > effectiveWidth) {
       if (onLastRow) {
-        if (width > 2) {
-          rows.push(
-            row +
-              fillBg +
-              " ".repeat(Math.max(0, effectiveWidth - rowCols)) +
-              palette.rowReset +
-              palette.fgDim +
-              "›" +
-              palette.rowReset,
-          );
-        } else {
-          rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
-        }
-        return rows;
+        truncated = true;
+        return true;
       }
       breakRow();
     }
-    row += cell.text;
-    rowCols += cell.cols;
+    row += content.slice(start, end);
+    rowCols += cols;
+  });
+  if (truncated) {
+    if (width > 2) {
+      rows.push(
+        row +
+          fillBg +
+          " ".repeat(Math.max(0, effectiveWidth - rowCols)) +
+          palette.rowReset +
+          palette.fgDim +
+          "›" +
+          palette.rowReset,
+      );
+    } else {
+      rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+    }
+    return rows;
   }
   if (row.length > 0 || rows.length === 0) {
     rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
@@ -479,6 +484,18 @@ describe("wrapAnsi incremental SGR state (differential)", () => {
     { content: "\x1b[1mxyz\x1b[22m".repeat(6), width: 2, maxRows: 2, fillBg: "" },
     // Fits: single row, no tracking consumed.
     { content: `${GREEN_FG}abc${RESET}`, width: 40, maxRows: 4, fillBg: "" },
+    // Plain multi-row with a NON-EMPTY fillBg: wrapPlainAscii must equal
+    // the cell-walk reference byte for byte — continuation rows carry the
+    // fillBg prefix DOUBLED (replayed bg state + the fresh fillBg, the
+    // same escape here — the tracked state itself stays ONE copy) and the
+    // last row truncates with the marker.
+    { content: "abcdefgh ".repeat(8), width: 16, maxRows: 4, fillBg: "\x1b[48;2;30;30;40m" },
+    // Truncation on a later row (maxRows >= 2): the marker row must open
+    // with the CARRIED state (the green fg crosses the break).
+    { content: `${GREEN_FG}const tail values persist${RESET}`, width: 12, maxRows: 2, fillBg: "" },
+    // Wide chars under maxRows=1: the truncation lands BETWEEN cells (a
+    // two-column char is never split) and the marker still fits the row.
+    { content: "汉".repeat(21), width: 40, maxRows: 1, fillBg: "" },
   ];
 
   it("matches the scan-based reference byte for byte", () => {
@@ -492,6 +509,38 @@ describe("wrapAnsi incremental SGR state (differential)", () => {
         }),
       ).toEqual(referenceWrapAnsi(c.content, c));
     }
+  });
+
+  it("truncating past the budget emits a full-width marker row with the carried state", () => {
+    // The green fg opens before the first break and is never reset, so
+    // the marker row must re-open it from the carried state before its
+    // first character — a lost carry would render the row in default fg.
+    const rows = wrapAnsi(`${GREEN_FG}const tail values persist${RESET}`, {
+      width: 12,
+      maxRows: 2,
+      fillBg: "",
+      palette: FALLBACK_PALETTE,
+    });
+    expect(rows).toHaveLength(2);
+    const [first, last] = rows;
+    // Both rows occupy exactly the width; the last ends with the marker.
+    expect(measurePlain(first!)).toBe(12);
+    expect(measurePlain(last!)).toBe(12);
+    expect(plain(last!).endsWith("›")).toBe(true);
+    // The carry: the last row's first bytes re-open the green fg before
+    // its first visible character ("alues…" — the break fell mid-word).
+    expect(last!.startsWith(`${GREEN_FG}alues`)).toBe(true);
+    // Wide chars: the 20th two-column char does not fit the narrowed
+    // budget (39) — the truncation leaves 19 whole chars plus the marker.
+    const wide = wrapAnsi("汉".repeat(21), {
+      width: 40,
+      maxRows: 1,
+      fillBg: "",
+      palette: FALLBACK_PALETTE,
+    });
+    expect(wide).toHaveLength(1);
+    expect(measurePlain(wide[0]!)).toBe(40);
+    expect(plain(wide[0]!)).toBe(`${"汉".repeat(19)} ›`);
   });
 });
 
@@ -540,6 +589,67 @@ describe("injectBg / wordDiffAnalysis code-point alignment", () => {
     const { oldRanges, newRanges } = wordDiffAnalysis("x", " x");
     expect(oldRanges).toEqual([]);
     expect(newRanges).toEqual([]);
+  });
+
+  it("injectBg emphasizes the changed word on grapheme-cluster lines (flag)", () => {
+    // A flag is ONE cell (Intl.Segmenter cluster) spanning TWO code
+    // points. Counting one per cell shifted every later range by one per
+    // cluster — "valor" landed on "alor". Ranges are CODE-POINT offsets,
+    // so the cell must advance `visible` by its code-point span.
+    const base = "\x1b[48;2;0;0;0m";
+    const hi = "\x1b[48;2;1;1;1m";
+    // "deploy 🇺🇸 flag " = 15 code points before "valor".
+    const out = injectBg("deploy \u{1f1fa}\u{1f1f8} flag valor", {
+      ranges: [[15, 20]],
+      baseBg: base,
+      highlightBg: hi,
+      palette: FALLBACK_PALETTE,
+    });
+    expect(out).toContain(`${hi}valor`);
+    expect(out).not.toContain(`${hi}alor`);
+    // Two flags = two merged cells (4 code points, 2 cells) — the shift
+    // compounds per cluster.
+    const out2 = injectBg("\u{1f1fa}\u{1f1f8}\u{1f1f7}\u{1f1f4} camino real", {
+      ranges: [[5, 11]],
+      baseBg: base,
+      highlightBg: hi,
+      palette: FALLBACK_PALETTE,
+    });
+    expect(out2).toContain(`${hi}camino`);
+    expect(out2).not.toContain(`${hi}amino`);
+  });
+
+  it("injectBg emphasizes the changed word on combining-mark lines", () => {
+    // "cafe\u0301" is TWO cells (c-a-f-é clusters): 6 code points, 5
+    // cells. The combining mark merges into ONE cell, so a one-per-cell
+    // count under-advances and shifts the emphasis one cell late.
+    const base = "\x1b[48;2;0;0;0m";
+    const hi = "\x1b[48;2;1;1;1m";
+    const out = injectBg("cafe\u0301 accent bar", {
+      ranges: [[6, 12]],
+      baseBg: base,
+      highlightBg: hi,
+      palette: FALLBACK_PALETTE,
+    });
+    expect(out).toContain(`${hi}accent`);
+    expect(out).not.toContain(`${hi}ccent`);
+  });
+
+  it("injectBg style-then-cluster lines keep range alignment across escapes", () => {
+    // Escapes contribute no code points; the flag sits AFTER an escape —
+    // the consumer must not conflate cell counts with code-point counts
+    // when both shifts (escape skip + cluster merge) apply together.
+    const base = "\x1b[48;2;0;0;0m";
+    const hi = "\x1b[48;2;1;1;1m";
+    const styled = "\x1b[38;2;200;100;100mdeploy \u{1f1fa}\u{1f1f8} flag\x1b[39m valor";
+    const out = injectBg(styled, {
+      ranges: [[15, 20]],
+      baseBg: base,
+      highlightBg: hi,
+      palette: FALLBACK_PALETTE,
+    });
+    expect(out).toContain(`${hi}valor`);
+    expect(out).not.toContain(`${hi}alor`);
   });
 
   it("counts astral code points as one cell and pins the similarity math", () => {

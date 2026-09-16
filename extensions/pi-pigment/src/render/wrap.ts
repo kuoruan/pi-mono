@@ -6,7 +6,7 @@
  * EXACTLY the target width).
  */
 
-import { isPlainAscii, iterateCells } from "#src/core/ansi.ts";
+import { continuationTail, forEachCell, isPlainAscii, truncateBudget } from "#src/core/ansi.ts";
 import { SgrState } from "#src/core/sgr.ts";
 import type { DiffPalette } from "#src/theme/palette.ts";
 
@@ -68,69 +68,93 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
     }
     return wrapPlainAscii(content, width, maxRows, fillBg, palette);
   }
-  // Non-plain content (escapes, CJK): the cell walk below handles BOTH the
-  // fits and the wrap outcome itself — a fitting line emits one row via
-  // the final push, byte-identical to the pad formula above — so there is
-  // no separate pre-measure to pay a second walk.
+  // Non-plain content (escapes, CJK): the single walk below handles BOTH the
+  // fits and the wrap outcome — a fitting line emits one row via the final
+  // push, byte-identical to the pad formula above — so there is no separate
+  // pre-measure to pay a second walk. Row bytes are materialized LAZILY — a
+  // row is a contiguous slice of `content` (its escapes ride inside the
+  // slice), so the common "fits on one row" case never pays the per-cell
+  // slice/concat; only a real break (`breakRow`) or the truncation emit slices.
   const rows: string[] = [];
-  let row = "";
+  let rowStart = 0; // Where the open row's content begins in `content`.
+  let prefix = ""; // The carried state seeded onto a continuation row ("" on row 1).
   let rowCols = 0;
   let onLastRow = false;
   let effectiveWidth = width;
+  // The initial last-row arm, hoisted out of the per-cell callback: rows.length
+  // starts at 0, so only a budget of 1 can arm it before the first cell.
+  if (maxRows <= 1) {
+    onLastRow = true;
+    effectiveWidth = truncateBudget(width);
+  }
   const tracker = new SgrState();
-  /** Close the current row (pad to EXACT width) and open the next. */
-  const breakRow = (): void => {
+  /**
+   * Close the row spanning [rowStart, breakStart): pad to EXACT width and
+   * open the next.
+   *
+   * @param breakStart - One past the row's last code unit.
+   */
+  const breakRow = (breakStart: number): void => {
     const state = tracker.replay();
-    rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
-    // The next row opens with the carried state plus a fresh fillBg —
-    // the tracker must seed from that opening so its replay stays exact.
-    row = state + fillBg;
-    tracker.applySeq(state + fillBg);
+    rows.push(
+      prefix +
+        content.slice(rowStart, breakStart) +
+        fillBg +
+        // Load-bearing: the cell that triggered the break stays on the NEXT
+        // row, so a cell wider than the row (2 cols at width 1) overdraws.
+        " ".repeat(Math.max(0, width - rowCols)) +
+        palette.rowReset,
+    );
+    // Only fillBg needs applying: `state` just left the tracker (feeding it
+    // back is an idempotent no-op), and applySeq would only re-scan bytes
+    // the tracker already holds.
+    prefix = state + fillBg;
+    if (fillBg !== "") tracker.apply(fillBg);
+    rowStart = breakStart;
     rowCols = 0;
     if (rows.length >= maxRows - 1) {
       onLastRow = true;
-      effectiveWidth = width > 2 ? width - 1 : width;
+      effectiveWidth = truncateBudget(width);
     }
   };
-  for (const cell of iterateCells(content)) {
-    if (!onLastRow && rows.length >= maxRows - 1) {
-      onLastRow = true;
-      effectiveWidth = width > 2 ? width - 1 : width;
+  let truncated = false;
+  forEachCell(content, (start, end, cols, isEscape) => {
+    if (isEscape) {
+      // Only escapes need their text — the tracker consumes it; the bytes
+      // themselves ride inside the open row's slice.
+      tracker.apply(content.slice(start, end));
+      return;
     }
-    if (cell.escape) {
-      tracker.apply(cell.text);
-      row += cell.text;
-      continue;
-    }
-    if (rowCols + cell.cols > effectiveWidth) {
+    if (rowCols + cols > effectiveWidth) {
       if (onLastRow) {
-        // Truncation: THIS discarded cell is the proof that visible
-        // content remains (escapes never reach the width check), so the
-        // marker is gated only by room to draw it. It fills to width-1 on
-        // the row's own background (fillBg), keeping the row at EXACTLY
-        // width columns (a wide char can stop the row at width-2).
-        if (width > 2) {
-          rows.push(
-            row +
-              fillBg +
-              " ".repeat(Math.max(0, effectiveWidth - rowCols)) +
-              palette.rowReset +
-              palette.fgDim +
-              "›" +
-              palette.rowReset,
-          );
-        } else {
-          rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
-        }
-        return rows;
+        // THIS discarded cell proves visible content remains (escapes never
+        // reach the width check), so the marker is gated only by room to
+        // draw it; the row stays at exactly width columns.
+        const rowContent = content.slice(rowStart, start);
+        rows.push(
+          prefix +
+            rowContent +
+            fillBg +
+            " ".repeat(Math.max(0, effectiveWidth - rowCols)) +
+            palette.rowReset +
+            (width > 2 ? continuationTail(palette.rowReset, palette.fgDim) : ""),
+        );
+        truncated = true;
+        return true;
       }
-      breakRow();
+      breakRow(start);
     }
-    row += cell.text;
-    rowCols += cell.cols;
-  }
-  if (row.length > 0 || rows.length === 0) {
-    rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+    rowCols += cols;
+  });
+  if (truncated) return rows;
+  if (content.length > 0 || rows.length === 0) {
+    rows.push(
+      prefix +
+        content.slice(rowStart) +
+        fillBg +
+        " ".repeat(Math.max(0, width - rowCols)) +
+        palette.rowReset,
+    );
   }
   return rows;
 }
@@ -160,27 +184,20 @@ function wrapPlainAscii(
   const rows: string[] = [];
   let start = 0;
   let room = width;
+  // `end` is clamped to start + room, so the pads below are never negative.
   while (start < content.length) {
-    if (rows.length >= maxRows - 1) room = width > 2 ? width - 1 : width;
+    if (rows.length >= maxRows - 1) room = truncateBudget(width);
     const end = Math.min(start + room, content.length);
     const slice = content.slice(start, end);
     const open = rows.length === 0 ? "" : rows.length === 1 ? fillBg : `${fillBg}${fillBg}`;
     const truncating = rows.length >= maxRows - 1 && end < content.length;
     if (truncating) {
-      if (width > 2) {
-        rows.push(
-          `${open}${slice}${fillBg}${" ".repeat(Math.max(0, room - slice.length))}${palette.rowReset}${palette.fgDim}›${palette.rowReset}`,
-        );
-      } else {
-        rows.push(
-          `${open}${slice}${fillBg}${" ".repeat(Math.max(0, width - slice.length))}${palette.rowReset}`,
-        );
-      }
+      rows.push(
+        `${open}${slice}${fillBg}${" ".repeat(room - slice.length)}${palette.rowReset}${width > 2 ? continuationTail(palette.rowReset, palette.fgDim) : ""}`,
+      );
       return rows;
     }
-    rows.push(
-      `${open}${slice}${fillBg}${" ".repeat(Math.max(0, width - slice.length))}${palette.rowReset}`,
-    );
+    rows.push(`${open}${slice}${fillBg}${" ".repeat(width - slice.length)}${palette.rowReset}`);
     start = end;
   }
   return rows;

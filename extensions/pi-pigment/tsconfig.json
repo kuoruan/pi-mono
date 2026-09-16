@@ -12,5 +12,5 @@
       "#root/*": ["./*"]
     }
   },
-  "include": ["index.ts", "render-kit.ts", "src", "tests", "vitest.config.ts"]
+  "include": ["index.ts", "render-kit.ts", "src", "tests", "tools", "vitest.config.ts"]
 }

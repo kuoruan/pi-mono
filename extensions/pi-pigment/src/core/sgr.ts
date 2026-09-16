@@ -5,8 +5,7 @@
  * any future batch reducer) stays on the same parameter semantics.
  */
 
-/** The ESC control character every ANSI escape sequence starts with. */
-const ESC = "\u001b";
+import { ESC, escapeEndAt } from "./ansi.ts";
 
 /** Match any SGR escape sequence, capturing its parameters. */
 const ANSI_CAPTURE_RE = new RegExp(`${ESC}\\[([^m]*)m`, "g");
@@ -19,6 +18,19 @@ const SPEC_48 = `${ESC}[48;`;
 const SEQ_RESET_ALL = `${ESC}[0m`;
 const SEQ_RESET_FG = `${ESC}[39m`;
 const SEQ_RESET_BG = `${ESC}[49m`;
+
+/**
+ * Whether a sequence is reset-like — closes enough state that the active
+ * background must be re-established after it. One predicate for the two
+ * consumers (reinjectSgr's pass and injectBg's per-escape re-open) so the
+ * set cannot drift.
+ *
+ * @param escapeText - A single `ESC[...m` sequence.
+ * @returns True for the full reset and the channel defaults.
+ */
+export function isResetLikeSequence(escapeText: string): boolean {
+  return escapeText === SEQ_RESET_ALL || escapeText === SEQ_RESET_FG || escapeText === SEQ_RESET_BG;
+}
 
 /**
  * The SGR color spec's parameter count: `2;r;g;b` consumes 5 (kind +
@@ -226,15 +238,11 @@ export class SgrState {
 
 /**
  * Re-inject `bg` after each reset-like SGR (Shiki closes tokens with the
- * ESC[39m family; 0m/49m count as broader resets). One indexOf walk
- * (SIMD substring search) with the same whole-sequence semantics the
- * iterateCells walk pins: a CSI escape cell runs ESC[ to the next "m";
- * an OSC sequence (the 8;; hyperlinks tool headers carry) runs to its
- * BEL or ST terminator and passes through UNTOUCHED — a URL's own
- * characters must never be mistaken for an SGR end (an "m" in a path
- * used to eat the terminator's ESC byte, corrupting the link and every
- * width measured over it); a lone ESC without a terminator is a code
- * point and copied as-is (no injection there).
+ * ESC[39m family; 0m/49m count as broader resets). One indexOf walk over
+ * the shared escape grammar (`escapeEndAt`): recognized sequences pass
+ * through whole, a reset-like one re-opens the background after itself;
+ * a lone ESC is text by this module's grammar and copied as-is (no
+ * injection there).
  *
  * @param line - The ANSI-styled line.
  * @param bg - The background escape to re-inject.
@@ -249,48 +257,20 @@ export function reinjectSgr(line: string, bg: string, escIndex: number): string 
   let last = 0;
   while (i !== -1) {
     out += line.slice(last, i);
-    const kind = line[i + 1];
-    if (kind === "[") {
-      const end = line.indexOf("m", i + 1);
-      if (end === -1) {
-        // Unterminated CSI: the cell walk yields the lone ESC as one
-        // code point; copy the byte itself and keep scanning.
-        out += ESC;
-        last = i + 1;
-        i = line.indexOf(ESC, last);
-        continue;
-      }
-      const seq = line.slice(i, end + 1);
+    const end = escapeEndAt(line, i);
+    if (end === -1) {
+      // Unterminated sequence or lone ESC: the cell walk's code-point
+      // cell — copy the ESC byte itself and keep scanning after it.
+      out += ESC;
+      last = i + 1;
+    } else {
+      const seq = line.slice(i, end);
       out += seq;
-      if (seq === SEQ_RESET_ALL || seq === SEQ_RESET_FG || seq === SEQ_RESET_BG) {
+      if (isResetLikeSequence(seq)) {
         out += bg;
       }
-      last = end + 1;
-      i = line.indexOf(ESC, last);
-      continue;
+      last = end;
     }
-    if (kind === "]") {
-      const bel = line.indexOf("\u0007", i);
-      const st = line.indexOf(ESC + "\\", i);
-      let end = -1;
-      if (bel !== -1 && (st === -1 || bel < st)) end = bel;
-      else if (st !== -1) end = st + 1; // the ST backslash closes the sequence
-      if (end === -1) {
-        // Unterminated OSC: lone-ESC code point, same as the cell walk.
-        out += ESC;
-        last = i + 1;
-        i = line.indexOf(ESC, last);
-        continue;
-      }
-      out += line.slice(i, end + 1);
-      last = end + 1;
-      i = line.indexOf(ESC, last);
-      continue;
-    }
-    // Lone ESC: the cell walk yields it as one code point and keeps
-    // scanning after it; copy one byte and continue the search.
-    out += ESC;
-    last = i + 1;
     i = line.indexOf(ESC, last);
   }
   return out + line.slice(last);

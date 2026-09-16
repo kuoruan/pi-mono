@@ -28,7 +28,14 @@
 
 import type { RgbColor } from "@earendil-works/pi-tui";
 
-import { isLightRgb, mixRgb, parseOpaqueHex, parseRootColor, rgbToHex } from "#src/core/color.ts";
+import {
+  isLightRgb,
+  mixRgb,
+  parseOpaqueHex,
+  parseRootColor,
+  rgbToHex,
+  tintCanvas,
+} from "#src/core/color.ts";
 import type { Issue } from "#src/core/issue.ts";
 
 import {
@@ -271,22 +278,6 @@ function extractDiffColors(
  */
 function towardCanvas(color: RgbColor, canvas: RgbColor, ratio: number): RgbColor {
   return mixRgb(canvas, color, 1 - ratio);
-}
-
-/**
- * Tint the CANVAS with a little of a color (the background slots' mix:
- * canvas stays the body, the color is the hint). The mirror of
- * towardCanvas — kept as its own name because confusing the two directions
- * is exactly the bug this split prevents (a bg slot taking towardCanvas
- * renders 97% foreground as a background — gray-on-gray text).
- *
- * @param color - The tint color (the fg, usually).
- * @param canvas - The canvas (the body).
- * @param amount - The tint amount (0 = pure canvas, 1 = pure color).
- * @returns The tinted canvas.
- */
-function tintCanvas(color: RgbColor, canvas: RgbColor, amount: number): RgbColor {
-  return mixRgb(canvas, color, amount);
 }
 
 /**

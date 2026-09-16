@@ -25,12 +25,12 @@ Debugging memory in pi-pigment (or any Node process) without browser tooling. pi
 ```sh
 node tools/memwatch.js [port=9229] [intervalMs=2000]
 node tools/memprof.js [port=9229] [seconds=60] [out=/tmp/heap-profile.json]
-node tools/theme-switch-bench.js [blocks=30] [lines=60]
+node tools/leak-probe.ts   # needs --expose-gc; pnpm leak wraps it
 ```
 
 - **memwatch** — a line per sample of `process.memoryUsage()` (`heapUsed`/`heapTotal` in MB). Run it while poking the TUI — scroll, collapse/expand frames, restore sessions — to see which interactions allocate, then watch whether GC reclaims between actions.
 - **memprof** — two phases: first it force-GCs (`HeapProfiler.collectGarbage`) and prints pre/post `heapUsed` — **a slope that survives the GC is real retention**; a slope that collects is just garbage pending collection. Then it runs a _sampling_ heap profiler (compact call-site allocation tree, not a full snapshot) and dumps the JSON. Sort `profile.head.samples` by `selfSize` descending to name the allocating functions. Note: attribution ≠ retention — for retainer chains use the DevTools Memory panel (below).
-- **theme-switch-bench** — the theme-switch re-highlight cost: N code blocks rendered warm under theme A, then cold under theme B (parallel and sequential shapes), plus a tokenize-only split so the tokenizer's share is visible. The regression harness for theme-switch cost — run it after any highlight/theme-selection change.
+- **leak-probe** — no inspector, runs in-process: heap deltas after forced GC across session churn, theme-content churn and the highlight cache bound, plus the Shiki theme registry size (the one container our own bounds cannot reach). `pnpm leak` wraps `node --expose-gc tools/leak-probe.ts`; it prints numbers only, so read them against the notes below.
 
 ## Deep dives (manual)
 

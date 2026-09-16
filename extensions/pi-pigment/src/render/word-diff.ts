@@ -9,6 +9,7 @@
 
 import { diffWords, type Change } from "diff";
 
+import { codePointCount } from "#src/core/ansi.ts";
 import type { DiffPalette } from "#src/theme/palette.ts";
 
 /** Word-level emphasis requires at least this similarity between paired lines. */
@@ -173,13 +174,18 @@ export function wordDiffAnalysis(oldText: string, newText: string): WordDiff {
       if (end > start) newRanges.push([start, end]);
       newPosition += total;
     } else {
-      const total = countCodePoints(part.value);
+      const total = codePointCount(part.value);
       same += total;
       oldPosition += total;
       newPosition += total;
     }
   }
-  const maxLength = Math.max(countCodePoints(oldText), countCodePoints(newText));
+  // The side totals come from the texts themselves, NOT from the running
+  // positions: diffWords's tokenizer can DROP characters at chunk edges
+  // (a trailing space absorbed into a boundary — fuzz-caught: parts
+  // reconstruct the old side at 25 code points against a 26-code-point
+  // input), so the positions are not a guaranteed partition of the text.
+  const maxLength = Math.max(codePointCount(oldText), codePointCount(newText));
   return {
     similarity: maxLength > 0 ? same / maxLength : 1,
     oldRanges,
@@ -215,33 +221,6 @@ function chunkStats(value: string): { total: number; lead: number; body: number;
   }
   if (firstNonWs === -1) return { total, lead: total, body: 0, trail: 0 };
   return { total, lead: firstNonWs, body: lastNonWsEnd - firstNonWs, trail: total - lastNonWsEnd };
-}
-
-/**
- * Count code points (not UTF-16 code units) in plain text — a direct
- * surrogate-aware walk, allocation-free (the iterateCells form yields one
- * cell object per code point; the range producer pays this per chunk and
- * per line, where escape handling is never needed).
- *
- * @param text - The plain text to count.
- * @returns The code-point count.
- */
-function countCodePoints(text: string): number {
-  let count = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-    // A high surrogate pairs ONLY with a following low surrogate (one
-    // code point, two units). A lone high surrogate counts as one cell —
-    // UTF-8 decode never produces one (invalid bytes become U+FFFD), but
-    // exact parity with the iterateCells walk costs one branch and keeps
-    // the two counters identical on every input class.
-    if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
-      const next = text.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) i += 1;
-    }
-    count += 1;
-  }
-  return count;
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
  * The per-frame render hot paths: wrapAnsi / diffRowFrame / injectBg /
  * word-diff pay per row of every diff view render. The cell-level costs
- * underneath them (measurePlain / iterateCells / SgrState) live in
+ * underneath them (measurePlain / forEachCell / SgrState) live in
  * tests/core/ansi-hot.bench.ts; inputs are shared through
  * #test/bench-fixtures.ts.
  *
@@ -77,6 +77,20 @@ test("wrapAnsi (fits-width fast path)", async ({ bench }) => {
       width: 160,
       maxRows: 4,
       fillBg: "",
+      palette: _diffPalette,
+    }).length;
+  }).run();
+});
+
+test("wrapAnsi (styled fits-width)", async ({ bench }) => {
+  // The common diff case: a styled line that fits needs no breaks — the
+  // walk tracks spans only, and the row emits as one slice.
+  const styled = `${_diffPalette.fgDim}const alpha = compute(items, 42, beta);${_diffPalette.rowReset}`;
+  await bench("styled line at width 160 (span walk, single-slice emit)", () => {
+    sink += _wrapAnsi(styled, {
+      width: 160,
+      maxRows: 3,
+      fillBg: _diffPalette.bgBase,
       palette: _diffPalette,
     }).length;
   }).run();

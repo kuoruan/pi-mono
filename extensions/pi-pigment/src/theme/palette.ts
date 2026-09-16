@@ -23,8 +23,14 @@
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { RgbColor } from "@earendil-works/pi-tui";
 
-import { BG_DEFAULT, bgRgb, fgRgb, mixBg } from "#src/core/ansi.ts";
-import { isLightRgb, parseAnsiRgb, parseHexForm, parseRootColor } from "#src/core/color.ts";
+import { BG_DEFAULT, RESET, bgRgb, fgRgb, mixBg } from "#src/core/ansi.ts";
+import {
+  isLightRgb,
+  parseAnsiRgb,
+  parseHexForm,
+  parseRootColor,
+  tintCanvas,
+} from "#src/core/color.ts";
 
 /** The diff sides, in stable order (drives iteration and root identity). */
 export const DIFF_SIDES = ["added", "removed"] as const;
@@ -208,9 +214,6 @@ const FALLBACK_FG: Record<string, RgbColor> = {
   dim: { r: 80, g: 80, b: 80 },
   gutter: { r: 100, g: 100, b: 100 },
 } as const;
-
-/** The full reset escape. */
-const RESET = "\x1b[0m";
 
 /** Fallback palette used before the first resolve() and for theme-less contexts. */
 export const FALLBACK_PALETTE: DiffPalette = {
@@ -452,12 +455,7 @@ function polarityOffenders(
         } catch {
           // keep black
         }
-        const a = tintRoot.alpha;
-        const rgb = {
-          r: Math.round(tintRoot.rgb.r * a + canvas.r * (1 - a)),
-          g: Math.round(tintRoot.rgb.g * a + canvas.g * (1 - a)),
-          b: Math.round(tintRoot.rgb.b * a + canvas.b * (1 - a)),
-        };
+        const rgb = tintCanvas(tintRoot.rgb, canvas, tintRoot.alpha);
         if (isLightRgb(rgb) !== isLight) offenders.push(`${side}.tint`);
       }
     }

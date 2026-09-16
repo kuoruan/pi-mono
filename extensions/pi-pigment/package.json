@@ -60,7 +60,9 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "generate:themes": "node scripts/generate-themes.ts"
+    "generate:themes": "node scripts/generate-themes.ts",
+    "leak": "node --expose-gc tools/leak-probe.ts",
+    "check:risky-tail": "node tools/sync-risky-tail.ts"
   },
   "dependencies": {
     "@aliou/sh": "^0.3.2",

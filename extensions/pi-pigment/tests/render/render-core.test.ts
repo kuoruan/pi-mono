@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { iterateCells } from "#src/core/ansi.ts";
+import { forEachCell } from "#src/core/ansi.ts";
 import type { DiffLine, ParsedDiff } from "#src/core/diff.ts";
 import { parseDiff, parsePatchFiles } from "#src/core/diff.ts";
 import { formatToolErrorResult, setToolErrorBg } from "#src/render/error-frame.ts";
@@ -146,14 +146,15 @@ describe("renderUnified", () => {
       let chars = "";
       let on = false;
       for (const row of out.split("\n")) {
-        for (const cell of iterateCells(row)) {
-          if (cell.escape) {
-            if (cell.text === bg) on = true;
-            else if (bgClasses.includes(cell.text)) on = false;
-            continue;
+        forEachCell(row, (start, end, _cols, isEscape) => {
+          const text = row.slice(start, end);
+          if (isEscape) {
+            if (text === bg) on = true;
+            else if (bgClasses.includes(text)) on = false;
+            return;
           }
-          if (on) chars += cell.text;
-        }
+          if (on) chars += text;
+        });
       }
       return chars;
     };

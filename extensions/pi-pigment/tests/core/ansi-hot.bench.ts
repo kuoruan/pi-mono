@@ -1,11 +1,16 @@
 /**
- * The ansi cell/line hot paths: measurePlain / iterateCells / SgrState
+ * The ansi cell/line hot paths: measurePlain / forEachCell / SgrState
  * are the per-cell and per-line costs every diff view pays on its first
  * render of a block (the Text/Box caches amortize them across unchanged
  * frames; the first wrap and every width change pay full price). Baseline
  * before optimizing; the ASCII fast path in measurePlain lands against
  * these numbers. The frame-level render costs (wrapAnsi / diffRowFrame /
  * injectBg / word diff) live in tests/render/render-hot.bench.ts.
+ *
+ * The measurePlain / forEachCell groups are gate-negative inputs: they show
+ * what the cluster gate costs a line that does NOT need it. The
+ * "grapheme-cluster tier" group is the other side — the segmenter pass a
+ * gated line pays.
  *
  * Benchmarks live inside `test()` as the `bench` context fixture;
  * `.bench.ts` files are skipped by `vitest run` and measured via
@@ -16,19 +21,30 @@
  */
 import { test } from "vitest";
 
-import { fitAnsi, iterateCells, measurePlain } from "#src/core/ansi.ts";
+import { fitAnsi, forEachCell, measurePlain } from "#src/core/ansi.ts";
 import { SgrState } from "#src/core/sgr.ts";
-import { cjkLine, diffBody, plainLine, styledLine } from "#test/bench-fixtures.ts";
+import {
+  cjkLine,
+  cjkMarkLine,
+  diffBody,
+  plainLine,
+  riskyLine,
+  riskyLineAscii,
+  styledLine,
+} from "#test/bench-fixtures.ts";
 
 // Bind the measured functions AND the shared inputs locally: vite's module
 // runner wraps every imported binding in a getter, and at nanosecond scale
 // a getter call inside the timed callback would dominate the measurement.
 const _measurePlain = measurePlain;
-const _iterateCells = iterateCells;
+const _forEachCell = forEachCell;
 const _fitAnsi = fitAnsi;
 const _styledLine = styledLine;
 const _plainLine = plainLine;
 const _cjkLine = cjkLine;
+const _cjkMarkLine = cjkMarkLine;
+const _riskyLine = riskyLine;
+const _riskyLineAscii = riskyLineAscii;
 const _diffBody = diffBody;
 
 // One module-level sink absorbs every measured return value: an unused
@@ -52,11 +68,11 @@ test("measurePlain", async ({ bench }) => {
   }).run();
 });
 
-test("iterateCells", async ({ bench }) => {
+test("forEachCell", async ({ bench }) => {
   const walk = (line: string): void => {
-    for (const cell of _iterateCells(line)) {
-      if (!cell.escape) sink += cell.cols;
-    }
+    _forEachCell(line, (_start, _end, cols, isEscape) => {
+      if (!isEscape) sink += cols;
+    });
   };
   await bench("styled code line (escape + token cells)", () => {
     walk(_styledLine);
@@ -66,6 +82,27 @@ test("iterateCells", async ({ bench }) => {
   }).run();
   await bench("CJK line (wide-cell path)", () => {
     walk(_cjkLine);
+  }).run();
+});
+
+/**
+ * The cell-walk SHAPE: the visitor primitive against a hand-inlined walk of the
+ * same input with the same per-cell classification. The two must stay within
+ * noise of each other — the point of the visitor is that it keeps the walk's
+ * escape/wide-character logic in ONE place without paying for it. A widening gap
+ * means the walk grew machinery again (its generator form measured 5-8x the
+ * inlined walk, the per-cell object being the bulk), so treat a regression here
+ * as a real one, not as bench jitter.
+ */
+test("cell-walk shape (visitor vs inlined: the two must move together)", async ({ bench }) => {
+  await bench("forEachCell (the primitive)", () => {
+    _forEachCell(_plainLine, (_start, _end, cols, isEscape) => {
+      if (!isEscape) sink += cols;
+    });
+  }).run();
+  await bench("inlined walk (no visitor call)", () => {
+    // The same classification as the primitive's first step (ESC code unit).
+    for (let i = 0; i < _plainLine.length; i++) if (_plainLine.charCodeAt(i) !== 27) sink += 1;
   }).run();
 });
 
@@ -89,6 +126,30 @@ test("SgrState apply (the wrap walk's per-escape update)", async ({ bench }) => 
 
 const FIT_RESET = "\x1b[0m";
 const FIT_DIM = "\x1b[38;2;110;110;110m";
+
+/**
+ * The cluster tier's price. The measurePlain / forEachCell groups above are
+ * gate-NEGATIVE inputs (no mark, format character, emoji modifier, jamo or
+ * flag): they carry the gate's own cost. This group measures the other
+ * side. A gated line is walked by grapheme cluster, so it pays one
+ * `Intl.Segmenter` pass plus a pi-tui `visibleWidth` call per genuinely
+ * clustered span — 10–20x the fast walk on the same line length (measured),
+ * which is why the gate exists and why it must stay narrow: a cluster the
+ * walk cannot see (a flag split across rows) is worse than a slow rare
+ * line, but a common line routed here would be a real regression (the
+ * gate-negative CJK groups above stay at parity — that is the sentinel).
+ */
+test("grapheme-cluster tier (gated lines)", async ({ bench }) => {
+  await bench("risky line (flag pair + ZWJ family): cluster walk", () => {
+    sink += _measurePlain(_riskyLine);
+  }).run();
+  await bench("same skeleton in ASCII: fast walk", () => {
+    sink += _measurePlain(_riskyLineAscii);
+  }).run();
+  await bench("gated but unclustered (CJK + one mark)", () => {
+    sink += _measurePlain(_cjkMarkLine);
+  }).run();
+});
 
 test("fitAnsi (truncation)", async ({ bench }) => {
   await bench("plain line truncated at width 40", () => {

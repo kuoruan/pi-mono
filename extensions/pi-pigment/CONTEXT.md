@@ -185,9 +185,10 @@ Opener resolution is position-associated (the parser may merge consecutive hered
 
 ### Rendering pipeline
 
-**Cell**: The unit every width-aware walk of styled text consumes — one SGR escape (free: zero columns, zero characters) or one code point (one visible character, one or two columns; East-Asian wide and regional indicators count 2).
+**Cell**: The unit every width-aware walk of styled text visits — one SGR escape (free: zero columns, zero characters) or one visible unit (one or two columns).
 
-- Produced by `iterateCells`, consumed by wrapping, fitting, background injection, and measurement.
+- Produced by `forEachCell`, consumed by wrapping, fitting, background injection, and measurement. The visitor takes primitives (span, columns, is-escape) instead of allocating a record per cell: the record-yielding predecessor measured 3–8x an inlined walk, and reusing one record measured slower than the allocation it removed.
+- A visible unit is a code point, except on a line carrying cluster-forming code points (marks, format characters, emoji ZWJ and skin-tone sequences, conjoining jamo, regional-indicator flags): there the unit is a grapheme cluster and its columns come from pi-tui's `visibleWidth` — the renderer draws clusters, so it is the width authority, and a rule it changes upstream reaches us without a copy living here. A cluster's span covers all of its code units and a wrap may only break between cells, so no cluster is cut in half. `tests/core/grapheme-clusters.test.ts` pins the agreement over every BMP code point plus a cluster corpus.
 - Pattern emphasis is the one documented exemption (it matches on spans between escapes, not cells); `ansiState` is a separate shape (a whole-string state reduction).
 
 _Avoid_: hand-rolled escape-skipping loops (the pre-Cell walkers — five variants of the same walk was where span-alignment bugs lived).

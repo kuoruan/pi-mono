@@ -4,8 +4,8 @@
  * views and the header helpers composite through.
  */
 
-import { ESC, isPlainAscii, iterateCells } from "#src/core/ansi.ts";
-import { reinjectSgr } from "#src/core/sgr.ts";
+import { ESC, codePointCount, forEachCell, isPlainAscii } from "#src/core/ansi.ts";
+import { isResetLikeSequence, reinjectSgr } from "#src/core/sgr.ts";
 import type { DiffPalette } from "#src/theme/palette.ts";
 
 import type { CharRange } from "./word-diff.ts";
@@ -15,7 +15,7 @@ const EMPTY_RANGES: readonly CharRange[] = [];
 
 /** The injectBg inputs. */
 export interface InjectBgOptions {
-  /** [start, end) visible-character ranges emphasized with highlightBg. */
+  /** [start, end) code-point ranges emphasized with highlightBg. */
   ranges?: CharRange[];
   /** Background escape for the whole line. */
   baseBg: string;
@@ -82,15 +82,16 @@ export function injectBg(ansiLine: string, options: InjectBgOptions): string {
   let visible = 0;
   let inHighlight = false;
   let rangeIndex = 0;
-  for (const cell of iterateCells(ansiLine)) {
-    if (cell.escape) {
-      output += cell.text;
+  forEachCell(ansiLine, (start, end, _cols, isEscape) => {
+    const text = ansiLine.slice(start, end);
+    if (isEscape) {
+      output += text;
       // Re-inject bg after any reset-like sequence (Shiki uses \x1b[39m
       // between tokens; some terminals may treat it as a broader reset).
-      if (cell.text === "\x1b[0m" || cell.text === "\x1b[39m" || cell.text === "\x1b[49m") {
+      if (isResetLikeSequence(text)) {
         output += inHighlight ? emphasisBg : baseBg;
       }
-      continue;
+      return;
     }
     while (rangeIndex < rangeList.length && visible >= rangeList[rangeIndex][1]) rangeIndex += 1;
     const wantsHighlight =
@@ -102,9 +103,13 @@ export function injectBg(ansiLine: string, options: InjectBgOptions): string {
       output += inHighlight ? emphasisBg : baseBg;
     }
     // Code-point offsets are the unit the word-diff ranges are produced
-    // in (see wordDiffAnalysis) — one visible character per cell.
-    output += cell.text;
-    visible += 1;
-  }
+    // in (see wordDiffAnalysis), so a cell advances `visible` by the code
+    // points it spans — not by one. The cluster tier merges several code
+    // points into one cell, and counting one per cell shifted every range
+    // on those lines. The range producer's chunks are cluster-aligned, so
+    // a range never starts inside a cell.
+    output += text;
+    visible += codePointCount(ansiLine, start, end);
+  });
   return output + rowEnd;
 }
