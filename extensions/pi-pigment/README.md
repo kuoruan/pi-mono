@@ -95,11 +95,9 @@ One Shiki highlighter instance serves all tools, with a 192-entry LRU cache for 
 
 ## Credits & see also
 
-pi-pigment was inspired by [pi-diff](https://github.com/phongndo/pi-diff) by phongndo.
+pi-pigment was inspired by [@heyhuynhgiabuu/pi-diff](https://github.com/buddingnewinsights/pi-diff).
 
 Shell-command highlighting and heredoc language injection run on [@aliou/sh](https://github.com/aliou/sh) — thanks to its author, [Aliou Diallo](https://github.com/aliou), for the shell AST.
-
-The two are complementary: pi-pigment renders each tool call inline; pi-diff adds a `/diff` review UI for session and git changes. If you want to review what the agent changed across the whole session, `pi install npm:pi-diff`.
 
 Building an extension that wraps the same tools? See [docs/integrating.md](docs/integrating.md) for the `render-kit` borrowing API and the first-wins coexistence rules.
 
