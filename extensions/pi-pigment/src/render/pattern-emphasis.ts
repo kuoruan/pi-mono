@@ -33,10 +33,6 @@ export interface PatternMatcher {
   needle: string | null;
 }
 
-/**
- * SGR sequence splitter (module-level: compiling per call was the hot
- * path).
- */
 /** Splits a rendered line at SGR escapes, keeping the escapes as segments. */
 const SGR_SPLIT = new RegExp(`(${SEQ_ESC}\\[[0-9;]*m)`);
 

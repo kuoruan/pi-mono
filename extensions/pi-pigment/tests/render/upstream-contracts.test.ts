@@ -53,10 +53,6 @@ beforeAll(() => {
   initTheme(undefined, false);
 }, 60000);
 
-// ---------------------------------------------------------------------------
-// the expand-hint composition
-// ---------------------------------------------------------------------------
-
 /**
  * Pigment's expand affordance mirrors pi's `keyHint` byte for byte (the
  * same `fg("dim", keyText(id)) + fg("muted", " " + description)` split).
@@ -89,10 +85,6 @@ describe("expand-key hint parity with the SDK's keyHint", () => {
     expect(expandKeyHint(ambient)).toBe(keyHint("app.tools.expand", "to expand"));
   });
 });
-
-// ---------------------------------------------------------------------------
-// bash output delegation
-// ---------------------------------------------------------------------------
 
 /**
  * The bash output renders through the SDK's NATIVE result renderer (timing,
@@ -354,10 +346,6 @@ describe("bash onError: the native timing interval", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// edit session compatibility (ADR 0005, amended)
-// ---------------------------------------------------------------------------
-
 describe("edit session compatibility (native renderer on pi-pigment results)", () => {
   it("the NATIVE renderer renders a pi-pigment-executed result", { timeout: 20000 }, async () => {
     // The old parse-and-replace execute dropped the SDK's
@@ -399,10 +387,6 @@ describe("edit session compatibility (native renderer on pi-pigment results)", (
     expect(rendered).toContain("const a = 42;");
   });
 });
-
-// ---------------------------------------------------------------------------
-// the upstream took guard
-// ---------------------------------------------------------------------------
 
 /**
  * Pi-pigment renders `Took Xs` footers on grep/find/ls results (the

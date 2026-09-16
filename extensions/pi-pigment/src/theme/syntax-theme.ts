@@ -109,10 +109,6 @@ const SCOPE_MAP: ReadonlyArray<{ scopes: string[]; color: PiSyntaxColor }> = [
   { scopes: ["punctuation", "meta.brace", "entity.name.tag"], color: "syntaxPunctuation" },
 ];
 
-// ---------------------------------------------------------------------------
-// WCAG adjustment
-// ---------------------------------------------------------------------------
-
 /**
  * The minimum contrast a color achieves over the background set.
  *
@@ -165,10 +161,6 @@ function rgbOfHsl(h: number, s: number, l: number): RgbColor {
   const rgb = new TinyColor({ h, s, l }).toRgb();
   return { r: rgb.r, g: rgb.g, b: rgb.b };
 }
-// ---------------------------------------------------------------------------
-// Theme derivation
-// ---------------------------------------------------------------------------
-
 /**
  * Read one syntax color from the pi theme as RGB, or null when absent.
  *

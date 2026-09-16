@@ -138,9 +138,6 @@ export function needsSeed(language: BundledLanguage | undefined): boolean {
  */
 export const MAX_SEED_CHARS = 64 * 1024;
 
-// ---------------------------------------------------------------------------
-// The highlight cache
-// ---------------------------------------------------------------------------
 // No engine prewarm (measured: the shiki module's
 // ~28ms import is paid at extension load (this file's static registry
 // import), leaving ensureCore ~45ms (WASM instantiate ~40 + grammar 3)

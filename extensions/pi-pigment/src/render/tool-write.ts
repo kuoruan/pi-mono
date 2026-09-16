@@ -286,11 +286,6 @@ export function createWriteWrapper(
         // "+N −M" suffix on the next frame.
         ctx.state.added = d.diff.added;
         ctx.state.removed = d.diff.removed;
-        // The seed source for embedded grammars (vue/html): the NEW file's
-        // text before the hunk, sliced from args (which persist into
-        // renderResult — live and restored alike). The split lives INSIDE
-        // the callback — it runs only when the task's keyed render asks
-        // for a seed, never per frame.
         // The seed source for embedded grammars (vue/html), and only for
         // them (the same gate the edit wrapper applies): the NEW file's
         // text before the hunk, sliced from args (which persist into

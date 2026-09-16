@@ -65,10 +65,6 @@ export function expandTabs(content: string): string {
   return content.includes("\t") ? content.replace(/\t/g, "  ") : content;
 }
 
-// ---------------------------------------------------------------------------
-// Inert text (terminal-injection defense; ADR 0004)
-// ---------------------------------------------------------------------------
-
 /**
  * Neutralize terminal control interpretation in user data (cat -v
  * semantics): every control character the terminal might act on becomes a
@@ -126,10 +122,6 @@ function isControlCode(code: number): boolean {
     (code >= 0x80 && code <= 0x9f)
   );
 }
-
-// ---------------------------------------------------------------------------
-// Terminal width measurement (two tiers: code points, then grapheme clusters)
-// ---------------------------------------------------------------------------
 
 /**
  * Whether a code point renders two terminal columns on its own — the East

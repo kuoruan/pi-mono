@@ -11,10 +11,6 @@ import { structuredPatch } from "diff";
 import { inertText } from "./ansi.ts";
 import { linesOf } from "./lines.ts";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 /** Hunk metadata parsed from a `@@` header, attached to separator DiffLines. */
 export interface HunkMeta {
   /** First old-file line number covered by the hunk. */
@@ -54,10 +50,6 @@ export interface ParsedDiff {
   /** Count of removed lines. */
   removed: number;
 }
-
-// ---------------------------------------------------------------------------
-// Unified diff patch parsing
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a unified diff/patch string into one or more ParsedDiff.
@@ -254,10 +246,6 @@ function parseHunkHeader(line: string): HunkMeta | null {
   return { oldStart, oldLines, newStart, newLines, context };
 }
 
-// ---------------------------------------------------------------------------
-// Hunk gap and separator labels
-// ---------------------------------------------------------------------------
-
 /**
  * Skipped unmodified old-file lines between two hunks — the single gap
  * authority both parsers use (null when the hunks are adjacent or overlap).
@@ -290,10 +278,6 @@ export function sepLabel(hunkMeta: HunkMeta | undefined, gap: number | null): st
   if (gap && gap > 0) return ` +${gap} lines `;
   return "";
 }
-
-// ---------------------------------------------------------------------------
-// Programmatic diff (string-to-string)
-// ---------------------------------------------------------------------------
 
 /**
  * Diff two strings into a ParsedDiff with `ctx` lines of context per hunk.
