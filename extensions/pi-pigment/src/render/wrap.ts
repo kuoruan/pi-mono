@@ -43,6 +43,40 @@ export interface WrapAnsiOptions {
 }
 
 /**
+ * The fits gate only runs at this pane width and above. Below it most
+ * code lines overflow (58% fit a 36-column pane of real code), so the
+ * measurement walk is pure overhead — the mixed-frame bench reads -3..-9%
+ * at 36-40 columns and +8..+50% from 44 up.
+ */
+const FITS_GATE_MIN_WIDTH = 44;
+
+/**
+ * The columns `content` occupies when it fits within `width`, or -1 when it
+ * overflows (the walk stops at the cell that would overshoot).
+ *
+ * Escape cells are skipped in place by the same grammar `wrapAnsi` walks,
+ * which is what makes the fits verdict byte-safe: no cell can exceed the
+ * budget, so no row break — and no tracker traffic — can have happened.
+ *
+ * @param content - ANSI-styled text.
+ * @param width - The column budget.
+ * @returns The used columns, or -1 when the content overflows.
+ */
+function fitsWithin(content: string, width: number): number {
+  let cols = 0;
+  let fits = true;
+  forEachCell(content, (_start, _end, cellCols) => {
+    cols += cellCols;
+    if (cols > width) {
+      fits = false;
+      return true;
+    }
+    return;
+  });
+  return fits ? cols : -1;
+}
+
+/**
  * Wrap ANSI content to `width` columns, capping at `maxRows` (the last row
  * shows a continuation marker when truncated). Escape sequences carry no
  * visual width; a carried SGR state re-opens on each row so styling survives
@@ -68,13 +102,18 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
     }
     return wrapPlainAscii(content, width, maxRows, fillBg, palette);
   }
-  // Non-plain content (escapes, CJK): the single walk below handles BOTH the
-  // fits and the wrap outcome — a fitting line emits one row via the final
-  // push, byte-identical to the pad formula above — so there is no separate
-  // pre-measure to pay a second walk. Row bytes are materialized LAZILY — a
-  // row is a contiguous slice of `content` (its escapes ride inside the
-  // slice), so the common "fits on one row" case never pays the per-cell
-  // slice/concat; only a real break (`breakRow`) or the truncation emit slices.
+  // Non-plain content (escapes, CJK): a measure-only walk decides the fits
+  // case up front — a fitting line takes one allocation-free walk plus one
+  // pad instead of the full wrap machinery. An overflowing line pays the
+  // measurement again, but it stops at the cell that overshoots, so the
+  // repeated pass is only as long as the first row.
+  const used = width >= FITS_GATE_MIN_WIDTH ? fitsWithin(content, width) : -1;
+  if (used !== -1) {
+    return [content + fillBg + " ".repeat(width - used) + palette.rowReset];
+  }
+  // Row bytes are materialized LAZILY — a row is a contiguous slice of
+  // `content` (its escapes ride inside the slice), so only a real break
+  // (`breakRow`) or the truncation emit slices; the final row slices once.
   const rows: string[] = [];
   let rowStart = 0; // Where the open row's content begins in `content`.
   let prefix = ""; // The carried state seeded onto a continuation row ("" on row 1).
@@ -105,11 +144,11 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
         " ".repeat(Math.max(0, width - rowCols)) +
         palette.rowReset,
     );
-    // Only fillBg needs applying: `state` just left the tracker (feeding it
-    // back is an idempotent no-op), and applySeq would only re-scan bytes
-    // the tracker already holds.
     prefix = state + fillBg;
-    if (fillBg !== "") tracker.apply(fillBg);
+    // The `!== ""` guard is correctness, not micro-optimization: apply("")
+    // parses an empty body as the `0` default and CLEARS the state (the
+    // replay above is what re-seeds it; applying `state` is a no-op).
+    if (fillBg !== "") tracker.apply(fillBg, 0, fillBg.length);
     rowStart = breakStart;
     rowCols = 0;
     if (rows.length >= maxRows - 1) {
@@ -120,9 +159,9 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
   let truncated = false;
   forEachCell(content, (start, end, cols, isEscape) => {
     if (isEscape) {
-      // Only escapes need their text — the tracker consumes it; the bytes
-      // themselves ride inside the open row's slice.
-      tracker.apply(content.slice(start, end));
+      // Only SGR cells reach the tracker — escapeEndAt also recognizes OSC
+      // (the header's hyperlinks), whose payload is not parameters.
+      if (content[start + 1] === "[") tracker.apply(content, start, end);
       return;
     }
     if (rowCols + cols > effectiveWidth) {
@@ -147,25 +186,26 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
     rowCols += cols;
   });
   if (truncated) return rows;
-  if (content.length > 0 || rows.length === 0) {
-    rows.push(
-      prefix +
-        content.slice(rowStart) +
-        fillBg +
-        " ".repeat(Math.max(0, width - rowCols)) +
-        palette.rowReset,
-    );
-  }
+  // No guard needed: the walk only runs for non-plain content, and "" is
+  // plain — so a final row always exists to push.
+  rows.push(
+    prefix +
+      content.slice(rowStart) +
+      fillBg +
+      " ".repeat(Math.max(0, width - rowCols)) +
+      palette.rowReset,
+  );
   return rows;
 }
 
 /**
  * Wrap pure printable-ASCII content without the cell walk — the walk's
- * byte contract replicated by slicing: rows break at exactly `width`
- * columns; row 1 opens with `fillBg`, rows 2+ with the carried state
- * (the previous row's fillBg open) plus the fresh `fillBg`; the last row
- * truncates at width-1 with the `›` marker when content remains (width
- * <= 2 has no marker room); every row closes at exactly `width` columns.
+ * byte contract replicated by slicing. Rows break at exactly `width`
+ * columns; the first row opens bare, the second with one `fillBg`, and
+ * rows beyond it with two (the carried background re-open plus the fresh
+ * one); the last row truncates at width-1 with the `›` marker when content
+ * remains (width <= 2 has no marker room); every row closes at exactly
+ * `width` columns.
  *
  * @param content - Printable ASCII (isPlainAscii held) longer than width.
  * @param width - Target column width (> 0).
@@ -183,15 +223,14 @@ function wrapPlainAscii(
 ): string[] {
   const rows: string[] = [];
   let start = 0;
-  let room = width;
   // `end` is clamped to start + room, so the pads below are never negative.
   while (start < content.length) {
-    if (rows.length >= maxRows - 1) room = truncateBudget(width);
+    const armed = rows.length >= maxRows - 1;
+    const room = armed ? truncateBudget(width) : width;
     const end = Math.min(start + room, content.length);
     const slice = content.slice(start, end);
     const open = rows.length === 0 ? "" : rows.length === 1 ? fillBg : `${fillBg}${fillBg}`;
-    const truncating = rows.length >= maxRows - 1 && end < content.length;
-    if (truncating) {
+    if (armed && end < content.length) {
       rows.push(
         `${open}${slice}${fillBg}${" ".repeat(room - slice.length)}${palette.rowReset}${width > 2 ? continuationTail(palette.rowReset, palette.fgDim) : ""}`,
       );

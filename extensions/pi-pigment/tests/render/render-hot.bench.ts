@@ -31,6 +31,7 @@ import {
   diffPalette,
   plainLine,
   styledLine,
+  styledWidth,
   wordNewLine,
   wordOldLine,
 } from "#test/bench-fixtures.ts";
@@ -236,5 +237,36 @@ test("shouldUseSplit (the split/unified verdict per diff render)", async ({ benc
   // view choice) — the duplicate call is the cost this measures.
   await bench("split verdict over a 30-line window", () => {
     sink += _shouldUseSplit(_splitDiff, 120, 40) ? 1 : 0;
+  }).run();
+});
+
+// A frame's worth of lines in the measured repo mix: the widths follow the
+// 34.9k-line sample above, so the fits share matches reality at every pane
+// width (58% of lines fit a 36-column pane, 72% at 56, 92% at 76). Any
+// fits-gate has to beat its own pre-walk overhead at these ratios.
+const mixedBody: string[] = [
+  ...Array.from({ length: 6 }, () => styledWidth(22)),
+  ...Array.from({ length: 9 }, () => styledWidth(32)),
+  ...Array.from({ length: 4 }, () => styledWidth(45)),
+  ...Array.from({ length: 5 }, () => styledWidth(65)),
+  styledWidth(90),
+  styledWidth(130),
+];
+
+test("wrapAnsi (mixed diff body)", async ({ bench }) => {
+  // The real per-frame mix: most lines fit, a few wrap or truncate. This
+  // is the case any fits-gate must win — the per-line overhead it adds to
+  // overflowing lines is paid here, not in the fits-only cases above.
+  await bench("26-line repo-width mix at a 56-column pane", () => {
+    let sum = 0;
+    for (const line of mixedBody) {
+      sum += _wrapAnsi(line, {
+        width: 56,
+        maxRows: 2,
+        fillBg: _diffPalette.bgBase,
+        palette: _diffPalette,
+      }).length;
+    }
+    sink += sum;
   }).run();
 });

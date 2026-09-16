@@ -10,10 +10,6 @@ import { ESC, escapeEndAt } from "./ansi.ts";
 /** Match any SGR escape sequence, capturing its parameters. */
 const ANSI_CAPTURE_RE = new RegExp(`${ESC}\\[([^m]*)m`, "g");
 
-/** The extended-color selector prefixes (fg and bg forms, both length 5). */
-const SPEC_38 = `${ESC}[38;`;
-const SPEC_48 = `${ESC}[48;`;
-
 /** The reset-like sequences reinjectSgr re-injects a background after. */
 const SEQ_RESET_ALL = `${ESC}[0m`;
 const SEQ_RESET_FG = `${ESC}[39m`;
@@ -47,33 +43,78 @@ function colorSpecLength(kind: number | undefined): number {
 }
 
 /**
- * Scan a strict `n;n;…` number tail (digits and separators only) — the
- * allocation-free alternative to split/map for the escape shapes this
- * pipeline emits.
+ * Whether the slice `text[start, end)` equals the literal `seq` — the
+ * allocation-free form of `text.slice(start, end) === seq` for the fast
+ * classifier.
  *
- * @param body - The parameter body after the leading selector.
- * @param count - Expected number count.
- * @returns The parsed numbers, or null when the shape doesn't match.
+ * @param text - The source string.
+ * @param start - The slice start (inclusive).
+ * @param end - The slice end (exclusive).
+ * @param seq - The literal to compare against.
+ * @returns True when the slice equals the literal.
  */
-function scanStrictNumbers(body: string, count: number): number[] | null {
-  const nums: number[] = [];
-  let i = 0;
+function sliceEquals(text: string, start: number, end: number, seq: string): boolean {
+  if (end - start !== seq.length) return false;
+  for (let i = 0; i < seq.length; i++) {
+    if (text[start + i] !== seq[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether the escape span starting at `start` can continue as a
+ * truecolor/indexed color spec — the classifier needs only the `2;`/`5;`
+ * head; the numbers are scanned strictly against the tail itself. `end - 1`
+ * is the escape end: the tail must be consumed exactly (the closing `m`
+ * lies outside it).
+ *
+ * @param text - The source string.
+ * @param start - The scan position (just past the `38;`/`48;` prefix).
+ * @param end - The escape end (exclusive of the closing `m`).
+ * @returns The tail offset and channel count, or null when no spec starts here.
+ */
+function specHeadAt(text: string, start: number, end: number): { count: number } | null {
+  if (end - start < 2 || text[start + 1] !== ";") return null;
+  if (text[start] === "2") return { count: 3 };
+  if (text[start] === "5") return { count: 1 };
+  return null;
+}
+
+/**
+ * Parse exactly `count` strict `n;n;…` numbers from `text[i, end)` — the
+ * allocation-free scan over the source itself (no slice, no split).
+ *
+ * @param text - The source string.
+ * @param i - The scan position.
+ * @param end - The escape end (exclusive of the closing `m`).
+ * @param count - Expected number count.
+ * @param out - The parsed numbers (only complete on success).
+ * @returns True exactly when the tail is consumed (i === end on success).
+ */
+function scanTailNumbers(
+  text: string,
+  i: number,
+  end: number,
+  count: number,
+  out: number[],
+): boolean {
+  out.length = 0;
   for (let k = 0; k < count; k++) {
     let value = 0;
     let digits = 0;
-    while (i < body.length && body[i] >= "0" && body[i] <= "9") {
-      value = value * 10 + (body.charCodeAt(i) - 48);
+    while (i < end && text[i] >= "0" && text[i] <= "9") {
+      value = value * 10 + (text.charCodeAt(i) - 48);
       i++;
       digits++;
     }
-    if (digits === 0) return null;
-    nums.push(value);
+    if (digits === 0) return false;
+    out.push(value);
     if (k < count - 1) {
-      if (body[i] !== ";") return null;
+      if (text[i] !== ";") return false;
       i++;
     }
   }
-  return i === body.length ? nums : null;
+  return i === end;
 }
 
 /**
@@ -93,91 +134,98 @@ export class SgrState {
   private fg = "";
   /** Background escape currently open (the full `48;…m` sequence, not a color value). */
   private bg = "";
-  /** Attribute codes currently open (1 bold, 3 italic, … — off-codes delete). */
-  private attrs = new Set<number>();
+  /**
+   * Attribute codes currently open (1 bold, 3 italic, … — off-codes delete).
+   * Lazy: most lines only carry fg/bg, so the Set is built on first add.
+   */
+  private attrs: Set<number> | null = null;
 
   /**
-   * Apply one escape sequence in place.
+   * Apply one escape sequence in place. The optional span form classifies
+   * directly against the source — zero slice allocations for the fast path.
    *
-   * @param escapeText - A single `ESC[...m` sequence.
+   * @param escapeText - A single `ESC[...m` sequence, or the source string
+   *   when `start`/`end` delimit the escape within it.
+   * @param start - The escape start within the source (default 0).
+   * @param end - The escape end within the source (default text length).
    * @returns Nothing.
    */
-  apply(escapeText: string): void {
+  apply(escapeText: string, start = 0, end = escapeText.length): void {
     // Fast classifier first: the escapes this pipeline itself emits are
     // literal shapes (resets, channel defaults, attribute on/off) or
     // truecolor/256 forms with strict digit tails — handled without a
     // split/map allocation. Anything else takes the full parameter walk.
-    if (escapeText === "\u001b[0m" || escapeText === "\u001b[m") {
+    if (
+      sliceEquals(escapeText, start, end, "\u001b[0m") ||
+      sliceEquals(escapeText, start, end, "\u001b[m")
+    ) {
       this.fg = "";
       this.bg = "";
-      this.attrs.clear();
+      this.attrs = null;
       return;
     }
-    if (escapeText === "\u001b[39m") {
+    if (sliceEquals(escapeText, start, end, "\u001b[39m")) {
       this.fg = "";
       return;
     }
-    if (escapeText === "\u001b[49m") {
+    if (sliceEquals(escapeText, start, end, "\u001b[49m")) {
       this.bg = "";
       return;
     }
-    if (escapeText === "\u001b[22m") {
-      this.attrs.delete(1); // bold off (and dim off — 2)
-      this.attrs.delete(2);
+    if (sliceEquals(escapeText, start, end, "\u001b[22m")) {
+      this.attrs?.delete(1); // bold off (and dim off — 2)
+      this.attrs?.delete(2);
       return;
     }
-    if (escapeText === "\u001b[23m") {
-      this.attrs.delete(3); // italic off
+    if (sliceEquals(escapeText, start, end, "\u001b[23m")) {
+      this.attrs?.delete(3); // italic off
       return;
     }
-    if (escapeText === "\u001b[24m") {
-      this.attrs.delete(4); // underline off
+    if (sliceEquals(escapeText, start, end, "\u001b[24m")) {
+      this.attrs?.delete(4); // underline off
       return;
     }
-    if (escapeText === "\u001b[29m") {
-      this.attrs.delete(9); // strikethrough off
+    if (sliceEquals(escapeText, start, end, "\u001b[29m")) {
+      this.attrs?.delete(9); // strikethrough off
       return;
     }
-    if (escapeText.length === 4 && escapeText[2] >= "1" && escapeText[2] <= "9") {
-      this.attrs.add(escapeText.charCodeAt(2) - 48);
+    if (end - start === 4 && escapeText[start + 2] >= "1" && escapeText[start + 2] <= "9") {
+      (this.attrs ??= new Set()).add(escapeText.charCodeAt(start + 2) - 48);
       return;
     }
     // Truecolor/256 color specs: `38;2;r;g;b` (or 48) / `38;5;n` (or 48) —
-    // scanned strictly, normalized exactly like the parameter walk does.
-    // A bare 38/48 (no `;kind`) skips the classifier and takes the walk.
+    // scanned strictly against the source tail, normalized exactly like
+    // the parameter walk does. A bare 38/48 (no `;kind`) skips the
+    // classifier and takes the walk.
     let kind: "38" | "48" | null = null;
-    if (escapeText.startsWith(SPEC_38)) {
+    if (sliceEquals(escapeText, start, start + 5, `${ESC}[38;`)) {
       kind = "38";
-    } else if (escapeText.startsWith(SPEC_48)) {
+    } else if (sliceEquals(escapeText, start, start + 5, `${ESC}[48;`)) {
       kind = "48";
     }
     if (kind !== null) {
-      const body = escapeText.slice(SPEC_38.length, -1);
-      const rgb = body.startsWith("2;") ? scanStrictNumbers(body.slice(2), 3) : null;
-      if (rgb !== null) {
-        const seq = `\u001b[${kind};2;${rgb.join(";")}m`;
-        if (kind === "38") this.fg = seq;
-        else this.bg = seq;
-        return;
-      }
-      const indexed = body.startsWith("5;") ? scanStrictNumbers(body.slice(2), 1) : null;
-      if (indexed !== null) {
-        const seq = `\u001b[${kind};5;${indexed[0]}m`;
-        if (kind === "38") this.fg = seq;
-        else this.bg = seq;
-        return;
+      // end - 1 skips the closing `m`: the tail must consume exactly.
+      const head = specHeadAt(escapeText, start + 5, end - 1);
+      if (head !== null) {
+        const channels: number[] = [];
+        if (scanTailNumbers(escapeText, start + 7, end - 1, head.count, channels)) {
+          const seq = `\u001b[${kind};${head.count === 3 ? "2" : "5"};${channels.join(";")}m`;
+          if (kind === "38") this.fg = seq;
+          else this.bg = seq;
+          return;
+        }
       }
     }
     // Full parameter walk (composite sequences like `1;38;2;…`, and
     // anything the classifier declined).
-    const params = (escapeText.slice(2, -1) || "0").split(";").map(Number);
+    const params = (escapeText.slice(start + 2, end - 1) || "0").split(";").map(Number);
     let i = 0;
     while (i < params.length) {
       const p = params[i];
       if (p === 0) {
         this.fg = "";
         this.bg = "";
-        this.attrs.clear();
+        this.attrs = null;
       } else if (p === 39) {
         this.fg = "";
       } else if (p === 49) {
@@ -193,16 +241,16 @@ export class SgrState {
         }
         i += len - 1;
       } else if (p === 22) {
-        this.attrs.delete(1);
-        this.attrs.delete(2);
+        this.attrs?.delete(1);
+        this.attrs?.delete(2);
       } else if (p === 23) {
-        this.attrs.delete(3);
+        this.attrs?.delete(3);
       } else if (p === 24) {
-        this.attrs.delete(4);
+        this.attrs?.delete(4);
       } else if (p === 29) {
-        this.attrs.delete(9);
-      } else if (p >= 1 && p <= 9) {
-        this.attrs.add(p);
+        this.attrs?.delete(9);
+      } else if (p !== undefined && p >= 1 && p <= 9) {
+        (this.attrs ??= new Set()).add(p);
       }
       i++;
     }
@@ -231,6 +279,7 @@ export class SgrState {
    * @returns The re-open sequences.
    */
   replay(): string {
+    if (this.attrs === null) return this.bg + this.fg;
     const attrSeqs = [...this.attrs].map((a) => `\u001b[${a}m`).join("");
     return this.bg + this.fg + attrSeqs;
   }

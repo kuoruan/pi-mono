@@ -280,6 +280,38 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
     ).toEqual([`${styled}  ${reset}`]);
   });
 
+  it("fits gate: styled content shorter than width takes the measured path", () => {
+    // The gate returns the used columns; the emit must equal the walk's
+    // single-row output byte for byte (no break, no tracker traffic).
+    const reset = "\u001b[0m";
+    const styled = `${GREEN_FG}ab${reset}`;
+    expect(
+      wrapAnsi(styled, { width: 4, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
+    ).toEqual([`${styled}  ${reset}`]);
+    // One column over: the gate declines and the walk breaks the row.
+    expect(
+      wrapAnsi(styled, { width: 1, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
+    ).toEqual([`${GREEN_FG}a${reset}`, `${GREEN_FG}b${reset}${reset}`]);
+  });
+
+  it("keeps SGR state across an OSC sequence (its payload is not parameters)", () => {
+    // escapeEndAt recognizes OSC (the header's hyperlinks) whole, so the
+    // walk hands the tracker an OSC cell — whose payload must NOT be parsed
+    // as SGR parameters. The reference reduction (applySeq) only matches
+    // ESC[...m and skips OSC; without the shape guard the payload's numeric
+    // fields (here a 0) would clear the state and inject phantom attributes.
+    const reset = "\u001b[0m";
+    const link = "\u001b]8;;http://example/0;2;1\u0007";
+    const content = `${GREEN_FG}abcd${link}efgh${reset}`;
+    const rows = wrapAnsi(content, { width: 5, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain(link); // the link bytes ride in the open row's slice
+    expect(plain((rows[0] ?? "").replace(link, ""))).toBe("abcde");
+    // The carried state is the true SGR state (green), not the OSC payload.
+    expect(rows[1]?.startsWith(GREEN_FG)).toBe(true);
+    expect(plain(rows[1] ?? "")).toBe("fgh  ");
+  });
+
   it("CJK content that fits emits one row byte-identical to the pad formula", () => {
     const reset = "\u001b[0m";
     expect(
