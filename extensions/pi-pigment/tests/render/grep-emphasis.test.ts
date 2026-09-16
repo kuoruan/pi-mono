@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { SEQ_BOLD, SEQ_BOLD_OFF, SEQ_FG_DEFAULT, SEQ_RESET } from "#src/core/escapes.ts";
 import { emphasize, riskyPattern } from "#src/render/pattern-emphasis.ts";
 import { parseHitLine, renderHitLine } from "#src/render/tool-grep.ts";
 import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
 import { buildRenderTheme, viewFor } from "#test/fixtures.ts";
 
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const BOLD_OFF = "\x1b[22m";
-const FG_DEFAULT = "\x1b[39m";
 const STR_FG = "\x1b[38;2;220;220;170m"; // a syntax-string color
 /** The emphasis spec callers pass: bold + an independent accent fg. */
 const EMPHASIS = { fg: "\x1b[38;2;255;170;0m" };
@@ -82,12 +79,12 @@ describe("renderHitLine (plain-text hit lines carry their own fg)", () => {
     expect(out).toContain(theme.getFgAnsi("toolOutput"));
     // The emphasis wrap closes CHANNEL-SCOPED (bold off) and re-opens the
     // content fg: the text AFTER the match keeps the toolOutput color.
-    expect(out).toContain(`${BOLD_OFF}${theme.getFgAnsi("toolOutput")}`);
-    // The line ends with the channel-scoped fg close — a full RESET is
+    expect(out).toContain(`${SEQ_BOLD_OFF}${theme.getFgAnsi("toolOutput")}`);
+    // The line ends with the channel-scoped fg close — a full SEQ_RESET is
     // gone from the emission path (it would kill pi's line-level frame
     // canvas from the match onward — the tool-ls rule).
-    expect(out).not.toContain(RESET);
-    expect(out.endsWith(FG_DEFAULT)).toBe(true);
+    expect(out).not.toContain(SEQ_RESET);
+    expect(out.endsWith(SEQ_FG_DEFAULT)).toBe(true);
   });
 });
 
@@ -95,7 +92,7 @@ describe("emphasize (grep hit emphasis)", () => {
   it("skips regex emphasis for risky patterns (graceful degradation)", () => {
     // (a+)+b hangs JS while ripgrep answers instantly; emphasis must not
     // run it at all — content passes through with syntax colors intact.
-    const content = `${STR_FG}aaaab${RESET}`;
+    const content = `${STR_FG}aaaab${SEQ_RESET}`;
     const out = emphasize({
       content,
       pattern: "(a+)+b",
@@ -106,7 +103,7 @@ describe("emphasize (grep hit emphasis)", () => {
   });
 
   it("re-opens the span's fg after each hit", () => {
-    const content = `${STR_FG}abcabc${RESET}`;
+    const content = `${STR_FG}abcabc${SEQ_RESET}`;
     const out = emphasize({
       content,
       pattern: "abc",
@@ -114,11 +111,11 @@ describe("emphasize (grep hit emphasis)", () => {
       emphasis: EMPHASIS,
     });
     // After each hit's channel-scoped close (bold off), the string color
-    // resumes for the rest. The wrap is BOLD + accent (the CLI convention
+    // resumes for the rest. The wrap is SEQ_BOLD + accent (the CLI convention
     // — visible even where the accent overlaps a token color); the
-    // content's own trailing RESET passes through untouched.
+    // content's own trailing SEQ_RESET passes through untouched.
     expect(out).toBe(
-      `${STR_FG}${BOLD}${EMPHASIS.fg}abc${BOLD_OFF}${STR_FG}${BOLD}${EMPHASIS.fg}abc${BOLD_OFF}${STR_FG}${RESET}`,
+      `${STR_FG}${SEQ_BOLD}${EMPHASIS.fg}abc${SEQ_BOLD_OFF}${STR_FG}${SEQ_BOLD}${EMPHASIS.fg}abc${SEQ_BOLD_OFF}${STR_FG}${SEQ_RESET}`,
     );
   });
 
@@ -132,7 +129,7 @@ describe("emphasize (grep hit emphasis)", () => {
     // No span fg active (plain content): each hit closes bold, then the
     // fg default — never a full reset (the frame canvas must survive).
     expect(out).toBe(
-      `${BOLD}${EMPHASIS.fg}Find${BOLD_OFF}${FG_DEFAULT} ${BOLD}${EMPHASIS.fg}find${BOLD_OFF}${FG_DEFAULT} ${BOLD}${EMPHASIS.fg}FIND${BOLD_OFF}${FG_DEFAULT}`,
+      `${SEQ_BOLD}${EMPHASIS.fg}Find${SEQ_BOLD_OFF}${SEQ_FG_DEFAULT} ${SEQ_BOLD}${EMPHASIS.fg}find${SEQ_BOLD_OFF}${SEQ_FG_DEFAULT} ${SEQ_BOLD}${EMPHASIS.fg}FIND${SEQ_BOLD_OFF}${SEQ_FG_DEFAULT}`,
     );
   });
 });
@@ -182,7 +179,7 @@ describe("renderHitLine prefix coloring", () => {
   });
 
   it("emits channel-scoped closes only — no full reset, no background escapes", () => {
-    // The wrap must never kill pi's line-level frame canvas: a full RESET
+    // The wrap must never kill pi's line-level frame canvas: a full SEQ_RESET
     // or an inline bg escape would expose the terminal default background
     // from the match onward (the tool-ls channel-scoped rule).
     const content = `${STR_FG}Find find FIND`;
@@ -197,6 +194,6 @@ describe("renderHitLine prefix coloring", () => {
     expect(out).not.toMatch(/\x1b\[0m/);
     // eslint-disable-next-line no-control-regex -- matches the background escapes the wrap must not emit
     expect(out).not.toMatch(/\x1b\[4[89]/);
-    expect(out).toContain(BOLD_OFF);
+    expect(out).toContain(SEQ_BOLD_OFF);
   });
 });

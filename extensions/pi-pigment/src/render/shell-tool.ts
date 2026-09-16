@@ -22,6 +22,7 @@
 import type { BashToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import { inertText } from "#src/core/ansi.ts";
+import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { astInjectRegions, fallbackHeredocRegions } from "./heredoc-inject.ts";
@@ -106,7 +107,7 @@ export function createShellWrapper(
             // Compose over the base: renderTokensAnsi closes each token's
             // fg with ESC[39m — re-open the base after every close so
             // uncolored segments (flags, paths) keep the title color.
-            const composed = highlighted.replaceAll("\x1b[39m", `\x1b[39m${base}`);
+            const composed = highlighted.replaceAll(SEQ_FG_DEFAULT, `${SEQ_FG_DEFAULT}${base}`);
             // Stale guard: the command moved on while we highlighted, or
             // the cache key was superseded (a theme switch kicked a fresh
             // highlight — the older one's colors must not land over it).

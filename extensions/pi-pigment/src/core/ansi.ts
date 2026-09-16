@@ -13,26 +13,12 @@ import { eastAsianWidth } from "get-east-asian-width";
 
 import { createBoundedFifoMap } from "./bounded-map.ts";
 import { mixRgb } from "./color.ts";
+import { SEQ_BEL, SEQ_ESC } from "./escapes.ts";
 
 /** Printable ASCII code units — the width fast-path gate. */
 const PLAIN_ASCII_RE = /^[\x20-\x7e]*$/;
 /** Truecolor-only color factory (level 3, ignoring NO_COLOR/FORCE_COLOR). */
 const color = new Ansis(3);
-
-/** The ESC control character every ANSI escape sequence starts with. */
-export const ESC = "\u001b";
-
-/** The SGR reset sequence. */
-export const RESET = "\u001b[0m";
-
-/** The SGR sequence resetting the background to the terminal default. */
-export const BG_DEFAULT = "\x1b[49m";
-
-/** The SGR sequence resetting the foreground to the terminal default. */
-export const FG_DEFAULT = "\x1b[39m";
-
-/** The dim style's opening escape. */
-export const DIM = "\x1b[2m";
 
 /**
  * Build a truecolor fg SGR escape.
@@ -86,7 +72,7 @@ export function expandTabs(content: string): string {
 /**
  * Neutralize terminal control interpretation in user data (cat -v
  * semantics): every control character the terminal might act on becomes a
- * visible caret representation — ESC → `^[`, CR → `^M`, DEL → `^?`, C1
+ * visible caret representation — SEQ_ESC → `^[`, CR → `^M`, DEL → `^?`, C1
  * code points → their C0-equivalent caret. Display is honest (the file
  * really contains these bytes) and inert (they can only produce glyphs,
  * never sequence interpretation — no OSC 52 clipboard writes, no CSI
@@ -117,7 +103,7 @@ export function inertText(text: string): string {
       // mapping only consults code points below 0xa0, where UTF-16 code
       // units and code points coincide.
       const code = ch.charCodeAt(0);
-      // C1 maps to its C0 equivalent (0x9b ≡ CSI ≡ ESC+[): the same caret
+      // C1 maps to its C0 equivalent (0x9b ≡ CSI ≡ SEQ_ESC+[): the same caret
       // representation, so the rule stays total across both blocks. DEL's
       // caret char is "?" (its low six bits, per cat -v).
       const c0 = code >= 0x80 && code <= 0x9f ? code - 0x80 : code;
@@ -176,7 +162,7 @@ function isWideCodePoint(codePoint: number): boolean {
  * them), emoji skin-tone modifiers, conjoining Hangul jamo, and the regional
  * indicators (a flag is ONE cluster of two).
  *
- * Control characters are deliberately absent: ESC is one, and every escape
+ * Control characters are deliberately absent: SEQ_ESC is one, and every escape
  * this module emits starts with it, so including them would send every
  * styled line to the cluster walk. `inertText` owns C0/C1/DEL and
  * `expandTabs` owns the tab, so neither reaches measurement.
@@ -249,9 +235,9 @@ let graphemeSegmenter: Intl.Segmenter | undefined;
 
 /**
  * The end of the escape sequence starting at `i`, or -1 when there is none.
- * Callers guard on `s[i] === ESC`.
+ * Callers guard on `s[i] === SEQ_ESC`.
  *
- * The escape grammar, in its one home: `ESC[...m` (SGR — the only shape this
+ * The escape grammar, in its one home: `SEQ_ESC[...m` (SGR — the only shape this
  * module emits) and OSC (the 8;; hyperlinks the header writes), whose cell
  * runs to the BEL or ST terminator so a URL's characters are never
  * escape-cell boundaries (an "m" in a path must not split the sequence).
@@ -259,8 +245,8 @@ let graphemeSegmenter: Intl.Segmenter | undefined;
  * the same shapes rather than keeping a second copy of them.
  *
  * @param s - The ANSI-styled text.
- * @param i - Index of the ESC.
- * @returns The exclusive end of the escape, or -1 for a lone ESC.
+ * @param i - Index of the SEQ_ESC.
+ * @returns The exclusive end of the escape, or -1 for a lone SEQ_ESC.
  */
 export function escapeEndAt(s: string, i: number): number {
   const kind = s[i + 1];
@@ -269,8 +255,8 @@ export function escapeEndAt(s: string, i: number): number {
     return end === -1 ? -1 : end + 1;
   }
   if (kind === "]") {
-    const bel = s.indexOf("\u0007", i);
-    const st = s.indexOf(ESC + "\\", i);
+    const bel = s.indexOf(SEQ_BEL, i);
+    const st = s.indexOf(SEQ_ESC + "\\", i);
     if (bel !== -1 && (st === -1 || bel < st)) return bel + 1;
     if (st !== -1) return st + 2;
   }
@@ -278,12 +264,12 @@ export function escapeEndAt(s: string, i: number): number {
 }
 
 /**
- * Visit the cell at an ESC, in either tier: the whole escape when one is
- * recognized, otherwise the lone ESC — text by this module's grammar, one
+ * Visit the cell at an SEQ_ESC, in either tier: the whole escape when one is
+ * recognized, otherwise the lone SEQ_ESC — text by this module's grammar, one
  * column in both tiers' agreement.
  *
  * @param s - The ANSI-styled text.
- * @param i - Index of the ESC.
+ * @param i - Index of the SEQ_ESC.
  * @param visit - The walk's visitor.
  * @returns The index after the cell, or -1 when the visitor stopped the walk.
  */
@@ -312,8 +298,8 @@ function stepEscape(s: string, i: number, visit: CellVisitor): number {
  * free. A cluster's span covers all of its code units and a wrap may only
  * break between cells, so no cluster is ever cut in half.
  *
- * `ESC[...m` is the only escape shape recognized (the SGR grammar the
- * rest of this module emits); a lone ESC without a terminating `m` visits
+ * `SEQ_ESC[...m` is the only escape shape recognized (the SGR grammar the
+ * rest of this module emits); a lone SEQ_ESC without a terminating `m` visits
  * as a single code point.
  *
  * The visitor takes primitives instead of a `Cell` record: the generator
@@ -345,7 +331,7 @@ export function forEachCell(s: string, visit: CellVisitor): void {
 function forEachCodePointCell(s: string, visit: CellVisitor): void {
   let i = 0;
   while (i < s.length) {
-    if (s[i] === ESC) {
+    if (s[i] === SEQ_ESC) {
       const next = stepEscape(s, i, visit);
       if (next === -1) return;
       i = next;
@@ -363,7 +349,7 @@ function forEachCodePointCell(s: string, visit: CellVisitor): void {
  * text run between escapes is segmented into grapheme clusters, each
  * visiting as one cell.
  *
- * Runs are sliced at the next ESC because the segmenter must never see
+ * Runs are sliced at the next SEQ_ESC because the segmenter must never see
  * escape bytes — a Control breaks clusters, so an escape would be shredded
  * into cells.
  *
@@ -376,13 +362,13 @@ function forEachClusterCell(s: string, visit: CellVisitor): void {
   }));
   let i = 0;
   while (i < s.length) {
-    if (s[i] === ESC) {
+    if (s[i] === SEQ_ESC) {
       const next = stepEscape(s, i, visit);
       if (next === -1) return;
       i = next;
       continue;
     }
-    const nextEscape = s.indexOf(ESC, i);
+    const nextEscape = s.indexOf(SEQ_ESC, i);
     const runEnd = nextEscape === -1 ? s.length : nextEscape;
     let at = i;
     for (const { segment } of segmenter.segment(s.slice(i, runEnd))) {

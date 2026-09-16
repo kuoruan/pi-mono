@@ -11,7 +11,8 @@ import { pathToFileURL } from "node:url";
 
 import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 
-import { inertText, RESET } from "#src/core/ansi.ts";
+import { inertText } from "#src/core/ansi.ts";
+import { SEQ_RESET } from "#src/core/escapes.ts";
 import { linesOf } from "#src/core/lines.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 
@@ -78,7 +79,7 @@ export function formatToolHeaderPath(
 /**
  * `+N -M` summary chip with the palette's diff colors.
  *
- * Chips close with the BARE reset (core/ansi RESET), never palette.rowReset:
+ * Chips close with the BARE reset (core/ansi SEQ_RESET), never palette.rowReset:
  * the header row's background is INJECTED by the frame's customBgFn (injectBg
  * re-opens its baseBg after every reset), not painted by the chip itself. A
  * rowReset close would re-open the palette's bgBase AFTER the injected one and
@@ -93,9 +94,9 @@ export function formatToolHeaderPath(
  */
 export function summarize(a: number, d: number, palette: DiffPalette): string {
   const p: string[] = [];
-  if (a > 0) p.push(`${palette.fgAdded}+${a}${RESET}`);
-  if (d > 0) p.push(`${palette.fgRemoved}-${d}${RESET}`);
-  return p.length ? p.join(" ") : `${palette.fgDim}no changes${RESET}`;
+  if (a > 0) p.push(`${palette.fgAdded}+${a}${SEQ_RESET}`);
+  if (d > 0) p.push(`${palette.fgRemoved}-${d}${SEQ_RESET}`);
+  return p.length ? p.join(" ") : `${palette.fgDim}no changes${SEQ_RESET}`;
 }
 
 /**

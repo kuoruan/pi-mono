@@ -4,7 +4,8 @@
  * views and the header helpers composite through.
  */
 
-import { ESC, codePointCount, forEachCell, isPlainAscii } from "#src/core/ansi.ts";
+import { codePointCount, forEachCell, isPlainAscii } from "#src/core/ansi.ts";
+import { SEQ_ESC } from "#src/core/escapes.ts";
 import { isResetLikeSequence, reinjectSgr } from "#src/core/sgr.ts";
 import type { DiffPalette } from "#src/theme/palette.ts";
 
@@ -43,13 +44,13 @@ export function injectBg(ansiLine: string, options: InjectBgOptions): string {
   const rangeList = ranges ?? EMPTY_RANGES;
   const emphasisBg = highlightBg ?? baseBg;
   const rowEnd = palette?.rowReset ?? baseBg;
-  // One ESC probe decides every later branch: memchr-fast, stops at the
-  // first ESC on styled lines (no full-line regex scan wasted on them).
-  const escIndex = ansiLine.indexOf(ESC);
+  // One SEQ_ESC probe decides every later branch: memchr-fast, stops at the
+  // first SEQ_ESC on styled lines (no full-line regex scan wasted on them).
+  const escIndex = ansiLine.indexOf(SEQ_ESC);
   if (rangeList.length === 0) {
     // No emphasis ranges: the only work is the base bg wrap plus the reset
     // reinjection. An escape-free line (any charset) needs neither;
-    // otherwise reinjectSgr resumes from the known first ESC.
+    // otherwise reinjectSgr resumes from the known first SEQ_ESC.
     if (escIndex === -1) return `${baseBg}${ansiLine}${rowEnd}`;
     return `${baseBg}${reinjectSgr(ansiLine, baseBg, escIndex)}${rowEnd}`;
   }

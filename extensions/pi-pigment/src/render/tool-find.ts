@@ -9,7 +9,8 @@
 
 import type { FindToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import { FG_DEFAULT, inertText } from "#src/core/ansi.ts";
+import { inertText } from "#src/core/ansi.ts";
+import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/highlight.ts";
 
 import { accentEmphasis, emphasize, type EmphasisSpec } from "./pattern-emphasis.ts";
@@ -87,7 +88,9 @@ function styleFindPath(options: StyleFindPathOptions): string {
     // The fgCode escape closes channel-scoped (the tool-ls rule): a full
     // RESET would kill pi's line-level frame canvas and expose the terminal
     // default behind the row tail.
-    return theme.fg("dim", inertText(dirname)) + palette.fgCode + styledBase(basename) + FG_DEFAULT;
+    return (
+      theme.fg("dim", inertText(dirname)) + palette.fgCode + styledBase(basename) + SEQ_FG_DEFAULT
+    );
   }
   return theme.fg("dim", inertText(dirname)) + theme.fg("toolOutput", styledBase(basename));
 }

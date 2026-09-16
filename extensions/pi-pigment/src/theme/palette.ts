@@ -23,7 +23,7 @@
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { RgbColor } from "@earendil-works/pi-tui";
 
-import { BG_DEFAULT, RESET, bgRgb, fgRgb, mixBg } from "#src/core/ansi.ts";
+import { bgRgb, fgRgb, mixBg } from "#src/core/ansi.ts";
 import {
   isLightRgb,
   parseAnsiRgb,
@@ -31,6 +31,7 @@ import {
   parseRootColor,
   tintCanvas,
 } from "#src/core/color.ts";
+import { SEQ_BG_DEFAULT, SEQ_RESET } from "#src/core/escapes.ts";
 
 /** The diff sides, in stable order (drives iteration and root identity). */
 export const DIFF_SIDES = ["added", "removed"] as const;
@@ -163,8 +164,8 @@ export interface DiffPalette {
   bgBase: string;
   /**
    * Reset that re-opens bgBase — for DIFF ROW spans only (the name says the
-   * scope). Toolbox output (grep/ls) must use the bare `RESET` from
-   * core/ansi instead: re-opening bgBase there paints tool rows with the
+   * scope). Toolbox output (grep/ls) must use the bare `SEQ_RESET` from
+   * core/escapes instead: re-opening bgBase there paints tool rows with the
    * diff canvas.
    */
   rowReset: string;
@@ -223,11 +224,11 @@ export const FALLBACK_PALETTE: DiffPalette = {
   bgRemovedWord: bgRgb(FALLBACK_BG.removedWord),
   bgAddedGutter: bgRgb(FALLBACK_BG.addedGutter),
   bgRemovedGutter: bgRgb(FALLBACK_BG.removedGutter),
-  bgBase: BG_DEFAULT,
-  // Bare RESET (not RESET+bgBase like the derived path): bgBase IS the
+  bgBase: SEQ_BG_DEFAULT,
+  // Bare SEQ_RESET (not SEQ_RESET+bgBase like the derived path): bgBase IS the
   // terminal default background, which a bare reset already restores —
   // the explicit [49m re-open would be a byte-level no-op.
-  rowReset: RESET,
+  rowReset: SEQ_RESET,
   fgAdded: fgRgb(FALLBACK_FG.added),
   fgCode: fgRgb(FALLBACK_FG.added),
   fgRemoved: fgRgb(FALLBACK_FG.removed),
@@ -530,8 +531,8 @@ function derivePalette(
     if (root && root.alpha >= 1) fgRemoved = fgRgb(root.rgb);
   }
   // Backgrounds: blend the effective diff fg into the effective tool boxes.
-  let bgBase = BG_DEFAULT;
-  let reset = RESET;
+  let bgBase = SEQ_BG_DEFAULT;
+  let reset = SEQ_RESET;
   let bgAdded = FALLBACK_PALETTE.bgAdded;
   let bgRemoved = FALLBACK_PALETTE.bgRemoved;
   let bgAddedWord = FALLBACK_PALETTE.bgAddedWord;
@@ -593,7 +594,7 @@ function derivePalette(
         bgRemovedWord = mixBg(delBase, delRgb, 0.35);
         bgRemovedGutter = mixBg(delBase, delRgb, 0.12);
       }
-      reset = `${RESET}${bgBase}`;
+      reset = `${SEQ_RESET}${bgBase}`;
     }
   } catch {
     // keep fallback backgrounds

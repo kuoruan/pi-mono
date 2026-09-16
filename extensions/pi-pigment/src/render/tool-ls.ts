@@ -7,7 +7,7 @@
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import { FG_DEFAULT } from "#src/core/ansi.ts";
+import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/highlight.ts";
 
 import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
@@ -119,7 +119,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
               // fg() closes (a full \x1b[0m would kill pi core's frame
               // canvas and whiten the row's tail padding).
               if (detectLanguage(entry)) {
-                return `${connector}${palette.fgCode}${entry}${FG_DEFAULT}`;
+                return `${connector}${palette.fgCode}${entry}${SEQ_FG_DEFAULT}`;
               }
               return `${connector}${theme.fg("toolOutput", entry)}`;
             });

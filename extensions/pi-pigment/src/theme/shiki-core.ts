@@ -14,6 +14,17 @@ import {
 
 import { fgRgb } from "#src/core/ansi.ts";
 import { parseHexColor } from "#src/core/color.ts";
+import {
+  SEQ_BOLD,
+  SEQ_BOLD_OFF,
+  SEQ_FG_DEFAULT,
+  SEQ_ITALIC,
+  SEQ_ITALIC_OFF,
+  SEQ_STRIKE,
+  SEQ_STRIKE_OFF,
+  SEQ_UNDERLINE,
+  SEQ_UNDERLINE_OFF,
+} from "#src/core/escapes.ts";
 
 /**
  * A Shiki language id or registered alias (e.g. "typescript", "ts").
@@ -115,8 +126,10 @@ export function renderTokenLinesAnsi(tokens: ThemedToken[][]): string[] {
         if (!token.color) return token.content;
         const { r, g, b } = parseHexColor(token.color) ?? { r: 188, g: 188, b: 188 };
         const style = fontStyleOpen(token.fontStyle ?? 0);
-        const close = style ? `\x1b[22m\x1b[23m\x1b[24m\x1b[29m` : "";
-        return `${style}${fgRgb({ r, g, b })}${token.content}\x1b[39m${close}`;
+        const close = style
+          ? `${SEQ_BOLD_OFF}${SEQ_ITALIC_OFF}${SEQ_UNDERLINE_OFF}${SEQ_STRIKE_OFF}`
+          : "";
+        return `${style}${fgRgb({ r, g, b })}${token.content}${SEQ_FG_DEFAULT}${close}`;
       })
       .join(""),
   );
@@ -131,9 +144,9 @@ export function renderTokenLinesAnsi(tokens: ThemedToken[][]): string[] {
  */
 function fontStyleOpen(fontStyle: number): string {
   let open = "";
-  if (fontStyle & FONT_ITALIC) open += "\x1b[3m";
-  if (fontStyle & FONT_BOLD) open += "\x1b[1m";
-  if (fontStyle & FONT_UNDERLINE) open += "\x1b[4m";
-  if (fontStyle & FONT_STRIKETHROUGH) open += "\x1b[9m";
+  if (fontStyle & FONT_ITALIC) open += SEQ_ITALIC;
+  if (fontStyle & FONT_BOLD) open += SEQ_BOLD;
+  if (fontStyle & FONT_UNDERLINE) open += SEQ_UNDERLINE;
+  if (fontStyle & FONT_STRIKETHROUGH) open += SEQ_STRIKE;
   return open;
 }

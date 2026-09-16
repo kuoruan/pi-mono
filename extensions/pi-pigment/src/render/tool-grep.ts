@@ -7,7 +7,8 @@
 
 import type { GrepToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import { FG_DEFAULT, inertText } from "#src/core/ansi.ts";
+import { inertText } from "#src/core/ansi.ts";
+import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage, MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
@@ -276,7 +277,7 @@ export function renderHitLine(options: RenderHitLineOptions): string {
   // re-open the diff canvas (a diff-row concept), and a full RESET would
   // kill pi's line-level frame canvas and expose the terminal default
   // behind the row tail (the tool-ls rule).
-  return `${prefixStyle}${hit.prefix} ${baseFg}${emphasized}${FG_DEFAULT}`;
+  return `${prefixStyle}${hit.prefix} ${baseFg}${emphasized}${SEQ_FG_DEFAULT}`;
 }
 
 /** The renderHighlighted inputs. */

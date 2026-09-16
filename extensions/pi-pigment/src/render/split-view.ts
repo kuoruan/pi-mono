@@ -4,8 +4,9 @@
  * fallback decision itself lives in shouldUseSplit).
  */
 
-import { DIM, expandTabs, fitAnsi } from "#src/core/ansi.ts";
+import { expandTabs, fitAnsi } from "#src/core/ansi.ts";
 import { type DiffLine, sepLabel } from "#src/core/diff.ts";
+import { SEQ_DIM } from "#src/core/escapes.ts";
 
 import {
   type DiffViewOptions,
@@ -184,7 +185,7 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
             palette,
           })
         : type === "ctx"
-          ? `${palette.bgBase}${DIM}${highlight}`
+          ? `${palette.bgBase}${SEQ_DIM}${highlight}`
           : injectBg(highlight, { baseBg: frame.codeBg, palette });
     return {
       gutter: frame.gutter,

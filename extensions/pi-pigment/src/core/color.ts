@@ -1,13 +1,15 @@
 /**
  * Pure color math: the RGB/hex/ANSI-color conversions and WCAG measures
- * the palette and syntax themes derive from. No SGR escape production
- * lives here (ansi.ts owns that) — everything in this module maps colors
+ * the palette and syntax themes derive from. No SGR escape literals
+ * live here (escapes.ts owns those) — everything in this module maps colors
  * to colors or numbers. Backed by @ctrl/tinycolor (WCAG contrast is
  * bit-identical to the spec; see ADR 0001 for why colord was rejected).
  */
 
 import { readability, TinyColor } from "@ctrl/tinycolor";
 import type { RgbColor } from "@earendil-works/pi-tui";
+
+import { SEQ_ESC } from "./escapes.ts";
 
 /** The 6×6×6 color-cube channel values of the XTerm 256-color palette. */
 const CUBE_CHANNELS = [0, 95, 135, 175, 215, 255] as const;
@@ -33,9 +35,6 @@ function decodeAnsi256(index: number): RgbColor | null {
   };
 }
 
-/** The ESC control character an SGR sequence starts with. */
-const ESC = "\u001b";
-
 /**
  * Parse an ANSI color sequence into RGB: truecolor (`38;2;r;g;b` /
  * `48;2;r;g;b`) directly, 256-color (`38;5;n` / `48;5;n`) through the XTerm
@@ -48,11 +47,11 @@ const ESC = "\u001b";
  * @returns The parsed RGB, or null.
  */
 export function parseAnsiRgb(ansi: string): RgbColor | null {
-  const truecolor = ansi.match(new RegExp(`${ESC}\\[(?:38|48);2;(\\d+);(\\d+);(\\d+)m`));
+  const truecolor = ansi.match(new RegExp(`${SEQ_ESC}\\[(?:38|48);2;(\\d+);(\\d+);(\\d+)m`));
   if (truecolor) {
     return { r: Number(truecolor[1]), g: Number(truecolor[2]), b: Number(truecolor[3]) };
   }
-  const indexed = ansi.match(new RegExp(`${ESC}\\[(?:38|48);5;(\\d+)m`));
+  const indexed = ansi.match(new RegExp(`${SEQ_ESC}\\[(?:38|48);5;(\\d+)m`));
   if (indexed) return decodeAnsi256(Number(indexed[1]));
   return null;
 }

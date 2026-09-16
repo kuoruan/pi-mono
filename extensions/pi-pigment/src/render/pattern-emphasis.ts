@@ -7,8 +7,15 @@
  * anchor run).
  */
 
-import { FG_DEFAULT, RESET } from "#src/core/ansi.ts";
 import { createBoundedMap } from "#src/core/bounded-map.ts";
+import {
+  SEQ_BOLD,
+  SEQ_BOLD_OFF,
+  SEQ_ESC,
+  SEQ_FG_DEFAULT,
+  SEQ_RESET,
+  SEQ_RESET_BARE,
+} from "#src/core/escapes.ts";
 
 /** How the caller wants the pattern matched (grep/find flags). */
 export interface MatchFlags {
@@ -30,9 +37,8 @@ export interface PatternMatcher {
  * SGR sequence splitter (module-level: compiling per call was the hot
  * path).
  */
-const ESC = String.fromCharCode(27);
 /** Splits a rendered line at SGR escapes, keeping the escapes as segments. */
-const SGR_SPLIT = new RegExp(`(${ESC}\\[[0-9;]*m)`);
+const SGR_SPLIT = new RegExp(`(${SEQ_ESC}\\[[0-9;]*m)`);
 
 /**
  * Compiled matcher per (pattern, literal, ignoreCase) — small bounded memo:
@@ -70,7 +76,7 @@ export interface EmphasisSpec {
 
 /**
  * The emphasis convention's color half: the theme's accent foreground.
- * BOLD (the other half) lives inside emphasize; callers pass this spec —
+ * SEQ_BOLD (the other half) lives inside emphasize; callers pass this spec —
  * one derivation beside the wrap that consumes it, no per-wrapper copies
  * of the rule or its rationale.
  *
@@ -109,14 +115,12 @@ export function emphasize(options: EmphasizeOptions): string {
 
   // Emphasis must never fight the span's own syntax color: after each hit,
   // re-open the fg escape that was active on entry. The emphasis signal
-  // itself is BOLD + independent fg (the CLI convention — ripgrep, GNU grep,
+  // itself is SEQ_BOLD + independent fg (the CLI convention — ripgrep, GNU grep,
   // and git grep all render matches as bold-plus-distinct-color): bold stays
   // visible even where the fg happens to match a token color. The close is
   // CHANNEL-SCOPED (bold-off, then spanFg — or the fg default when none): a
-  // full RESET would kill the pi frame's line-level canvas mid-line and expose
+  // full SEQ_RESET would kill the pi frame's line-level canvas mid-line and expose
   // the terminal default background from the match onward (the tool-ls rule).
-  const BOLD = "\x1b[1m";
-  const BOLD_OFF = "\x1b[22m";
   // The fg active before each match — the emphasis wrap closes its own
   // channels, so the remainder must re-open the span it was in; plain-text
   // callers pass their base fg so the text after a match keeps it (highlighted
@@ -124,18 +128,19 @@ export function emphasize(options: EmphasizeOptions): string {
   let spanFg = baseFg;
   // The fg escape spans a match sits in replaces the emphasis fg without a
   // separate close (fg escapes overwrite); without one, close to the default.
-  const wrap = (hit: string) => `${BOLD}${emphasis.fg}${hit}${BOLD_OFF}${spanFg || FG_DEFAULT}`;
+  const wrap = (hit: string) =>
+    `${SEQ_BOLD}${emphasis.fg}${hit}${SEQ_BOLD_OFF}${spanFg || SEQ_FG_DEFAULT}`;
 
   // Matcher per grep/find semantics (memoized — see matcherFor).
   const { regex, needle } = matcherFor(pattern, flags);
 
   return spans
     .map((span) => {
-      if (span.startsWith(ESC)) {
+      if (span.startsWith(SEQ_ESC)) {
         // Track the span's effective fg: a reset clears it, an fg escape
         // (possibly inside a compound sequence) re-opens it, anything else
         // (bg-only, attributes) leaves the current fg standing.
-        if (span === RESET || span === "\x1b[m") {
+        if (span === SEQ_RESET || span === SEQ_RESET_BARE) {
           spanFg = "";
         } else if (FG_ONLY.test(span)) {
           spanFg = span;
@@ -175,8 +180,10 @@ export function emphasize(options: EmphasizeOptions): string {
 }
 
 /** An SGR span that sets a foreground color (the emphasis re-opens it). */
-// eslint-disable-next-line no-control-regex -- intentionally matches ESC
-const FG_ONLY = /\x1b\[3[0-9](?:;[0-9]+)*m|\x1b\[38;5;\d+m|\x1b\[38;2;\d+;\d+;\d+m/;
+// eslint-disable-next-line no-control-regex -- intentionally matches SEQ_ESC
+const FG_ONLY = new RegExp(
+  `${SEQ_ESC}\\[3[0-9](?:;[0-9]+)*m|${SEQ_ESC}\\[38;5;\\d+m|${SEQ_ESC}\\[38;2;\\d+;\\d+;\\d+m`,
+);
 
 /**
  * Whether a regex pattern risks catastrophic backtracking in JS's

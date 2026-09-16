@@ -2,12 +2,10 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 
 import { fitAnsi, forEachCell, measurePlain } from "#src/core/ansi.ts";
+import { SEQ_DIM, SEQ_RESET } from "#src/core/escapes.ts";
 import { wrapAnsi } from "#src/render/wrap.ts";
 import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
 import { plain } from "#test/fixtures.ts";
-
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
 
 /** The grapheme clusters of a string — the same segmentation pi-tui draws. */
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -185,11 +183,16 @@ describe("the grapheme-cluster width model (measurement must equal the renderer)
   });
 
   it("truncates on a cluster boundary", () => {
-    const flags = fitAnsi("\u{1f1fa}\u{1f1f8}\u{1f1ef}\u{1f1f5}", 3, RESET, DIM);
+    const flags = fitAnsi("\u{1f1fa}\u{1f1f8}\u{1f1ef}\u{1f1f5}", 3, SEQ_RESET, SEQ_DIM);
     expect(measurePlain(flags)).toBe(3);
     expect(plain(flags)).toBe("\u{1f1fa}\u{1f1f8}\u203a");
     // An 11-code-unit cluster survives whole (its width is 2, not 11).
-    const family = fitAnsi("\u{1f468}\u200d\u{1f469}\u200d\u{1f467}\u200d\u{1f466}", 5, RESET, DIM);
+    const family = fitAnsi(
+      "\u{1f468}\u200d\u{1f469}\u200d\u{1f467}\u200d\u{1f466}",
+      5,
+      SEQ_RESET,
+      SEQ_DIM,
+    );
     expect(measurePlain(family)).toBe(5);
     expect(plain(family)).toBe("\u{1f468}\u200d\u{1f469}\u200d\u{1f467}\u200d\u{1f466}   ");
   });

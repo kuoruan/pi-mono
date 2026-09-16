@@ -5,15 +5,21 @@
  * any future batch reducer) stays on the same parameter semantics.
  */
 
-import { ESC, escapeEndAt } from "./ansi.ts";
+import { escapeEndAt } from "./ansi.ts";
+import {
+  SEQ_BG_DEFAULT,
+  SEQ_BOLD_OFF,
+  SEQ_ESC,
+  SEQ_FG_DEFAULT,
+  SEQ_ITALIC_OFF,
+  SEQ_RESET,
+  SEQ_RESET_BARE,
+  SEQ_STRIKE_OFF,
+  SEQ_UNDERLINE_OFF,
+} from "./escapes.ts";
 
 /** Match any SGR escape sequence, capturing its parameters. */
-const ANSI_CAPTURE_RE = new RegExp(`${ESC}\\[([^m]*)m`, "g");
-
-/** The reset-like sequences reinjectSgr re-injects a background after. */
-const SEQ_RESET_ALL = `${ESC}[0m`;
-const SEQ_RESET_FG = `${ESC}[39m`;
-const SEQ_RESET_BG = `${ESC}[49m`;
+const ANSI_CAPTURE_RE = new RegExp(`${SEQ_ESC}\\[([^m]*)m`, "g");
 
 /**
  * Whether a sequence is reset-like — closes enough state that the active
@@ -25,7 +31,7 @@ const SEQ_RESET_BG = `${ESC}[49m`;
  * @returns True for the full reset and the channel defaults.
  */
 export function isResetLikeSequence(escapeText: string): boolean {
-  return escapeText === SEQ_RESET_ALL || escapeText === SEQ_RESET_FG || escapeText === SEQ_RESET_BG;
+  return escapeText === SEQ_RESET || escapeText === SEQ_FG_DEFAULT || escapeText === SEQ_BG_DEFAULT;
 }
 
 /**
@@ -144,7 +150,7 @@ export class SgrState {
    * Apply one escape sequence in place. The optional span form classifies
    * directly against the source — zero slice allocations for the fast path.
    *
-   * @param escapeText - A single `ESC[...m` sequence, or the source string
+   * @param escapeText - A single `SEQ_ESC[...m` sequence, or the source string
    *   when `start`/`end` delimit the escape within it.
    * @param start - The escape start within the source (default 0).
    * @param end - The escape end within the source (default text length).
@@ -156,36 +162,36 @@ export class SgrState {
     // truecolor/256 forms with strict digit tails — handled without a
     // split/map allocation. Anything else takes the full parameter walk.
     if (
-      sliceEquals(escapeText, start, end, "\u001b[0m") ||
-      sliceEquals(escapeText, start, end, "\u001b[m")
+      sliceEquals(escapeText, start, end, SEQ_RESET) ||
+      sliceEquals(escapeText, start, end, SEQ_RESET_BARE)
     ) {
       this.fg = "";
       this.bg = "";
       this.attrs = null;
       return;
     }
-    if (sliceEquals(escapeText, start, end, "\u001b[39m")) {
+    if (sliceEquals(escapeText, start, end, SEQ_FG_DEFAULT)) {
       this.fg = "";
       return;
     }
-    if (sliceEquals(escapeText, start, end, "\u001b[49m")) {
+    if (sliceEquals(escapeText, start, end, SEQ_BG_DEFAULT)) {
       this.bg = "";
       return;
     }
-    if (sliceEquals(escapeText, start, end, "\u001b[22m")) {
+    if (sliceEquals(escapeText, start, end, SEQ_BOLD_OFF)) {
       this.attrs?.delete(1); // bold off (and dim off — 2)
       this.attrs?.delete(2);
       return;
     }
-    if (sliceEquals(escapeText, start, end, "\u001b[23m")) {
+    if (sliceEquals(escapeText, start, end, SEQ_ITALIC_OFF)) {
       this.attrs?.delete(3); // italic off
       return;
     }
-    if (sliceEquals(escapeText, start, end, "\u001b[24m")) {
+    if (sliceEquals(escapeText, start, end, SEQ_UNDERLINE_OFF)) {
       this.attrs?.delete(4); // underline off
       return;
     }
-    if (sliceEquals(escapeText, start, end, "\u001b[29m")) {
+    if (sliceEquals(escapeText, start, end, SEQ_STRIKE_OFF)) {
       this.attrs?.delete(9); // strikethrough off
       return;
     }
@@ -198,9 +204,9 @@ export class SgrState {
     // the parameter walk does. A bare 38/48 (no `;kind`) skips the
     // classifier and takes the walk.
     let kind: "38" | "48" | null = null;
-    if (sliceEquals(escapeText, start, start + 5, `${ESC}[38;`)) {
+    if (sliceEquals(escapeText, start, start + 5, `${SEQ_ESC}[38;`)) {
       kind = "38";
-    } else if (sliceEquals(escapeText, start, start + 5, `${ESC}[48;`)) {
+    } else if (sliceEquals(escapeText, start, start + 5, `${SEQ_ESC}[48;`)) {
       kind = "48";
     }
     if (kind !== null) {
@@ -287,15 +293,15 @@ export class SgrState {
 
 /**
  * Re-inject `bg` after each reset-like SGR (Shiki closes tokens with the
- * ESC[39m family; 0m/49m count as broader resets). One indexOf walk over
+ * SEQ_ESC[39m family; 0m/49m count as broader resets). One indexOf walk over
  * the shared escape grammar (`escapeEndAt`): recognized sequences pass
  * through whole, a reset-like one re-opens the background after itself;
- * a lone ESC is text by this module's grammar and copied as-is (no
+ * a lone SEQ_ESC is text by this module's grammar and copied as-is (no
  * injection there).
  *
  * @param line - The ANSI-styled line.
  * @param bg - The background escape to re-inject.
- * @param escIndex - The first ESC offset (callers probing it already
+ * @param escIndex - The first SEQ_ESC offset (callers probing it already
  *   hand it over, skipping the re-scan).
  * @returns The line with backgrounds re-established.
  */
@@ -308,9 +314,9 @@ export function reinjectSgr(line: string, bg: string, escIndex: number): string 
     out += line.slice(last, i);
     const end = escapeEndAt(line, i);
     if (end === -1) {
-      // Unterminated sequence or lone ESC: the cell walk's code-point
-      // cell — copy the ESC byte itself and keep scanning after it.
-      out += ESC;
+      // Unterminated sequence or lone SEQ_ESC: the cell walk's code-point
+      // cell — copy the SEQ_ESC byte itself and keep scanning after it.
+      out += SEQ_ESC;
       last = i + 1;
     } else {
       const seq = line.slice(i, end);
@@ -320,7 +326,7 @@ export function reinjectSgr(line: string, bg: string, escIndex: number): string 
       }
       last = end;
     }
-    i = line.indexOf(ESC, last);
+    i = line.indexOf(SEQ_ESC, last);
   }
   return out + line.slice(last);
 }

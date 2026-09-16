@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BG_DEFAULT,
   bgRgb,
   expandTabs,
   fgRgb,
@@ -10,6 +9,17 @@ import {
   measurePlain,
   mixBg,
 } from "#src/core/ansi.ts";
+import {
+  SEQ_BEL,
+  SEQ_BG_DEFAULT,
+  SEQ_BOLD,
+  SEQ_BOLD_OFF,
+  SEQ_ESC,
+  SEQ_ITALIC,
+  SEQ_ITALIC_OFF,
+  SEQ_RESET,
+  SEQ_RESET_BARE,
+} from "#src/core/escapes.ts";
 import { SgrState } from "#src/core/sgr.ts";
 import { injectBg } from "#src/render/inject-bg.ts";
 import { wordDiffAnalysis } from "#src/render/word-diff.ts";
@@ -19,8 +29,6 @@ import { plain } from "#test/fixtures.ts";
 
 const RED_BG = "\x1b[48;2;255;0;0m";
 const GREEN_FG = "\x1b[38;2;0;255;0m";
-const RESET = "\x1b[0m";
-const ESC = "\x1b";
 
 describe("expandTabs", () => {
   it("replaces tabs with two spaces", () => {
@@ -40,31 +48,31 @@ describe("mixBg", () => {
 
 describe("fitAnsi", () => {
   it("pads short content to the width", () => {
-    expect(fitAnsi("ab", 5, RESET, "")).toBe("ab   ");
+    expect(fitAnsi("ab", 5, SEQ_RESET, "")).toBe("ab   ");
   });
 
   it("truncates plain ASCII via slicing (exact bytes)", () => {
     // The plain path slice: content to width-1, pad-less, close + marker.
-    expect(fitAnsi("abcdefgh", 3, RESET, "")).toBe(`ab${RESET}›${RESET}`);
+    expect(fitAnsi("abcdefgh", 3, SEQ_RESET, "")).toBe(`ab${SEQ_RESET}›${SEQ_RESET}`);
   });
 
   it("keeps escape sequences out of the visual count", () => {
-    const fitted = fitAnsi(`${GREEN_FG}abcdef${RESET}`, 3, RESET, "");
+    const fitted = fitAnsi(`${GREEN_FG}abcdef${SEQ_RESET}`, 3, SEQ_RESET, "");
     expect(plain(fitted)).toBe("ab›");
   });
 
   it("truncates without a marker when width is tiny", () => {
-    expect(plain(fitAnsi("abcdef", 2, RESET, ""))).toBe("ab");
+    expect(plain(fitAnsi("abcdef", 2, SEQ_RESET, ""))).toBe("ab");
   });
 
   it("returns empty for non-positive width", () => {
-    expect(fitAnsi("abc", 0, RESET, "")).toBe("");
+    expect(fitAnsi("abc", 0, SEQ_RESET, "")).toBe("");
   });
 
   it("keeps CJK truncation at exactly the width (no wide-char overshoot)", () => {
     // Regression: the truncation loop once stopped on columns >= showWidth
     // AFTER consuming a wide char, emitting 7 visible columns for width 6.
-    const fitted = fitAnsi("中中中b", 6, RESET, "");
+    const fitted = fitAnsi("中中中b", 6, SEQ_RESET, "");
     expect(measurePlain(plain(fitted))).toBe(6);
     // The third wide char is left out and the gap padded: exactly 6 columns.
     expect(plain(fitted)).toBe("中中 ›");
@@ -72,7 +80,7 @@ describe("fitAnsi", () => {
 
   it("keeps CJK truncation exact at a two-column boundary", () => {
     // Width 5: budget 4 content columns -> two CJK chars + marker = 5.
-    const fitted = fitAnsi("中中中", 5, RESET, "");
+    const fitted = fitAnsi("中中中", 5, SEQ_RESET, "");
     expect(measurePlain(plain(fitted))).toBe(5);
   });
 });
@@ -95,21 +103,21 @@ describe("SGR batch reduction (SgrState applySeq + replay)", () => {
   });
 
   it("resets on SGR 0 and default fg on 39", () => {
-    expect(batchState(`${GREEN_FG}a${RESET}b`)).toBe("");
+    expect(batchState(`${GREEN_FG}a${SEQ_RESET}b`)).toBe("");
   });
 
   it("carries open font attributes (bold/italic survive the line break)", () => {
-    const BOLD = "\u001b[1m";
-    const ITALIC = "\u001b[3m";
-    const UNDO = "\u001b[22m\u001b[23m";
+    const UNDO = `${SEQ_BOLD_OFF}${SEQ_ITALIC_OFF}`;
     // A bold+italic token broken by a wrap keeps both attributes.
-    expect(batchState(`${BOLD}${ITALIC}${GREEN_FG}partial`)).toBe(`${GREEN_FG}${BOLD}${ITALIC}`);
+    expect(batchState(`${SEQ_BOLD}${SEQ_ITALIC}${GREEN_FG}partial`)).toBe(
+      `${GREEN_FG}${SEQ_BOLD}${SEQ_ITALIC}`,
+    );
     // Attribute-off codes clear what they close (fg stays).
-    expect(batchState(`${BOLD}${GREEN_FG}x${UNDO}`)).toBe(`${GREEN_FG}`);
+    expect(batchState(`${SEQ_BOLD}${GREEN_FG}x${UNDO}`)).toBe(`${GREEN_FG}`);
     // A full reset clears attributes too.
-    expect(batchState(`${BOLD}${GREEN_FG}x${RESET}`)).toBe("");
-    // `ESC[m` (empty params) is a reset.
-    expect(batchState(`${BOLD}x\u001b[m`)).toBe("");
+    expect(batchState(`${SEQ_BOLD}${GREEN_FG}x${SEQ_RESET}`)).toBe("");
+    // `SEQ_ESC[m` (empty params) is a reset.
+    expect(batchState(`${SEQ_BOLD}${SEQ_RESET_BARE}`)).toBe("");
     // Composite sequences parse per-parameter: bold + truecolor fg in one.
     expect(batchState("\u001b[1;38;2;10;20;30mx")).toBe("\u001b[38;2;10;20;30m\u001b[1m");
     // 256-color specs consume their tail.
@@ -117,11 +125,10 @@ describe("SGR batch reduction (SgrState applySeq + replay)", () => {
   });
 
   it("re-opens carried state so wrapped tokens keep their style", () => {
-    const BOLD = "\u001b[1m";
-    const state = batchState(`${BOLD}${GREEN_FG}partial`);
+    const state = batchState(`${SEQ_BOLD}${GREEN_FG}partial`);
     // The wrap continuation begins with the state; the token stays bold.
     expect(state.startsWith(`${GREEN_FG}`)).toBe(true);
-    expect(state).toContain(BOLD);
+    expect(state).toContain(SEQ_BOLD);
   });
 });
 
@@ -136,7 +143,7 @@ function referenceAnsiState(content: string): string {
   let fg = "";
   let bg = "";
   const attrs = new Set<number>();
-  for (const match of content.matchAll(new RegExp(`${ESC}\\[([^m]*)m`, "g"))) {
+  for (const match of content.matchAll(new RegExp(`${SEQ_ESC}\\[([^m]*)m`, "g"))) {
     const params = (match[1] || "0").split(";").map(Number);
     let i = 0;
     while (i < params.length) {
@@ -179,7 +186,7 @@ describe("SgrState (incremental) matches the batch reduction", () => {
   // empty params, attribute stacking.
   const corpus = [
     "plain text",
-    `${GREEN_FG}const${RESET}`,
+    `${GREEN_FG}const${SEQ_RESET}`,
     "\x1b[1;38;2;10;20;30mcomposite\x1b[22m",
     "\x1b[38;5;220m256-color\x1b[39m",
     "\x1b[mempty-param-resets",
@@ -199,7 +206,7 @@ describe("SgrState (incremental) matches the batch reduction", () => {
   it("incremental apply over each escape equals the reference reduction", () => {
     for (const s of corpus) {
       const state = new SgrState();
-      for (const m of s.matchAll(new RegExp(`${ESC}\\[[^m]*m`, "g"))) state.apply(m[0]);
+      for (const m of s.matchAll(new RegExp(`${SEQ_ESC}\\[[^m]*m`, "g"))) state.apply(m[0]);
       expect(state.replay()).toBe(referenceAnsiState(s));
     }
   });
@@ -214,8 +221,8 @@ describe("SgrState (incremental) matches the batch reduction", () => {
 });
 
 describe("module constants", () => {
-  it("BG_DEFAULT resets the background", () => {
-    expect(BG_DEFAULT).toBe("\x1b[49m");
+  it("SEQ_BG_DEFAULT resets the background", () => {
+    expect(SEQ_BG_DEFAULT).toBe("\x1b[49m");
   });
 });
 
@@ -298,10 +305,10 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
     // escapeEndAt recognizes OSC (the header's hyperlinks) whole, so the
     // walk hands the tracker an OSC cell — whose payload must NOT be parsed
     // as SGR parameters. The reference reduction (applySeq) only matches
-    // ESC[...m and skips OSC; without the shape guard the payload's numeric
+    // SEQ_ESC[...m and skips OSC; without the shape guard the payload's numeric
     // fields (here a 0) would clear the state and inject phantom attributes.
     const reset = "\u001b[0m";
-    const link = "\u001b]8;;http://example/0;2;1\u0007";
+    const link = `${SEQ_ESC}]8;;http://example/0;2;1${SEQ_BEL}`;
     const content = `${GREEN_FG}abcd${link}efgh${reset}`;
     const rows = wrapAnsi(content, { width: 5, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE });
     expect(rows).toHaveLength(2);
@@ -515,7 +522,7 @@ describe("wrapAnsi incremental SGR state (differential)", () => {
     // width <= 2 truncation without a marker.
     { content: "\x1b[1mxyz\x1b[22m".repeat(6), width: 2, maxRows: 2, fillBg: "" },
     // Fits: single row, no tracking consumed.
-    { content: `${GREEN_FG}abc${RESET}`, width: 40, maxRows: 4, fillBg: "" },
+    { content: `${GREEN_FG}abc${SEQ_RESET}`, width: 40, maxRows: 4, fillBg: "" },
     // Plain multi-row with a NON-EMPTY fillBg: wrapPlainAscii must equal
     // the cell-walk reference byte for byte — continuation rows carry the
     // fillBg prefix DOUBLED (replayed bg state + the fresh fillBg, the
@@ -524,7 +531,12 @@ describe("wrapAnsi incremental SGR state (differential)", () => {
     { content: "abcdefgh ".repeat(8), width: 16, maxRows: 4, fillBg: "\x1b[48;2;30;30;40m" },
     // Truncation on a later row (maxRows >= 2): the marker row must open
     // with the CARRIED state (the green fg crosses the break).
-    { content: `${GREEN_FG}const tail values persist${RESET}`, width: 12, maxRows: 2, fillBg: "" },
+    {
+      content: `${GREEN_FG}const tail values persist${SEQ_RESET}`,
+      width: 12,
+      maxRows: 2,
+      fillBg: "",
+    },
     // Wide chars under maxRows=1: the truncation lands BETWEEN cells (a
     // two-column char is never split) and the marker still fits the row.
     { content: "汉".repeat(21), width: 40, maxRows: 1, fillBg: "" },
@@ -547,7 +559,7 @@ describe("wrapAnsi incremental SGR state (differential)", () => {
     // The green fg opens before the first break and is never reset, so
     // the marker row must re-open it from the carried state before its
     // first character — a lost carry would render the row in default fg.
-    const rows = wrapAnsi(`${GREEN_FG}const tail values persist${RESET}`, {
+    const rows = wrapAnsi(`${GREEN_FG}const tail values persist${SEQ_RESET}`, {
       width: 12,
       maxRows: 2,
       fillBg: "",

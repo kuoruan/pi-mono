@@ -3,8 +3,9 @@
  * code, paired del/add lines with word-level emphasis.
  */
 
-import { DIM, expandTabs, measurePlain } from "#src/core/ansi.ts";
+import { expandTabs, measurePlain } from "#src/core/ansi.ts";
 import { sepLabel, type DiffLine } from "#src/core/diff.ts";
+import { SEQ_DIM } from "#src/core/escapes.ts";
 
 import {
   type DiffViewOptions,
@@ -108,7 +109,7 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
       continue;
     }
     if (line.type === "ctx") {
-      emitRow("ctx", line.newNum, `${palette.bgBase}${DIM}${oldHl(line)}`);
+      emitRow("ctx", line.newNum, `${palette.bgBase}${SEQ_DIM}${oldHl(line)}`);
       newIndex++;
       index++;
       continue;
