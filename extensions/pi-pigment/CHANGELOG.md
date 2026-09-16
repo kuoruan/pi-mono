@@ -1,5 +1,21 @@
 # pi-pigment
 
+## 0.2.0
+
+### Minor Changes
+
+- b71229c: Third-party extensions can now borrow pi-pigment's rendering instead of racing it for the tool name: `pi-pigment/render-kit` installs the renderers on YOUR tool definitions (`decorate`) and leaves your `execute` untouched, and a zero-dependency publication channel (`globalThis[Symbol.for("pi-pigment.render-kit.v1")]`) serves extensions that must not import the package. Borrowed rendering is contract-tested byte-identical to pi-pigment's own wrappers. See `docs/integrating.md`.
+
+### Patch Changes
+
+- 9eb6889: The styled-text cell walk no longer allocates a record per cell: `forEachCell` visits a cell's span, column count and escape flag as primitives (its generator predecessor yielded one object per cell and measured 3–8x an inlined walk, the allocation being the bulk of it), and each call site slices the cell's text only when it needs it. Measured on the frame paths, per pair of interleaved runs against the previous code: styled-line width measurement ~5x faster, CJK ~2.5x, styled truncation ~2.5x, background injection with emphasis ranges ~1.4x; the plain-ASCII fast paths are untouched.
+- 9eb6889: Rows that carry grapheme clusters (combining marks, ZWJ emoji, flags, conjoining jamo, …) are now walked and measured by cluster, using pi-tui's own `visibleWidth`, so widths, wrapping, truncation and word-emphasis highlights match what the renderer draws; lines without cluster-forming code points keep the fast per-code-point path. The gate's code-point tail is derived from the runtime's `Intl.Segmenter` instead of a hand-copied chart — `pnpm run check:risky-tail` re-derives it — and now covers the Hangul jamo Extended-A/B blocks and the Kirat Rai joiners the previous ranges missed.
+- b71229c: Session render state is now a per-session value (`RenderSession`) instead of module-level singletons: diff roots, the theme selection, the user-theme environment, and the converted-theme map are resolved once at `session_start` and carried by the session — the four `set*` writes and the ambient reads they fed are gone, and two sessions in one process can no longer leak theme state into each other.
+
+  Pinning that seam surfaced a real rendering bug, fixed here: Shiki keys its theme registry by name, and a created grammar's color map ignores a later same-name `loadTheme` — so two user theme files sharing a stem (a re-edited file, two projects in one process) rendered with the FIRST file's colors while reporting the new ones. File-channel themes now register under a content-distinct name (`stem~fingerprint`), matching the highlight cache's existing key. Bundled, enforced, and patched theme variants were never affected.
+
+- 722c4a8: Tool wrappers now yield to names another extension (or an SDK-passed custom tool) already claimed: before registering, the extension reads pi's merged tool registry and skips any of the seven built-in names whose source is not `builtin`, with a one-line notice per session. A resume/fork re-fire does not yield to the extension's own prior registration. Names claimed after pi-pigment's `session_start` fires keep pi-pigment's wrapper live under pi's load-order merge (the late registration is dropped with a conflict log); factory-time registration, the render kit, or `disabledTools` cover that case. See ADR 0005's addendum and `docs/integrating.md`.
+
 ## 0.1.4
 
 ### Patch Changes
