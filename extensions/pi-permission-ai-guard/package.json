@@ -53,7 +53,7 @@
     "@earendil-works/pi-ai": "^0.85.1",
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@earendil-works/pi-tui": "^0.85.1",
-    "@gotgenes/pi-permission-system": "^32.0.2",
+    "@gotgenes/pi-permission-system": "^32.0.4",
     "@tsconfig/node22": "catalog:",
     "@types/node": "catalog:",
     "memfs": "catalog:",
