@@ -138,8 +138,9 @@ function isControlCode(code: number): boolean {
 function isWideCodePoint(codePoint: number): boolean {
   // Exhaustively verified: no W/F code point exists below U+1100, so the
   // database lookup is skipped for every code point the fast tier meets in
-  // plain/ASCII text (measured ~37ns per call on ASCII — the bulk of the
-  // walk's cost on the common line; measured 1.6-1.9x whole-walk gain).
+  // plain/ASCII text — the bulk of the walk's cost on the common line.
+  // (The guard's value is relative, not absolute: it removes the lookup
+  // from the common path. Re-measure on the wrap benches if this moves.)
   if (codePoint < 0x1100) return false;
   if (codePoint >= 0x1f1e6 && codePoint <= 0x1f1ff) return true; // regional indicators
   return eastAsianWidth(codePoint) === 2;
@@ -194,17 +195,25 @@ export type CellVisitor = (
   isEscape: boolean,
 ) => boolean | void;
 
-/** Capacity of the gate-verdict memo, in lines. */
-const GATE_MEMO_CAPACITY = 512;
+/**
+ * Capacity of the gate-verdict memo, in lines. Sized to cover the largest
+ * real file sampled (see the distribution the mixed-frame bench asserts
+ * in tests/bench-fixtures.ts) with headroom: the verdict is keyed on the
+ * whole styled line and re-read up to three times per line per frame
+ * (measure, wrap, inject-bg), so a churn-free memo spans frames instead
+ * of re-scanning on every scroll or refresh. The entries are one boolean
+ * per line — doubling the capacity costs tens of KB.
+ */
+const GATE_MEMO_CAPACITY = 1024;
 
 /**
- * Memoized gate verdicts. The property scan costs ~13ns per code point
- * (a 60-column CJK line scanned ~880ns), against a verdict that is a pure
- * function of the line and lines a TUI re-measures every frame (pi-tui
- * keeps its width results in a bounded cache for the same reason). Exact
- * FIFO: recency says nothing about a pure verdict, so the read stays one
- * plain `Map.get` (measured ~13ns against ~60ns for a recency touch on
- * the same keys) and the oldest line simply leaves first.
+ * Memoized gate verdicts. The property scan runs per code point against a
+ * verdict that is a pure function of the line — and lines a TUI
+ * re-measures every frame (pi-tui keeps its width results in a bounded
+ * cache for the same reason), so the memo pays for itself on scroll and
+ * refresh. Exact FIFO: recency says nothing about a pure verdict, so the
+ * read stays one plain `Map.get` (no recency touch) and the oldest line
+ * simply leaves first.
  */
 const riskyLineMemo = createBoundedFifoMap<string, boolean>(GATE_MEMO_CAPACITY);
 

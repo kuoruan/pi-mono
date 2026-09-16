@@ -47,7 +47,13 @@ export interface DiffViewOptions {
   seed?: string;
 }
 
-/** Renders below this width fall back to the unified view (split needs two code columns). */
+/**
+ * Renders below this width fall back to the unified view (split needs two code columns).
+ *
+ * NOTE: this is the total RENDER width, not a code pane — do not confuse
+ * with FITS_GATE_MIN_WIDTH (44), which gates the wrap fast path on the
+ * per-side code width.
+ */
 export const MIN_RENDER_WIDTH = 40;
 
 /**

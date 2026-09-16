@@ -241,9 +241,9 @@ test("shouldUseSplit (the split/unified verdict per diff render)", async ({ benc
 });
 
 // A frame's worth of lines in the measured repo mix: the widths follow the
-// 34.9k-line sample above, so the fits share matches reality at every pane
-// width (58% of lines fit a 36-column pane, 72% at 56, 92% at 76). Any
-// fits-gate has to beat its own pre-walk overhead at these ratios.
+// sample asserted in bench-fixtures (LINE_WIDTH_SAMPLE), so the fits share
+// matches reality at every pane width. Any fits-gate has to beat its own
+// pre-walk overhead at these ratios.
 const mixedBody: string[] = [
   ...Array.from({ length: 6 }, () => styledWidth(22)),
   ...Array.from({ length: 9 }, () => styledWidth(32)),

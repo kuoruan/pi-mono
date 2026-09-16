@@ -129,11 +129,11 @@ function scanTailNumbers(
  * can replay the state without re-scanning the row.
  *
  * The char-by-char classifier inside `apply` exists for measured reasons:
- * the naive parse-per-escape form was 30% SLOWER than the per-break
- * batch re-scan it replaced; recognizing this pipeline's own literal
- * escape shapes (bench-verified: ~1.6× on escaped wrapped rows) closed
- * that gap. The full parameter walk stays as the semantically-exact
- * fallback for anything the classifier declines.
+ * the naive parse-per-escape form was substantially slower than the
+ * per-break batch re-scan it replaced (see the render-hot benches);
+ * recognizing this pipeline's own literal escape shapes closed that gap.
+ * The full parameter walk stays as the semantically-exact fallback for
+ * anything the classifier declines.
  */
 export class SgrState {
   /** Foreground escape currently open (the full `38;…m` sequence, not a color value). */

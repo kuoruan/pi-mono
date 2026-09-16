@@ -14,9 +14,21 @@ import { lineNumberWidth } from "./row-frame.ts";
 const SPLIT_MIN_WIDTH = 80;
 /** Split view needs at least this many code columns per side. */
 const SPLIT_MIN_CODE_WIDTH = 24;
-/** Split view rejects diffs whose visible lines wrap more than this ratio. */
+/**
+ * Split view rejects diffs whose visible lines wrap more than this ratio.
+ * Empirical, not derived: above roughly a third of wrapping lines the
+ * side-by-side halves stop scanning as pairs (each half wraps on its own
+ * rows) and the unified view reads better. Checked before the render, so
+ * a narrow terminal — where wrapping is common — falls back to unified
+ * rather than rendering a broken split.
+ */
 const SPLIT_MAX_WRAP_RATIO = 0.35;
-/** Split view rejects diffs with more than this many wrapping lines (absolute). */
+/**
+ * Split view rejects diffs with more than this many wrapping lines (absolute).
+ * Backs the ratio above for small diffs: a 3-line hunk with one wrapping
+ * line is ratio 0.33 (just under), a 2-line hunk with one is 0.5 — without
+ * the absolute cap a handful of long lines would always force whole view.
+ */
 const SPLIT_MAX_WRAP_LINES = 10;
 
 /**

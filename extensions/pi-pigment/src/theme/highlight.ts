@@ -138,17 +138,16 @@ export function needsSeed(language: BundledLanguage | undefined): boolean {
  */
 export const MAX_SEED_CHARS = 64 * 1024;
 
-// No engine prewarm (measured: the shiki module's
-// ~28ms import is paid at extension load (this file's static registry
-// import), leaving ensureCore ~45ms (WASM instantiate ~40 + grammar 3)
-// — and every hlBlock consumer renders through an async plain-then-
-// styled upgrade (text-task / invalidate) that makes any load latency
-// invisible. There is no regex compilation to warm: the Oniguruma WASM
-// engine interprets TextMate patterns directly (the JavaScript-regex
-// engine's lazy per-pattern compile premium — ~600ms on the first
-// tokenize of a 29KB file — left with that engine). Shiki's own guidance
-// is the lazy singleton (ensureCore's promise memo); VS Code renders
-// plain and restyles when the tokenizer catches up — the same model.
+// No engine prewarm (the shiki module's import is paid at extension load —
+// this file's static registry import — leaving ensureCore the WASM
+// instantiate plus grammar cost) — and every hlBlock consumer renders
+// through an async plain-then-styled upgrade (text-task / invalidate) that
+// makes any load latency invisible. There is no regex compilation to warm:
+// the Oniguruma WASM engine interprets TextMate patterns directly (the
+// JavaScript-regex engine's lazy per-pattern compile premium — paid once
+// on the first tokenize of a real file — left with that engine). Shiki's
+// own guidance is the lazy singleton (ensureCore's promise memo); VS Code
+// renders plain and restyles when the tokenizer catches up — the same model.
 const highlightCache = createBoundedMap<string, string[]>(CACHE_LIMIT);
 
 /**

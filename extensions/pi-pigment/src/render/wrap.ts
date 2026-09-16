@@ -44,9 +44,10 @@ export interface WrapAnsiOptions {
 
 /**
  * The fits gate only runs at this pane width and above. Below it most
- * code lines overflow (58% fit a 36-column pane of real code), so the
- * measurement walk is pure overhead — the mixed-frame bench reads -3..-9%
- * at 36-40 columns and +8..+50% from 44 up.
+ * code lines overflow (the mixed-frame bench asserts the real fits share
+ * per pane in tests/bench-fixtures.ts), so the measurement walk is pure
+ * overhead — the gate's break-even sits between the 36/40-column panes
+ * (losing) and the 44-column pane (winning); see the mixed-frame bench.
  */
 const FITS_GATE_MIN_WIDTH = 44;
 

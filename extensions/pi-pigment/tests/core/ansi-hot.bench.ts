@@ -19,11 +19,12 @@
  * Every benchmark folds its return value into a running sink so the
  * engine cannot eliminate the measured work (dead-code elimination).
  */
-import { test } from "vitest";
+import { expect, test } from "vitest";
 
 import { fitAnsi, forEachCell, measurePlain } from "#src/core/ansi.ts";
 import { SgrState } from "#src/core/sgr.ts";
 import {
+  LINE_WIDTH_SAMPLE,
   cjkLine,
   cjkMarkLine,
   diffBody,
@@ -52,6 +53,23 @@ const _diffBody = diffBody;
 // (dead-code elimination — pure functions like measurePlain inline and
 // vanish once their result is dropped).
 let sink = 0;
+
+/**
+ * The line-width distribution the mixed-frame bench assumes (see
+ * LINE_WIDTH_SAMPLE): the styledWidth widths must keep matching it, or
+ * the fits-share the fits-gate threshold rests on silently ages. Fails
+ * loudly on drift so a re-sample updates the fixture widths too.
+ */
+test("mixed-frame width distribution", () => {
+  const widths = [
+    22, 22, 22, 22, 22, 22, 32, 32, 32, 32, 32, 32, 32, 32, 32, 45, 45, 45, 45, 65, 65, 65, 65, 65,
+    90, 130,
+  ];
+  const share = (pane: number): number => widths.filter((w) => w <= pane).length / widths.length;
+  expect(Math.abs(share(36) - LINE_WIDTH_SAMPLE.fits36)).toBeLessThan(0.02);
+  expect(Math.abs(share(56) - LINE_WIDTH_SAMPLE.fits56)).toBeLessThan(0.02);
+  expect(Math.abs(share(76) - LINE_WIDTH_SAMPLE.fits76)).toBeLessThan(0.02);
+});
 
 test("measurePlain", async ({ bench }) => {
   await bench("styled code line (~25 cols with escapes)", () => {

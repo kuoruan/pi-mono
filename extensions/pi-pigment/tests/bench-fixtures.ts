@@ -34,9 +34,10 @@ const MIX_DIM = "\x1b[38;2;110;110;120m";
 const MIX_RESET = "\x1b[0m";
 
 /**
- * A styled code line of exactly `cols` visible columns. Widths for the
- * mixed-frame fixture come from the repo's own line-width sample (34,903
- * lines): p25 22, p50 32, p90 74, p99 136 columns.
+ * A styled code line of exactly `cols` visible columns. The widths the
+ * mixed-frame bench draws from here follow the repo's own line-width
+ * sample (see the fits-share assertion below): p25 22, p50 32, p90 74,
+ * p99 136 columns.
  *
  * @param cols - The exact visible width in columns.
  * @returns The styled line.
@@ -45,6 +46,23 @@ export const styledWidth = (cols: number): string => {
   if (cols <= 40) return `${MIX_FG}// ${"x".repeat(Math.max(0, cols - 3))}${MIX_RESET}`;
   return `${MIX_FG}const value = compute(items, 42, beta);${MIX_RESET}${MIX_DIM} // ${"x".repeat(cols - 44)}${MIX_RESET}`;
 };
+
+/**
+ * The repo's line-width sample the `styledWidth` widths above are drawn
+ * from — asserted so a re-sample that moves the distribution fails loudly
+ * instead of silently aging the mixed-frame bench's realism. Panes are
+ * the code-pane widths the bench measures at (render width minus gutters).
+ */
+export const LINE_WIDTH_SAMPLE = {
+  /** Lines sampled. */
+  lines: 34903,
+  /** Share of lines fitting a 36-column pane. */
+  fits36: 0.58,
+  /** Share of lines fitting a 56-column pane. */
+  fits56: 0.72,
+  /** Share of lines fitting a 76-column pane. */
+  fits76: 0.92,
+} as const;
 
 /** The riskyLine skeleton in plain ASCII, for the in-group mechanism ratio. */
 export const riskyLineAscii = "  deploy US family pipeline done";
