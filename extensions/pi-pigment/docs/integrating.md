@@ -83,7 +83,7 @@ export default function sandboxedBash(pi: ExtensionAPI) {
     // throw inside session_start aborts the rest of YOUR handler — the
     // registration never happens and the unguarded tool stays reachable.
     // Guard when the decorate is a security decision:
-    if (!kit.tools.includes(mine.name)) {
+    if (!kit.hasTool(mine.name)) {
       pi.registerTool(mine); // degrade to your own rendering, never worse
       return;
     }
@@ -195,5 +195,13 @@ The rules your extension lives under when pi-pigment is installed:
 ## API stability
 
 - `pi-pigment/render-kit` is the public integration surface: `render-kit.ts` at the package root, exporting straight from the defining modules (`src/render/kit.ts` for the kit, `src/render/session.ts` for the session seam). The package root holds the two public entries — `index.ts` for the extension, `render-kit.ts` for consumers — and everything under `src/` is internal. Its published key set is contract-tested against the module exports, and a borrow renders byte-identically to pi-pigment's own wrappers.
-- `version: 1` in the publication payload is the PROTOCOL version (`RENDER_KIT_PROTOCOL_VERSION` — the publication contract, not the package release); a mismatch means "absent" to a well-behaved consumer (Sample B). `packageVersion` is informational (read from pi-pigment's `package.json`, also exported as `PACKAGE_VERSION`), for logging next to it. The payload's type is `RenderKitPublication`.
+- `version: 1` in the publication payload is the wire protocol
+  (`RENDER_KIT_PROTOCOL_VERSION` — the publication contract, not the package
+  release); a mismatch means "absent" to a well-behaved consumer (Sample B).
+  `packageVersion` is informational (read from pi-pigment's `package.json`,
+  also exported as `VERSION`), for logging next to it. Three different
+  versions ride this channel — do not confuse them: `VERSION` is the
+  pi-pigment release, `payload.version` is the wire protocol the publication
+  speaks, and `RENDER_KIT_PROTOCOL_VERSION` is the protocol this build
+  implements. The payload's type is `RenderKitPublication`.
 - Everything else under `pi-pigment` (the main entry, internals, theme files) is the extension's own surface and may change without notice.

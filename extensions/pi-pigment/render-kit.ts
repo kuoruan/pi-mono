@@ -10,7 +10,7 @@
  */
 
 /** The package version — the version module reads package.json once. */
-export { PACKAGE_VERSION } from "./src/package-json.ts";
+export { VERSION } from "./src/package-json.ts";
 
 export {
   createRenderKit,

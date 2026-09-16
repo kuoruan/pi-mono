@@ -18,8 +18,8 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import packageJson from "#root/package.json" with { type: "json" };
-import { PACKAGE_VERSION as PUBLIC_PACKAGE_VERSION } from "#root/render-kit.ts";
-import { PACKAGE_VERSION } from "#src/package-json.ts";
+import { VERSION as PUBLIC_VERSION } from "#root/render-kit.ts";
+import { VERSION } from "#src/package-json.ts";
 import {
   createRenderKit,
   publishRenderKit,
@@ -110,9 +110,9 @@ describe("channel B: the globalThis publication", () => {
 
   it("carries the package.json version (runtime import, no literal to drift)", () => {
     // One reader (src/package-json.ts); the facade + payload share it.
-    expect(PACKAGE_VERSION).toBe(packageJson.version);
-    expect(PUBLIC_PACKAGE_VERSION).toBe(PACKAGE_VERSION);
-    expect(published().packageVersion).toBe(PACKAGE_VERSION);
+    expect(VERSION).toBe(packageJson.version);
+    expect(PUBLIC_VERSION).toBe(VERSION);
+    expect(published().packageVersion).toBe(VERSION);
   });
 
   it("is exported by the package-root facade straight from the sources (one surface, two paths)", async () => {
@@ -120,7 +120,7 @@ describe("channel B: the globalThis publication", () => {
     // The facade's runtime export list is exactly the kit's value surface.
     expect(Object.keys(facade).toSorted()).toEqual(
       [
-        "PACKAGE_VERSION",
+        "VERSION",
         "RENDER_KIT_KEY",
         "RENDER_KIT_PROTOCOL_VERSION",
         "createRenderKit",
@@ -130,11 +130,19 @@ describe("channel B: the globalThis publication", () => {
     );
     // Same bindings, not copies: the facade exports the defining modules
     expect(facade.createRenderKit).toBe(createRenderKit);
-    expect(facade.PACKAGE_VERSION).toBe(PACKAGE_VERSION);
+    expect(facade.VERSION).toBe(VERSION);
   });
 });
 
 describe("channel A: decorate", () => {
+  it("answers membership with a plain string (definition.name is string)", async () => {
+    const kit = await kitFor();
+    expect(kit.hasTool("grep")).toBe(true);
+    expect(kit.hasTool("apply_patch")).toBe(false);
+    const name: string = "grep";
+    expect(kit.hasTool(name)).toBe(true);
+  });
+
   it("keeps the consumer's execute and takes over the rendering", async () => {
     const kit = await kitFor();
     const ran: string[] = [];

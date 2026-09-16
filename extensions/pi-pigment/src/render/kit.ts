@@ -21,7 +21,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { loadPigmentConfig } from "#src/config/config-layer.ts";
 import { TOOL_NAMES, type IndicatorStyle, type ToolName } from "#src/config/config-schema.ts";
 import { defaultIssueSink, type IssueSink } from "#src/core/issue.ts";
-import { PACKAGE_VERSION } from "#src/package-json.ts";
+import { VERSION } from "#src/package-json.ts";
 
 import { shortPath } from "./paths.ts";
 import {
@@ -61,6 +61,15 @@ export interface RenderKitOptions {
 export interface RenderKit {
   /** The tool names this build can decorate. */
   readonly tools: readonly ToolName[];
+  /**
+   * Whether this build can decorate `name`. Takes a plain string because
+   * call sites usually hold `definition.name: string`, and `tools.includes`
+   * would demand a `ToolName`.
+   *
+   * @param name - The tool name to check.
+   * @returns True when {@link decorate} accepts it.
+   */
+  hasTool(name: string): boolean;
   /**
    * The session's resolved render state, for consumers that render outside
    * a tool slot (e.g. a message renderer): `kit.session.forTheme(theme)`.
@@ -108,6 +117,7 @@ export async function createRenderKit(options: RenderKitOptions): Promise<Render
   return {
     tools: TOOL_NAMES,
     session,
+    hasTool: (name: string): boolean => (TOOL_NAMES as readonly string[]).includes(name),
     decorate: (definition: ToolDefinition): ToolDefinition => decorate(definition, services),
   };
 }
@@ -169,7 +179,7 @@ export interface RenderKitPublication {
 export function publishRenderKit(): void {
   const payload: RenderKitPublication = {
     version: RENDER_KIT_PROTOCOL_VERSION,
-    packageVersion: PACKAGE_VERSION,
+    packageVersion: VERSION,
     tools: TOOL_NAMES,
     createRenderKit,
     createRenderSession,
