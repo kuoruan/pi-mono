@@ -11,26 +11,21 @@ import { armTiming, stopTiming, tookFooter } from "#src/render/tool-output.ts";
 import type { ExecutionTimingState } from "#src/render/tool-services.ts";
 import { buildRenderTheme, plain } from "#test/fixtures.ts";
 
-describe("tookFooter (pretty-ms delegation)", () => {
+describe("tookFooter (pi shell-renderer parity)", () => {
   it("is empty when the duration is unknown", () => {
     expect(tookFooter(undefined, buildRenderTheme())).toBe("");
   });
 
-  it("formats the common ranges", () => {
+  // Same body as pi's native formatDuration: seconds with one decimal,
+  // always — 8ms reads "0.0s", exactly like bash's settled row.
+  it("formats every duration as seconds with one decimal", () => {
     const theme = buildRenderTheme();
-    expect(plain(tookFooter(8, theme))).toBe("Took 8ms");
-    expect(plain(tookFooter(999, theme))).toBe("Took 999ms");
+    expect(plain(tookFooter(8, theme))).toBe("Took 0.0s");
+    expect(plain(tookFooter(999, theme))).toBe("Took 1.0s");
     expect(plain(tookFooter(1234, theme))).toBe("Took 1.2s");
     expect(plain(tookFooter(9500, theme))).toBe("Took 9.5s");
-  });
-
-  // pretty-ms owns every rounding boundary; these pin the delegation, not
-  // the arithmetic (CONTEXT.md: upstream keeps the rounding correct).
-  it("formats long runs readably", () => {
-    const theme = buildRenderTheme();
-    expect(plain(tookFooter(65_000, theme))).toBe("Took 1m 5s");
-    expect(plain(tookFooter(2_760_000, theme))).toBe("Took 46m");
-    expect(plain(tookFooter(3_722_000, theme))).toBe("Took 1h 2m 2s");
+    expect(plain(tookFooter(65_000, theme))).toBe("Took 65.0s");
+    expect(plain(tookFooter(3_722_000, theme))).toBe("Took 3722.0s");
   });
 });
 

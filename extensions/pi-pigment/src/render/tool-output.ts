@@ -13,7 +13,6 @@ import type {
   LsToolDetails,
 } from "@earendil-works/pi-coding-agent";
 import { keyText } from "@earendil-works/pi-coding-agent";
-import prettyMilliseconds from "pretty-ms";
 
 import { inertText } from "#src/core/ansi.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
@@ -310,10 +309,10 @@ export function expandKeyHint(theme: PaletteTheme): string {
 
 /**
  * The `Took 1.2s` footer from the measured execution time — bash's native
- * renderer shows one; grep/find/ls had none until this. Formatting
- * delegates to pretty-ms: same shape in the common range (8ms, 1.2s),
- * minute/hour readability for long runs (1m 5s, 1h 1m 40s), and every
- * rounding boundary is upstream's to keep correct.
+ * renderer shows one; grep/find/ls had none until this. Formatting is
+ * pi's shell-renderer body byte-identically (`(ms / 1000).toFixed(1)` +
+ * "s" — bash.js), so settled rows read the same whichever renderer
+ * painted them.
  *
  * @param ms - The measured duration in milliseconds.
  * @param theme - The pi theme (muted fg).
@@ -321,7 +320,7 @@ export function expandKeyHint(theme: PaletteTheme): string {
  */
 export function tookFooter(ms: number | undefined, theme: PaletteTheme): string {
   if (ms === undefined) return "";
-  return theme.fg("muted", `Took ${prettyMilliseconds(ms)}`);
+  return theme.fg("muted", `Took ${(ms / 1000).toFixed(1)}s`);
 }
 
 /**

@@ -302,7 +302,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     // Collapsed: the budget's worth of hits, the tail, and the timing.
     expect(text).toContain("match-target");
     expect(text).toContain("more lines, ctrl+o to expand");
-    expect(text).toMatch(/Took \d+(ms|\.\ds)/);
+    expect(text).toMatch(/Took \d+\.\ds/);
     // And the expanded render drops the affordance tail.
     const expandedComponent = grep.renderResult(
       result,
@@ -363,8 +363,8 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
       ctx,
     ) as DrivenTaskComponent;
     finalC.render(120);
-    await waitFor(() => (/Took \d+(ms|\.\ds)/.test(plain(finalC.text.text)) ? true : undefined));
-    expect(plain(finalC.text.text)).toMatch(/Took \d+(ms|\.\ds)/);
+    await waitFor(() => (/Took \d+\.\ds/.test(plain(finalC.text.text)) ? true : undefined));
+    expect(plain(finalC.text.text)).toMatch(/Took \d+\.\ds/);
   });
 
   it("grep re-renders when the theme identity changes (the key carries the palette)", async () => {
@@ -432,7 +432,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     ) as DrivenTaskComponent;
     const text = await settledText(component, "f0.ts");
     expect(text).toContain("more lines, ctrl+o to expand");
-    expect(text).toMatch(/Took \d+(ms|\.\ds)/);
+    expect(text).toMatch(/Took \d+\.\ds/);
   });
 
   it("ls renders a tree with connectors, collapse, and Took", async () => {
@@ -454,7 +454,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     const collapsedText = await settledText(collapsed, "├── ");
     expect(collapsedText).toContain("├── ");
     expect(collapsedText).toContain("more lines, ctrl+o to expand");
-    expect(collapsedText).toMatch(/Took \d+(ms|\.\ds)/);
+    expect(collapsedText).toMatch(/Took \d+\.\ds/);
 
     const expanded = ls.renderResult(
       result,
@@ -483,7 +483,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     live.ctx.executionStarted = true;
     ls.renderCall!({ path: tempDir }, theme, live.ctx);
     const liveFrame = ls.renderResult!(result, options, theme, live.ctx) as DrivenTaskComponent;
-    expect(await settledText(liveFrame, "── ")).toMatch(/Took \d+/);
+    expect(await settledText(liveFrame, "── ")).toMatch(/Took \d+\.\ds/);
 
     // RESUME: pi replays the row with executionStarted false and never
     // re-arms — no duration, and nothing about the timing was persisted to
@@ -539,7 +539,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     const raw = component.text.text;
     expect(raw).toContain("app.ts"); // exercise a code-file (fgCode) row
     expect(raw).not.toContain("\x1b[0m"); // regression: full reset whitens the row tail
-    expect(plain(raw)).toMatch(/└── [^\n]*\n\nTook \d+(ms|\.\ds)/);
+    expect(plain(raw)).toMatch(/└── [^\n]*\n\nTook \d+\.\ds/);
   });
 
   it("bash delegates execution verbatim (streaming updates included)", async () => {
