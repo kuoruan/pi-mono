@@ -5,6 +5,7 @@
  * (ours and the SDK tools') routes through the mocked volume.
  */
 
+import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
@@ -837,6 +838,46 @@ describe("write new-file preview line cap (memfs)", () => {
     // means no cap at all.
     expect(plain(text).split("\n").length).toBeLessThan(250);
   });
+});
+
+describe("write create preview tab handling", () => {
+  it(
+    "tab-indented long rows stay within width (no Text double-wrap)",
+    { timeout: 20000 },
+    async () => {
+      const tools = await registerTools();
+      const write = tools.find((t) => t.name === "write");
+      if (!write?.renderResult) throw new Error("write not registered");
+      // A tab-indented row near the code width: Text renders each tab as
+      // three spaces, so an unexpanded tab under-measures and the row
+      // wraps twice (the trailing-bar artifact).
+      const longRow = `\tconst schemeEnd = url.indexOf("://") + 3; // ${"pad".repeat(20)}`;
+      const content = ["export function f(url: string): string {", longRow, "}"].join("\n");
+      const result = await write.execute(
+        "tab1",
+        { path: "/project/tab.ts", content },
+        undefined,
+        undefined,
+        undefined,
+      );
+      const { ctx } = makeRenderCtx();
+      ctx.args = { path: "/project/tab.ts", content };
+      const component = write.renderResult(
+        result,
+        { expanded: true, isPartial: false },
+        buildRenderTheme(),
+        ctx,
+      ) as TaskCarrier;
+      const rendered = await component.previewTask!.render(120);
+      for (const row of rendered.split("\n")) {
+        expect(visibleWidth(plain(row))).toBeLessThanOrEqual(120);
+      }
+      // The full round-trip through Text must not add rows either.
+      const host = new Text("", 0, 0);
+      host.setText(rendered);
+      expect(host.render(120)).toHaveLength(rendered.split("\n").length);
+    },
+  );
 });
 
 describe("bash command highlighting (renderCall)", () => {

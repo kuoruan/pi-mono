@@ -53,7 +53,7 @@ export function mixBg(base: RgbColor, accent: RgbColor, intensity: number): stri
 }
 
 /**
- * Expand tabs to two spaces (the renderer's tab width).
+ * Expand tabs to three spaces (matching pi-tui's Text tab width).
  *
  * @param content - Text possibly containing tabs.
  * @returns The text with tabs expanded.
@@ -62,7 +62,7 @@ export function expandTabs(content: string): string {
   // Fast path: no tab means the same string reference — the hot wrap
   // paths (shouldUseSplit's measure and every row wrap) avoid allocating
   // a copy per line.
-  return content.includes("\t") ? content.replace(/\t/g, "  ") : content;
+  return content.includes("\t") ? content.replace(/\t/g, "   ") : content;
 }
 
 /**

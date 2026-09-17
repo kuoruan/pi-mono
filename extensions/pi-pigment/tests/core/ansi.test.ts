@@ -31,8 +31,8 @@ const RED_BG = "\x1b[48;2;255;0;0m";
 const GREEN_FG = "\x1b[38;2;0;255;0m";
 
 describe("expandTabs", () => {
-  it("replaces tabs with two spaces", () => {
-    expect(expandTabs("\ta\tb")).toBe("  a  b");
+  it("replaces tabs with three spaces (pi-tui Text parity)", () => {
+    expect(expandTabs("\ta\tb")).toBe("   a   b");
   });
 });
 

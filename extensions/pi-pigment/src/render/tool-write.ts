@@ -14,7 +14,7 @@ import type {
   WriteToolInput,
 } from "@earendil-works/pi-coding-agent";
 
-import { inertText } from "#src/core/ansi.ts";
+import { expandTabs, inertText } from "#src/core/ansi.ts";
 import { type ParsedDiff, parseDiff } from "#src/core/diff.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { countLines, linesOf, textBeforeLine } from "#src/core/lines.ts";
@@ -375,7 +375,12 @@ export function createWriteWrapper(
             fallback: "",
             invalidate: ctx.invalidate,
             render: async (width: number) => {
-              const content = rawContent();
+              // Tabs expand BEFORE highlight/wrap (split/unified parity):
+              // Shiki keeps tabs inside tokens and the wrapper measures a
+              // tab as one column, while pi-tui's Text renders it as three
+              // spaces — an unexpanded tab makes long indented rows wrap
+              // twice (the trailing-bar artifact).
+              const content = expandTabs(rawContent());
               if (!content) return "";
               // Streaming frames stay plain (no re-tokenize per partial);
               // the settled frame highlights and populates the cache.
