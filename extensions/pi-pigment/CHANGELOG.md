@@ -1,5 +1,12 @@
 # pi-pigment
 
+## 0.2.1
+
+### Patch Changes
+
+- 35dfbae: The write create preview no longer leaves pale trailing bars on tab-indented rows: tabs now expand to the same width the terminal renderer uses before wrapping.
+- c5517ad: The Took footer now reads the same whichever renderer painted the row, and pretty-ms is no longer a dependency.
+
 ## 0.2.0
 
 ### Minor Changes
