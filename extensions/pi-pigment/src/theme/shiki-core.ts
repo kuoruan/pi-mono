@@ -8,7 +8,9 @@
 import {
   createHighlighterCore,
   createOnigurumaEngine,
+  guessEmbeddedLanguages,
   type HighlighterCore,
+  type LanguageInput,
   type ThemedToken,
 } from "shiki";
 
@@ -70,9 +72,15 @@ let corePromise: Promise<HighlighterCore> | undefined;
  * the pinned measurements.
  *
  * @param language - The language to load.
+ * @param probe - The text being highlighted (code plus its grammar seed):
+ *   shiki's guessEmbeddedLanguages scans it for embedded-language markers
+ *   (`lang="tsx"`, fences) and loads only those companions.
  * @returns The highlighter core, or undefined when the language cannot load.
  */
-export async function ensureCore(language: BundledLanguage): Promise<HighlighterCore | undefined> {
+export async function ensureCore(
+  language: BundledLanguage,
+  probe = "",
+): Promise<HighlighterCore | undefined> {
   try {
     // The await sits INSIDE this try: a construction rejection must reach
     // this catch to clear the poisoned memo.
@@ -81,12 +89,24 @@ export async function ensureCore(language: BundledLanguage): Promise<Highlighter
     });
     const resolved = await corePromise;
     try {
-      if (!resolved.getLoadedLanguages().includes(language)) {
-        const mod = (await import(`shiki/dist/langs/${language}.mjs`)) as {
-          /** The language grammar module's default export. */
-          default: unknown;
-        };
-        await resolved.loadLanguage(mod.default as never);
+      const loaded = new Set(resolved.getLoadedLanguages());
+      // Embedded blocks (shiki#791 made them lazy by design): a host like vue
+      // declares only the ts/js/css/html closure, so `<script lang="tsx">`
+      // includes `source.tsx` that never loads — the block falls back to the
+      // host's flat foreground (the "vue tsx diff renders uncolored" report).
+      // Guess from the ACTUAL text (shiki's own guessEmbeddedLanguages, the
+      // same one createSingletonShorthands uses): only grammars the content
+      // references get loaded, and only once. The seed rides along — a hunk
+      // slice shows no `<script>` tag, so the seed is where the lang
+      // attribute lives.
+      const wanted = [
+        ...(loaded.has(language) ? [] : [language]),
+        ...guessEmbeddedLanguages(probe, language).filter(
+          (lang) => lang !== language && !loaded.has(lang),
+        ),
+      ];
+      if (wanted.length > 0) {
+        await loadWithHostFallback(resolved, language, wanted, loaded);
       }
       return resolved;
     } catch {
@@ -105,6 +125,53 @@ export async function ensureCore(language: BundledLanguage): Promise<Highlighter
   }
 }
 
+/**
+ * Load language modules into the core in ONE batch: the dynamic imports run
+ * in parallel and core.loadLanguage takes all registrations at once (its own
+ * Promise.all — the same single call createSingletonShorthands makes).
+ *
+ * @param core - The highlighter core.
+ * @param languages - The shiki language modules to load.
+ */
+async function loadLanguageModules(
+  core: HighlighterCore,
+  languages: readonly string[],
+): Promise<void> {
+  const mods = await Promise.all(
+    languages.map(async (language) => {
+      const mod = (await import(`shiki/dist/langs/${language}.mjs`)) as {
+        /** The language grammar module's default export. */
+        default: LanguageInput;
+      };
+      return mod.default;
+    }),
+  );
+  await core.loadLanguage(...mods);
+}
+
+/**
+ * Load one batch of languages with a host-alone retry: a single missing
+ * module rejects the whole batch, so on failure the host retries ALONE (a
+ * missing tsx must not uncolor a ts-only file); only the host failing twice
+ * throws — the caller then falls through to plain text.
+ *
+ * @param core - The highlighter core.
+ * @param host - The MUST-load host language.
+ * @param wanted - The full batch (host first, then embedded companions).
+ * @param loaded - The languages already loaded (host retry skips when set).
+ */
+async function loadWithHostFallback(
+  core: HighlighterCore,
+  host: string,
+  wanted: readonly string[],
+  loaded: ReadonlySet<string>,
+): Promise<void> {
+  try {
+    await loadLanguageModules(core, wanted);
+  } catch {
+    if (!loaded.has(host)) await loadLanguageModules(core, [host]);
+  }
+}
 /**
  * Convert one codeToTokensBase result to an ANSI string: hex→escape,
  * fontStyle-bit wrapping, through our forced-truecolor contract (never an

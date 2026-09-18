@@ -178,6 +178,26 @@ describe("highlight (the session's render entry)", () => {
   });
 });
 
+describe("embedded-grammar companions (ensureCore preload)", () => {
+  beforeEach(() => {
+    resetPigmentForTest();
+  });
+  afterEach(() => {
+    resetPigmentForTest();
+  });
+
+  it("colors a vue tsx script block seeded mid-file (the InTransitTab report)", async () => {
+    const view = viewFor(buildFakeTheme({ syntaxColors: true }));
+    const code = "const currentFilterValues = ref<ViewFieldFilter[]>([]);";
+    const seed = '<script lang="tsx" setup>';
+    const lines = await view.highlight({ code, language: "vue", seed });
+    // eslint-disable-next-line no-control-regex -- counts token fg escapes
+    const colors = new Set(lines.join("\n").match(/\x1b\[38;2;\d+;\d+;\d+m/g) ?? []);
+    // Flat (unloaded tsx embed) would carry exactly one fg color.
+    expect(colors.size).toBeGreaterThan(1);
+  });
+});
+
 describe("theme selections (the session's inputs)", () => {
   beforeEach(() => {
     resetPigmentForTest();

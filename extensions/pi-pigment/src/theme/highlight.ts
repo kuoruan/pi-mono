@@ -267,7 +267,7 @@ async function renderThemeToAnsi(
   seed?: string,
 ): Promise<string[]> {
   if (!themeInput) return linesOf(code);
-  const core = await ensureCore(language);
+  const core = await ensureCore(language, seed ? `${seed}\n${code}` : code);
   if (!core) return linesOf(code);
   // Normalize to a registered theme: a bundled id materializes through
   // the intake (translucent flattening); an object registers AS-IS — its
