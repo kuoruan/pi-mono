@@ -1,4 +1,4 @@
-import type { HighlighterCore } from "shiki/core";
+import type { HighlighterCore, ThemedToken } from "shiki/core";
 /**
  * The theme-switch re-highlight cost: N code blocks rendered under theme A (the
  * pre-switch state, cache primed), then the same blocks under theme B — every
@@ -40,7 +40,7 @@ import { beforeAll, test } from "vitest";
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
 import { clearHighlightCacheForTest } from "#src/theme/highlight.ts";
 import type { PaletteTheme } from "#src/theme/palette.ts";
-import { ensureCore } from "#src/theme/shiki-core.ts";
+import { ensureCore, renderTokenLinesAnsi } from "#src/theme/shiki-core.ts";
 import { buildFakeTheme, viewFor } from "#test/fixtures.ts";
 
 // One module-level sink absorbs every measured return value (DCE guard).
@@ -105,6 +105,8 @@ let core: HighlighterCore | undefined;
 let tokenizeTheme: string | undefined;
 /** The name the tokenize leg registers under: ours, so the id it passes is certain. */
 const TOKENIZE_THEME = "pi-bench-tokenize";
+/** One pre-tokenized block set (the render-only leg's input, same theme+code). */
+let tokenSets: ThemedToken[][][] = [];
 
 beforeAll(async () => {
   for (const b of blocks)
@@ -116,6 +118,12 @@ beforeAll(async () => {
     // of trusting whatever name the intake materialized.
     await core.loadTheme({ ...materialized, name: TOKENIZE_THEME });
     tokenizeTheme = TOKENIZE_THEME;
+    tokenSets = [];
+    for (const b of blocks) {
+      tokenSets.push(
+        await core.codeToTokensBase(b.code, { lang: LANGUAGE, theme: TOKENIZE_THEME }),
+      );
+    }
   }
 });
 
@@ -148,6 +156,13 @@ test("theme switch (the tokenizer's share)", async ({ bench }) => {
     for (const b of blocks) {
       const tokens = await core.codeToTokensBase(b.code, { lang: LANGUAGE, theme: tokenizeTheme });
       sink += tokens.length;
+    }
+  }).run();
+
+  await bench(`render only: ${BLOCKS} blocks (renderTokenLinesAnsi, same tokens)`, async () => {
+    if (!tokenSets.length) throw new Error("render-only leg needs pre-tokenized blocks");
+    for (const tokens of tokenSets) {
+      for (const line of renderTokenLinesAnsi(tokens)) sink += line.length;
     }
   }).run();
 

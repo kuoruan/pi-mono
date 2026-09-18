@@ -15,6 +15,7 @@ import {
 } from "shiki";
 
 import { fgRgb } from "#src/core/ansi.ts";
+import { createBoundedMap } from "#src/core/bounded-map.ts";
 import { parseHexColor } from "#src/core/color.ts";
 import {
   SEQ_BOLD,
@@ -172,6 +173,52 @@ async function loadWithHostFallback(
     if (!loaded.has(host)) await loadLanguageModules(core, [host]);
   }
 }
+
+/**
+ * The token open+close escape pair for one color+fontStyle combination —
+ * everything in the rendered token EXCEPT the content text.
+ */
+interface TokenWrapping {
+  /** The style-open + fg-color escape prefix. */
+  open: string;
+  /** The fg-default + style-close escape suffix. */
+  close: string;
+}
+
+/**
+ * The token wrapping cache: one entry per distinct color+fontStyle pair
+ * (dozens per theme) instead of one hex parse + string build per token
+ * (thousands per diff). The hex strings ARE the theme's colors, so a theme
+ * switch keys itself — no invalidation needed. Bounded by the shared
+ * two-generation memo (same policy as the highlight caches).
+ */
+const wrappingCache = createBoundedMap<string, TokenWrapping>(512);
+
+/**
+ * The open+close escapes for one token's color+fontStyle (the cache's
+ * miss path: one hex parse, then freeze the pair).
+ *
+ * @param color - The token's hex color.
+ * @param fontStyle - The token's fontStyle bitmask.
+ * @returns The wrapping escape pair.
+ */
+function tokenWrapping(color: string, fontStyle: number): TokenWrapping {
+  const key = `${color}\0${fontStyle}`;
+  const hit = wrappingCache.get(key);
+  if (hit) return hit;
+  const { r, g, b } = parseHexColor(color) ?? { r: 188, g: 188, b: 188 };
+  const style = fontStyleOpen(fontStyle);
+  const close = style
+    ? `${SEQ_BOLD_OFF}${SEQ_ITALIC_OFF}${SEQ_UNDERLINE_OFF}${SEQ_STRIKE_OFF}`
+    : "";
+  const wrapping: TokenWrapping = {
+    open: `${style}${fgRgb({ r, g, b })}`,
+    close: `${SEQ_FG_DEFAULT}${close}`,
+  };
+  wrappingCache.set(key, wrapping);
+  return wrapping;
+}
+
 /**
  * Convert one codeToTokensBase result to an ANSI string: hex→escape,
  * fontStyle-bit wrapping, through our forced-truecolor contract (never an
@@ -191,12 +238,8 @@ export function renderTokenLinesAnsi(tokens: ThemedToken[][]): string[] {
     line
       .map((token) => {
         if (!token.color) return token.content;
-        const { r, g, b } = parseHexColor(token.color) ?? { r: 188, g: 188, b: 188 };
-        const style = fontStyleOpen(token.fontStyle ?? 0);
-        const close = style
-          ? `${SEQ_BOLD_OFF}${SEQ_ITALIC_OFF}${SEQ_UNDERLINE_OFF}${SEQ_STRIKE_OFF}`
-          : "";
-        return `${style}${fgRgb({ r, g, b })}${token.content}${SEQ_FG_DEFAULT}${close}`;
+        const { open, close } = tokenWrapping(token.color, token.fontStyle ?? 0);
+        return `${open}${token.content}${close}`;
       })
       .join(""),
   );
