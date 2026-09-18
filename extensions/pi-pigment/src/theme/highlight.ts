@@ -6,7 +6,7 @@
  */
 
 import { getLanguageFromPath } from "@earendil-works/pi-coding-agent";
-import { bundledLanguages, bundledLanguagesAlias } from "shiki";
+import { bundledLanguages, bundledLanguagesAlias, type GrammarState } from "shiki";
 
 import { createBoundedMap } from "#src/core/bounded-map.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
@@ -151,6 +151,16 @@ export const MAX_SEED_CHARS = 64 * 1024;
 const highlightCache = createBoundedMap<string, string[]>(CACHE_LIMIT);
 
 /**
+ * Seed grammar states, shared across a diff's hunk blocks: one seed's
+ * `getLastGrammarState` tokenize (~2-3ms/KB) serves every block carrying
+ * it, instead of each block re-tokenizing the seed as `grammarContextCode`
+ * (the N× cost a multi-hunk diff's settle frame pays). Keyed by language +
+ * seed hash — the state is grammar-level (per-theme stacks resolve lazily
+ * inside), so the theme stays out of the key. Small next to the highlight
+ * cache: one entry per distinct seed, not per block.
+ */
+const grammarStateCache = createBoundedMap<string, GrammarState>(16);
+/**
  * Drop every cached highlight (test seam — the suite's aggregate reset).
  * The cache itself is correct-by-construction (deterministic tokenize of
  * deterministic keys); the seam exists so a test can force a re-render
@@ -161,6 +171,7 @@ const highlightCache = createBoundedMap<string, string[]>(CACHE_LIMIT);
  */
 export function clearHighlightCacheForTest(): void {
   highlightCache.clear();
+  grammarStateCache.clear();
 }
 
 /**
@@ -289,13 +300,24 @@ async function renderThemeToAnsi(
     );
     registeredThemeObjects.set(registeredName, stamp);
   }
-  // Grammar-state seeding (embedded grammars) through shiki's own
-  // `grammarContextCode`: the seed participates in grammar inference as
-  // prepended code and never reaches the output.
+  // Grammar-state seeding (embedded grammars): the seed's end state is
+  // computed ONCE per distinct seed (grammarStateCache) and shared by every
+  // block carrying it — passing the state object skips the per-block seed
+  // re-tokenize `grammarContextCode` would pay. The state never reaches
+  // the output, only the slice tokenizes from it.
+  let grammarState: GrammarState | undefined;
+  if (seed !== undefined) {
+    const stateKey = [language, fnv1a(seed)].join("\0");
+    grammarState = grammarStateCache.get(stateKey);
+    if (!grammarState) {
+      grammarState = core.getLastGrammarState(seed, { lang: language, theme: registeredName });
+      grammarStateCache.set(stateKey, grammarState);
+    }
+  }
   const tokens = await core.codeToTokensBase(code, {
     lang: language,
     theme: registeredName,
-    grammarContextCode: seed,
+    ...(grammarState ? { grammarState } : { grammarContextCode: seed }),
   });
   return renderTokenLinesAnsi(tokens);
 }
