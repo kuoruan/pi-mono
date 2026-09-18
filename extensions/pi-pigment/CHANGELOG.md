@@ -1,5 +1,17 @@
 # pi-pigment
 
+## 0.2.2
+
+### Patch Changes
+
+- 03de3b9: The highlight cache key now carries the code's length plus its FNV-1a hash instead of the full source text, shrinking full-cache key memory from megabytes to kilobytes.
+- ccf96b7: Extract the grammar-state seed lifecycle into `theme/seed.ts` (language gate, last-hunk slice rule, character cap, shared grammar-state cache, edit/write seed sources) and language detection into `theme/language.ts`. No behavior change: `highlight.ts` keeps re-exports so existing importers work.
+- 3b3292c: Resizing across the split/unified threshold no longer re-slices a diff's grammar seed: the seed now covers the diff's last hunk outright instead of the visible window's end, so narrow and wide renders share one seed and one set of highlight cache keys.
+- 065dffc: Multi-hunk diffs with grammar seeds (vue/svelte/…) settle noticeably faster: the seed's grammar state is now computed once and shared by every hunk block instead of being re-tokenized per block.
+- 59a1fdf: Token-to-ANSI rendering now caches the open/close escape pair per distinct color+fontStyle combination instead of parsing hex and rebuilding strings per token.
+- 9099cb9: Unify the visible-window slicing for the unified and split diff views in `render/visible-sources.ts` (`unifiedWindow`/`splitWindow`: window slice plus aligned highlight sources in one return). No behavior change: both views consume the same aligned pairs they hand-built before.
+- 58cc52f: Vue files with `<script lang="tsx">` (or any other embedded language) no longer render diff hunks uncolored: the highlighter now loads the embedded grammars the code actually references, guessed from the hunk and its seed text.
+
 ## 0.2.1
 
 ### Patch Changes
