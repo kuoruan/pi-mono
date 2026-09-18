@@ -8,7 +8,7 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
-import { detectLanguage } from "#src/theme/highlight.ts";
+import { detectLanguage } from "#src/theme/language.ts";
 
 import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
 import { createToolWrapper } from "./tool-factory.ts";

@@ -17,7 +17,7 @@
 import { type Redirect, type SimpleCommand, type Word, parse } from "@aliou/sh";
 
 import { linesOf } from "#src/core/lines.ts";
-import { detectLanguage } from "#src/theme/highlight.ts";
+import { detectLanguage } from "#src/theme/language.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 /** A code region to render in its own grammar, by source offset. */

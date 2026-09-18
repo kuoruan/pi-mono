@@ -42,13 +42,6 @@ const registeredThemeObjects = createBoundedMap<string, object | string>(64);
  */
 const CACHE_LIMIT = 192;
 
-/**
- * Language detection (moved to language.ts) and the seed lifecycle
- * (moved to seed.ts): re-exported here so existing importers keep working.
- */
-export { detectLanguage } from "./language.ts";
-export { MAX_SEED_CHARS, needsSeed } from "./seed.ts";
-
 // No engine prewarm (the shiki module's import is paid at extension load —
 // this file's static registry import — leaving ensureCore the WASM
 // instantiate plus grammar cost) — and every hlBlock consumer renders

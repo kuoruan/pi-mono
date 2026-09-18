@@ -9,7 +9,8 @@ import type { GrepToolInput, ToolDefinition } from "@earendil-works/pi-coding-ag
 
 import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
-import { detectLanguage, MAX_HL_CHARS } from "#src/theme/highlight.ts";
+import { MAX_HL_CHARS } from "#src/theme/highlight.ts";
+import { detectLanguage } from "#src/theme/language.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 

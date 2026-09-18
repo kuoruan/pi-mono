@@ -19,7 +19,7 @@ import type {
 
 import { parsePatchFiles } from "#src/core/diff.ts";
 import { linesOf } from "#src/core/lines.ts";
-import { detectLanguage } from "#src/theme/highlight.ts";
+import { detectLanguage } from "#src/theme/language.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import { seedFromLines } from "#src/theme/seed.ts";
 

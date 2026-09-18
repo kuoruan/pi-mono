@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseDiff } from "#src/core/diff.ts";
 import { textBeforeLine } from "#src/core/lines.ts";
 import { setDiffPreviewTask, type PreviewTextHost } from "#src/render/text-task.ts";
-import { MAX_SEED_CHARS } from "#src/theme/highlight.ts";
+import { MAX_SEED_CHARS } from "#src/theme/seed.ts";
 import {
   buildFakeTheme,
   makeRenderCtx,

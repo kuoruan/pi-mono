@@ -18,7 +18,7 @@ import { expandTabs, inertText } from "#src/core/ansi.ts";
 import { type ParsedDiff, parseDiff } from "#src/core/diff.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { countLines, linesOf } from "#src/core/lines.ts";
-import { detectLanguage } from "#src/theme/highlight.ts";
+import { detectLanguage } from "#src/theme/language.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import { seedFromText } from "#src/theme/seed.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";

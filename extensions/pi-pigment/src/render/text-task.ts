@@ -8,7 +8,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
-import type { ParsedDiff } from "#src/core/diff.ts";
 import { lastHunkNewStart } from "#src/theme/seed.ts";
 
 import { type DiffViewOptions } from "./diff-view.ts";
@@ -354,7 +353,6 @@ async function renderPaddedDiff(
 }
 
 /**
- * /**
  * Wrap a Text component so render(width) drives the attached preview task:
  * on key change it shows the placeholder, kicks the async render, and
  * swaps in the result (or the fallback on failure).
