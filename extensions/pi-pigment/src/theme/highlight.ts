@@ -155,9 +155,9 @@ const highlightCache = createBoundedMap<string, string[]>(CACHE_LIMIT);
  * `getLastGrammarState` tokenize (~2-3ms/KB) serves every block carrying
  * it, instead of each block re-tokenizing the seed as `grammarContextCode`
  * (the N× cost a multi-hunk diff's settle frame pays). Keyed by language +
- * seed hash — the state is grammar-level (per-theme stacks resolve lazily
- * inside), so the theme stays out of the key. Small next to the highlight
- * cache: one entry per distinct seed, not per block.
+ * theme + seed hash: GrammarState binds stacks per theme and cross-theme
+ * use throws. Small next to the highlight cache: one entry per distinct
+ * seed, not per block.
  */
 const grammarStateCache = createBoundedMap<string, GrammarState>(16);
 /**
@@ -301,13 +301,16 @@ async function renderThemeToAnsi(
     registeredThemeObjects.set(registeredName, stamp);
   }
   // Grammar-state seeding (embedded grammars): the seed's end state is
-  // computed ONCE per distinct seed (grammarStateCache) and shared by every
-  // block carrying it — passing the state object skips the per-block seed
-  // re-tokenize `grammarContextCode` would pay. The state never reaches
+  // computed ONCE per distinct seed+theme (grammarStateCache) and shared by
+  // every block carrying it — passing the state object skips the per-block
+  // seed re-tokenize `grammarContextCode` would pay. The state never reaches
   // the output, only the slice tokenizes from it.
+  // The theme is IN the key: GrammarState binds its stacks per theme and
+  // codeToTokensBase THROWS on a cross-theme state (which the highlight
+  // fallback would swallow into uncolored lines).
   let grammarState: GrammarState | undefined;
   if (seed !== undefined) {
-    const stateKey = [language, fnv1a(seed)].join("\0");
+    const stateKey = [language, registeredName, fnv1a(seed)].join("\0");
     grammarState = grammarStateCache.get(stateKey);
     if (!grammarState) {
       grammarState = core.getLastGrammarState(seed, { lang: language, theme: registeredName });

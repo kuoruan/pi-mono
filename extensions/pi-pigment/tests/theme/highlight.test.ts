@@ -196,6 +196,31 @@ describe("embedded-grammar companions (ensureCore preload)", () => {
     // Flat (unloaded tsx embed) would carry exactly one fg color.
     expect(colors.size).toBeGreaterThan(1);
   });
+
+  it("re-seeds per theme: a cross-theme state would throw into plain lines", async () => {
+    // GrammarState binds stacks per theme — a state computed under theme A
+    // THROWS under theme B (swallowed by the highlight fallback into
+    // uncolored lines). The state cache keys on the theme, so the second
+    // theme re-seeds instead of reusing. The themes must differ in an actual
+    // syntax color: the derived shiki name hashes content, not the pi name.
+    const code = "const currentFilterValues = ref<ViewFieldFilter[]>([]);";
+    const seed = '<script lang="tsx" setup>';
+    const base = buildFakeTheme({ syntaxColors: true });
+    const viewA = viewFor(base);
+    const viewB = viewFor({
+      ...base,
+      getFgAnsi: (color) =>
+        color === "syntaxKeyword" ? "\x1b[38;2;200;156;214m" : base.getFgAnsi(color),
+    });
+    const linesA = await viewA.highlight({ code, language: "vue", seed });
+    const linesB = await viewB.highlight({ code, language: "vue", seed });
+    // eslint-disable-next-line no-control-regex -- counts token fg escapes
+    const fgRe = /\x1b\[38;2;\d+;\d+;\d+m/g;
+    const colorsA = new Set(linesA.join("\n").match(fgRe) ?? []);
+    const colorsB = new Set(linesB.join("\n").match(fgRe) ?? []);
+    expect(colorsA.size).toBeGreaterThan(1);
+    expect(colorsB.size).toBeGreaterThan(1);
+  });
 });
 
 describe("theme selections (the session's inputs)", () => {
