@@ -240,8 +240,13 @@ export async function hlBlockResolved(
     block.seed !== undefined && block.seed.length <= MAX_SEED_CHARS ? block.seed : undefined;
   const themeId = themeIdentity(theme);
   const seedKey = seed ? fnv1a(seed) : "";
-  const key = [themeId, language, seedKey, code].join("\0");
-  // BoundedMap's get refreshes recency (the LRU touch).
+  // The key carries hashes, not the sources: a worst-case 80KB face would
+  // otherwise duplicate its text in every entry's key (192 entries x KBs =
+  // MBs of key alone, plus a full-string compare per lookup). The length
+  // prefixes the hash so same-length is the only collision surface — at a
+  // 192-entry window a 32-bit collision there is ~2e-7 (and a miss merely
+  // re-derives; a hit on a collided key would miscolor, hence the length).
+  const key = [themeId, language, seedKey, code.length, fnv1a(code)].join("\0");
   const cached = highlightCache.get(key);
   if (cached) return cached;
   try {
