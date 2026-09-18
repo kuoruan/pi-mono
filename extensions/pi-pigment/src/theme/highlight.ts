@@ -5,15 +5,13 @@
  * theme-selection.ts.
  */
 
-import { getLanguageFromPath } from "@earendil-works/pi-coding-agent";
-import { bundledLanguages, bundledLanguagesAlias, type GrammarState } from "shiki";
-
 import { createBoundedMap } from "#src/core/bounded-map.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { linesOf } from "#src/core/lines.ts";
 
 import { loadBundledTheme } from "./bundled-intake.ts";
-import { ensureCore, renderTokenLinesAnsi, type BundledLanguage } from "./shiki-core.ts";
+import { MAX_SEED_CHARS, clearSeedCacheForTest, seedGrammarState } from "./seed.ts";
+import { type BundledLanguage, ensureCore, renderTokenLinesAnsi } from "./shiki-core.ts";
 import type { ShikiThemeInput } from "./syntax-theme.ts";
 
 /** Skip highlighting above this size — the diff still renders, unstyled. */
@@ -45,98 +43,11 @@ const registeredThemeObjects = createBoundedMap<string, object | string>(64);
 const CACHE_LIMIT = 192;
 
 /**
- * The language keys Shiki's bundle accepts: language ids plus registered
- * aliases — which the community keeps populated with file extensions
- * ("ts", "py", "zig", "nu", …). This set IS the extension map: a file's
- * extension (lowercased) that hits the set is a valid `lang` argument as-is,
- * covering 300+ languages without a hand-maintained table. Extensionless
- * convention files match too ("Makefile" → "makefile").
+ * Language detection (moved to language.ts) and the seed lifecycle
+ * (moved to seed.ts): re-exported here so existing importers keep working.
  */
-const LANGUAGE_KEYS: ReadonlySet<string> = new Set(
-  [...Object.keys(bundledLanguages), ...Object.keys(bundledLanguagesAlias)].map((key) =>
-    key.toLowerCase(),
-  ),
-);
-
-/** The few header extensions neither the SDK's map nor Shiki's keys carry. */
-const EXTRA_EXT_LANG: Record<string, BundledLanguage> = {
-  hxx: "cpp",
-  hh: "cpp",
-};
-
-/**
- * Detect the Shiki language for a file path: the SDK's own extension map
- * first (the authority — it knows the C-header and makefile spellings),
- * then Shiki's language keys (ids + alias registry, which the community
- * keeps populated with newer extensions), then the two header spellings
- * neither carries.
- *
- * @param filePath - The file path to inspect.
- * @returns The Shiki language id, or undefined when unknown.
- */
-export function detectLanguage(filePath: string): BundledLanguage | undefined {
-  const sdk = getLanguageFromPath(filePath);
-  if (sdk) return sdk as BundledLanguage;
-  const name = filePath.slice(filePath.lastIndexOf("/") + 1);
-  const dot = name.lastIndexOf(".");
-  const ext = (dot === -1 ? name : name.slice(dot + 1)).toLowerCase();
-  if (!ext) return undefined;
-  if (LANGUAGE_KEYS.has(ext)) return ext as BundledLanguage;
-  return EXTRA_EXT_LANG[ext];
-}
-
-/**
- * The grammars that EMBED another syntax: vue's `<script>`, html's
- * `<style>`, php's inline mode, a markdown fence. A mid-file hunk of such
- * a language carries no tag in view, so a from-the-top tokenize renders
- * the embedded part flat — the one case where a grammar seed changes the
- * render. Everywhere else the seed would tokenize the same input to the
- * same tokens, so the price (a disk read and a prefix-sized tokenize) is
- * paid for nothing.
- */
-const SEED_LANGUAGES: ReadonlySet<string> = new Set([
-  "angular-html",
-  "astro",
-  "blade",
-  "erb",
-  "haml",
-  "handlebars",
-  "hbs",
-  "html",
-  "jade",
-  "jinja",
-  "liquid",
-  "markdown",
-  "md",
-  "mdx",
-  "php",
-  "pug",
-  "razor",
-  "svelte",
-  "twig",
-  "vue",
-]);
-
-/**
- * Whether a language embeds another syntax — the gate for the edit
- * preview's disk-backed grammar seed (see {@link SEED_LANGUAGES}).
- *
- * @param language - The detected language, if any.
- * @returns True when a seed can change the render.
- */
-export function needsSeed(language: BundledLanguage | undefined): boolean {
-  return language !== undefined && SEED_LANGUAGES.has(language);
-}
-
-/**
- * The seed prefix's character cap. The seed rides into the tokenizer as
- * `grammarContextCode`, so the prefix is paid for twice — once slicing it
- * out of the file, once (the dominant term) in the tokenize that consumes
- * it: measured ~2-3 ms per KB (10KB ≈ 30ms, 86KB ≈ 170ms on a cold
- * cache). Past this cap the unseeded render is the better trade — the
- * embedded region degrades to flat, the frame stays responsive.
- */
-export const MAX_SEED_CHARS = 64 * 1024;
+export { detectLanguage } from "./language.ts";
+export { MAX_SEED_CHARS, needsSeed } from "./seed.ts";
 
 // No engine prewarm (the shiki module's import is paid at extension load —
 // this file's static registry import — leaving ensureCore the WASM
@@ -151,17 +62,6 @@ export const MAX_SEED_CHARS = 64 * 1024;
 const highlightCache = createBoundedMap<string, string[]>(CACHE_LIMIT);
 
 /**
- * Seed grammar states, shared across a diff's hunk blocks: one seed's
- * `getLastGrammarState` tokenize (~2-3ms/KB) serves every block carrying
- * it, instead of each block re-tokenizing the seed as `grammarContextCode`
- * (the N× cost a multi-hunk diff's settle frame pays). Keyed by language +
- * theme + seed hash: GrammarState binds stacks per theme and cross-theme
- * use throws. Small next to the highlight cache: one entry per distinct
- * seed, not per block.
- */
-const grammarStateCache = createBoundedMap<string, GrammarState>(16);
-/**
- * Drop every cached highlight (test seam — the suite's aggregate reset).
  * The cache itself is correct-by-construction (deterministic tokenize of
  * deterministic keys); the seam exists so a test can force a re-render
  * through a fresh derivation after resetting the theme-selection state.
@@ -171,7 +71,7 @@ const grammarStateCache = createBoundedMap<string, GrammarState>(16);
  */
 export function clearHighlightCacheForTest(): void {
   highlightCache.clear();
-  grammarStateCache.clear();
+  clearSeedCacheForTest();
 }
 
 /**
@@ -305,23 +205,13 @@ async function renderThemeToAnsi(
     );
     registeredThemeObjects.set(registeredName, stamp);
   }
-  // Grammar-state seeding (embedded grammars): the seed's end state is
-  // computed ONCE per distinct seed+theme (grammarStateCache) and shared by
-  // every block carrying it — passing the state object skips the per-block
-  // seed re-tokenize `grammarContextCode` would pay. The state never reaches
+  // Grammar-state seeding (embedded grammars — see seed.ts): the seed's end
+  // state is computed ONCE per distinct seed+theme and shared by every block
+  // carrying it — passing the state object skips the per-block seed
+  // re-tokenize `grammarContextCode` would pay. The state never reaches
   // the output, only the slice tokenizes from it.
-  // The theme is IN the key: GrammarState binds its stacks per theme and
-  // codeToTokensBase THROWS on a cross-theme state (which the highlight
-  // fallback would swallow into uncolored lines).
-  let grammarState: GrammarState | undefined;
-  if (seed !== undefined) {
-    const stateKey = [language, registeredName, fnv1a(seed)].join("\0");
-    grammarState = grammarStateCache.get(stateKey);
-    if (!grammarState) {
-      grammarState = core.getLastGrammarState(seed, { lang: language, theme: registeredName });
-      grammarStateCache.set(stateKey, grammarState);
-    }
-  }
+  const grammarState =
+    seed !== undefined ? seedGrammarState(core, seed, language, registeredName) : undefined;
   const tokens = await core.codeToTokensBase(code, {
     lang: language,
     theme: registeredName,

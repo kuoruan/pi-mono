@@ -9,6 +9,7 @@ import type { Component } from "@earendil-works/pi-tui";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
+import { lastHunkNewStart } from "#src/theme/seed.ts";
 
 import { type DiffViewOptions } from "./diff-view.ts";
 import { clearToolHeaderBg, padDiffBody } from "./header.ts";
@@ -353,35 +354,7 @@ async function renderPaddedDiff(
 }
 
 /**
- * The LAST hunk's start line in new-file numbering (1-based) — the slice
- * point the seed must cover up to. The seed re-enters the grammar stack at
- * that point, so it must span EVERY hunk: a multi-hunk diff whose first hunk
- * sits in the template would otherwise leave a later script hunk below the
- * seed coverage — uncolored (the "vue partial diff renders uncolored"
- * "report's second face). Deliberately view-independent: slicing at the
- * visible window's end would couple the seed to the split/unified verdict
- * (and through it, the width), re-slicing the seed on resize.
- *
- * @param diff - The parsed diff.
- * @returns The deepest hunk's new-file start line, or 1 when the
- *   diff carries no hunk headers (the programmatic parseDiff path).
- */
-function lastHunkNewStart(diff: ParsedDiff): number {
-  // Parser invariant this leans on: both producers (parseDiff,
-  // parsePatchFiles) open non-empty diffs with sep lines carrying
-  // hunkMeta. Track the LAST sep line's start over ALL lines — view and
-  // width independent by construction.
-  // the newNum fallback and the terminal 1 exist for that contract, not
-  // for this caller's call sites.
-  let last = 0;
-  for (const line of diff.lines) {
-    if (line.hunkMeta?.newStart) last = line.hunkMeta.newStart;
-    else if (last === 0 && line.newNum !== null) last = line.newNum;
-  }
-  return last >= 1 ? last : 1;
-}
-
-/**
+ * /**
  * Wrap a Text component so render(width) drives the attached preview task:
  * on key change it shows the placeholder, kicks the async render, and
  * swaps in the result (or the fallback on failure).

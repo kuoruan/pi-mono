@@ -17,9 +17,10 @@ import type {
 import { expandTabs, inertText } from "#src/core/ansi.ts";
 import { type ParsedDiff, parseDiff } from "#src/core/diff.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
-import { countLines, linesOf, textBeforeLine } from "#src/core/lines.ts";
-import { detectLanguage, needsSeed } from "#src/theme/highlight.ts";
+import { countLines, linesOf } from "#src/core/lines.ts";
+import { detectLanguage } from "#src/theme/highlight.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
+import { seedFromText } from "#src/theme/seed.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { setCallHeader } from "./error-frame.ts";
@@ -294,9 +295,7 @@ export function createWriteWrapper(
         // for a seed, never per frame. An oversized prefix is dropped in
         // hlBlockResolved, where the tokenize pays for it.
         const newContent = argsOf<WriteToolInput>(ctx.args).content ?? "";
-        const seedFor = needsSeed(d.language)
-          ? (start: number): string | undefined => textBeforeLine(newContent, start)
-          : undefined;
+        const seedFor = seedFromText(newContent, d.language);
         setDiffPreviewTask({
           text,
           keyPrefix: "wd",

@@ -18,9 +18,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
-import { linesBefore, linesOf } from "#src/core/lines.ts";
-import { detectLanguage, needsSeed } from "#src/theme/highlight.ts";
+import { linesOf } from "#src/core/lines.ts";
+import { detectLanguage } from "#src/theme/highlight.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
+import { seedFromLines } from "#src/theme/seed.ts";
 
 import { setCallHeader } from "./error-frame.ts";
 import { summarize, resultLine } from "./header.ts";
@@ -196,21 +197,23 @@ export function createEditWrapper(
         // path for its whole life, so the memo needs no key. The stale
         // window (an external write landing between the call and a later
         // re-render) is display-only and self-heals on the next call.
-        const seedFor = needsSeed(language)
-          ? (start: number): string | undefined => {
-              if (start <= 1) return undefined;
-              let lines = ctx.state.seedLines;
-              if (lines === undefined) {
-                try {
-                  lines = linesOf(readFileSync(editPath, "utf-8"));
-                } catch {
-                  lines = null; // unreadable file: memoize the miss
-                }
-                ctx.state.seedLines = lines;
-              }
-              return lines ? linesBefore(lines, start) : undefined;
+        // The read memoizes in the row state: the task render re-runs on
+        // every re-render (attach, settle, resize) and the row has ONE
+        // path for its whole life, so the memo needs no key. The stale
+        // window (an external write landing between the call and a later
+        // re-render) is display-only and self-heals on the next call.
+        const seedFor = seedFromLines(() => {
+          let lines = ctx.state.seedLines;
+          if (lines === undefined) {
+            try {
+              lines = linesOf(readFileSync(editPath, "utf-8"));
+            } catch {
+              lines = null; // unreadable file: memoize the miss
             }
-          : undefined;
+            ctx.state.seedLines = lines;
+          }
+          return lines;
+        }, language);
         setDiffPreviewTask({
           text,
           keyPrefix: "ed",
