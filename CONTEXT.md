@@ -13,3 +13,5 @@ A pnpm monorepo for Pi Agent extension packages. Each package is independently v
 **Catalog**: The `catalog:` protocol in `pnpm-workspace.yaml`. Pins shared dependency versions once at the workspace level; packages declare `"catalog:"` in their `package.json` to inherit. Prevents version drift across packages without moving dependency declarations off the packages that own them.
 
 **Changeset**: A markdown record under `.changeset/` describing a package change (semver bump + summary). Accumulated changesets drive the automated Version Packages PR and subsequent npm publish. _Avoid_: changelog entry (a changeset becomes a changelog entry at release time)
+
+**Grammar seed**: The file text before a diff's last hunk, fed to the syntax tokenizer so embedded grammars (vue `<script>`, html `<style>`) color mid-file slices correctly. Owned by pi-pigment's `theme/seed.ts` (slice rule, cap, state cache, edit/write sources). _Avoid_: grammar prefix, syntax context
