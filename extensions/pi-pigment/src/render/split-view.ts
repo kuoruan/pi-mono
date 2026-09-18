@@ -16,66 +16,9 @@ import {
 } from "./diff-view.ts";
 import { injectBg } from "./inject-bg.ts";
 import { borderBar, diffRowFrame, gutterWidth } from "./row-frame.ts";
+import { splitWindow } from "./visible-sources.ts";
 import { type CharRange, shouldEmphasize, wordDiffAnalysis } from "./word-diff.ts";
 import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
-
-/** One split-view row: the paired old/new lines. */
-interface SplitRow {
-  /** The left (old) side's line, or null when this side has no partner. */
-  left: DiffLine | null;
-  /** The right (new) side's line, or null when this side has no partner. */
-  right: DiffLine | null;
-  /**
-   * The row's share of the unified-view line count: a del+add pair is two
-   * logical lines, ctx/sep/single-sided rows one — counted at construction,
-   * never inferred from left/right occupancy (a ctx row shares its DiffLine
-   * across both sides).
-   */
-  hiddenLines: number;
-}
-
-/**
- * Pair diff lines into split-view rows: ctx lines span both sides, sep
- * lines sit left-only, and each del/add block pairs positionally (the
- * shorter side fills with nulls).
- *
- * @param lines - The parsed diff's lines.
- * @returns The paired rows, in diff order.
- */
-function buildSplitRows(lines: readonly DiffLine[]): SplitRow[] {
-  const rows: SplitRow[] = [];
-  let idx = 0;
-  while (idx < lines.length) {
-    const line = lines[idx];
-    if (line.type === "ctx") {
-      rows.push({ left: line, right: line, hiddenLines: 1 });
-      idx++;
-      continue;
-    }
-    if (line.type === "sep") {
-      rows.push({ left: line, right: null, hiddenLines: 1 });
-      idx++;
-      continue;
-    }
-    const dels: DiffLine[] = [];
-    while (idx < lines.length && lines[idx].type === "del") {
-      dels.push(lines[idx]);
-      idx++;
-    }
-    const adds: DiffLine[] = [];
-    while (idx < lines.length && lines[idx].type === "add") {
-      adds.push(lines[idx]);
-      idx++;
-    }
-    const count = Math.max(dels.length, adds.length);
-    for (let r = 0; r < count; r++) {
-      const left = dels[r] ?? null;
-      const right = adds[r] ?? null;
-      rows.push({ left, right, hiddenLines: left && right ? 2 : 1 });
-    }
-  }
-  return rows;
-}
 
 /**
  * Render the split (side-by-side) view: old/new columns sharing a line-number
@@ -91,8 +34,7 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
   const palette = view.palette;
   if (!diff.lines.length) return "";
 
-  const rows = buildSplitRows(diff.lines);
-  const visible = rows.slice(0, maxLines);
+  const { rows, visible, leftSource, rightSource } = splitWindow(diff.lines, maxLines);
   const renderWidth = Math.max(MIN_RENDER_WIDTH, width);
   // The gutter sizes to the numbers the visible ROWS actually display —
   // not to any line-prefix window. A paired row shows a del line AND its
@@ -131,12 +73,6 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
   const codeWidth = Math.max(12, half - gutter);
   const rowWidth = 2 * (gutter + codeWidth) + seamWidth;
 
-  const leftSource: string[] = [];
-  const rightSource: string[] = [];
-  for (const row of visible) {
-    if (row.left && row.left.type !== "sep") leftSource.push(row.left.content);
-    if (row.right && row.right.type !== "sep") rightSource.push(row.right.content);
-  }
   const {
     sides: [leftHighlights, rightHighlights],
   } = await highlightPairSides({

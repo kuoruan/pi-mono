@@ -15,6 +15,7 @@ import {
 } from "./diff-view.ts";
 import { injectBg } from "./inject-bg.ts";
 import { borderBar, diffRowFrame, gutterWidth, lineNumberWidth } from "./row-frame.ts";
+import { unifiedWindow } from "./visible-sources.ts";
 import { paintWordDiff, shouldEmphasize, wordDiffAnalysis } from "./word-diff.ts";
 import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
 
@@ -30,7 +31,7 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
   const { diff, language, maxLines, width, view, indicator, seed } = options;
   const palette = view.palette;
   if (!diff.lines.length) return "";
-  const visible = diff.lines.slice(0, maxLines);
+  const { visible, oldSource, newSource } = unifiedWindow(diff.lines, maxLines);
   const renderWidth = Math.max(MIN_RENDER_WIDTH, width);
   const numberWidth = lineNumberWidth(diff.lines, maxLines);
   // The border column (the bar — indicatorStyle's only surface) joins
@@ -42,12 +43,6 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
 
   const codeWidth = Math.max(20, renderWidth - gutter);
 
-  const oldSource: string[] = [];
-  const newSource: string[] = [];
-  for (const line of visible) {
-    if (line.type === "ctx" || line.type === "del") oldSource.push(line.content);
-    if (line.type === "ctx" || line.type === "add") newSource.push(line.content);
-  }
   const {
     sides: [oldHighlights, newHighlights],
     highlighted: canHighlight,
@@ -79,8 +74,8 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
   };
 
   // The highlight cursor for one side: ctx lines advance both, dels the
-  // old, adds the new (the same feeds the source arrays above). Only the
-  // HIGHLIGHTED mode reads the arrays — when highlighting is off (over
+  // old, adds the new (mirroring how unifiedWindow splits the sources).
+  // Only the HIGHLIGHTED mode reads the arrays — when highlighting is off
   // the char budget), every render path uses the line's own content and
   // the cursors stay frozen: advancing selectively would desync them
   // (the plain-text del/add paths consume nothing, so a ctx cursor step
