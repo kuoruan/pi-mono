@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { parseDiff } from "#src/core/diff.ts";
+import { textBeforeLine } from "#src/core/lines.ts";
+import { setDiffPreviewTask, type PreviewTextHost } from "#src/render/text-task.ts";
 import { MAX_SEED_CHARS } from "#src/theme/highlight.ts";
 import {
   buildFakeTheme,
   makeRenderCtx,
+  makeTextComponent,
   plain,
   registerTools,
   resetPigmentForTest,
   toolOf,
   type TextDouble,
+  viewFor,
 } from "#test/fixtures.ts";
 import { vol } from "#test/memfs.ts";
 
@@ -364,4 +369,65 @@ describe("the seed gate (only embedding grammars read the file)", () => {
     expect(capped.read).toBe(true);
     expect(capped.chunks).toBeLessThan(seeded.chunks);
   });
+});
+
+/**
+ * One filler script row.
+ *
+ * @param from - The first row index.
+ * @param to - The past-the-end row index.
+ * @returns The generated assignment rows.
+ */
+function filler(from: number, to: number): string[] {
+  return Array.from({ length: to - from }, (_, i) => `const pad${from + i} = ${from + i};`);
+}
+
+describe("the seed slice point (view-independent)", () => {
+  beforeEach(() => {
+    resetPigmentForTest();
+  });
+  afterEach(() => {
+    resetPigmentForTest();
+  });
+
+  it(
+    "narrow and wide renders ask the seed for the same hunk start",
+    { timeout: 30000 },
+    async () => {
+      // Three LARGE hunks (80 changed rows each): the hunk separators land
+      // at diff-lines ~0/~86/~172, so the unified window (150) sees the
+      // second hunk last while the split window (300) sees the third —
+      // slicing at the visible window's end would give the two widths
+      // different seeds and different highlight keys. The slice point is the
+      // diff's LAST hunk, so both widths agree.
+      const oldLines = ['<script setup lang="ts">', ...filler(0, 400), "</script>"];
+      const newLines = [...oldLines];
+      for (const at of [10, 150, 290]) {
+        for (let i = 0; i < 80; i++) newLines[at + i] = `const pad${at + i} = 999;`;
+      }
+      const diff = parseDiff(`${oldLines.join("\n")}\n`, `${newLines.join("\n")}\n`);
+      expect(diff.lines.filter((l) => l.type === "sep").length).toBeGreaterThanOrEqual(3);
+      const starts: number[] = [];
+      const host = makeTextComponent();
+      const mc = makeRenderCtx();
+      setDiffPreviewTask({
+        text: host as unknown as PreviewTextHost,
+        keyPrefix: "wd",
+        diff,
+        language: "typescript",
+        maxLines: 150,
+        view: viewFor(buildFakeTheme({ syntaxColors: true })),
+        ctx: mc.ctx,
+        indicatorStyle: "bar",
+        seedFor: (start) => {
+          starts.push(start);
+          return textBeforeLine(newLines.join("\n"), start);
+        },
+      });
+      await host.previewTask!.render(60);
+      await host.previewTask!.render(120);
+      expect(starts.length).toBe(2);
+      expect(starts[1]).toBe(starts[0]);
+    },
+  );
 });

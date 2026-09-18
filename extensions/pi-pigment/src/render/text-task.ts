@@ -296,14 +296,15 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
         // and the view choice both consume it (it walks every visible
         // content line — a duplicate call would double that scan).
         const useSplit = shouldUseSplit(diff, width, maxLines);
-        // The budget follows the chosen view: split pairs a del+add into ONE
-        // visual row, so its window can consume up to 2×maxLines logical
-        // lines — slicing the seed at maxLines alone would leave the deepest
-        // visible hunk uncovered (the vue bug's second face, split edition).
+        // The seed covers the diff's LAST hunk outright (not the visible
+        // window's): the slice point must not depend on the split/unified
+        // verdict, or a width crossing the split threshold re-slices the
+        // seed and invalidates every hunk block's highlight key. Covering
+        // deeper-than-visible hunks only extends the prefix (capped and
+        // state-cached downstream) — correctness only gains coverage.
         // The highlight gate: streaming frames render plain, so they skip
         // BOTH the language and the seed read; the settle frame colors in.
-        const seedBudget = useSplit ? maxLines * 2 : maxLines;
-        const seed = streaming ? undefined : seedFor?.(lastHunkNewStart(diff, seedBudget));
+        const seed = streaming ? undefined : seedFor?.(lastHunkNewStart(diff));
         return renderPaddedDiff({
           diff,
           language: streaming ? undefined : language,
@@ -352,26 +353,28 @@ async function renderPaddedDiff(
 }
 
 /**
- * The LAST visible hunk's start line in new-file numbering (1-based) —
- * the slice point the seed must cover up to. The seed re-enters the
- * grammar stack at that point, so it must span EVERY visible hunk: a
- * multi-hunk diff whose first hunk sits in the template would otherwise
- * leave a later script hunk below the seed coverage — uncolored (the
- * "vue partial diff renders uncolored" report's second face).
+ * The LAST hunk's start line in new-file numbering (1-based) — the slice
+ * point the seed must cover up to. The seed re-enters the grammar stack at
+ * that point, so it must span EVERY hunk: a multi-hunk diff whose first hunk
+ * sits in the template would otherwise leave a later script hunk below the
+ * seed coverage — uncolored (the "vue partial diff renders uncolored"
+ * "report's second face). Deliberately view-independent: slicing at the
+ * visible window's end would couple the seed to the split/unified verdict
+ * (and through it, the width), re-slicing the seed on resize.
  *
  * @param diff - The parsed diff.
- * @param maxLines - The visible window's row budget.
- * @returns The deepest visible hunk's new-file start line, or 1 when the
+ * @returns The deepest hunk's new-file start line, or 1 when the
  *   diff carries no hunk headers (the programmatic parseDiff path).
  */
-function lastHunkNewStart(diff: ParsedDiff, maxLines: number): number {
+function lastHunkNewStart(diff: ParsedDiff): number {
   // Parser invariant this leans on: both producers (parseDiff,
   // parsePatchFiles) open non-empty diffs with sep lines carrying
-  // hunkMeta. Track the LAST sep line's start over the visible window;
+  // hunkMeta. Track the LAST sep line's start over ALL lines — view and
+  // width independent by construction.
   // the newNum fallback and the terminal 1 exist for that contract, not
   // for this caller's call sites.
   let last = 0;
-  for (const line of diff.lines.slice(0, maxLines)) {
+  for (const line of diff.lines) {
     if (line.hunkMeta?.newStart) last = line.hunkMeta.newStart;
     else if (last === 0 && line.newNum !== null) last = line.newNum;
   }
