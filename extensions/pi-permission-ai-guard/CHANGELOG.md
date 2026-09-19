@@ -1,5 +1,14 @@
 # pi-permission-ai-guard
 
+## 0.9.2
+
+### Patch Changes
+
+- 15200df: Fix the verdict-cache context key covering only trusted intent while the review prompt also renders untrusted tool calls — an intervening tool call could hit a verdict reached for a different prompt. The context hash now mixes both transcript sections.
+- 913a6f1: Emit a dedicated `ai_guard.coverage` debug breadcrumb (outside the machinery taxonomy) when an ask falls outside this link's surfaces, so a thought-covered-but-never-reviewed misconfig is discoverable when diagnostics are on. Behavior unchanged: the ask still defers.
+- 347a763: Harden `shortHash` (verdict-cache keys, log correlation) from a dual-32-bit Math.imul hash to SHA-256 truncated to 16 hex chars — an agent-influenced command must not be able to preimage onto an allowed command's cache key and inherit its verdict.
+- d6abba7: Recognize `verdict=` (in addition to `verdict:`) as an attempted-verdict signature when scanning malformed model replies, so a pseudo-JSON verdict like `{verdict="deny"}` stops the scan instead of being skipped as brace noise.
+
 ## 0.9.1
 
 ### Patch Changes
