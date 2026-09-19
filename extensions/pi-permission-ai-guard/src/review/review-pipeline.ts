@@ -17,12 +17,14 @@ import { type SessionManagerLike, stripTranscript } from "#src/ask/transcript-st
 import {
   BREAKER_DENY_REASON,
   CACHE_LOOKUP_EVENT,
+  COVERAGE_EVENT,
   DECISION_EVENT,
   type DecisionRecordEntry,
   DecisionRecord,
   MODEL_REPLY_EVENT,
   SHORT_CIRCUIT_EVENT,
   cacheLookup,
+  coverage,
   mapped,
   modelReply,
   shortCircuit,
@@ -261,6 +263,15 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
           deps.notify,
         );
       }
+      // surface-unmatched is outside this link's jurisdiction, but staying
+      // fully silent hides coverage gaps (misspelled surface, host-renamed
+      // surface): one debug-stream record (gated on debugLog, like every
+      // other short-circuit breadcrumb) so a "thought-covered but never
+      // reviewed" misconfig is discoverable when diagnostics are on.
+      // Deliberately the coverage event, not a shortCircuit() record:
+      // surface-unmatched is NOT a machinery failure (it must never enter
+      // the machinery taxonomy / lanes), only a coverage breadcrumb.
+      log.debug(COVERAGE_EVENT, coverage(details.requestId, "surface-unmatched"));
       return { kind: "defer" };
     }
     const { surface, target, ask } = opened;

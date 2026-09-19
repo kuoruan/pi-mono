@@ -122,6 +122,16 @@ export interface ModelCallErrorRecord {
   [k: string]: unknown;
 }
 
+/** A coverage-gap debug record (an ask outside this link's jurisdiction). */
+export interface CoverageRecord {
+  /** The ask's request id. */
+  requestId: string;
+  /** Why the ask is outside coverage (e.g. surface-unmatched). */
+  reason: string;
+  /** Admits the record to be passed as an AuthorizerLog details payload. */
+  [k: string]: unknown;
+}
+
 /** The event constants live here so callers don't redeclare them. */
 export const DECISION_EVENT = "ai_guard.decision";
 
@@ -132,6 +142,8 @@ export const MODEL_REPLY_EVENT = "ai_guard.model_reply";
 export const CACHE_LOOKUP_EVENT = "ai_guard.cache_lookup";
 
 export const MODEL_CALL_ERROR_EVENT = "ai_guard.model_call_error";
+
+export const COVERAGE_EVENT = "ai_guard.coverage";
 
 /**
  * The deny reason emitted when the circuit breaker trips. Shared by the
@@ -472,4 +484,19 @@ export function modelCallError(
   error: string,
 ): ModelCallErrorRecord {
   return { requestId, deferKind, error };
+}
+
+/**
+ * Build a coverage-gap debug record.
+ *
+ * Deliberately outside the machinery taxonomy: an ask outside this link's
+ * jurisdiction is not a reviewer failure, only a coverage breadcrumb so a
+ * "thought-covered but never reviewed" misconfig is discoverable.
+ *
+ * @param requestId - The ask's request id.
+ * @param reason - Why the ask is outside coverage (e.g. surface-unmatched).
+ * @returns A coverage-gap debug record.
+ */
+export function coverage(requestId: string, reason: string): CoverageRecord {
+  return { requestId, reason };
 }
