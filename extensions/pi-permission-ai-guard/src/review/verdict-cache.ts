@@ -14,7 +14,7 @@ export interface CacheEntry {
 
 /** A cached entry as stored, keyed by commandHash. */
 interface StoredEntry extends CacheEntry {
-  /** The trusted-intent context the verdict applies to (invalidation key). */
+  /** The full model-visible transcript context the verdict applies to (invalidation key). */
   contextHash: string;
 }
 
@@ -44,13 +44,14 @@ export class VerdictCache {
 
   /**
    * Look up a cached verdict. Returns a hit only when both the command and
-   * the trusted-intent context match (same command + moved conversation would
-   * have a different contextHash and miss, which is the desired invalidation).
+   * the full model-visible transcript context match (same command + moved
+   * conversation would have a different contextHash and miss, which is the
+   * desired invalidation).
    * The miss reason lets callers emit telemetry distinguishing "first time"
    * from "context changed since last run".
    *
    * @param commandHash - Hash of the command being looked up.
-   * @param contextHash - Hash of the current trusted-intent context.
+   * @param contextHash - Hash of the current full model-visible transcript context.
    * @param cc - The cache configuration.
    * @returns A cache hit with the verdict, or a miss with the reason.
    */
@@ -77,7 +78,7 @@ export class VerdictCache {
    * existing key refreshes its LRU position via delete+set.
    *
    * @param commandHash - Hash of the command to store under.
-   * @param contextHash - Hash of the trusted-intent context this verdict applies to.
+   * @param contextHash - Hash of the full model-visible transcript context this verdict applies to.
    * @param entry - The cache entry (verdict + optional risk level) to store.
    * @param cc - The cache configuration.
    */

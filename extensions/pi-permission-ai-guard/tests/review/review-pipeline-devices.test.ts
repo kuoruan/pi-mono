@@ -272,6 +272,45 @@ describe("createReviewPipeline — verdict cache", () => {
     expect(modelCalled).toBe(1);
   });
 
+  it("misses when an intervening tool call changes the model-visible prompt", async () => {
+    const cache = new VerdictCache();
+    let modelCalled = 0;
+    const sessionEntries: unknown[] = [];
+    const sessionManager = {
+      getSessionId: () => "s1",
+      buildContextEntries: () => sessionEntries as never,
+    };
+    const authorize = createReviewPipeline(
+      makePipeline({
+        config: { ...baseConfig, cache: { ...baseConfig.cache, maxEntries: 5 } },
+        sessionManager,
+        verdictCache: cache,
+        completeSimple: async () => {
+          modelCalled++;
+          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+        },
+      }),
+    );
+    // First call: no tool calls yet → model runs, verdict cached.
+    await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), noLog);
+    expect(modelCalled).toBe(1);
+    // An intervening tool call enters the prompt's untrusted-tool-calls section —
+    // the same command must miss and re-run the model, which now sees it.
+    sessionEntries.push({
+      type: "message",
+      id: "e1",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", name: "write", arguments: { path: "x" } }],
+      },
+    });
+    const v = await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), noLog);
+    expect(v).toEqual({ kind: "allow" });
+    expect(modelCalled).toBe(2);
+  });
+
   it("does not cache when cache.maxEntries is 0", async () => {
     const breaker = new CircuitBreaker();
     const cache = new VerdictCache();
