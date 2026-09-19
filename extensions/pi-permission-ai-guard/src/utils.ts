@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * Shared prompt-sanitization, hashing, stringification, and record guards
  * used across modules.
@@ -200,26 +202,17 @@ export function encodeActionTextForPrompt(text: string): string {
 }
 
 /**
- * Fast deterministic hash to shorten long strings for cache/identity keys.
+ * Stable hash for cache keys / log correlation.
  *
- * Copied from pi-ai's internal `utils/hash.ts` (not re-exported from the
- * package root). Two independent 32-bit Math.imul hashes (cypherCB),
- * finalized and combined as base36.
+ * SHA-256 truncated to 16 hex chars (64 bits): collision resistance matters
+ * here — a cache key an agent-influenced command could preimage onto an
+ * allowed command would inherit its verdict.
  *
  * @param str - The string to hash.
- * @returns A short base36 hash of the input string.
+ * @returns The first 16 hex chars of the SHA-256 of the input string.
  */
 export function shortHash(str: string): string {
-  let h1 = 0xdeadbeef;
-  let h2 = 0x41c6ce57;
-  for (let i = 0; i < str.length; i++) {
-    const ch = str.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
+  return createHash("sha256").update(str, "utf8").digest("hex").slice(0, 16);
 }
 
 /**
