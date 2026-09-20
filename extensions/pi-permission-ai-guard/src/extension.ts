@@ -23,7 +23,7 @@ import {
 import { MODE_VALUES, NOTIFY_LEVEL_VALUES } from "#src/config/config-schema.ts";
 import { CYCLE_MODE_VALUES, EMPHASIZED_MODE, MODE_BLURBS } from "#src/config/mode-table.ts";
 import { warn } from "#src/logger.ts";
-import { type CompleteSimpleFn, createCompleteSimple } from "#src/model/model-review.ts";
+import { type ModelCallFn, createModelCall } from "#src/model/model-review.ts";
 import { type ReviewPipelineDeps, createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { RuntimeSettings, type EnumSettingSpec } from "#src/session/runtime-settings.ts";
 import { SessionLifecycle } from "#src/session/session-lifecycle.ts";
@@ -36,10 +36,10 @@ export interface AiGuardDependencies {
   /** Override config loading (inject mock config in tests). */
   loadConfig?: (env: ConfigEnv) => LoadConfigResult;
   /** Override model call (inject mock replies in tests). */
-  completeSimple?: CompleteSimpleFn;
+  modelCall?: ModelCallFn;
   /**
    * Override the authorizer factory (inject a stub to test lifecycle timing
-   * without resolving the model stack). When set, `completeSimple` is not
+   * without resolving the model stack). When set, `modelCall` is not
    * used — the factory owns authorizer construction.
    */
   createPipeline?: (deps: ReviewPipelineDeps) => Authorizer["authorize"];
@@ -90,18 +90,16 @@ export function createAiGuardExtension(
   // The lifecycle owns session identity, the registration, and the stable
   // overrides object; the settings surface reads/writes overrides through
   // that same object (the single write path).
-  // Annotated (not inferred) because the completeSimple closure below
+  // Annotated (not inferred) because the modelCall closure below
   // references `lifecycle` from its own initializer — an explicit type
   // removes the self-reference from type inference entirely.
   const lifecycle: SessionLifecycle = new SessionLifecycle({
     // The authorizer factory defaults to the real ReviewPipeline. Tests
     // inject a stub to exercise lifecycle timing without the model stack.
     createPipeline: dependencies.createPipeline ?? createReviewPipeline,
-    // Model calls go through `provider.streamSimple(...).result()` via the
-    // ModelRegistry handed to extensions, avoiding the deprecated
-    // `@earendil-works/pi-ai/compat` entrypoint.
-    completeSimple:
-      dependencies.completeSimple ?? createCompleteSimple(() => lifecycle.session?.registry),
+    // Model calls go through `ModelRegistry.complete` — the agent's own
+    // call path, never the provider layer directly.
+    modelCall: dependencies.modelCall ?? createModelCall(() => lifecycle.session?.registry),
   });
 
   const settings = new RuntimeSettings(

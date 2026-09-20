@@ -35,7 +35,7 @@ describe("createReviewPipeline — mode", () => {
       makePipeline({
         // config stays "default" — only the session override hands denies to the human.
         overrides: { mode: "lenient" },
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
         ]),
       }),
@@ -47,7 +47,7 @@ describe("createReviewPipeline — mode", () => {
     const { log, reviewCalls } = makeRecordingLog();
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
         ]),
       }),
@@ -63,7 +63,7 @@ describe("createReviewPipeline — mode", () => {
 
   it("default maps a cached deny to defer on a cache hit (no model call, notify fires)", async () => {
     let modelCalls = 0;
-    const completeSimple = async () => {
+    const modelCall = async () => {
       modelCalls++;
       return makeFakeCompleteSimple([
         { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
@@ -75,7 +75,7 @@ describe("createReviewPipeline — mode", () => {
       makePipeline({
         config: { ...baseConfig, cache: { maxEntries: 8 } },
         notify,
-        completeSimple,
+        modelCall,
       }),
     );
     const first = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), log);
@@ -99,7 +99,7 @@ describe("createReviewPipeline — mode", () => {
   it("default keeps a model defer as a defer", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"defer","reason":"needs the target path"}' },
         ]),
       }),
@@ -114,7 +114,7 @@ describe("createReviewPipeline — mode", () => {
       makePipeline({
         config: { ...baseConfig, mode: "strict" },
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"defer","reason":"needs the target path"}' },
         ]),
       }),
@@ -144,7 +144,7 @@ describe("createReviewPipeline — mode", () => {
       makePipeline({
         config: { ...baseConfig, mode: "strict" },
         // Valid JSON defer, but the model omitted the clarification request.
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
       }),
     );
     const verdict = await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
@@ -161,7 +161,7 @@ describe("createReviewPipeline — mode", () => {
         config: { ...baseConfig, mode: "strict" },
         notify,
         // No JSON — a machinery failure (no-json), not the model's uncertainty.
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
       }),
     );
     await expectVerdict(
@@ -184,7 +184,7 @@ describe("createReviewPipeline — mode", () => {
       makePipeline({
         config: { ...baseConfig, mode: "strict" },
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
         ]),
       }),
@@ -201,7 +201,7 @@ describe("createReviewPipeline — mode", () => {
 
   it("lenient denies still count toward the circuit breaker", async () => {
     let modelCalls = 0;
-    const completeSimple = async () => {
+    const modelCall = async () => {
       modelCalls++;
       return makeFakeCompleteSimple([
         { type: "text", text: '{"verdict":"deny","reason":"no","riskLevel":"medium"}' },
@@ -210,7 +210,7 @@ describe("createReviewPipeline — mode", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, mode: "lenient" },
-        completeSimple,
+        modelCall,
       }),
     );
     for (let i = 0; i < 3; i++) {
@@ -231,7 +231,7 @@ describe("createReviewPipeline — mode", () => {
 describe("createReviewPipeline — mode edges", () => {
   it("strict keeps a cached deny terminal on a cache hit (no model call, both passes notify)", async () => {
     let modelCalls = 0;
-    const completeSimple = async () => {
+    const modelCall = async () => {
       modelCalls++;
       return makeFakeCompleteSimple([
         { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
@@ -242,7 +242,7 @@ describe("createReviewPipeline — mode edges", () => {
       makePipeline({
         config: { ...baseConfig, mode: "strict", cache: { maxEntries: 8 } },
         notify,
-        completeSimple,
+        modelCall,
       }),
     );
     const first = await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
@@ -272,7 +272,7 @@ describe("createReviewPipeline — mode edges", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, mode: "strict" },
-        completeSimple: async () => {
+        modelCall: async () => {
           modelCalled = true;
           return {} as AssistantMessage;
         },
@@ -369,7 +369,7 @@ describe("createReviewPipeline — pre-call machinery failures by mode", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, mode: "default" },
-        completeSimple: makeFakeCompleteSimple([]),
+        modelCall: makeFakeCompleteSimple([]),
         notify,
       }),
     );
@@ -450,7 +450,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     const authorize = createReviewPipeline(
       makePipeline({
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           {
             type: "text",
             text: '{"verdict":"defer","reason":"which package manager does this project use?"}',
@@ -469,7 +469,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     const authorize = createReviewPipeline(
       makePipeline({
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           {
             type: "text",
             text: JSON.stringify({
@@ -498,7 +498,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     const authorize = createReviewPipeline(
       makePipeline({
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           {
             type: "text",
             text: '{"verdict":"defer","reason":"reads a research file outside CWD","lean":"allow"}',
@@ -530,7 +530,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
       makePipeline({
         config: { ...baseConfig, mode: "lenient" },
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           {
             type: "text",
             text: '{"verdict":"defer","reason":"reads a research file outside CWD","lean":"allow"}',
@@ -570,7 +570,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
       makePipeline({
         config: { ...baseConfig, mode: "lenient" },
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           {
             type: "text",
             text: '{"verdict":"defer","reason":"remote content piped to an interpreter","lean":"deny"}',
@@ -589,7 +589,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     const { log, reviewCalls } = makeRecordingLog();
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
       }),
     );
     await authorize(
@@ -613,7 +613,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     } as never;
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
       }),
     );
     await authorize(makeDetails({ value: "ls" }), makeQuery("ask"), log);
@@ -636,7 +636,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
         config: { ...baseConfig, mode: "lenient" },
         notify,
         // Hard tier (high|critical|missing): terminal in every mode.
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
         ]),
       }),
@@ -656,7 +656,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       makePipeline({
         config: { ...baseConfig, mode: "default" },
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
         ]),
       }),
@@ -675,7 +675,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       makePipeline({
         config: { ...baseConfig, mode: "strict" },
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
         ]),
       }),
@@ -692,7 +692,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       makePipeline({
         config: { ...baseConfig, mode: "permissive" },
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           {
             type: "text",
             text: '{"verdict":"deny","reason":"secrets in the command","riskLevel":"critical"}',
@@ -716,7 +716,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       makePipeline({
         config: { ...baseConfig, mode: "lenient" },
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"defer","reason":"which one?"}' },
         ]),
       }),
@@ -734,7 +734,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       makePipeline({
         config: { ...baseConfig, mode: "permissive" },
         notify,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
         ]),
       }),
@@ -756,7 +756,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, mode: "lenient" },
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"defer","reason":"which package manager?"}' },
         ]),
       }),
@@ -782,7 +782,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
         circuitBreaker: breaker,
         notify,
         // No JSON — a machinery failure (no-json), never an allow.
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
       }),
     );
     await expectVerdict(
@@ -807,7 +807,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       makePipeline({
         config: { ...baseConfig, mode: "permissive" },
         notify,
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
       }),
     );
     for (let i = 0; i < 3; i++) {

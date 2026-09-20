@@ -29,7 +29,7 @@ import {
 } from "#src/audit/decision-record.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import {
-  type CompleteSimpleFn,
+  type ModelCallFn,
   type ModelCallContext,
   type ModelRegistryLike,
   type ResolvedRequestAuth,
@@ -91,8 +91,8 @@ export interface ReviewPipelineDeps {
   verdictCache: VerdictCache;
   /** Session-scoped runtime overrides (/ai-guard, ctrl+alt+g); consulted before config. */
   overrides: SessionOverrides;
-  /** Model call function (wrapped provider.streamSimple().result()). */
-  completeSimple: CompleteSimpleFn;
+  /** The one-shot model call (see `ModelCallFn`). */
+  modelCall: ModelCallFn;
   /** Session model-gate deny log (the /ai-guard denied panel's data). */
   denyHistory: DenyRecord[];
   /**
@@ -259,7 +259,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // dependency call in the pipeline — a throwing registry collapses into
     // model-unresolved like an absent one.
     const modelId = `${config.provider}/${config.model}`;
-    let model;
+    let model: Model<Api> | undefined;
     try {
       model = deps.registry.find(config.provider, config.model);
     } catch {
@@ -374,7 +374,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // Model review.
     const callCtx: ModelCallContext = {
       model,
-      completeSimple: deps.completeSimple,
+      modelCall: deps.modelCall,
       auth: { apiKey: auth.apiKey, headers: auth.headers },
       reasoning: config.reasoning,
       maxTokens: config.maxTokens,

@@ -76,6 +76,8 @@ Note: `external_directory`/`path` asks reach this link, but any `allow` on them 
 
 ### Review
 
+**Model call path**: Model calls go through `ModelRegistry.complete` (the agent's own call path — raw `Context` in, auth + transcript normalization inside the registry). Never the provider layer directly: upstream brands the provider input, so `getProvider().streamSimple()` breaks on every tightening. Known asymmetry: the pipeline auth gate accepts compatibility-headers providers that `prepareRequest` rejects — both fail safe to `call-failed` defer, and such a provider could not run the agent itself. _Avoid_: provider-layer calls
+
 **Full review**: The JSON-verdict review. The model receives a stripped transcript + the permission request and is asked to return `{"verdict":"allow|deny|defer","reason":"...","riskLevel":"..."}`. A tolerant parser extracts the JSON from prose-wrapped replies, so providers that wrap JSON in text still work. Deny and defer carry a `reason`; allow omits it. A deny reason must state what makes the request dangerous — an assessment that concludes "safe" must be an `allow` (the reason binds to the verdict; a live contradictory pair is a model misfire, not a pipeline error).
 
 **Upstream retry**: One retry per mechanism per review, budgeted inside `timeoutMs` (the total-budget promise — a review never exceeds one window):

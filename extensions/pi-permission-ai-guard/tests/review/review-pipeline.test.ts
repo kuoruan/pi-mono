@@ -37,7 +37,7 @@ describe("createReviewPipeline — guard clauses", () => {
     let modelCalled = false;
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: async () => {
+        modelCall: async () => {
           modelCalled = true;
           return {} as AssistantMessage;
         },
@@ -51,7 +51,7 @@ describe("createReviewPipeline — guard clauses", () => {
     let modelCalled = false;
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: async () => {
+        modelCall: async () => {
           modelCalled = true;
           return {} as AssistantMessage;
         },
@@ -165,7 +165,7 @@ describe("createReviewPipeline — verdicts", () => {
   it("returns deny with reason when model denies", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
         ]),
       }),
@@ -181,7 +181,7 @@ describe("createReviewPipeline — verdicts", () => {
     const { log, reviewCalls } = makeRecordingLog();
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe command"}' },
         ]),
       }),
@@ -197,7 +197,7 @@ describe("createReviewPipeline — verdicts", () => {
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
         notify,
       }),
     );
@@ -210,7 +210,7 @@ describe("createReviewPipeline — verdicts", () => {
   it("defers when model returns no tool call", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: "I cannot decide" }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: "I cannot decide" }]),
       }),
     );
     await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
@@ -225,9 +225,7 @@ describe("createReviewPipeline — verdicts", () => {
       review: () => {},
       debug: (e: string) => debugCalls.push({ event: e }),
     } as never;
-    const authorize = createReviewPipeline(
-      makePipeline({ completeSimple: makeFakeCompleteSimple([]) }),
-    );
+    const authorize = createReviewPipeline(makePipeline({ modelCall: makeFakeCompleteSimple([]) }));
     const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
     expect(verdict).toEqual({ kind: "defer" });
     // Empty content → diagnostic event is logged via MODEL_REPLY_EVENT
@@ -237,7 +235,7 @@ describe("createReviewPipeline — verdicts", () => {
   it("falls back to text parsing when model emits prose", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: 'My verdict: {"verdict": "allow"}' },
         ]),
       }),
@@ -250,7 +248,7 @@ describe("createReviewPipeline — verdicts", () => {
     const { log, reviewCalls } = makeRecordingLog();
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: async () =>
+        modelCall: async () =>
           ({
             role: "assistant",
             content: [],
@@ -281,7 +279,7 @@ describe("createReviewPipeline — verdicts", () => {
     const longText = "x".repeat(600);
     const authorize = createReviewPipeline(
       makePipeline({
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: longText }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: longText }]),
       }),
     );
     await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
@@ -296,7 +294,7 @@ describe("createReviewPipeline — verdicts", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, timeoutMs: 100 },
-        completeSimple: async () => {
+        modelCall: async () => {
           throw new Error("network error");
         },
       }),
@@ -310,7 +308,7 @@ describe("createReviewPipeline — verdicts", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         // No JSON — a machinery defer whose raw text carries the credential.
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: `the prompt had ${credential} but {not json` },
         ]),
       }),
@@ -339,7 +337,7 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
     const authorize = createReviewPipeline(
       makePipeline({
         denyHistory,
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
         ]),
       }),
@@ -371,7 +369,7 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
       makePipeline({
         denyHistory,
         config: { ...baseConfig, cache: { maxEntries: 8 } },
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
         ]),
       }),
@@ -389,7 +387,7 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
       makePipeline({
         denyHistory,
         config: { ...baseConfig, mode: "strict" },
-        completeSimple: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
+        modelCall: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
       }),
     );
     await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
@@ -407,7 +405,7 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
       makePipeline({
         denyHistory,
         config: { ...baseConfig, mode: "default", cache: { maxEntries: 8 } },
-        completeSimple: makeFakeCompleteSimple([
+        modelCall: makeFakeCompleteSimple([
           { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
         ]),
       }),

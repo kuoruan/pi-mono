@@ -3,7 +3,7 @@
  *
  * {@link reviewModel} is the single entry point — it takes a resolved
  * {@link ModelCallContext} (model + auth + call config) and the prompt pair,
- * runs `completeSimple`, and returns a {@link ReviewOutcome}. The call
+ * runs `modelCall`, and returns a {@link ReviewOutcome}. The call
  * machinery (AbortSignal, auth headers, maxTokens, reasoning, error
  * classification) is private to this module.
  *
@@ -45,8 +45,8 @@ import {
  */
 export type ResolvedRequestAuth = Awaited<ReturnType<ModelRegistry["getApiKeyAndHeaders"]>>;
 
-/** Model completion function signature (wraps `provider.streamSimple().result()`). */
-export type CompleteSimpleFn = (
+/** One model-call round trip: (model, context, options) → the full reply. */
+export type ModelCallFn = (
   model: Model<Api>,
   context: Context,
   options?: SimpleStreamOptions,
@@ -58,7 +58,7 @@ export type CompleteSimpleFn = (
  * the accepted method set tracks the package's exported shape instead of a
  * hand-written interface that can silently diverge.
  */
-export type ModelRegistryLike = Pick<ModelRegistry, "find" | "getApiKeyAndHeaders" | "getProvider">;
+export type ModelRegistryLike = Pick<ModelRegistry, "find" | "getApiKeyAndHeaders" | "complete">;
 
 /**
  * Result of the shared call scaffolding in {@link executeCall}.
@@ -84,8 +84,8 @@ export type ModelCallAuth = Pick<SimpleStreamOptions, "apiKey" | "headers">;
 export interface ModelCallContext {
   /** The resolved reviewer model. */
   model: Model<Api>;
-  /** Model completion function (wraps `provider.streamSimple().result()`). */
-  completeSimple: CompleteSimpleFn;
+  /** The one-shot model call (see `ModelCallFn`). */
+  modelCall: ModelCallFn;
   /** Resolved auth fields for the call. */
   auth: ModelCallAuth;
   /** Reasoning level ("off" omits the option). */
@@ -99,27 +99,27 @@ export interface ModelCallContext {
 }
 
 /**
- * Build a non-deprecated model completer on top of `ModelRegistry.getProvider`.
+ * Build the model completer on top of `ModelRegistry.complete` — the
+ * agent's own call path (raw `Context` in, auth + transcript normalization
+ * handled inside the registry). Never the provider layer: pi-ai brands the
+ * provider input, so a direct `getProvider().streamSimple()` call breaks
+ * whenever upstream tightens it.
  *
- * Uses `provider.streamSimple(...).result()` instead of the deprecated
- * `@earendil-works/pi-ai/compat` `completeSimple` entrypoint. The caller is
- * responsible for resolving auth (`getApiKeyAndHeaders`) and passing the
- * resulting apiKey/headers into options.
+ * NOTE: prefer `registry.streamSimple` once the peer floor reaches 0.86
+ * (provider-neutral options + a streaming result; `complete` is its
+ * one-shot sibling on the same pipeline). This factory stays a
+ * `ModelCallFn` either way, so the switch is implementation-only.
  *
  * @param getRegistry - Function returning the model registry (or undefined if unavailable).
- * @returns A `CompleteSimpleFn` that completes a model call via `provider.streamSimple`.
+ * @returns A `ModelCallFn` that completes a model call via `registry.complete`.
  */
-export function createCompleteSimple(
-  getRegistry: () => ModelRegistryLike | undefined,
-): CompleteSimpleFn {
+export function createModelCall(getRegistry: () => ModelRegistryLike | undefined): ModelCallFn {
   return async (model, context, options) => {
     const registry = getRegistry();
-    const provider = registry?.getProvider(model.provider);
-    if (!provider) {
-      throw new Error(`No provider registered for "${model.provider}"`);
+    if (!registry) {
+      throw new Error("No model registry available");
     }
-    const stream = provider.streamSimple(model, context, options);
-    return stream.result();
+    return registry.complete(model, context, options);
   };
 }
 
@@ -144,7 +144,7 @@ function reportCallFailure(
 
 /**
  * Shared call scaffolding for {@link reviewModel}: builds the context +
- * options, runs `completeSimple`, and normalizes a thrown error into a defer
+ * options, runs `modelCall`, and normalizes a thrown error into a defer
  * reason. {@link reviewModel} owns the parser and the outcome-shape mapping;
  * this owns the call machinery — AbortSignal, auth headers, maxTokens,
  * reasoning, and the timeout/call-failed classification.
@@ -194,7 +194,7 @@ async function executeCall(
     if (ctx.reasoning && ctx.reasoning !== "off") {
       options.reasoning = ctx.reasoning;
     }
-    const reply = await ctx.completeSimple(ctx.model, context, options);
+    const reply = await ctx.modelCall(ctx.model, context, options);
     return { ok: true, reply, latencyMs: Date.now() - startedAt };
   } catch (e) {
     const deferKind: ModelCallDeferKind =

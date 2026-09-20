@@ -201,8 +201,12 @@ export const defaultRegistry = (
     getApiKeyAndHeaders: ReviewPipelineDeps["registry"]["getApiKeyAndHeaders"];
   }> = {},
 ): ReviewPipelineDeps["registry"] => ({
+  // Unit tests drive the pipeline through the `modelCall` seam, never
+  // the registry — `complete` is unreachable here.
+  complete: () => {
+    throw new Error("unreachable in unit tests");
+  },
   find: () => fakeModel,
-  getProvider: () => undefined,
   getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "k" }),
   ...overrides,
 });
@@ -224,7 +228,7 @@ export function makePipeline(overrides: Partial<ReviewPipelineDeps> = {}): Revie
     verdictCache: new VerdictCache(),
     denyHistory: [],
     overrides: {},
-    completeSimple: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+    modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
     // Required in production (the lifecycle's notify bridge); tests that
     // don't assert notifications get a no-op.
     notify: () => {},

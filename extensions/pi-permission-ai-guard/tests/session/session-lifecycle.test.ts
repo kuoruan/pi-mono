@@ -43,7 +43,7 @@ function makeLifecycle() {
       calls.push(deps);
       return async () => ({ kind: "defer" });
     },
-    completeSimple: async () => {
+    modelCall: async () => {
       throw new Error("unused");
     },
   });
@@ -62,7 +62,9 @@ function makeSeed(overrides: Partial<SessionSeed> = {}): SessionSeed {
     config: configSchema.parse({ provider: "test", model: "test" }),
     registry: {
       find: () => undefined,
-      getProvider: () => undefined,
+      complete: () => {
+        throw new Error("unreachable in unit tests");
+      },
       getApiKeyAndHeaders: async () => ({ ok: false }) as never,
     },
     sessionManager: { getSessionId: () => "s1", buildContextEntries: () => [] },

@@ -5,9 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import { MODEL_CALL_ERROR_EVENT } from "#src/audit/decision-record.ts";
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
 import {
-  type CompleteSimpleFn,
+  type ModelCallFn,
   type ModelCallContext,
-  createCompleteSimple,
+  createModelCall,
   reviewModel,
 } from "#src/model/model-review.ts";
 
@@ -22,12 +22,12 @@ const fakeModel = { provider: "test", id: "test-model" } as unknown as Model<any
 /**
  * Build a ModelCallContext with defaults from baseConfig.
  *
- * @param completeSimple - The model completer function to inject.
+ * @param modelCall - The model completer function to inject.
  * @param overrides - Optional overrides for apiKey, headers, reasoning, log, requestId.
  * @returns A `ModelCallContext` for testing.
  */
 function makeContext(
-  completeSimple: CompleteSimpleFn,
+  modelCall: ModelCallFn,
   overrides: {
     apiKey?: string;
     headers?: Record<string, string>;
@@ -38,7 +38,7 @@ function makeContext(
 ): ModelCallContext {
   return {
     model: fakeModel,
-    completeSimple,
+    modelCall,
     auth: { apiKey: overrides.apiKey, headers: overrides.headers },
     reasoning: overrides.reasoning ?? baseConfig.reasoning,
     maxTokens: baseConfig.maxTokens,
@@ -94,32 +94,32 @@ const nonErrorCompleteSimple = async (): Promise<AssistantMessage> => {
 
 describe("reviewModel", () => {
   it("returns allow verdict from text reply", async () => {
-    const completeSimple = async (): Promise<AssistantMessage> =>
+    const modelCall = async (): Promise<AssistantMessage> =>
       makeReply([{ type: "text", text: '{"verdict":"allow"}' }]);
-    const ctx = makeContext(completeSimple);
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "allow" });
   });
 
   it("returns deny verdict with reason", async () => {
-    const completeSimple = async (): Promise<AssistantMessage> =>
+    const modelCall = async (): Promise<AssistantMessage> =>
       makeReply([{ type: "text", text: '{"verdict":"deny","reason":"Unsafe"}' }], "stop");
-    const ctx = makeContext(completeSimple);
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "deny", reason: "Unsafe" });
   });
 
   it("falls back to text parsing when no JSON", async () => {
-    const completeSimple = async (): Promise<AssistantMessage> =>
+    const modelCall = async (): Promise<AssistantMessage> =>
       makeReply([{ type: "text", text: '{"verdict": "allow"}' }], "stop");
-    const ctx = makeContext(completeSimple);
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "allow" });
   });
 
   it("defers when model returns empty content", async () => {
-    const completeSimple = async (): Promise<AssistantMessage> => makeReply([], "stop");
-    const ctx = makeContext(completeSimple);
+    const modelCall = async (): Promise<AssistantMessage> => makeReply([], "stop");
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferKind).toBe("empty-reply");
@@ -130,14 +130,14 @@ describe("reviewModel", () => {
   it("retries a fast empty reply and adopts the second attempt's verdict", async () => {
     const calls: { attempts: number }[] = [];
     let nth = 0;
-    const completeSimple: CompleteSimpleFn = async (_model, _context, options) => {
+    const modelCall: ModelCallFn = async (_model, _context, options) => {
       calls.push({ attempts: options?.maxRetries ?? 0 });
       nth++;
       return nth === 1
         ? makeReply([{ type: "thinking", thinking: "…" }], "stop")
         : makeReply([{ type: "text", text: '{"verdict":"allow"}' }], "stop");
     };
-    const ctx = makeContext(completeSimple);
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "allow" });
     expect(result.attempts).toBe(2);
@@ -150,13 +150,13 @@ describe("reviewModel", () => {
 
   it("does not retry a slow empty reply (half-window gate)", async () => {
     let calls = 0;
-    const completeSimple: CompleteSimpleFn = async () => {
+    const modelCall: ModelCallFn = async () => {
       calls++;
       // Consume more than half the 100ms window before answering empty.
       await new Promise((resolve) => setTimeout(resolve, 60));
       return makeReply([], "stop");
     };
-    const ctx = makeContext(completeSimple);
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 100);
     expect(result.deferKind).toBe("empty-reply");
     expect(result.attempts).toBeUndefined();
@@ -165,7 +165,7 @@ describe("reviewModel", () => {
 
   it("the retry's budget is the remaining window", async () => {
     let nth = 0;
-    const completeSimple: CompleteSimpleFn = async (_model, _context, options) => {
+    const modelCall: ModelCallFn = async (_model, _context, options) => {
       nth++;
       if (nth === 1) {
         // ~200ms of the 1000ms window — comfortably under the half-window
@@ -185,7 +185,7 @@ describe("reviewModel", () => {
       });
       return makeReply([{ type: "text", text: '{"verdict":"allow"}' }], "stop");
     };
-    const ctx = makeContext(completeSimple);
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 1000);
     // The retry hit its remaining-window budget: call failed via abort →
     // timeout defer, with both attempts accounted.
@@ -198,8 +198,8 @@ describe("reviewModel", () => {
     // AbortSignal.timeout() does not throw — the Anthropic provider catches
     // the abort and resolves with an empty AssistantMessage whose stopReason
     // is "aborted". This must be classified as "timeout" for telemetry.
-    const completeSimple = async (): Promise<AssistantMessage> => makeReply([], "aborted");
-    const ctx = makeContext(completeSimple);
+    const modelCall = async (): Promise<AssistantMessage> => makeReply([], "aborted");
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferKind).toBe("timeout");
@@ -211,8 +211,8 @@ describe("reviewModel", () => {
     // model behavior. The bucket must say so: "call-failed" joins the
     // thrown path, and "empty-reply" stays reserved for genuine model
     // silence (a completed reply that chose to say nothing).
-    const completeSimple = async (): Promise<AssistantMessage> => makeReply([], "error");
-    const ctx = makeContext(completeSimple);
+    const modelCall = async (): Promise<AssistantMessage> => makeReply([], "error");
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferKind).toBe("call-failed");
@@ -261,7 +261,7 @@ describe("reviewModel", () => {
 
   it("passes reasoning level when not off", async () => {
     let capturedOptions: SimpleStreamOptions | undefined;
-    const completeSimple = async (
+    const modelCall = async (
       _model: Model<any>,
       _ctx: Context,
       opts?: SimpleStreamOptions,
@@ -269,14 +269,14 @@ describe("reviewModel", () => {
       capturedOptions = opts;
       return makeReply([{ type: "text", text: '{"verdict":"allow"}' }]);
     };
-    const ctx = makeContext(completeSimple, { reasoning: "low" });
+    const ctx = makeContext(modelCall, { reasoning: "low" });
     await reviewModel(ctx, "test", "test", 15000);
     expect(capturedOptions?.reasoning).toBe("low");
   });
 
   it("omits reasoning when off", async () => {
     let capturedOptions: SimpleStreamOptions | undefined;
-    const completeSimple = async (
+    const modelCall = async (
       _model: Model<any>,
       _ctx: Context,
       opts?: SimpleStreamOptions,
@@ -284,7 +284,7 @@ describe("reviewModel", () => {
       capturedOptions = opts;
       return makeReply([{ type: "text", text: '{"verdict":"allow"}' }]);
     };
-    const ctx = makeContext(completeSimple);
+    const ctx = makeContext(modelCall);
     await reviewModel(ctx, "test", "test", 15000);
     expect(capturedOptions?.reasoning).toBeUndefined();
   });
@@ -292,55 +292,43 @@ describe("reviewModel", () => {
 
 describe("reviewModel — riskLevel passthrough", () => {
   it("passes riskLevel through from the verdict", async () => {
-    const completeSimple = async (): Promise<AssistantMessage> =>
+    const modelCall = async (): Promise<AssistantMessage> =>
       makeReply(
         [{ type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' }],
         "stop",
       );
-    const ctx = makeContext(completeSimple);
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "deny", reason: "unsafe" });
     expect(result.riskLevel).toBe("high");
   });
 
   it("leaves riskLevel undefined when omitted", async () => {
-    const completeSimple = async (): Promise<AssistantMessage> =>
+    const modelCall = async (): Promise<AssistantMessage> =>
       makeReply([{ type: "text", text: '{"verdict":"allow"}' }]);
-    const ctx = makeContext(completeSimple);
+    const ctx = makeContext(modelCall);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.riskLevel).toBeUndefined();
   });
 });
 
-describe("createCompleteSimple", () => {
-  it("calls provider.streamSimple().result() when the provider is found", async () => {
-    const result = vi.fn<() => AssistantMessage>(
-      () => ({ ok: true }) as unknown as AssistantMessage,
-    );
-    const streamSimple = vi.fn<() => { result: typeof result }>(
-      () => ({ result }) as unknown as never,
-    );
-    const provider = { streamSimple } as unknown as never;
-    const getProvider = vi.fn<() => typeof provider>(() => provider);
-    const registry = { getProvider } as unknown as never;
-    const complete = createCompleteSimple(() => registry);
+describe("createModelCall", () => {
+  it("delegates to registry.complete with model, context, and options", async () => {
+    const reply = { ok: true } as unknown as AssistantMessage;
+    const complete = vi.fn<() => Promise<AssistantMessage>>(async () => reply);
+    const registry = { complete } as unknown as never;
+    const run = createModelCall(() => registry);
     const model = { provider: "test" } as unknown as Model<any>;
-    await complete(model, {} as Context);
-    expect(getProvider).toHaveBeenCalledWith("test");
-    expect(streamSimple).toHaveBeenCalledTimes(1);
-    expect(result).toHaveBeenCalledTimes(1);
-  });
-
-  it("throws with the provider name when no provider is registered", async () => {
-    const registry = { getProvider: () => undefined } as unknown as never;
-    const complete = createCompleteSimple(() => registry);
-    const model = { provider: "missing" } as unknown as Model<any>;
-    await expect(complete(model, {} as Context)).rejects.toThrow(/missing/);
+    const context = {} as Context;
+    const options = { maxTokens: 1 } as never;
+    await expect(run(model, context, options)).resolves.toBe(reply);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(complete).toHaveBeenCalledWith(model, context, options);
   });
 
   it("throws when registry is undefined", async () => {
-    const complete = createCompleteSimple(() => undefined);
+    const run = createModelCall(() => undefined);
     const model = { provider: "test" } as unknown as Model<any>;
-    await expect(complete(model, {} as Context)).rejects.toThrow(/provider/i);
+    await expect(run(model, {} as Context)).rejects.toThrow(/registry/i);
   });
 });

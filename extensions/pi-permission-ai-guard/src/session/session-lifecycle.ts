@@ -64,7 +64,7 @@ import type { SessionManagerLike } from "#src/ask/transcript-stripper.ts";
 import { type LoadConfigResult } from "#src/config/config-layer.ts";
 import { LINK_NAME } from "#src/config/config-schema.ts";
 import { NOTIFY_PREFIX, warn, type NotifyLevel } from "#src/logger.ts";
-import { type CompleteSimpleFn, type ModelRegistryLike } from "#src/model/model-review.ts";
+import { type ModelCallFn, type ModelRegistryLike } from "#src/model/model-review.ts";
 import { type BreakerTier, CircuitBreaker } from "#src/review/circuit-breaker.ts";
 import { type DenyRecord, type ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
@@ -115,7 +115,7 @@ export interface SessionLifecycleDeps {
   /** The authorizer factory (the real ReviewPipeline, or a stub in tests). */
   createPipeline: (deps: ReviewPipelineDeps) => Authorizer["authorize"];
   /** Model-call function (lazy registry resolution happens per call). */
-  completeSimple: CompleteSimpleFn;
+  modelCall: ModelCallFn;
 }
 
 /**
@@ -413,7 +413,7 @@ export class SessionLifecycle {
         verdictCache: session.verdictCache,
         denyHistory: session.denyHistory,
         overrides: this.#overrides,
-        completeSimple: this.#deps.completeSimple,
+        modelCall: this.#deps.modelCall,
         notify: this.#ambientNotify,
       };
       const authorize = this.#deps.createPipeline(deps);

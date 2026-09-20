@@ -21,7 +21,13 @@
 
 import { parseArgs } from "node:util";
 
-import type { Api, Model, Provider } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  type Model,
+  type Provider,
+  normalizeContext,
+  type SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -35,7 +41,7 @@ import type {
 
 import type { SessionManagerLike } from "#src/ask/transcript-stripper.ts";
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
-import { type ModelRegistryLike, createCompleteSimple } from "#src/model/model-review.ts";
+import { type ModelRegistryLike, createModelCall } from "#src/model/model-review.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
@@ -262,7 +268,13 @@ function buildHarness(
   const registry: ModelRegistryLike = {
     find: () => model,
     getApiKeyAndHeaders: async () => ({ ok: true, apiKey }),
-    getProvider: () => providerInstance,
+    // Integration harness: stand in for the agent's registry by delegating
+    // to the real provider (dev-only; pi-ai >= 0.86 brands the provider input).
+    complete: (m, context, options) =>
+      // The harness only runs the anthropic/openai providers, both Simple.
+      providerInstance
+        .streamSimple(m, normalizeContext(context), options as SimpleStreamOptions | undefined)
+        .result(),
   };
   const events: LogEvent[] = [];
   const log: AuthorizerLog & { events: LogEvent[] } = {
@@ -279,7 +291,7 @@ function buildHarness(
     verdictCache: new VerdictCache(),
     denyHistory: [],
     overrides: {},
-    completeSimple: createCompleteSimple(() => registry),
+    modelCall: createModelCall(() => registry),
     // CLI: escalation messages surface on the console — no TUI footer here.
     notify: (message, level) => console.log(`[${level ?? "info"}] ${message}`),
   });
