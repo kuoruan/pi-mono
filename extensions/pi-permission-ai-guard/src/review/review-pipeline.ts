@@ -8,7 +8,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import type { Authorizer, AuthorizerLog, AuthorizerVerdict } from "@gotgenes/pi-permission-system";
+import type { Authorizer } from "@gotgenes/pi-permission-system";
 
 import { type DriftWarnState, openAsk } from "#src/ask/ask.ts";
 import { buildReviewPrompt, buildReviewSystemPrompt } from "#src/ask/prompt.ts";
@@ -19,17 +19,15 @@ import {
   CACHE_LOOKUP_EVENT,
   COVERAGE_EVENT,
   DECISION_EVENT,
-  type DecisionRecordEntry,
   DecisionRecord,
   MODEL_REPLY_EVENT,
   SHORT_CIRCUIT_EVENT,
   cacheLookup,
   coverage,
-  mapped,
   modelReply,
   shortCircuit,
 } from "#src/audit/decision-record.ts";
-import type { AiGuardConfig, Mode } from "#src/config/config-schema.ts";
+import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import {
   type CompleteSimpleFn,
   type ModelCallContext,
@@ -37,23 +35,14 @@ import {
   type ResolvedRequestAuth,
   reviewModel,
 } from "#src/model/model-review.ts";
-import type { RiskLevel } from "#src/model/model-verdict.ts";
 import { effectiveOverride, type SessionOverrides } from "#src/session/session-overrides.ts";
 import { normalizeAndRedactText, shortHash } from "#src/utils.ts";
 
 import { accountModelOutcome, type CircuitBreaker, consumeTrip } from "./circuit-breaker.ts";
-import { PRE_CALL_MACHINERY_KINDS, type PreCallMachineryKind } from "./machinery-kinds.ts";
+import { releaseMachineryGate, releaseVerdictGate } from "./disposition.ts";
+import { PRE_CALL_MACHINERY_KINDS } from "./machinery-kinds.ts";
 import type { VerdictCache } from "./verdict-cache.ts";
-import {
-  applyVerdictMode,
-  type DenyInstructionSource,
-  type ModelDeferInfo,
-  machineryDenyReason,
-  machineryDeferNotice,
-  machineryTarget,
-  resolveMapping,
-  withAgentInstruction,
-} from "./verdict-mode.ts";
+import { applyVerdictMode, type ModelDeferInfo, withAgentInstruction } from "./verdict-mode.ts";
 
 /**
  * Fire-and-forget user notification — the host UI context's own notify
@@ -117,66 +106,6 @@ export interface ReviewPipelineDeps {
 }
 
 /**
- * What the escalation footwork hands back to a verdict gate: the
- * annotated record to write, and the agent instruction's source for the
- * deny the gate may be about to return (null when nothing deny-shaped
- * was emitted).
- */
-interface EscalationFootwork {
-  /** The annotated (or plain) decision record. */
-  record: DecisionRecordEntry;
-  /** The instruction source for an emitted deny, else null. */
-  instructionSource: DenyInstructionSource | null;
-}
-
-/**
- * Release a pre-call machinery gate: the single disposal seam for the
- * four reviewer-failure gates that never hold a parsed verdict (no-target,
- * model-unresolved, transcript-error, auth-failed).
- *
- * Owns the whole disposition: the machinery lane lookup, the deny reason
- * (computed ONCE — the audit annotation and the returned verdict share
- * it), the breaker's recoverable-tier credit, the review-stream record
- * (mapped when the gate denies, plain when it defers), the forced-defer
- * notice, and the returned verdict. The shared invariants — a broken
- * reviewer never rubber-stamps, every reviewer-relevant gate writes the
- * review stream — live here instead of being hand-copied per gate.
- *
- * @param mode - The effective mode (the machinery lane's only input).
- * @param kind - The classified machinery failure (pre-call: the review
- *   never opened).
- * @param record - The gate's decision record (verdict "defer" — the
- *   review never opened).
- * @param breaker - The session circuit breaker (recoverable-tier credit).
- * @param log - The authorizer log pair (review stream).
- * @param notify - The pipeline's notify (the forced-defer notice).
- * @returns The verdict the gate emits.
- */
-function releaseMachineryGate(
-  mode: Mode,
-  kind: PreCallMachineryKind,
-  record: DecisionRecordEntry,
-  breaker: CircuitBreaker,
-  log: AuthorizerLog,
-  notify: NotifyFn,
-): AuthorizerVerdict {
-  if (machineryTarget(mode) !== "deny") {
-    log.review(DECISION_EVENT, record);
-    // Forced defer interrupts the human with no dialog context of its
-    // own — same doctrine as the breaker trip: name the cause.
-    notify(machineryDeferNotice(kind), "warning");
-    return { kind: "defer" };
-  }
-  breaker.recordDenyEquivalent();
-  const reason = machineryDenyReason(kind, mode);
-  log.review(DECISION_EVENT, mapped(record, mode, "deny", reason));
-  // The audit annotation keeps the un-instructed reason; the returned
-  // verdict carries the agent instruction (a machinery denial was never
-  // judged — retrying later is legitimate).
-  return { kind: "deny", reason: withAgentInstruction(reason, "machinery") };
-}
-
-/**
  * Build the AI Guard authorizer from resolved session state. The returned
  * `authorize` function is the upstream `Authorizer["authorize"]` seam — the
  * only interface callers (extension.ts) and tests cross.
@@ -205,42 +134,6 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // effectiveOverride in session-overrides). Read per-call: the override
     // object is mutable session state.
     const mode = effectiveOverride(deps.overrides, config, "mode");
-
-    // Per-call closure: the mode read here flows into every mapping
-    // annotation below; noticeState/deps stay captured from the factory.
-    // The mode mapping's shared footwork for the two gates that emit a real
-    // verdict (cache-hit and fresh model): resolveMapping owns the deciding
-    // rule (annotation input + every notify owed + the instruction
-    // source); this closure performs the side effects — flip the notice
-    // state, send the notify, annotate the record. The per-call constants
-    // (mode, noticeState, deps) are closure-captured — only the
-    // per-verdict facts travel as parameters.
-    const annotateAndEscalate = (
-      record: DecisionRecordEntry,
-      original: AuthorizerVerdict,
-      emitted: AuthorizerVerdict,
-      riskLevel: RiskLevel | undefined,
-      defer: ModelDeferInfo | undefined,
-    ): EscalationFootwork => {
-      const decision = resolveMapping({
-        original,
-        emitted,
-        riskLevel,
-        deferKind: defer?.kind,
-        deferReason: defer?.reason,
-        deferLean: defer?.lean,
-        mode,
-        noticeShown: noticeState.shown,
-      });
-      if (decision.markNoticeShown) noticeState.shown = true;
-      if (decision.notice) deps.notify(decision.notice.message, decision.notice.level);
-      return {
-        record: decision.annotate
-          ? mapped(record, mode, emitted.kind, decision.emittedReason)
-          : record,
-        instructionSource: decision.instructionSource,
-      };
-    };
 
     // surface-unmatched is expected config behavior (silent defer; outside
     // this link's jurisdiction). no-target is an unexpected ask — the
@@ -434,7 +327,8 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // rides along so a cached deny maps identically to its fresh first
       // pass.
       const emitted = applyVerdictMode(mode, lookup.verdict, undefined, lookup.riskLevel);
-      const { record, instructionSource } = annotateAndEscalate(
+      const released = releaseVerdictGate(
+        { mode, noticeShown: noticeState.shown, notify: deps.notify },
         DecisionRecord.cacheHit(base, lookup.verdict),
         lookup.verdict,
         emitted,
@@ -442,20 +336,16 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         // Cached verdicts are allow/deny only — no defer context at all.
         undefined,
       );
+      if (released.markNoticeShown) noticeState.shown = true;
+      const { record, verdict } = released;
       // Replay gate: the verdict was already recorded at its model gate —
       // debug stream only (see the log-stream doctrine in
       // decision-record.ts).
       log.debug(DECISION_EVENT, record);
-      // A cached deny replays the model's own reason — the instruction
-      // is appended exactly once per hit (the cache holds the
+      // The release carries the returned verdict (a deny already has the
+      // instruction appended exactly once per hit — the cache holds the
       // un-instructed original; each hit re-appends).
-      if (emitted.kind === "deny") {
-        return {
-          kind: "deny",
-          reason: withAgentInstruction(emitted.reason, instructionSource ?? "content"),
-        };
-      }
-      return emitted;
+      return verdict;
     }
     // Cache miss: record the miss reason for telemetry.
     log.debug(CACHE_LOOKUP_EVENT, cacheLookup(requestId, surface, lookup.missReason));
@@ -529,7 +419,8 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       deferInfo,
       reviewOutcome.riskLevel,
     );
-    const { record, instructionSource } = annotateAndEscalate(
+    const released = releaseVerdictGate(
+      { mode, noticeShown: noticeState.shown, notify: deps.notify },
       DecisionRecord.model(
         base,
         modelId,
@@ -543,6 +434,8 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       reviewOutcome.riskLevel,
       deferInfo,
     );
+    if (released.markNoticeShown) noticeState.shown = true;
+    const { record, verdict } = released;
     log.review(DECISION_EVENT, record);
 
     // The denied panel's data: record what the MODEL denied (the review's
@@ -576,18 +469,13 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       );
     }
 
-    // The returned deny carries the agent instruction; the audit record
-    // (annotated above) and the cache (stored above) keep the un-instructed
-    // reason. The source discrimination (machinery iff the review failed,
-    // content iff the request was judged) lives in resolveMapping — same
-    // rule as the cache-hit gate above.
-    if (emitted.kind === "deny") {
-      return {
-        kind: "deny",
-        reason: withAgentInstruction(emitted.reason, instructionSource ?? "content"),
-      };
-    }
-    return emitted;
+    // The release carries the returned verdict: the audit record (annotated
+    // above) and the cache (stored above) keep the un-instructed reason;
+    // the returned deny carries the agent instruction. The source
+    // discrimination (machinery iff the review failed, content iff the
+    // request was judged) lives in resolveMapping — same rule as the
+    // cache-hit gate above.
+    return verdict;
   };
 }
 

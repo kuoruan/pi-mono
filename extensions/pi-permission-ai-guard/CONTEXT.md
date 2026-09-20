@@ -102,6 +102,8 @@ The retry carries no provider-layer retry — three requests is the hard ceiling
 - **Review stream** (always on): reviewer-relevant gates — model, circuit-breaker, no-target, model-unresolved, auth-failed, transcript-error — write to `permission-review.jsonl`.
 - **Debug stream** (written only while the permission system's `debugLog` is on): pass-through gates (policy-decided, cache-hit) and every verbose/diagnostic payload (raw replies on defer failures only, call errors, cache-miss telemetry, transcript short-circuits, empty-reply stop-reason details).
 
+**Disposition**: The single release seam for every gate that emits a verdict — machinery or mapped (the breaker's own trip ritual stays beside the breaker by design). A gate declares verdict + facts, and the disposition owns the release ritual (audit annotation, operator notice, agent instruction). _Avoid_: escalation footwork
+
 **Policy suggestion**: A report candidate for a deterministic permission rule: the same ask (surface + target) reached the model ≥3 times, every occurrence in one trusted-intent context (same `contextHash`), with no terminal deny anywhere. Evidence, never authorization — the report renders copy-paste rule fragments; adopting one is the operator's explicit action in the permission system's config.
 
 ### Transcript
