@@ -56,6 +56,7 @@ Formatting rules — concise and readable, no hard line breaks:
 - **Soft-wrapped paragraphs**: never insert hard line breaks mid-sentence in a summary — write each paragraph as one flowing line and let editors soft-wrap. Changesets render verbatim into `CHANGELOG.md`, and wrapped summaries balloon every published entry.
 - **Prefer one terse sentence**; link a PR or commit for detail.
 - **Bullets only when they earn their keep**: a short lead sentence plus a few one-line bullets is welcome for multi-point features (each bullet one terse idea) — it beats one giant run-on. Do NOT paste multi-paragraph essays or implementation narratives into a changeset.
+- **Cover WHAT / WHY / HOW**: state what changed, why it was needed, and what (if anything) a consumer must do. Peer-floor bumps must name the new minimum and who is affected. Example: `Fix X so Y stops happening (Z changed upstream). Requires foo >= 1.2.`
 
 ### When a changeset is NOT required
 
