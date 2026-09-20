@@ -309,14 +309,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // working directory, and policy-derived path boundary, so a verdict
     // cannot cross those contexts.
     const commandHash = shortHash(reviewRequestCacheMaterial(request));
-    // The context hash covers the FULL model-visible transcript input — both
-    // trusted intent AND untrusted tool calls. The prompt renders both
-    // (buildTranscriptSections), so a key over intent alone could hit on a
-    // verdict reached for a different prompt (e.g. an intervening tool call
-    // the reviewer never saw). Correctness over hit rate.
-    const contextHash = shortHash(
-      [...transcript.trustedIntent, ...transcript.toolCalls].join("\0"),
-    );
+    // The context hash covers the trusted intent only — user messages are
+    // the authorization source the model honors, so a new user message
+    // must miss. Tool calls are deliberately excluded: agent retries of the
+    // same command between user turns would otherwise never hit (each
+    // intervening tool call changes the transcript). The residual risk — a
+    // verdict replayed into a prompt with different background tool calls —
+    // is accepted: tool calls are untrusted context, not authorization.
+    const contextHash = shortHash(transcript.trustedIntent.join("\0"));
     const cc = config.cache;
     const lookup = deps.verdictCache.lookup(commandHash, contextHash, cc);
     if (lookup.hit) {

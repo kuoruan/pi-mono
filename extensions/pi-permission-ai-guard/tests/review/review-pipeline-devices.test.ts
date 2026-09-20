@@ -272,7 +272,7 @@ describe("createReviewPipeline — verdict cache", () => {
     expect(modelCalled).toBe(1);
   });
 
-  it("misses when an intervening tool call changes the model-visible prompt", async () => {
+  it("hits when only intervening tool calls change (no new user message)", async () => {
     const cache = new VerdictCache();
     let modelCalled = 0;
     const sessionEntries: unknown[] = [];
@@ -294,8 +294,9 @@ describe("createReviewPipeline — verdict cache", () => {
     // First call: no tool calls yet → model runs, verdict cached.
     await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), noLog);
     expect(modelCalled).toBe(1);
-    // An intervening tool call enters the prompt's untrusted-tool-calls section —
-    // the same command must miss and re-run the model, which now sees it.
+    // An intervening tool call enters the transcript's untrusted-tool-calls
+    // section, but the context key covers trusted intent only — the same
+    // command with no new user message must hit without re-running the model.
     sessionEntries.push({
       type: "message",
       id: "e1",
@@ -308,7 +309,7 @@ describe("createReviewPipeline — verdict cache", () => {
     });
     const v = await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), noLog);
     expect(v).toEqual({ kind: "allow" });
-    expect(modelCalled).toBe(2);
+    expect(modelCalled).toBe(1);
   });
 
   it("does not cache when cache.maxEntries is 0", async () => {
