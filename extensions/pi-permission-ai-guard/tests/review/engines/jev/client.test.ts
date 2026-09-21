@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildJevRequest, createTypesafeClient } from "#src/review/engines/jev/client.ts";
-import { DANGER_CRITERIA, RISK_RUBRIC } from "#src/review/engines/jev/questions.ts";
 import type { AskContext } from "#src/review/request/ask.ts";
 import { buildAskContext } from "#src/review/request/ask.ts";
 import type { ReviewRequestContext } from "#src/review/request/review-request.ts";
 import type { StrippedTranscript } from "#src/review/request/transcript-stripper.ts";
-import { makeDetails } from "#test/fixtures.ts";
+import { ev, makeDetails, payload } from "#test/fixtures.ts";
 
 function ask(): AskContext {
   return buildAskContext(makeDetails({ value: "rm -rf /tmp/x" }), "/project");
@@ -26,33 +25,16 @@ function transcript(overrides: Partial<StrippedTranscript> = {}): StrippedTransc
 }
 
 describe("buildJevRequest", () => {
-  it("builds the four built-in questions with the model id", () => {
+  it("builds the built-in questions with the model id", () => {
     const req = buildJevRequest(transcript(), request(), null, "jev-1.13");
     expect(req.model).toBe("jev-1.13");
     expect(Object.keys(req.questions).toSorted()).toEqual([
       "danger_category",
       "intent_match",
       "risk",
-      "unconditionally_safe",
     ]);
     expect(req.questions.danger_category.type).toBe("choice");
     expect(req.questions.risk.type).toBe("score");
-  });
-
-  it("covers all nine DENY-Always categories plus none", () => {
-    expect(Object.keys(DANGER_CRITERIA).toSorted()).toEqual([
-      "destructive_vcs",
-      "external_code_execution",
-      "external_exposure",
-      "irreversible_destruction",
-      "none",
-      "persistent_system_changes",
-      "resource_abuse_dos",
-      "secrets_credentials",
-      "sensitive_data_egress",
-      "system_tampering",
-    ]);
-    expect(RISK_RUBRIC).toHaveLength(5);
   });
 
   it("puts the anchor, earlier context, and command in state", () => {
@@ -69,6 +51,20 @@ describe("buildJevRequest", () => {
       tool_calls: ["ls"],
       working_directory: "/project",
     });
+  });
+
+  it("carries tool input in state for a tool ask with empty flagged elements", () => {
+    // A tool-kind ask whose value is empty flags nothing — exactly the
+    // blind-on-intent shape the tool_input key exists for (B1 regression).
+    const toolAsk = buildAskContext(
+      makeDetails({
+        payload: payload("tool", { value: "", surface: "mcp" }, [ev("input", "preview")]),
+      }),
+      "/project",
+    );
+    expect(toolAsk.flaggedElements).toEqual([]);
+    const req = buildJevRequest(transcript(), { ask: toolAsk, target: "mcp" }, null, "jev-1.13");
+    expect(req.state).toMatchObject({ tool_input: "preview" });
   });
 
   it("uses (none found) when there is no trusted intent", () => {

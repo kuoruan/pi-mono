@@ -11,7 +11,6 @@ function confident(overrides: Partial<JevAnswers> = {}): JevAnswers {
     dangerCategory: DANGER_NONE,
     dangerConfidence: 0.95,
     intentMatch: 0.9,
-    unconditionallySafe: 0.9,
     riskScore: 0.1,
     riskConfidence: 0.9,
     ...overrides,
@@ -19,7 +18,7 @@ function confident(overrides: Partial<JevAnswers> = {}): JevAnswers {
 }
 
 describe("synthesizeJevVerdict", () => {
-  it("allows when safe and intent match, all confident", () => {
+  it("allows when intent matches and risk is low, all confident", () => {
     const out = synthesizeJevVerdict(confident(), THRESHOLDS, 100);
     expect(out.verdict).toEqual({ kind: "allow" });
     expect(out.latencyMs).toBe(100);
@@ -53,7 +52,7 @@ describe("synthesizeJevVerdict", () => {
     expect(out.verdict).toEqual({ kind: "defer" });
     expect(out.deferKind).toBe("model-defer");
     expect(out.deferReason).toContain("danger_category");
-    expect(out.deferReason).toContain("below floor");
+    expect(out.deferReason).toContain("unsure about this action");
   });
 
   it("denies a confident danger hit regardless of check order", () => {
@@ -77,7 +76,7 @@ describe("synthesizeJevVerdict", () => {
 
   it("soft-denies low when intent is not established but risk is moderate", () => {
     const out = synthesizeJevVerdict(
-      confident({ intentMatch: 0.2, unconditionallySafe: 0.2, riskScore: 0.6 }),
+      confident({ intentMatch: 0.2, riskScore: 0.6 }),
       THRESHOLDS,
       7,
     );
@@ -87,7 +86,7 @@ describe("synthesizeJevVerdict", () => {
 
   it("soft-denies medium when the risk score is high", () => {
     const out = synthesizeJevVerdict(
-      confident({ intentMatch: 0.2, unconditionallySafe: 0.2, riskScore: 0.8 }),
+      confident({ intentMatch: 0.2, riskScore: 0.8 }),
       THRESHOLDS,
       7,
     );
@@ -95,9 +94,24 @@ describe("synthesizeJevVerdict", () => {
     expect(out.riskLevel).toBe("medium");
   });
 
+  it("denies at the risk bar even when intent is established", () => {
+    // The risk half of the allow gate: high intent must not cross the deny line.
+    const out = synthesizeJevVerdict(confident({ riskScore: 0.6 }), THRESHOLDS, 7);
+    expect(out.verdict.kind).toBe("deny");
+  });
+
+  it("cuts the risk bar at 0.5: 0.4 allows, 0.5 denies", () => {
+    expect(synthesizeJevVerdict(confident({ riskScore: 0.4 }), THRESHOLDS, 7).verdict).toEqual({
+      kind: "allow",
+    });
+    expect(synthesizeJevVerdict(confident({ riskScore: 0.5 }), THRESHOLDS, 7).verdict.kind).toBe(
+      "deny",
+    );
+  });
+
   it("defers when intent is not established and the risk score is low", () => {
     const out = synthesizeJevVerdict(
-      confident({ intentMatch: 0.2, unconditionallySafe: 0.2, riskScore: 0.3 }),
+      confident({ intentMatch: 0.2, riskScore: 0.3 }),
       THRESHOLDS,
       7,
     );
@@ -106,26 +120,23 @@ describe("synthesizeJevVerdict", () => {
     expect(out.lean).toBe("deny");
   });
 
-  it("defers neutral, naming the answer that actually fell short", () => {
-    // Intent is established; only unconditional safety is short. The reason
-    // must not claim an intent problem, and the lean follows the same answer
-    // (neutral — a reflexive deny would mis-route the defer's mode lane).
+  it("defers naming intent when intent falls short and risk is low", () => {
     const out = synthesizeJevVerdict(
-      confident({ unconditionallySafe: 0.2, riskScore: 0.3 }),
+      confident({ intentMatch: 0.2, riskScore: 0.3 }),
       THRESHOLDS,
       7,
     );
     expect(out.verdict).toEqual({ kind: "defer" });
-    expect(out.deferReason).toContain("unconditionally_safe");
-    expect(out.deferReason).not.toContain("intent");
-    expect(out.lean).toBeUndefined();
+    expect(out.deferKind).toBe("model-defer");
+    expect(out.deferReason).toContain("intent_match");
+    expect(out.lean).toBe("deny");
   });
 
   it("names the axis whose confidence is under the floor", () => {
     const out = synthesizeJevVerdict(confident({ riskConfidence: 0.2 }), THRESHOLDS, 7);
     expect(out.verdict).toEqual({ kind: "defer" });
     expect(out.deferReason).toContain("risk");
-    expect(out.deferReason).toContain("below floor");
+    expect(out.deferReason).toContain("unsure about this action");
   });
 });
 
@@ -134,7 +145,6 @@ describe("projectRawAnswers", () => {
     const answers = projectRawAnswers({
       danger_category: { type: "choice", choice: "none", confidence: 0.9 },
       intent_match: { type: "noul", noul: 0.2 },
-      unconditionally_safe: { type: "noul", noul: 0.2 },
       risk: { type: "score", score: 3, confidence: 0.9 },
     });
     expect(answers.riskScore).toBe(0.75);

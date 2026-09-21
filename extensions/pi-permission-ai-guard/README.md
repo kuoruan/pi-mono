@@ -93,21 +93,21 @@ Chain facts that shape how this link behaves:
 
 ## Configuration
 
-| Field            | Type                                                                    | Default                                   | Description                                                                                                                                                                                                                    |
-| ---------------- | ----------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `provider`       | string\|object                                                          | required                                  | Model provider id (e.g. `anthropic`), or `{type:"typesafe", baseUrl?, apiKey?}` for the Jev reviewer (unset fields fall back to `TYPESAFE_BASE_URL` / `TYPESAFE_API_KEY`)                                                      |
-| `model`          | string                                                                  | required                                  | Model id (e.g. `claude-haiku-4-5`; Jev: `jev-1.13`)                                                                                                                                                                            |
-| `reasoning`      | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"off"`                                   | Thinking level (pi-ai `ModelThinkingLevel`); `off` = disabled. Ignored in Jev mode                                                                                                                                             |
-| `timeoutMs`      | integer                                                                 | `15000`                                   | Model-call timeout (ms). Jev mode: per-attempt fallback; `typesafe.timeoutMs` overrides per attempt                                                                                                                            |
-| `maxTokens`      | integer                                                                 | `4096`                                    | Reviewer reply budget; thinking blocks count against it on reasoning upstreams. Ignored in Jev mode                                                                                                                            |
-| `transcript`     | object                                                                  | see below                                 | Transcript stripping config (see below)                                                                                                                                                                                        |
-| `surfaces`       | string[]                                                                | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes. Path-family granularity: `path` = whole family, `path_*` = proven-direction access only, `path_read` = one direction, `!path` = family-wide exclude    |
-| `instructions`   | string\|object\|null                                                    | `null`                                    | Custom safety rules. LLM mode: replaces defaults. Jev mode: string = shared background; object = `{background?, questions?}` overlay (ids: `danger_category`, `intent_match`, `unconditionally_safe`, `risk`); null = built-in |
-| `typesafe`       | object                                                                  | see below                                 | Jev behavior thresholds (object providers only)                                                                                                                                                                                |
-| `mode`           | `"strict"\|"default"\|"lenient"\|"permissive"`                          | `"default"`                               | Leniency ladder for non-allow verdicts (see below)                                                                                                                                                                             |
-| `notifyLevel`    | `"info"\|"warning"\|"error"\|"off"`                                     | `"info"`                                  | Ambient-notify threshold — the minimum review-loop notify level that still notifies; command feedback is never gated                                                                                                           |
-| `circuitBreaker` | object                                                                  | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                                                                                                                                                                             |
-| `cache`          | object                                                                  | `{maxEntries:128}`                        | Verdict cache (see below)                                                                                                                                                                                                      |
+| Field            | Type                                                                    | Default                                   | Description                                                                                                                                                                                                                 |
+| ---------------- | ----------------------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`       | string\|object                                                          | required                                  | Model provider id (e.g. `anthropic`), or `{type:"typesafe", baseUrl?, apiKey?}` for the Jev reviewer (unset fields fall back to `TYPESAFE_BASE_URL` / `TYPESAFE_API_KEY`)                                                   |
+| `model`          | string                                                                  | required                                  | Model id (e.g. `claude-haiku-4-5`; Jev: `jev-1.13`)                                                                                                                                                                         |
+| `reasoning`      | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"off"`                                   | Thinking level (pi-ai `ModelThinkingLevel`); `off` = disabled. Ignored in Jev mode                                                                                                                                          |
+| `timeoutMs`      | integer                                                                 | `15000`                                   | Model-call timeout (ms). Jev mode: per-attempt fallback; `typesafe.timeoutMs` overrides per attempt                                                                                                                         |
+| `maxTokens`      | integer                                                                 | `4096`                                    | Reviewer reply budget; thinking blocks count against it on reasoning upstreams. Ignored in Jev mode                                                                                                                         |
+| `transcript`     | object                                                                  | see below                                 | Transcript stripping config (see below)                                                                                                                                                                                     |
+| `surfaces`       | string[]                                                                | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes. Path-family granularity: `path` = whole family, `path_*` = proven-direction access only, `path_read` = one direction, `!path` = family-wide exclude |
+| `instructions`   | string\|object\|null                                                    | `null`                                    | Custom safety rules. LLM mode: replaces defaults. Jev mode: string = shared background; object = `{background?, questions?}` overlay (ids: `danger_category`, `intent_match`, `risk`); null = built-in                      |
+| `typesafe`       | object                                                                  | see below                                 | Jev behavior thresholds (object providers only)                                                                                                                                                                             |
+| `mode`           | `"strict"\|"default"\|"lenient"\|"permissive"`                          | `"default"`                               | Leniency ladder for non-allow verdicts (see below)                                                                                                                                                                          |
+| `notifyLevel`    | `"info"\|"warning"\|"error"\|"off"`                                     | `"info"`                                  | Ambient-notify threshold — the minimum review-loop notify level that still notifies; command feedback is never gated                                                                                                        |
+| `circuitBreaker` | object                                                                  | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                                                                                                                                                                          |
+| `cache`          | object                                                                  | `{maxEntries:128}`                        | Verdict cache (see below)                                                                                                                                                                                                   |
 
 ### Transcript
 
@@ -129,7 +129,31 @@ Set `provider` to `{ "type": "typesafe" }` to review through TypeSafe's Jev (Sys
 | `confidenceFloor`  | `0.5`   | Minimum answer confidence; below it the verdict defers                                                         |
 | `timeoutMs`        | —       | SDK timeout per attempt (timeouts fail outright — only 408/429/5xx retry); falls back to top-level `timeoutMs` |
 
-In Jev mode `reasoning`/`maxTokens` are ignored, and `instructions` overlays rather than replaces: a string is shared background for every question; `{ background?, questions? }` adds onto the built-in set (`danger_category`, `intent_match`, `unconditionally_safe`, `risk`).
+In Jev mode `reasoning`/`maxTokens` are ignored, and `instructions` overlays rather than replaces: a string is shared background for every question; `{ background?, questions? }` adds onto the built-in set (`danger_category`, `intent_match`, `risk`).
+
+#### Custom rules (Jev mode)
+
+Every question already carries a built-in reviewer role (it judges the action against the authorization anchor and the working directory). `instructions` adds yours on top — it can only narrow, never replace the built-ins. A string applies to every question:
+
+```json
+{
+  "instructions": "This project never touches /etc or ~/.ssh; any action there is unauthorized."
+}
+```
+
+An object adds a shared background plus per-question notes (unknown ids are rejected, not ignored):
+
+```json
+{
+  "instructions": {
+    "background": "Monorepo: each package owns its directory.",
+    "questions": {
+      "danger_category": "Deleting migration files counts as irreversible destruction.",
+      "risk": "Touching /migrations is at least medium risk."
+    }
+  }
+}
+```
 
 ### Mode
 

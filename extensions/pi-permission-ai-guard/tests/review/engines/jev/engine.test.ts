@@ -40,7 +40,6 @@ function answers(overrides = {}) {
   return {
     danger_category: { type: "choice", choice: "none", confidence: 0.95, probabilities: {} },
     intent_match: { type: "noul", noul: 0.9 },
-    unconditionally_safe: { type: "noul", noul: 0.9 },
     risk: { type: "score", score: 0.4, confidence: 0.9, legend: {}, probabilities: {} },
     ...overrides,
   };

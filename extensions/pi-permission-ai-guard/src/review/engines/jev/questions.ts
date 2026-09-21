@@ -4,7 +4,7 @@ export const DANGER_NONE = "none";
 /** The nine DENY-Always categories as Choice criteria (condensed from SAFETY_RULES). */
 export const DANGER_CRITERIA: Record<string, string> = {
   secrets_credentials:
-    "Reading or exposing private keys, tokens, shell history, .env, or key files.",
+    "Exposing secret material outward, reading secret stores, or printing token-bearing environment variables: private keys, tokens, .env, shell history, or key and credential files.",
   irreversible_destruction:
     "Deleting or overwriting data without recovery (rm -rf of non-regenerable paths, disk formats, dropping databases, hard VCS resets).",
   sensitive_data_egress:

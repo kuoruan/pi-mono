@@ -51,22 +51,17 @@ export const REASONING_VALUES: readonly ModelThinkingLevel[] = [
 ];
 
 /**
- * The four System One question ids — a config-level contract. The schema
+ * The System One question ids — a config-level contract. The schema
  * validates instruction overlays against this list, and the Jev engine
  * builds its questions from it; both sides share the one source so a new
  * question is one entry, not two lists that can drift.
  */
-export const JEV_QUESTION_IDS = [
-  "danger_category",
-  "intent_match",
-  "unconditionally_safe",
-  "risk",
-] as const;
+export const JEV_QUESTION_IDS = ["danger_category", "intent_match", "risk"] as const;
 
 /** Membership check for the overlay ids (string-keyed: config keys are strings). */
 const JEV_QUESTION_ID_SET: ReadonlySet<string> = new Set(JEV_QUESTION_IDS);
 
-/** One of the four System One question ids. */
+/** One of the System One question ids. */
 export type JevQuestionId = (typeof JEV_QUESTION_IDS)[number];
 
 /** A direct TypeSafe connection (object provider) — both fields optional. */

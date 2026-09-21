@@ -25,11 +25,19 @@ export interface TypesafeConnection {
   apiKey?: string;
 }
 
-/** The four built-in questions in the SDK's request shapes. */
+/**
+ * The built-in reviewer role: every question's first background layer.
+ * Not user configuration — it tells Jev it is a permission reviewer
+ * (the LLM path's system prompt equivalent), so intent/scope read
+ * against the authorization anchor rather than free-floating.
+ */
+export const JEV_REVIEWER_BACKGROUND =
+  "You are reviewing one tool call for an AI coding agent. Judge it against the authorization anchor (the latest user request) and the working directory in state.";
+
+/** The built-in questions in the SDK's request shapes. */
 export interface JevQuestions extends Questions {
   danger_category: ChoiceQuestion<typeof DANGER_CRITERIA>;
   intent_match: NoulQuestion;
-  unconditionally_safe: NoulQuestion;
   risk: ScoreQuestion<typeof RISK_RUBRIC>;
 }
 
@@ -63,10 +71,11 @@ export function createTypesafeClient(connection: TypesafeConnection): TypesafeCl
  * authorization anchor, and the stripped context — optional keys are
  * added only when present, so no undefined value ever serializes.
  *
- * The ask fields are redacted here, the LLM prompt's twin: the pipeline
- * hands engines the raw projection (only the transcript arrives
+ * The untrusted ask fields are redacted here, the LLM prompt's twin: the
+ * pipeline hands engines the raw projection (only the transcript arrives
  * sanitized), so a credential in the command would otherwise leave for
- * the TypeSafe service in the clear.
+ * the TypeSafe service in the clear. The session-supplied working
+ * directory is the one exception — passed through (see below).
  *
  * @param request - The review request (ask + resolved target).
  * @param transcript - The stripped transcript.
@@ -83,8 +92,16 @@ function buildState(request: ReviewRequestContext, transcript: StrippedTranscrip
     authorization_anchor: transcript.trustedIntent.at(-1) ?? "(none found)",
     earlier_context: transcript.trustedIntent.slice(0, -1),
     tool_calls: transcript.toolCalls,
-    working_directory: normalizeAndRedactText(ask.workingDirectory),
+    // cwd comes from the session, not user input — passed unredacted
+    // (redaction could mangle paths matching secret prefixes). Note: the
+    // LLM prompt still redacts its cwd line (its own doc says otherwise) —
+    // that fork is tracked separately, not papered over here.
+    working_directory: ask.workingDirectory,
   };
+  // Non-bash action carriers (the LLM prompt's tool-input/read-path lines):
+  // without these a replace/mcp ask is reviewed blind on intent alone.
+  if (ask.toolInputPreview) state.tool_input = normalizeAndRedactText(ask.toolInputPreview);
+  if (ask.readPath) state.read_path = normalizeAndRedactText(ask.readPath);
   if (ask.flaggedElements.length > 0) {
     state.flagged_elements = ask.flaggedElements.map(normalizeAndRedactText);
   }
@@ -110,16 +127,18 @@ export function buildJevRequest(
   instructions: JevInstructionsInput,
   model: string,
 ): SystemOneRequest<JevQuestions> {
+  // Three layers, applied in order: the built-in reviewer role, the
+  // user's shared background, then the question's own override (each
+  // layer adds rather than replacing).
   const overlay =
     typeof instructions === "string" ? { background: instructions } : (instructions ?? {});
   const perQuestion = overlay.questions ?? {};
   const bg = overlay.background;
 
-  // Two layers, applied in order: the shared background, then the
-  // question's own override (which adds to the background rather than
-  // replacing it).
   const q = (id: JevQuestionId, base: string): JevQuestionEntry => {
-    const withBg = applyOverlay(base, bg);
+    // The built-in role always leads: the user's background appends after it.
+    const withRole = applyOverlay(base, JEV_REVIEWER_BACKGROUND);
+    const withBg = bg === undefined ? withRole : applyOverlay(withRole, bg);
     const extra = perQuestion[id];
     return extra === undefined ? withBg : applyOverlay(withBg, extra);
   };
@@ -138,21 +157,7 @@ export function buildJevRequest(
       },
       intent_match: {
         type: "noul",
-        instructions: q(
-          "intent_match",
-          "The authorization anchor (latest user request) authorizes this action.",
-        ),
-      },
-      unconditionally_safe: {
-        type: "noul",
-        instructions: q(
-          "unconditionally_safe",
-          "This action is safe regardless of intent: read-only inspection in the working directory, bounded in-project writes matching the task, project tooling (tests, linters, builds), or safe local git operations.",
-        ),
-        criteria: {
-          true: "Read-only ops in CWD, bounded in-project writes, project tooling, non-destructive local VCS.",
-          false: "Anything else — needs the authorization check, not a free pass.",
-        },
+        instructions: q("intent_match", "The authorization anchor authorizes this action."),
       },
       risk: {
         type: "score",

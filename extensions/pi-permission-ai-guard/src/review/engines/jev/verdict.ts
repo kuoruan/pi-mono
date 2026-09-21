@@ -4,7 +4,7 @@ import { GENERIC_DENY_REASON } from "#src/model/model-verdict.ts";
 import { DANGER_NONE } from "./questions.ts";
 
 /**
- * The four built-in answers as 0–1 probabilities/confidences: `noul` arrives
+ * The built-in answers as 0–1 probabilities/confidences: `noul` arrives
  * as a probability already, the 0–4 `score` is normalized by
  * {@link projectRawAnswers}, so the table below speaks one scale.
  */
@@ -12,7 +12,6 @@ export interface JevAnswers {
   dangerCategory: string;
   dangerConfidence: number;
   intentMatch: number;
-  unconditionallySafe: number;
   riskScore: number;
   riskConfidence: number;
 }
@@ -46,7 +45,6 @@ export function projectRawAnswers(raw: Record<string, TypesafeRawAnswer>): JevAn
     dangerCategory: danger?.choice ?? DANGER_NONE,
     dangerConfidence: danger?.confidence ?? 0,
     intentMatch: raw.intent_match?.noul ?? 0,
-    unconditionallySafe: raw.unconditionally_safe?.noul ?? 0,
     riskScore: (risk?.score ?? 0) / 4,
     riskConfidence: risk?.confidence ?? 0,
   };
@@ -84,7 +82,7 @@ function deriveLean(answers: JevAnswers, thresholds: JevThresholds): VerdictLean
  * Synthesize a {@link ReviewOutcome} from calibrated answers, top-down:
  * danger hit → deny (before the confidence floor — a danger defer could
  * otherwise lean-allow in permissive mode); below-floor confidence → defer;
- * safe + intent → allow;
+ * intent + risk below the deny line → allow;
  * otherwise the DENY-Unless lane — a risk score at or above the deny bar is a
  * soft deny, anything below it defers.
  *
@@ -116,15 +114,14 @@ export function synthesizeJevVerdict(
     return {
       verdict: { kind: "defer" },
       deferKind: "model-defer",
-      deferReason: `low confidence on ${weakest.axis} (${minConfidence.toFixed(2)}) below floor ${thresholds.confidenceFloor.toFixed(2)}`,
+      deferReason: `unsure about this action (${weakest.axis} confidence ${minConfidence.toFixed(2)} < ${thresholds.confidenceFloor.toFixed(2)})`,
       lean: deriveLean(answers, thresholds),
       latencyMs,
     };
   }
-  if (
-    answers.unconditionallySafe >= thresholds.booleanThreshold &&
-    answers.intentMatch >= thresholds.booleanThreshold
-  ) {
+  // Allow needs both: the anchor authorizes it AND risk stays below the
+  // deny line.
+  if (answers.intentMatch >= thresholds.booleanThreshold && answers.riskScore < 0.5) {
     return { verdict: { kind: "allow" }, latencyMs };
   }
   if (answers.riskScore >= 0.5) {
@@ -134,15 +131,11 @@ export function synthesizeJevVerdict(
       riskLevel: answers.riskScore >= 0.75 ? "medium" : "low",
     };
   }
-  // The reason names the answer that actually fell short, and the lean
-  // follows that same answer (not a reflexive deny).
-  const intentShort = answers.intentMatch < thresholds.booleanThreshold;
+  // Only intent can still fall short here (risk≥0.5 already denied above).
   return {
     verdict: { kind: "defer" },
     deferKind: "model-defer",
-    deferReason: intentShort
-      ? `intent unclear: P(intent_match)=${answers.intentMatch.toFixed(2)} below threshold ${thresholds.booleanThreshold.toFixed(2)}`
-      : `not unconditionally safe: P(unconditionally_safe)=${answers.unconditionallySafe.toFixed(2)} below threshold ${thresholds.booleanThreshold.toFixed(2)}`,
+    deferReason: `unsure this matches your request (intent_match ${answers.intentMatch.toFixed(2)} < ${thresholds.booleanThreshold.toFixed(2)})`,
     lean: deriveLean(answers, thresholds),
     latencyMs,
   };

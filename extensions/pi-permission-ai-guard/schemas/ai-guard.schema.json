@@ -133,7 +133,7 @@
             "questions": { "type": "object" }
           },
           "additionalProperties": false,
-          "description": "Jev-mode overlay (object providers only): shared background plus per-question additions keyed by stable question id (danger_category, intent_match, unconditionally_safe, risk). LLM mode accepts only the string form."
+          "description": "Jev-mode overlay (object providers only): shared background plus per-question additions keyed by stable question id (danger_category, intent_match, risk). LLM mode accepts only the string form."
         },
         {
           "type": "null"
