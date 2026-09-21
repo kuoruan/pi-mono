@@ -1,6 +1,6 @@
 /**
  * The mode ladder — the single source of truth for every OPERATIONAL fact
- * about a mode value: the verdict lanes (imported by verdict-mode), the
+ * about a mode value: the verdict lanes (imported by verdict-rule), the
  * casual-cycle membership, the warning-red emphasis, and the
  * config-surprise warnings (imported by config-layer).
  *

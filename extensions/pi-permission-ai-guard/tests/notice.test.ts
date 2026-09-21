@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { warn } from "#src/logger.ts";
+import { warn } from "#src/notice.ts";
 
 describe("logger", () => {
   const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});

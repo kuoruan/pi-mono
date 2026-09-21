@@ -77,8 +77,6 @@ export const EXCLUDED_REQUEST_FACTS: Record<
  * noise. Two asks that share `kind` + content but differ only in `surface`
  * (e.g. a `bash` kind reached via a shell-alias re-exposure, where `surface`
  * holds the alias name) reach the same verdict and so intentionally collide.
- * The old key's `surface` partition was over-conservative (missed cache hits);
- * dropping it is a correctness gain, not a regression.
  *
  * **Never log this value** — it contains raw, unredacted action text (needed
  * for cache-key distinction). The caller must pass it directly to a hash

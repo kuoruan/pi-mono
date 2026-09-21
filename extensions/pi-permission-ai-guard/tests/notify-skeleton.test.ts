@@ -15,7 +15,7 @@ const NOTIFY_SOURCES = [
   "#src/review/review-pipeline.ts",
   "#src/session/runtime-settings.ts",
   "#src/session/panels.ts",
-  "#src/review/verdict-mode.ts",
+  "#src/review/verdict-copy.ts",
 ] as const;
 
 /** The notify call prefixes whose first argument this test scans. */

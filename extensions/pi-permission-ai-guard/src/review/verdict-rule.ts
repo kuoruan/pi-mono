@@ -1,12 +1,12 @@
 /**
- * The mode mapping: how the link disposes the reviewer's non-allow
- * verdicts, and the messages that disposition produces.
+ * The mode mapping rule: how the link disposes the reviewer's non-allow
+ * verdicts. Deciding only — the human-facing copy lives in verdict-copy.
  *
  * This module owns the verdict-bearing side of the leniency ladder — the
  * hard/soft deny tiers, the soft-deny/model-defer/machinery lanes'
- * application, the deny reasons, and the human-facing escalation messages.
+ * application.
  * The ladder's operational facts (lanes, cycle membership, emphasis,
- * config warnings) are single-sourced in {@link ./mode-table.ts} and
+ * config warnings) are single-sourced in {@link ../config/mode-table.ts} and
  * consumed here as data.
  *
  * The doctrine stays local: hard-tier denies (riskLevel high|critical, or
@@ -31,7 +31,14 @@ import type {
 } from "#src/model/model-verdict.ts";
 import { truncateMiddle } from "#src/utils.ts";
 
-import type { MachineryFailureKind } from "./machinery-kinds.ts";
+import {
+  escalationMessage,
+  machineryDenyReason,
+  machineryDeferNotice,
+  NOTIFY_REASON_CEILING,
+  uncertainDenyReason,
+  type DenyInstructionSource,
+} from "./verdict-copy.ts";
 
 /**
  * Extra context for a model defer verdict (fresh-path only — defers are
@@ -193,169 +200,6 @@ function mapLane(
 }
 
 /**
- * The deny reason when the reviewer's own uncertainty is denied with no
- * clarification request attached.
- *
- * @param mode - The effective mode.
- * @returns The deny teaching reason.
- */
-export function uncertainDenyReason(mode: Mode): string {
-  return `Reviewer was uncertain about this request — ${mode} mode denies uncertain requests`;
-}
-
-/**
- * The human notice for a machinery-forced defer — the deferred ask lands on
- * the operator with no dialog context of its own, so the line names the
- * failure kind (doctrine symmetry with the breaker-trip notice). No
- * structural colon: the TUI's own level prefix would double it up.
- *
- * @param kind - The classified machinery failure kind.
- * @returns The notification message.
- */
-export function machineryDeferNotice(kind: MachineryFailureKind): string {
-  return `reviewer could not complete the review (${kind}) — deferring to you`;
-}
-
-/**
- * The deny reason for a machinery-failure denial: the agent sees why the
- * review could not complete instead of a silent deny. Mode-parameterized
- * so audit readers see which policy produced the deny.
- *
- * @param deferKind - The classified failure kind, if any.
- * @param mode - The effective mode.
- * @returns The deny teaching reason.
- */
-export function machineryDenyReason(
-  deferKind: MachineryFailureKind | undefined,
-  mode: Mode,
-): string {
-  return `reviewer could not complete the review (${deferKind ?? "unknown"}) — ${mode} mode denied the request`;
-}
-
-/**
- * Which kind of deny a terminal reason comes from — selects the agent
- * instruction variant.
- *
- * - `"content"`: the review COMPLETED and judged the request itself dangerous (a model deny, or
- *   `strict`'s mapping of the reviewer's own uncertain defer). The agent's correct move is to stop
- *   pursuing this action and let the user re-request it explicitly.
- * - `"machinery"`: the review FAILED (a reviewer-machinery denial — e.g. an unresolved model, auth
- *   failure, unparseable reply, timeout, or the breaker; the full taxonomy lives in
- *   machinery-kinds). The request was never judged; retrying later is legitimate.
- */
-export type DenyInstructionSource = "content" | "machinery";
-
-/**
- * The behavioral instruction for a content deny (the request was judged).
- * No trailing period — the host's agent-side reason render appends its
- * own, and a trailing period here would double up.
- */
-const CONTENT_DENY_INSTRUCTION =
-  "Automatic review denied this, not the user. Do not rephrase, retry, or work around it; if the user wants it, they should ask explicitly";
-
-/**
- * The behavioral instruction for a machinery deny (the review failed).
- * No trailing period — same double-up guard as the content variant.
- */
-const MACHINERY_DENY_INSTRUCTION =
-  "Automatic review failed (the reviewer, not the request). Retry later, or ask the user to request it explicitly if urgent";
-
-/**
- * Append the agent-facing behavioral instruction to a terminal deny reason.
- *
- * A deny that terminates the chain is the last word the agent hears; the
- * teaching reason alone says WHAT was dangerous but not what to do about
- * it. The instruction names the denier (not a human click — the agent must
- * not attribute the refusal to the user and argue around it) and the
- * legitimate path (stop pursuing / retry later, user re-requests
- * explicitly). Two variants, because the agent's correct move differs:
- * content denies must not be retried or rephrased; machinery denies were
- * never judged and may legitimately be retried later.
- *
- * The instruction comes FIRST — it is the behavioral directive, and the
- * host's agent-side render already fronts its own attribution sentence
- * ("The '…' authorizer denied this … Reason: …"), so instruction-then-
- * reason reads as "what to do — why" inside that frame.
- *
- * Applies ONLY to the returned verdict's reason — the audit record's
- * `emittedReason` and the operator notify lines keep the un-instructed
- * mapping reason (the instruction is agent-channel copy, not an audit
- * fact, and a line addressed to the agent would read as noise to the
- * operator).
- *
- * @param reason - The mapped deny reason (the teaching reason), or
- *   undefined when the deny carries none (the instruction still stands
- *   alone — the agent needs the behavioral guidance regardless).
- * @param source - Which kind of deny produced the reason.
- * @returns The instruction followed by the reason (or the instruction
- *   alone when no reason was present).
- */
-export function withAgentInstruction(
-  reason: string | undefined,
-  source: DenyInstructionSource,
-): string {
-  const instruction =
-    source === "machinery" ? MACHINERY_DENY_INSTRUCTION : CONTENT_DENY_INSTRUCTION;
-  return reason ? `${instruction} — ${reason}` : instruction;
-}
-
-/**
- * Defensive ceiling for model reasons in notify copies. The prompt
- * anchors reasons at ~150 characters (a concise sentence); the ceiling is
- * the hard display bound when a model runs long — 200 keeps the head+tail
- * view readable while preserving the conclusion and the evidence tail.
- * The audit record keeps the full text regardless.
- */
-export const NOTIFY_REASON_CEILING = 200;
-
-/**
- * What actually happened to the request the reviewer denied: the deny held
- * (`"denied"`), or the mode softened it into a human ask (`"asked"`).
- */
-export type EscalationOutcome = "denied" | "asked";
-
-/**
- * Surface the reviewer's reasoning when the mode hands a model deny to the
- * human — the permission dialog renders only the request, so
- * without this the reviewer's judgment is audit-log-only.
- *
- * @param verdict - The model's verdict (a deny at every call site).
- * @param riskLevel - The risk level attached to the deny, if any.
- * @param outcome - The request's real outcome ({@link EscalationOutcome}) —
- *   the tail appears only when it diverges from the fact sentence.
- * @returns The notification message.
- */
-export function escalationMessage(
-  verdict: AuthorizerVerdict,
-  riskLevel: RiskLevel | undefined,
-  outcome: EscalationOutcome,
-): string {
-  const reason = verdict.kind === "deny" ? verdict.reason : undefined;
-  // No structural colons: this line can render under the TUI's own
-  // "Warning:" prefix at warning level — "Warning: [ai-guard] … risk: x"
-  // would double up. Parens carry the detail colon-free.
-  //
-  // The reason goes out whole — the operator must be able to read (and for
-  // a clarification, answer) the model's full text; only a pathological
-  // ramble hits the ceiling. The audit record keeps the full text either way.
-  //
-  // Multi-part construction: segments carry no leading spaces — the join
-  // owns the separator, so an absent segment can never leave a gap.
-  return [
-    `reviewer denied this request`,
-    riskLevel ? `(risk ${riskLevel})` : undefined,
-    reason ? `— ${truncateMiddle(reason, NOTIFY_REASON_CEILING)}` : undefined,
-    // The tail appears only when the outcome diverges from the fact
-    // sentence: "denied this request" needs no "— denied" echo; "asking
-    // you instead" corrects the operator's read of the sentence (the
-    // request was NOT denied — a dialog is coming).
-    outcome === "asked" ? "— asking you instead" : undefined,
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-/**
  * What the pipeline owes after the mode maps a verdict: the decision
  * record's annotation input and the operator notice. Pure — the
  * once-per-pipeline fail-open notice state is READ as an input and
@@ -380,7 +224,7 @@ export interface MappingDecision {
   /**
    * The operator notice this disposition owes, rendered and leveled; null
    * when silent. Five kinds: a model deny that HOLDS or escalates
-   * (v27 renders no dialog for denials — the notify line is the
+   * (the host renders no dialog for denials — the notify line is the
    * operator's only copy), a mapped defer (the "asking you instead"
    * tail corrects the operator's read), the once-per-pipeline fail-open
    * notice (the mode auto-approving against the model's explicit verdict
@@ -433,8 +277,8 @@ export interface MappingInput {
 }
 
 /**
- * The mapping's consequence resolver — the deciding rule that used to
- * live in the pipeline's closure, extracted as one pure function: given
+ * The mapping's consequence resolver — the deciding rule as one pure
+ * function: given
  * the original verdict, the emitted verdict, and the per-ask context
  * (risk level, defer classification, lean, mode, notice state), it
  * decides the record annotation, every notify the disposition owes, and
@@ -457,13 +301,14 @@ export function resolveMapping(input: MappingInput): MappingDecision {
   // The agent instruction's source: machinery iff what was denied is a
   // machinery defer (the review failed — retry-later copy); content
   // otherwise (the request itself was judged — stop-pursuing copy). Null
-  // when nothing deny-shaped was emitted. One rule, stated once: the
-  // cache-hit path derives "content" from it structurally (a cached
-  // original is allow/deny only, so the machinery branch is unreachable
-  // by type, not by comment).
+  // when nothing deny-shaped was emitted. One rule, stated once: an
+  // unclassified defer counts as machinery here exactly as it does in the
+  // lane table above, and the cache-hit path derives "content" from the
+  // same rule structurally (a cached original is allow/deny only, so the
+  // machinery branch is unreachable by type, not by comment).
   const instructionSource: DenyInstructionSource | null =
     emitted.kind === "deny"
-      ? original.kind === "defer" && deferKind !== undefined && deferKind !== "model-defer"
+      ? original.kind === "defer" && deferKind !== "model-defer"
         ? "machinery"
         : "content"
       : null;
@@ -487,7 +332,7 @@ export function resolveMapping(input: MappingInput): MappingDecision {
       : null;
   if (emitted.kind === original.kind) {
     // The verdict held. A model deny that holds in every mode is the
-    // reviewer's hardest call — v27 has no dialog for denials (the
+    // reviewer's hardest call — the host renders no dialog for denials (the
     // reason goes to the agent and the audit log alone), so the notify
     // line is the only human-visible copy. Every mode notifies a deny
     // that carries a model reason, regardless of tier. The reason check

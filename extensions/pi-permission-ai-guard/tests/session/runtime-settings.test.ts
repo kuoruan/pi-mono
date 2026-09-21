@@ -12,16 +12,15 @@ import type { LogEntry } from "#src/audit/decision-log-reader.ts";
 import type { SaveConfigFn } from "#src/config/config-layer.ts";
 import { MODE_VALUES, configSchema } from "#src/config/config-schema.ts";
 import { MODE_BLURBS } from "#src/config/mode-table.ts";
+import type { SessionOverrides } from "#src/config/session-overrides.ts";
+import type { NotifyFn } from "#src/notice.ts";
 import type { BreakerTier } from "#src/review/circuit-breaker.ts";
-import type { DenyRecord, NotifyFn } from "#src/review/review-pipeline.ts";
+import type { DenyRecord } from "#src/review/review-pipeline.ts";
 import {
-  displayPhrase,
   type EnumSettingSpec,
   type RuntimeSettings,
   RuntimeSettings as RuntimeSettingsClass,
-  verbWord,
 } from "#src/session/runtime-settings.ts";
-import type { SessionOverrides } from "#src/session/session-overrides.ts";
 import { makeUiCtx } from "#test/host-ctx.ts";
 
 const SPECS: readonly EnumSettingSpec[] = [
@@ -52,6 +51,8 @@ interface MakeSettingsOptions {
   resetTier?: BreakerTier;
   /** No live session (the no-session guard tests). */
   noSession?: boolean;
+  /** A live session whose config failed to load (the fail-safe start). */
+  noConfig?: boolean;
   /** Custom save-config stub (default: a path echo reporting a change). */
   saveConfig?: SaveConfigFn;
   /** The session's deny-history records (default: empty). */
@@ -71,7 +72,11 @@ function makeSettings(overridesInit: SessionOverrides = {}, options: MakeSetting
       session: {
         session: options.noSession
           ? undefined
-          : { config: configSchema.parse({ provider: "test", model: "test" }) },
+          : {
+              config: options.noConfig
+                ? undefined
+                : configSchema.parse({ provider: "test", model: "test" }),
+            },
         overrides,
         resetBreaker,
       },
@@ -368,28 +373,6 @@ describe("RuntimeSettings — command", () => {
     expect(overrides.notifyLevel).toBe("off");
   });
 
-  it("verbWord kebabizes any word shape — camelCase, snake, and kebab alike", () => {
-    // Derived, not declared: a future multi-word field name gets its verb
-    // automatically, in the ecosystem's uniform command shape.
-    expect(verbWord("notifyLevel")).toBe("notify-level");
-    expect(verbWord("notify-level")).toBe("notify-level");
-    expect(verbWord("risk_mode")).toBe("risk-mode");
-    expect(verbWord("api2Key")).toBe("api2-key");
-    expect(verbWord("mode")).toBe("mode");
-  });
-
-  it("displayPhrase tokenizes any word shape — kebab, camelCase, and snake alike", () => {
-    // The tokenizer owns the shape, not the convention: a hypothetical
-    // multi-word field name displays as a phrase whatever its casing.
-    // (EnumSettingSpec.name is compile-checked against real config
-    // fields, so the exotic shapes ride the pure function directly.)
-    expect(displayPhrase("notifyLevel")).toBe("notify level");
-    expect(displayPhrase("notify-level")).toBe("notify level");
-    expect(displayPhrase("risk_mode")).toBe("risk mode");
-    expect(displayPhrase("api2Key")).toBe("api2 key");
-    expect(displayPhrase("mode")).toBe("mode");
-  });
-
   it("cancelling the picker changes nothing", async () => {
     const { settings, overrides, appendEntry } = makeSettings();
     const ctx = makeUiCtx(undefined);
@@ -583,6 +566,16 @@ describe("RuntimeSettings — restore + footer", () => {
     const ctx = makeUiCtx();
     settings.syncFooter(ctx);
     expect(ctx.ui.setStatus).not.toHaveBeenCalled();
+  });
+
+  it("syncFooter clears the line for a session whose config failed to load", () => {
+    // No settings to project: the previous session's fragment must not keep
+    // advertising a mode that is not applied (and a guard that is not
+    // installed).
+    const { settings } = makeSettings({}, { noConfig: true });
+    const ctx = makeUiCtx();
+    settings.syncFooter(ctx);
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", undefined);
   });
 
   it("clearFooter clears the line", () => {

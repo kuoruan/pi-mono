@@ -10,9 +10,9 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 
-import { DECISION_EVENT, MODEL_REPLY_EVENT } from "#src/audit/decision-record.ts";
+import { DECISION_EVENT, MODEL_REPLY_EVENT } from "#src/audit/events.ts";
 import { createReviewPipeline, type DenyRecord } from "#src/review/review-pipeline.ts";
-import { withAgentInstruction } from "#src/review/verdict-mode.ts";
+import { withAgentInstruction } from "#src/review/verdict-copy.ts";
 import { makeDetails } from "#test/fixtures.ts";
 
 import {
@@ -27,6 +27,7 @@ import {
   expectVerdict,
   defaultRegistry,
   makePipeline,
+  makeEngine,
 } from "./pipeline-helpers.ts";
 
 describe("createReviewPipeline — guard clauses", () => {
@@ -37,10 +38,12 @@ describe("createReviewPipeline — guard clauses", () => {
     let modelCalled = false;
     const authorize = createReviewPipeline(
       makePipeline({
-        modelCall: async () => {
-          modelCalled = true;
-          return {} as AssistantMessage;
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled = true;
+            return {} as AssistantMessage;
+          },
+        }),
       }),
     );
     await expectVerdict(authorize, { value: "ls -la" }, { kind: "defer" }, "allow");
@@ -51,10 +54,12 @@ describe("createReviewPipeline — guard clauses", () => {
     let modelCalled = false;
     const authorize = createReviewPipeline(
       makePipeline({
-        modelCall: async () => {
-          modelCalled = true;
-          return {} as AssistantMessage;
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled = true;
+            return {} as AssistantMessage;
+          },
+        }),
       }),
     );
     await expectVerdict(authorize, { value: "cat .env" }, { kind: "defer" }, "deny");
@@ -71,7 +76,7 @@ describe("createReviewPipeline — guard clauses", () => {
   it("defers when model is not found in registry", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: defaultRegistry({ find: () => undefined }),
+        engine: makeEngine({ registry: defaultRegistry({ find: () => undefined }) }),
       }),
     );
     await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
@@ -80,8 +85,10 @@ describe("createReviewPipeline — guard clauses", () => {
   it("defers when auth fails", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: defaultRegistry({
-          getApiKeyAndHeaders: async () => ({ ok: false, error: "no key" }),
+        engine: makeEngine({
+          registry: defaultRegistry({
+            getApiKeyAndHeaders: async () => ({ ok: false, error: "no key" }),
+          }),
         }),
       }),
     );
@@ -91,10 +98,12 @@ describe("createReviewPipeline — guard clauses", () => {
   it("defers when getApiKeyAndHeaders throws", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: defaultRegistry({
-          getApiKeyAndHeaders: async () => {
-            throw new Error("network error");
-          },
+        engine: makeEngine({
+          registry: defaultRegistry({
+            getApiKeyAndHeaders: async () => {
+              throw new Error("network error");
+            },
+          }),
         }),
       }),
     );
@@ -106,10 +115,12 @@ describe("createReviewPipeline — guard clauses", () => {
     // to an auth-failed defer via the String(e) branch.
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: defaultRegistry({
-          getApiKeyAndHeaders: async () => {
-            throw "string error";
-          },
+        engine: makeEngine({
+          registry: defaultRegistry({
+            getApiKeyAndHeaders: async () => {
+              throw "string error";
+            },
+          }),
         }),
       }),
     );
@@ -134,12 +145,14 @@ describe("createReviewPipeline — guard clauses", () => {
     const { log, reviewCalls } = makeRecordingLog();
     const authorize = createReviewPipeline(
       makePipeline({
-        registry: defaultRegistry({
-          getApiKeyAndHeaders: async () => {
-            throw new Error(
-              "Invalid API key: sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF",
-            );
-          },
+        engine: makeEngine({
+          registry: defaultRegistry({
+            getApiKeyAndHeaders: async () => {
+              throw new Error(
+                "Invalid API key: sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF",
+              );
+            },
+          }),
         }),
       }),
     );
@@ -153,6 +166,27 @@ describe("createReviewPipeline — guard clauses", () => {
     );
     expect(authFailed!.data.error).toContain("[REDACTED]");
   });
+
+  it("names its cause when the pipeline itself throws", async () => {
+    // A throw from outside the wrapped paths (here the policy query) still
+    // owes the operator a reason: a bare defer is indistinguishable from a
+    // review that raised no objection.
+    const { notify, notifications } = makeNotifySpy();
+    const authorize = createReviewPipeline(makePipeline({ notify }));
+    const throwingQuery = {
+      ...makeQuery("ask"),
+      checkPermission: () => {
+        throw new Error("policy exploded");
+      },
+    };
+
+    const verdict = await authorize(makeDetails({ value: "ls" }), throwingQuery, noLog);
+
+    expect(verdict).toEqual({ kind: "defer" });
+    expect(notifications).toEqual([
+      ["reviewer crashed — deferring to the prompt (policy exploded)", "error"],
+    ]);
+  });
 });
 
 describe("createReviewPipeline — verdicts", () => {
@@ -165,9 +199,11 @@ describe("createReviewPipeline — verdicts", () => {
   it("returns deny with reason when model denies", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        modelCall: makeFakeCompleteSimple([
-          { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
-        ]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([
+            { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
+          ]),
+        }),
       }),
     );
     const verdict = await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
@@ -181,9 +217,11 @@ describe("createReviewPipeline — verdicts", () => {
     const { log, reviewCalls } = makeRecordingLog();
     const authorize = createReviewPipeline(
       makePipeline({
-        modelCall: makeFakeCompleteSimple([
-          { type: "text", text: '{"verdict":"deny","reason":"unsafe command"}' },
-        ]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([
+            { type: "text", text: '{"verdict":"deny","reason":"unsafe command"}' },
+          ]),
+        }),
       }),
     );
     await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), log);
@@ -197,7 +235,9 @@ describe("createReviewPipeline — verdicts", () => {
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
-        modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }]),
+        }),
         notify,
       }),
     );
@@ -210,7 +250,9 @@ describe("createReviewPipeline — verdicts", () => {
   it("defers when model returns no tool call", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        modelCall: makeFakeCompleteSimple([{ type: "text", text: "I cannot decide" }]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([{ type: "text", text: "I cannot decide" }]),
+        }),
       }),
     );
     await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
@@ -225,7 +267,9 @@ describe("createReviewPipeline — verdicts", () => {
       review: () => {},
       debug: (e: string) => debugCalls.push({ event: e }),
     } as never;
-    const authorize = createReviewPipeline(makePipeline({ modelCall: makeFakeCompleteSimple([]) }));
+    const authorize = createReviewPipeline(
+      makePipeline({ engine: makeEngine({ modelCall: makeFakeCompleteSimple([]) }) }),
+    );
     const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
     expect(verdict).toEqual({ kind: "defer" });
     // Empty content → diagnostic event is logged via MODEL_REPLY_EVENT
@@ -235,9 +279,11 @@ describe("createReviewPipeline — verdicts", () => {
   it("falls back to text parsing when model emits prose", async () => {
     const authorize = createReviewPipeline(
       makePipeline({
-        modelCall: makeFakeCompleteSimple([
-          { type: "text", text: 'My verdict: {"verdict": "allow"}' },
-        ]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([
+            { type: "text", text: 'My verdict: {"verdict": "allow"}' },
+          ]),
+        }),
       }),
     );
     const verdict = await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), noLog);
@@ -248,14 +294,16 @@ describe("createReviewPipeline — verdicts", () => {
     const { log, reviewCalls } = makeRecordingLog();
     const authorize = createReviewPipeline(
       makePipeline({
-        modelCall: async () =>
-          ({
-            role: "assistant",
-            content: [],
-            stopReason: "aborted",
-            rawStopReason: "max_tokens",
-            errorMessage: "provider hiccup",
-          }) as unknown as AssistantMessage,
+        engine: makeEngine({
+          modelCall: async () =>
+            ({
+              role: "assistant",
+              content: [],
+              stopReason: "aborted",
+              rawStopReason: "max_tokens",
+              errorMessage: "provider hiccup",
+            }) as unknown as AssistantMessage,
+        }),
       }),
     );
     await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
@@ -279,7 +327,9 @@ describe("createReviewPipeline — verdicts", () => {
     const longText = "x".repeat(600);
     const authorize = createReviewPipeline(
       makePipeline({
-        modelCall: makeFakeCompleteSimple([{ type: "text", text: longText }]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([{ type: "text", text: longText }]),
+        }),
       }),
     );
     await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
@@ -294,9 +344,11 @@ describe("createReviewPipeline — verdicts", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, timeoutMs: 100 },
-        modelCall: async () => {
-          throw new Error("network error");
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            throw new Error("network error");
+          },
+        }),
       }),
     );
     await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
@@ -308,9 +360,11 @@ describe("createReviewPipeline — verdicts", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         // No JSON — a machinery defer whose raw text carries the credential.
-        modelCall: makeFakeCompleteSimple([
-          { type: "text", text: `the prompt had ${credential} but {not json` },
-        ]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([
+            { type: "text", text: `the prompt had ${credential} but {not json` },
+          ]),
+        }),
       }),
     );
     await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
@@ -337,9 +391,11 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
     const authorize = createReviewPipeline(
       makePipeline({
         denyHistory,
-        modelCall: makeFakeCompleteSimple([
-          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
-        ]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([
+            { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' },
+          ]),
+        }),
       }),
     );
     await authorize(makeDetails({ value: "rm -rf /" }), makeQuery("ask"), noLog);
@@ -369,9 +425,11 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
       makePipeline({
         denyHistory,
         config: { ...baseConfig, cache: { maxEntries: 8 } },
-        modelCall: makeFakeCompleteSimple([
-          { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
-        ]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([
+            { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
+          ]),
+        }),
       }),
     );
     await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
@@ -387,7 +445,9 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
       makePipeline({
         denyHistory,
         config: { ...baseConfig, mode: "strict" },
-        modelCall: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([{ type: "text", text: "sounds risky" }]),
+        }),
       }),
     );
     await authorize(makeDetails({ value: "rm x" }), makeQuery("ask"), noLog);
@@ -405,9 +465,11 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
       makePipeline({
         denyHistory,
         config: { ...baseConfig, mode: "default", cache: { maxEntries: 8 } },
-        modelCall: makeFakeCompleteSimple([
-          { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
-        ]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([
+            { type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"low"}' },
+          ]),
+        }),
       }),
     );
     // Fresh soft deny under default → emitted defer, but the model's own

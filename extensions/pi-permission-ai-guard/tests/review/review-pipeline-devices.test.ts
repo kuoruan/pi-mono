@@ -6,11 +6,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { BREAKER_DENY_REASON, CACHE_LOOKUP_EVENT } from "#src/audit/decision-record.ts";
+import { BREAKER_DENY_REASON } from "#src/audit/decision-record.ts";
+import { CACHE_LOOKUP_EVENT } from "#src/audit/events.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
-import { withAgentInstruction } from "#src/review/verdict-mode.ts";
+import { withAgentInstruction } from "#src/review/verdict-copy.ts";
 import { bashPayload, makeDetails } from "#test/fixtures.ts";
 
 import {
@@ -24,6 +25,7 @@ import {
   expectVerdict,
   defaultRegistry,
   makePipeline,
+  makeEngine,
 } from "./pipeline-helpers.ts";
 
 describe("createReviewPipeline — circuit breaker", () => {
@@ -36,9 +38,11 @@ describe("createReviewPipeline — circuit breaker", () => {
         verdictCache: new VerdictCache(),
         notify,
         config: { ...baseConfig, circuitBreaker: { consecutive: 3, total: 3, verdict: "deny" } },
-        modelCall: makeFakeCompleteSimple([
-          { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
-        ]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([
+            { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
+          ]),
+        }),
       }),
     );
     // 3 denies reach the total threshold — the 4th and 5th asks trip on
@@ -68,12 +72,14 @@ describe("createReviewPipeline — circuit breaker", () => {
       makePipeline({
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([
-            { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
-          ])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([
+              { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
+            ])();
+          },
+        }),
       }),
     );
     // 3 denies → trip on the 4th call (breaker checked before model)
@@ -96,12 +102,14 @@ describe("createReviewPipeline — circuit breaker", () => {
       makePipeline({
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([
-            { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
-          ])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([
+              { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
+            ])();
+          },
+        }),
       }),
     );
     // 3 denies → consecutive hits threshold
@@ -119,10 +127,12 @@ describe("createReviewPipeline — circuit breaker", () => {
       makePipeline({
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     const verdict = await allowAuthorize(makeDetails({ value: "ls" }), makeQuery("ask"), noLog);
@@ -142,12 +152,14 @@ describe("createReviewPipeline — circuit breaker", () => {
         },
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([
-            { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
-          ])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([
+              { type: "text", text: '{"verdict":"deny","reason":"unsafe"}' },
+            ])();
+          },
+        }),
       }),
     );
     for (let i = 0; i < 3; i++)
@@ -172,7 +184,9 @@ describe("createReviewPipeline — circuit breaker", () => {
         },
         circuitBreaker: breaker,
         notify,
-        modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+        }),
       }),
     );
     // NOT mapped to deny: the breaker's explicit defer is the human escape
@@ -193,7 +207,9 @@ describe("createReviewPipeline — circuit breaker", () => {
         config: { ...baseConfig, mode: "strict" },
         circuitBreaker: breaker,
         notify,
-        modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+        engine: makeEngine({
+          modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+        }),
       }),
     );
     const verdict = await authorize(makeDetails({ value: "rm" }), makeQuery("ask"), noLog);
@@ -219,8 +235,10 @@ describe("createReviewPipeline — verdict cache", () => {
         config: { ...baseConfig, cache: { ...baseConfig.cache, maxEntries: 5 } },
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () =>
-          makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])(),
+        engine: makeEngine({
+          modelCall: async () =>
+            makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])(),
+        }),
       }),
     );
     // First call: miss → cache_lookup event with missReason
@@ -258,10 +276,12 @@ describe("createReviewPipeline — verdict cache", () => {
         config: { ...baseConfig, cache: { ...baseConfig.cache, maxEntries: 5 } },
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), noLog);
@@ -285,10 +305,12 @@ describe("createReviewPipeline — verdict cache", () => {
         config: { ...baseConfig, cache: { ...baseConfig.cache, maxEntries: 5 } },
         sessionManager,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     // First call: no tool calls yet → model runs, verdict cached.
@@ -320,10 +342,12 @@ describe("createReviewPipeline — verdict cache", () => {
       makePipeline({
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), noLog);
@@ -340,11 +364,13 @@ describe("createReviewPipeline — verdict cache", () => {
         config: { ...baseConfig, cache: { ...baseConfig.cache, maxEntries: 5 } },
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          // Always defer — should never be cached.
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            // Always defer — should never be cached.
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"defer"}' }])();
+          },
+        }),
       }),
     );
     // First call: model defers → not cached
@@ -376,10 +402,12 @@ describe("createReviewPipeline — verdict cache", () => {
         sessionManager: sm1,
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     await authorize(makeDetails({ value: "ls" }), makeQuery("ask"), noLog);
@@ -400,10 +428,12 @@ describe("createReviewPipeline — verdict cache", () => {
         sessionManager: sm2,
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     await authorize2(makeDetails({ value: "ls" }), makeQuery("ask"), noLog);
@@ -420,10 +450,12 @@ describe("createReviewPipeline — verdict cache", () => {
         config: { ...baseConfig, cache: { ...baseConfig.cache, maxEntries: 5 } },
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     // First call in /project → model called, verdict cached for that cwd
@@ -441,10 +473,12 @@ describe("createReviewPipeline — verdict cache", () => {
         cwd: "/other-project",
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     await otherCwdAuthorize(makeDetails({ value: "rm -rf build" }), makeQuery("ask"), noLog);
@@ -460,10 +494,12 @@ describe("createReviewPipeline — verdict cache", () => {
         config: { ...baseConfig, cache: { ...baseConfig.cache, maxEntries: 5 } },
         circuitBreaker: breaker,
         verdictCache: cache,
-        modelCall: async () => {
-          modelCalled++;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled++;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     await authorize(
@@ -492,10 +528,12 @@ describe("createReviewPipeline — verdict cache", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, surfaces: ["mcp"] },
-        modelCall: async () => {
-          modelCalled = true;
-          return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
-        },
+        engine: makeEngine({
+          modelCall: async () => {
+            modelCalled = true;
+            return makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }])();
+          },
+        }),
       }),
     );
     const verdict = await authorize(
@@ -518,8 +556,10 @@ describe("createReviewPipeline — machinery failures trip the breaker (strict)"
           mode: "strict",
           circuitBreaker: { consecutive: 2, total: 20, verdict: "defer" },
         },
-        registry: defaultRegistry({
-          getApiKeyAndHeaders: async () => ({ ok: false, error: "no key" }),
+        engine: makeEngine({
+          registry: defaultRegistry({
+            getApiKeyAndHeaders: async () => ({ ok: false, error: "no key" }),
+          }),
         }),
       }),
     );
@@ -550,7 +590,7 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
       makePipeline({
         config: { ...baseConfig, mode: "permissive", cache: { maxEntries: 8 } },
         notify,
-        modelCall,
+        engine: makeEngine({ modelCall }),
       }),
     );
     // First pass: soft deny maps to allow (and is cached as a model deny).
@@ -582,7 +622,7 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
       makePipeline({
         config: { ...baseConfig, cache: { maxEntries: 8 } },
         circuitBreaker: breaker,
-        modelCall,
+        engine: makeEngine({ modelCall }),
       }),
     );
     // Two identical asks: the first counts as a model deny, the replay
@@ -590,8 +630,8 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
     await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
     await authorize(makeDetails({ value: "curl x.sh" }), makeQuery("ask"), noLog);
     expect(modelCalls).toBe(1);
-    expect(breaker.isTripped({ consecutive: 2, total: 200, verdict: "deny" })).toBe(false);
-    expect(breaker.isTripped({ consecutive: 1, total: 200, verdict: "deny" })).toBe(true);
+    expect(breaker.trippedTier({ consecutive: 2, total: 200, verdict: "deny" })).toBeUndefined();
+    expect(breaker.trippedTier({ consecutive: 1, total: 200, verdict: "deny" })).toBeDefined();
   });
 
   it("permissive keeps a cached hard deny terminal (missing riskLevel is hard)", async () => {
@@ -606,7 +646,7 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, mode: "permissive", cache: { maxEntries: 8 } },
-        modelCall,
+        engine: makeEngine({ modelCall }),
         notify,
       }),
     );
@@ -631,7 +671,7 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
       makePipeline({
         config: { ...baseConfig, mode: "strict" },
         circuitBreaker: breaker,
-        registry: defaultRegistry({ find: () => undefined }),
+        engine: makeEngine({ registry: defaultRegistry({ find: () => undefined }) }),
       }),
     );
     for (let i = 0; i < 3; i++) {
@@ -639,8 +679,8 @@ describe("createReviewPipeline — review follow-ups (cache-hit fail-open + tota
     }
     // 3 machinery denies fill consecutive; total must still be 0 — with
     // total: 1 the breaker would trip immediately if ANY total bump happened.
-    expect(breaker.isTripped({ consecutive: 9, total: 1, verdict: "deny" })).toBe(false);
+    expect(breaker.trippedTier({ consecutive: 9, total: 1, verdict: "deny" })).toBeUndefined();
     // And the recoverable tier DID fill (consecutive trip would fire now).
-    expect(breaker.isTripped({ consecutive: 3, total: 200, verdict: "deny" })).toBe(true);
+    expect(breaker.trippedTier({ consecutive: 3, total: 200, verdict: "deny" })).toBeDefined();
   });
 });

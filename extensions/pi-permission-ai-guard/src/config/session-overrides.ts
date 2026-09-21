@@ -6,7 +6,7 @@
 import type { AiGuardConfig, Mode, NotifyThreshold } from "#src/config/config-schema.ts";
 
 /**
- * Session-scoped runtime overrides over the config file. Set via the
+ * Session overrides, written per session. Set via the
  * `/ai-guard` command or the `ctrl+alt+g` shortcut; each change is appended
  * to the pi session file (custom entry, never LLM context) and restored on
  * resume. A new session starts from the config values.
@@ -68,8 +68,7 @@ export function effectiveOverride<T extends OverridableKey>(
  *
  * Keys whose override is undefined are skipped, so a reset (which deletes
  * the key) never lets a dead `mode: undefined` shadow the config value
- * into the saved layer file — the bug this projection exists to make
- * impossible.
+ * into the saved layer file.
  *
  * @param config - The validated loaded config.
  * @param overrides - The stable session overrides object.

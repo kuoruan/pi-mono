@@ -52,7 +52,7 @@ export interface StripOptions {
  * Minimal projection of the host's SessionManager shared by the stripper
  * and the session lifecycle — derived (not hand-written) so the signature
  * can't drift from the real manager: the stripper needs
- * `buildContextEntries`; the lifecycle reads `getSessionId` for the v27
+ * `buildContextEntries`; the lifecycle reads `getSessionId` for the
  * session-keyed permissions service.
  */
 export type SessionManagerLike = Pick<SessionManager, "buildContextEntries" | "getSessionId">;
@@ -79,7 +79,7 @@ function isMessageEntry(entry: SessionEntry): entry is Extract<SessionEntry, { t
 
 /**
  * Type guard: is this entry one of the two custom entry kinds — `custom`
- * (host custom entry) and `custom_message` (the newer shape)? Neither may
+ * (host custom entry) and `custom_message` (an equivalent shape)? Neither may
  * become an authorization signal.
  *
  * @param entry - The session entry to test.
@@ -209,7 +209,7 @@ export function stripTranscript(
       continue;
     }
 
-    const message = entry.message as Message | undefined;
+    const message = entry.message;
     if (!message || !message.role) {
       strippedCount++;
       continue;

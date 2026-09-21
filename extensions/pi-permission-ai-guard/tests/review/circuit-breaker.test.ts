@@ -8,20 +8,20 @@ describe("CircuitBreaker", () => {
     const s = new CircuitBreaker();
     s.recordVerdict("deny");
     s.recordVerdict("deny");
-    expect(s.isTripped(cb)).toBe(false);
+    expect(s.trippedTier(cb)).toBeUndefined();
   });
 
-  it("isTripped is a pure query — resetConsecutive is the separate, visible step", () => {
+  it("trippedTier is a pure query — resetConsecutive is the separate, visible step", () => {
     const s = new CircuitBreaker();
     s.recordVerdict("deny");
     s.recordVerdict("deny");
     s.recordVerdict("deny");
-    expect(s.isTripped(cb)).toBe(true);
+    expect(s.trippedTier(cb)).toBeDefined();
     // The pure query keeps reporting tripped until the caller resets.
-    expect(s.isTripped(cb)).toBe(true);
+    expect(s.trippedTier(cb)).toBeDefined();
     s.resetConsecutive();
     // Fresh consecutive window — next check won't trip until 3 more denies.
-    expect(s.isTripped(cb)).toBe(false);
+    expect(s.trippedTier(cb)).toBeUndefined();
   });
 
   it("allow resets the consecutive counter", () => {
@@ -30,16 +30,16 @@ describe("CircuitBreaker", () => {
     s.recordVerdict("deny");
     s.recordVerdict("allow");
     // allow broke the streak, so consecutive is 0 → not tripped
-    expect(s.isTripped(cb)).toBe(false);
+    expect(s.trippedTier(cb)).toBeUndefined();
   });
 
   it("total is a permanent trip (resetConsecutive cannot clear it)", () => {
     const s = new CircuitBreaker();
     for (let i = 0; i < 20; i++) s.recordVerdict("deny");
-    expect(s.isTripped(cb)).toBe(true);
+    expect(s.trippedTier(cb)).toBeDefined();
     // total stays at 20; the reset is moot on the hard tier — still tripped.
     s.resetConsecutive();
-    expect(s.isTripped(cb)).toBe(true);
+    expect(s.trippedTier(cb)).toBeDefined();
   });
 
   it("does not count a breaker short-circuit or cache hit (caller responsibility)", () => {
@@ -50,9 +50,9 @@ describe("CircuitBreaker", () => {
     s.recordVerdict("deny");
     s.recordVerdict("deny");
     s.recordVerdict("deny");
-    expect(s.isTripped(cb)).toBe(true); // trip → total still 3
+    expect(s.trippedTier(cb)).toBeDefined(); // trip → total still 3
     s.resetConsecutive();
-    expect(s.isTripped(cb)).toBe(false); // consecutive 0, total 3 < 20
+    expect(s.trippedTier(cb)).toBeUndefined(); // consecutive 0, total 3 < 20
   });
 
   it("defer does not change counters", () => {
@@ -60,7 +60,7 @@ describe("CircuitBreaker", () => {
     s.recordVerdict("defer");
     s.recordVerdict("defer");
     s.recordVerdict("defer");
-    expect(s.isTripped(cb)).toBe(false);
+    expect(s.trippedTier(cb)).toBeUndefined();
   });
 });
 
@@ -72,7 +72,7 @@ describe("breaker accounting steps", () => {
     s.recordVerdict("deny");
     // Below threshold: reports not-tripped and never mutates.
     expect(consumeTrip(s, { ...config, consecutive: 3 })).toEqual({ tripped: false });
-    expect(s.isTripped({ ...config, consecutive: 3 })).toBe(false);
+    expect(s.trippedTier({ ...config, consecutive: 3 })).toBeUndefined();
     // At threshold: names the tier and consumes the recoverable tier.
     expect(consumeTrip(s, config)).toEqual({
       tripped: true,
@@ -119,9 +119,9 @@ describe("breaker accounting steps", () => {
     accountModelOutcome(s, "defer", { kind: "deny", reason: "x" });
     // Two credits (real defer is a no-op, machinery is consecutive-only) →
     // consecutive = 1, total = 0.
-    expect(s.isTripped({ consecutive: 1, total: 200, verdict: "deny" })).toBe(true);
-    expect(s.isTripped({ consecutive: 2, total: 200, verdict: "deny" })).toBe(false);
-    expect(s.isTripped({ consecutive: 999, total: 1, verdict: "deny" })).toBe(false);
+    expect(s.trippedTier({ consecutive: 1, total: 200, verdict: "deny" })).toBeDefined();
+    expect(s.trippedTier({ consecutive: 2, total: 200, verdict: "deny" })).toBeUndefined();
+    expect(s.trippedTier({ consecutive: 999, total: 1, verdict: "deny" })).toBeUndefined();
   });
 
   it("strict's model-defer→deny counts as a deny-equivalent into the recoverable tier only", () => {
@@ -130,15 +130,15 @@ describe("breaker accounting steps", () => {
     accountModelOutcome(s, "defer", { kind: "deny", reason: "clarification" });
     // A wavering reviewer under strict is a denial stream — consecutive
     // fills (recoverable escape can fire), total stays model-denies-only.
-    expect(s.isTripped(tripAtOne)).toBe(true);
-    expect(s.isTripped({ consecutive: 99, total: 1, verdict: "deny" })).toBe(false);
+    expect(s.trippedTier(tripAtOne)).toBeDefined();
+    expect(s.trippedTier({ consecutive: 99, total: 1, verdict: "deny" })).toBeUndefined();
   });
 
   it("accountModelOutcome records real denies into both tiers regardless of the emitted mapping", () => {
     const s = new CircuitBreaker();
     // permissive maps a soft deny to allow — the recording keeps the model's deny.
     accountModelOutcome(s, "deny", { kind: "allow" });
-    expect(s.isTripped({ consecutive: 1, total: 20, verdict: "deny" })).toBe(true);
-    expect(s.isTripped({ consecutive: 2, total: 1, verdict: "deny" })).toBe(true);
+    expect(s.trippedTier({ consecutive: 1, total: 20, verdict: "deny" })).toBeDefined();
+    expect(s.trippedTier({ consecutive: 2, total: 1, verdict: "deny" })).toBeDefined();
   });
 });

@@ -20,25 +20,28 @@
  * next setting is one spec entry here plus its schema/loader/docs — the
  * whole UX materializes from the spec. Action verbs (`save-*`, `breaker
  * reset`, `report`, `denied`) ride the same machinery as
- * {@link CommandEntry} rows — completion, menu, and dispatch traverse
- * the one table, so a verb is one entry, not four hand-built touch
- * points.
+ * {@link CommandEntry} rows (see `command/table.ts`).
  */
 
 import { basename } from "node:path";
 
-import type {
-  ExtensionShortcut,
-  ExtensionUIContext,
-  RegisteredCommand,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionShortcut, RegisteredCommand } from "@earendil-works/pi-coding-agent";
 
 import type { ConfigLayerTarget, SaveConfigFn } from "#src/config/config-layer.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import { CYCLE_DESCRIPTION } from "#src/config/mode-table.ts";
+import {
+  effectiveConfig,
+  effectiveOverride,
+  type OverridableKey,
+  type SessionOverrides,
+} from "#src/config/session-overrides.ts";
+import type { NotifyFn } from "#src/notice.ts";
 import type { BreakerTier } from "#src/review/circuit-breaker.ts";
-import type { NotifyFn } from "#src/review/review-pipeline.ts";
 
+import type { CommandEntry, SettingOption } from "./command/table.ts";
+import { displayPhrase, verbWord } from "./command/table.ts";
+import type { AiGuardUiContext } from "./command/ui-context.ts";
 import {
   openDeniedPanel,
   openReportPanel,
@@ -46,7 +49,6 @@ import {
   type PanelReaders,
   pickItem,
 } from "./panels.ts";
-import { effectiveConfig, effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
 import {
   type SessionBranchReader,
   persistSetting,
@@ -65,7 +67,7 @@ export interface EnumSettingSpec {
    * notify-level warning`, see {@link verbWord}), and read-only display
    * surfaces re-segment it into a phrase (see {@link displayPhrase}).
    */
-  readonly name: keyof SessionOverrides & keyof AiGuardConfig;
+  readonly name: OverridableKey;
   /** Valid values, in shortcut-cycle order. */
   readonly values: readonly string[];
   /**
@@ -104,20 +106,6 @@ export interface EnumSettingSpec {
 }
 
 /**
- * The UI-context subset the settings surface uses — derived from the host's
- * contexts so the method signatures can't drift. Structurally satisfied by
- * the real `ExtensionContext` / `ExtensionCommandContext` the host passes
- * (both carry a full `ui: ExtensionUIContext` and the `hasUI` flag); the
- * narrow shape keeps test fixtures light.
- */
-export interface AiGuardUiContext {
-  /** Picker / notify / footer-status / overlay-dialog surface. */
-  ui: Pick<ExtensionUIContext, "select" | "notify" | "setStatus" | "custom">;
-  /** Whether dialog-capable UI is available (TUI/RPC) — gates the picker paths. */
-  hasUI: boolean;
-}
-
-/**
  * The /ai-guard command registration object — derived from pi's
  * `RegisteredCommand` (registerCommand's options shape). Only the handler's
  * ctx is narrowed to the consumed {@link AiGuardUiContext} subset.
@@ -136,20 +124,6 @@ export type AiGuardCommand = Omit<RegisteredCommand, "name" | "sourceInfo" | "ha
 export type AiGuardShortcut = Omit<ExtensionShortcut, "shortcut" | "extensionPath" | "handler"> & {
   handler: (ctx: AiGuardUiContext) => void;
 };
-
-/**
- * A completion suggestion — one row of the command's argument completion.
- * Structurally the host's AutocompleteItem (pi-tui via RegisteredCommand);
- * the alignment is compile-checked where the command object satisfies
- * `AiGuardCommand` (its `getArgumentCompletions` carries the host's own
- * type, so a drift breaks the build rather than the runtime).
- */
-export interface CompletionItem {
-  /** The value inserted when the suggestion is accepted. */
-  value: string;
-  /** The row's display text. */
-  label: string;
-}
 
 /** The settings' view of session state — {@link SessionLifecycle} satisfies this structurally. */
 export interface SettingsSessionSurface {
@@ -187,17 +161,6 @@ export interface RuntimeSettingsDeps {
   saveConfig: SaveConfigFn;
 }
 
-/**
- * One option in a setting's picker and completion surface: an enum value,
- * or the reset action. The union keeps the reset ACTION out of the value
- * channel — a spec whose values someday include a literal "reset" stays
- * unambiguous.
- */
-type SettingOption = {
-  readonly text: string;
-  readonly kind: "value" | "reset";
-};
-
 /** Footer status key the settings line lives under. */
 const FOOTER_KEY = "ai-guard";
 
@@ -213,69 +176,6 @@ const FOOTER_KEY = "ai-guard";
  */
 function highlightText(text: string): string {
   return `\x1b[1;31m${text}\x1b[0m`;
-}
-
-/** One pickable row of the settings menu: its label and its dispatch args. */
-interface MenuRow {
-  /** The picker label (settings show live state; actions their phrase). */
-  readonly label: string;
-  /** The arguments the picked entry runs with (a direction, or none). */
-  readonly args: readonly string[];
-}
-
-/**
- * One row of the /ai-guard command table: a setting (its spec) or an
- * action verb. Completion, the settings menu, and dispatch all traverse
- * this one table — adding a verb is one entry, not four hand-built touch
- * points (a completion row, a dispatch branch, a method, a deps field).
- */
-interface CommandEntry {
-  /** The first token that selects this entry. */
-  readonly name: string;
-  /** The first-token completion label (static: what this is). */
-  readonly completionLabel: string;
-  /**
-   * The settings-menu rows this entry contributes (none = not
-   * menu-reachable). Settings contribute one row showing live state; a
-   * bare action verb contributes its phrase and lets its picker ask
-   * the rest; a fixed-argument verb carries its argument.
-   */
-  readonly menuRows?: () => MenuRow[];
-  /** Second-token completion for the entry's argument grammar, if any. */
-  readonly completeArgument?: (prefix: string) => CompletionItem[];
-  /** Dispatch: the tokens that follow the entry's name. */
-  readonly run: (args: readonly string[], ctx: AiGuardUiContext) => void | Promise<void>;
-}
-
-/**
- * Re-segment a setting's name into its kebab-case command verb
- * ("notifyLevel" → "notify-level"). Derived, not declared: any future
- * multi-word field gets its verb automatically.
- *
- * @param name - The setting's name (persistence/overrides/config key).
- * @returns The kebab-case command verb.
- */
-export function verbWord(name: string): string {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-    .replace(/[_]+/g, "-")
-    .toLowerCase();
-}
-
-/**
- * Re-segment a setting's name into a lowercase space-separated phrase —
- * kebab, snake, and camelCase inputs all tokenize ("notifyLevel" →
- * "notify level", "risk_mode" → "risk mode"). Feeds the read-only display
- * surfaces; the typed surfaces keep the verb (see {@link verbWord}).
- *
- * @param name - The setting's name (persistence/overrides/config key).
- * @returns The display phrase.
- */
-export function displayPhrase(name: string): string {
-  // The same tokenizer as {@link verbWord} — the display face is the typed
-  // face with separators read as spaces ("notify-level" → "notify level") —
-  // so the two derivations can never drift apart.
-  return verbWord(name).replaceAll("-", " ");
 }
 
 /** The settings-menu row for the save verb (its picker asks the target). */
@@ -356,8 +256,8 @@ export class RuntimeSettings {
     // cannot drift from the cycle it describes.
     description: `Cycle ai-guard mode: ${CYCLE_DESCRIPTION} (session-scoped)`,
     handler: (ctx) => {
-      // The cycle anchors the MODE spec by name — specs is no longer a
-      // one-element array, and "first" was a silent single-spec assumption.
+      // The cycle anchors the MODE spec by name — the cycled setting must
+      // not depend on spec order or count.
       const spec = this.#spec("mode");
       if (!spec || !this.#guardSessionConfig()) return;
       // The cycle visits the CASUAL subset only (cycleValues) — the
@@ -399,7 +299,15 @@ export class RuntimeSettings {
    * @param ctx - A UI context carrying setStatus (command/shortcut/event ctx).
    */
   syncFooter(ctx: AiGuardUiContext): void {
-    if (!this.#deps.session.session?.config) return;
+    const session = this.#deps.session.session;
+    if (!session) return;
+    // A session whose config failed to load has no settings to project —
+    // clear the line rather than leaving the previous session's fragment
+    // advertising a mode that is not applied.
+    if (!session.config) {
+      ctx.ui.setStatus(FOOTER_KEY, undefined);
+      return;
+    }
     const fragments: string[] = [];
     for (const spec of this.#specs) {
       const override = this.#readOverride(spec);
@@ -675,13 +583,12 @@ export class RuntimeSettings {
       this.#deps.notify(`${target} config already matches — nothing written`, "info");
       return;
     }
-    const created = result.created ? " (created)" : "";
     this.#deps.notify(
       // Layer semantics, one line under budget: what the save feeds (new
       // sessions) and what it does NOT touch (this session's overrides).
       // The rarest fact — a higher layer can still shadow the saved value —
       // lives in the README's save-verbs section, not here.
-      `saved to ${target} config (${basename(result.path)}${created}) — new sessions start from it; this session keeps current overrides`,
+      `saved to ${target} config (${basename(result.path)}${result.created ? " (created)" : ""}) — new sessions start from it; this session keeps current overrides`,
       "info",
     );
   }
@@ -825,20 +732,6 @@ export class RuntimeSettings {
     }
     this.syncFooter(ctx);
   }
-
-  /**
-   * Pick an item through the label-based select seam: renders items, asks
-   * the UI, maps the chosen label back to its item. The seam returns label
-   * strings, so label↔item uniqueness is this helper's one discipline —
-   * callers whose items can repeat (the deny panel's repeated targets)
-   * must render distinguishing detail into the label.
-   *
-   * @param ctx - The command UI context (select-capable).
-   * @param title - The picker title.
-   * @param items - The items to choose among.
-   * @param render - The label renderer (one per item).
-   * @returns The picked item, or undefined on cancel.
-   */
 
   /**
    * Open the spec's value picker and apply the choice.

@@ -60,4 +60,24 @@ describe("readTailLinesFromFile", () => {
     const lines = readTailLinesFromFile(LOG_PATH, 2);
     expect(lines).toEqual(["keep-1", "keep-2"]);
   });
+
+  it("keeps every complete line when the chunk starts mid-codepoint (the drop absorbs the partial)", () => {
+    // Multi-byte UTF-8: a start offset can land inside a codepoint. The
+    // corrupted fragment lives only in the dropped first line; every
+    // surviving line must decode whole.
+    writeFile(LOG_PATH, Array.from({ length: 400 }, (_, i) => `中é记录-${i}\n`).join(""));
+    const lines = readTailLinesFromFile(LOG_PATH, 3);
+    expect(lines).toEqual([`中é记录-397`, `中é记录-398`, `中é记录-399`]);
+  });
+
+  it("returns the complete lines before a partial trailing record when the file ends mid-codepoint", () => {
+    // A file cut mid-write: the final line is genuinely incomplete (the
+    // tolerant parse drops it downstream); the lines before it stay whole.
+    const full = Array.from({ length: 10 }, (_, i) => `中é记录-${i}\n`).join("");
+    writeFile(LOG_PATH, full.slice(0, full.length - 2)); // cuts "9\n"
+    const lines = readTailLinesFromFile(LOG_PATH, 3);
+    expect(lines?.[0]).toBe(`中é记录-7`);
+    expect(lines?.[1]).toBe(`中é记录-8`);
+    expect(lines?.[2]).toBe(`中é记录-`); // the "9" went with the cut
+  });
 });

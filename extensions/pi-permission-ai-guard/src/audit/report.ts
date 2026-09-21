@@ -21,13 +21,13 @@
  *    count).
  * 2. Every occurrence shares the SAME contextHash (one trusted-intent context — the operator was
  *    running one routine, not re-judging the command across different tasks). Records without a
- *    contextHash (written before the field existed) fail this check — the whole group is excluded,
- *    conservatively.
- * 3. No occurrence ended in a terminal deny (blocked/denied) — an operator refusal anywhere
- *    disqualifies the group.
+ *    contextHash cannot prove same-context — the whole group is excluded, conservatively.
+ * 3. No occurrence ended in a terminal deny — an operator refusal (blocked/denied) or the reviewer's
+ *    own refusal anywhere disqualifies the group (an allow rule would cover the refused ask too).
  */
 
 import type { LogEntry } from "./decision-log-reader.ts";
+import { DECISION_EVENT } from "./events.ts";
 
 /**
  * A report candidate: one (surface, target) group that passed the
@@ -76,6 +76,17 @@ export function templateBashTarget(target: string): string {
 }
 
 /**
+ * Whether a model-gate record is the reviewer's own refusal — in the judgment
+ * or in what the mode escalated it to.
+ *
+ * @param entry - A model-gate log entry.
+ * @returns True when the reviewer refused this ask.
+ */
+function refused(entry: LogEntry): boolean {
+  return entry.verdict === "deny" || entry.emittedVerdict === "deny";
+}
+
+/**
  * Build the report candidates from parsed log entries.
  *
  * @param entries - The parsed review-log entries (file order).
@@ -86,13 +97,12 @@ export function buildReportCandidates(
   entries: LogEntry[],
   minOccurrences: number = DEFAULT_MIN_OCCURRENCES,
 ): ReportCandidate[] {
-  // Model-gate records only — the review evidence lives there. A model
-  // deny is also terminal for its group (the reviewer refused — the
-  // signal's own "the operator let it pass" semantics, held here rather
-  // than trusted from upstream's terminal-deny records).
-  const modelGates = entries.filter(
-    (e) => e.event === "ai_guard.decision" && e.gate === "model" && e.verdict !== "deny",
-  );
+  // Model-gate records only — the review evidence lives there. A refusal is
+  // terminal for its group twice over: it is no "the operator let it pass"
+  // occurrence, and it disqualifies the group below (held here rather than
+  // trusted from upstream's terminal-deny records). `emittedVerdict` carries
+  // the refusal a mode escalated out of a defer.
+  const modelGates = entries.filter((e) => e.event === DECISION_EVENT && e.gate === "model");
 
   // Terminal denies by requestId — an operator refusal disqualifies the group.
   const deniedRequestIds = new Set(
@@ -104,21 +114,29 @@ export function buildReportCandidates(
       .filter((id): id is string => id !== undefined),
   );
 
-  // Group model-gate records by (surface, target).
-  const groups = new Map<string, LogEntry[]>();
+  // Group model-gate records by (surface, target), carrying the group's
+  // reviewer refusals separately: a refusal is not an occurrence, but it still
+  // disqualifies the group (an allow rule would cover the refused ask too).
+  const groups = new Map<string, { occurrences: LogEntry[]; refused: boolean }>();
   for (const e of modelGates) {
     const key = `${e.surface ?? "?"}\u0000${e.target ?? "?"}`;
-    const list = groups.get(key);
-    if (list) list.push(e);
-    else groups.set(key, [e]);
+    let group = groups.get(key);
+    if (!group) {
+      group = { occurrences: [], refused: false };
+      groups.set(key, group);
+    }
+    if (refused(e)) group.refused = true;
+    else group.occurrences.push(e);
   }
 
   const candidates: ReportCandidate[] = [];
-  for (const [key, records] of groups) {
+  for (const [key, group] of groups) {
+    if (group.refused) continue;
+    const records = group.occurrences;
     if (records.length < minOccurrences) continue;
     // Same-context requirement: every occurrence carries the same
-    // contextHash, and none may be missing (legacy records — written
-    // before the field existed — exclude the whole group).
+    // contextHash, and none may be missing (a record without a
+    // contextHash excludes the whole group).
     const hashes = new Set(records.map((r) => r.contextHash));
     if (hashes.size !== 1) continue;
     if (records.some((r) => r.contextHash === undefined)) continue;

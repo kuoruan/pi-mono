@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAskContext } from "#src/ask/ask.ts";
+import { buildAskContext } from "#src/review/request/ask.ts";
 import {
   EXCLUDED_ASK_FIELDS,
   EXCLUDED_REQUEST_FACTS,
   reviewRequestCacheMaterial,
-} from "#src/ask/review-request.ts";
+} from "#src/review/request/review-request.ts";
 import { ev, makeDetails, payload } from "#test/fixtures.ts";
 
 describe("reviewRequestCacheMaterial", () => {

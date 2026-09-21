@@ -27,21 +27,11 @@ export class CircuitBreaker {
   private totalTripNoticeClaimed = false;
 
   /**
-   * Pure query: would the breaker trip on the next verdict? No counters
-   * mutate — the trip's reset is a separate, deliberately visible step
-   * ({@link resetConsecutive}), never hidden inside a boolean condition.
-   *
-   * @param cb - The circuit-breaker thresholds to check against.
-   * @returns True if either tier is at its threshold.
-   */
-  isTripped(cb: CircuitBreakerConfig): boolean {
-    return this.trippedTier(cb) !== undefined;
-  }
-
-  /**
    * Pure query: WHICH tier is tripped — the hard session cap takes
    * precedence (both at threshold means the persistent state is the one
-   * the operator must hear about).
+   * the operator must hear about). No counters mutate — the trip's reset
+   * is a separate, deliberately visible step ({@link resetConsecutive}),
+   * never hidden inside a boolean condition.
    *
    * @param cb - The circuit-breaker thresholds to check against.
    * @returns `"total"` or `"consecutive"` when tripped, else undefined.

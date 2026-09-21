@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildAskContext, openAsk, resolveReviewTarget } from "#src/ask/ask.ts";
+import { buildAskContext, openAsk, resolveReviewTarget } from "#src/review/request/ask.ts";
 import { bashPayload, ev, makeDetails, payload } from "#test/fixtures.ts";
 
 describe("resolveReviewTarget — surface matching", () => {

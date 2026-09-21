@@ -17,7 +17,10 @@ import { closeSync, openSync, readSync, statSync } from "node:fs";
  * log grows without rotation, so a whole-file read would grow with it).
  * The chunk assumes ~1KB per line — when a pathological long line exceeds
  * the chunk, the window silently shrinks (conservative: fewer entries,
- * never wrong ones).
+ * never wrong ones). Both chunk boundaries are safe: a start that lands
+ * mid-codepoint only corrupts the dropped first line; an end that lands
+ * mid-codepoint means the file itself was cut mid-write, and the reader's
+ * tolerant parse drops that genuinely incomplete record.
  *
  * @param path - The file path.
  * @param lineCount - How many trailing lines to return.
@@ -42,8 +45,7 @@ export function readTailLinesFromFile(path: string, lineCount: number): string[]
       const real = lines.at(-1) === "" ? lines.slice(0, -1) : lines;
       // The first line is usually mid-line (the chunk starts at a byte
       // offset); drop it unless the read starts at the file's beginning.
-      const usable = start > 0 ? real.slice(1) : real;
-      return usable.slice(-lineCount);
+      return (start > 0 ? real.slice(1) : real).slice(-lineCount);
     } finally {
       closeSync(fd);
     }

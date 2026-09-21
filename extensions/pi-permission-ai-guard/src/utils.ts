@@ -70,7 +70,7 @@ const SECRET_PATTERNS: RegExp[] = [
  * is redacted whole instead of leaving residue after the opening quote.
  */
 const GENERIC_ASSIGNMENT_PATTERN =
-  /(password|passwd|passphrase|token|secret|api_key|apikey|credential|authorization|private_key|privatekey|aws_secret_access_key|aws_access_key_id)(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
+  /(password|passwd|passphrase|token|secret|api[-_]?key|apikey|credential|authorization|private[-_]?key|aws_secret_access_key|aws_access_key_id)(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
 
 /**
  * The format characters that can deceive a reader: zero-width joiner-ish
@@ -296,4 +296,33 @@ export function safeStringify(value: unknown): string {
   } catch {
     return "[unstringifiable]";
   }
+}
+
+/**
+ * The message of a thrown value: an Error's message, any other value's
+ * string form.
+ *
+ * @param error - The thrown value.
+ * @returns Its message text.
+ */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Classify an abort-family error: a DOMException timeout/abort or an
+ * error whose message names timeout/abort/aborted.
+ *
+ * @param error - The thrown value.
+ * @returns `"timeout"` when the error is abort-shaped, `undefined` otherwise.
+ */
+export function classifyAbortish(error: unknown): "timeout" | undefined {
+  if (
+    error instanceof DOMException &&
+    (error.name === "TimeoutError" || error.name === "AbortError")
+  ) {
+    return "timeout";
+  }
+  if (/timeout|abort/i.test(errorMessage(error))) return "timeout";
+  return undefined;
 }

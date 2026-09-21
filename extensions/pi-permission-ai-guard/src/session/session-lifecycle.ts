@@ -10,12 +10,11 @@
  * 3. The overrides object NEVER changes identity. It is allocated once here and reset in place at
  *    session_start, so every pipeline generation — and every runtime write (command, shortcut,
  *    restore, tree re-derive) — sees the same object. Re-creating it would leave an older
- *    registered pipeline closed over a stale object (the bug this module exists to make
- *    structurally impossible).
+ *    registered pipeline closed over a stale object.
  *
  * Registration is attempted from both session_start and permissions:ready
  * behind the `registered` guard, because their relative order within a
- * session is not guaranteed — but v27 fires ready at least once per
+ * session is not guaranteed — but ready fires at least once per
  * session and may repeat (per node: at its session_start after the node
  * published its service, then again idempotently at its first
  * before_agent_start), so whichever fires first registers and every later
@@ -23,20 +22,19 @@
  * node. The session itself is NEVER rebuilt on permissions:ready (breaker
  * counts and cache entries survive).
  *
- * The v27 service locator is keyed by session id: each node (root AND
+ * The service locator is keyed by session id: each node (root AND
  * in-process subagent children) publishes its own service, and this link
  * registers on the node's own. The id arrives from two sources:
- * `permissions:ready` carries it in its payload (the official source —
- * upstream: "Take sessionId from the permissions:ready payload"), and — as
+ * `permissions:ready` carries it in its payload (the official source), and — as
  * a host-floor fallback for nodes whose payload carries null — the
  * session_start ctx self-read ({@link readSessionId}). Hosts without a
  * session id anywhere have no keyed service: the guard skips registration
  * there (every ask defers, the same observable as "no service published").
  *
- * The single registration slot rests on the v27 host contract: one
+ * The single registration slot rests on the host contract: one
  * extension instance per session node — every node (root AND subagent
- * child) runs with its OWN ExtensionContext (upstream ADR 0012: "its own
- * ExtensionContext, event bus, gates"), so this instance never observes
+ * child) runs with its own ExtensionContext (its own event bus and
+ * gates), so this instance never observes
  * another node's session events. A host that dispatched multiple nodes
  * through one instance would break the register-once contract
  * (unsupported).
@@ -54,23 +52,23 @@
  * never fatal.
  */
 
-import {
-  type Authorizer,
-  type PermissionsReadyEvent,
-  getPermissionsService,
-} from "@gotgenes/pi-permission-system";
+import { type Authorizer, getPermissionsService } from "@gotgenes/pi-permission-system";
 
-import type { SessionManagerLike } from "#src/ask/transcript-stripper.ts";
 import { type LoadConfigResult } from "#src/config/config-layer.ts";
-import { LINK_NAME } from "#src/config/config-schema.ts";
-import { NOTIFY_PREFIX, warn, type NotifyLevel } from "#src/logger.ts";
+import { hasTypesafeProvider, LINK_NAME } from "#src/config/config-schema.ts";
+import { effectiveOverride, type SessionOverrides } from "#src/config/session-overrides.ts";
 import { type ModelCallFn, type ModelRegistryLike } from "#src/model/model-review.ts";
+import { NOTIFY_PREFIX, warn, type NotifyLevel } from "#src/notice.ts";
 import { type BreakerTier, CircuitBreaker } from "#src/review/circuit-breaker.ts";
+import { createJevEngine } from "#src/review/engines/jev/index.ts";
+import { createLlmEngine } from "#src/review/engines/llm/index.ts";
+import type { SessionManagerLike } from "#src/review/request/transcript-stripper.ts";
 import { type DenyRecord, type ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
+import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
+import { errorMessage, isObjectRecord } from "#src/utils.ts";
 
-import type { AiGuardUiContext } from "./runtime-settings.ts";
-import { effectiveOverride, type SessionOverrides } from "./session-overrides.ts";
+import type { AiGuardUiContext } from "./command/ui-context.ts";
 
 /** What a session_start hands the lifecycle: the session's own inputs. */
 export interface SessionSeed {
@@ -125,9 +123,7 @@ export interface SessionLifecycleDeps {
  *
  * Exact match on the full message — not substring — so a different error
  * that merely contains "already registered" stays a generic warning. The
- * message is the contract today: upstream explicitly defers a typed
- * error code (pi-packages #702) — when one lands, migrate this check to
- * it.
+ * message is the contract; match it exactly.
  *
  * @param error - The caught error from `service.registerAuthorizer()`.
  * @param linkName - The link name passed to `registerAuthorizer`.
@@ -184,6 +180,13 @@ function notifyLevelRank(level: NotifyLevel): number {
 export class SessionLifecycle {
   #session: SessionState | undefined;
   #registered = false;
+  /**
+   * Per-session latch: a failed registration notifies once, not on every
+   * ready emission. Reset at each session_start — a new session retries
+   * (the operator may have just fixed the config) and, if it fails again,
+   * hears about it again.
+   */
+  #registrationFailed = false;
   #dispose: (() => void) | undefined;
   /**
    * The node's session id — keys the per-node permissions service. Sources:
@@ -215,9 +218,7 @@ export class SessionLifecycle {
       // message must not be silent: in manual mode this notify is the
       // only channel carrying the reviewer's reasoning to a human
       // about to adjudicate.
-      warn(
-        `notify failed (${e instanceof Error ? e.message : String(e)}) — escalation message lost: ${message}`,
-      );
+      warn(`notify failed (${errorMessage(e)}) — escalation message lost: ${message}`);
     }
   }
 
@@ -309,6 +310,7 @@ export class SessionLifecycle {
    */
   onSessionStart(seed: SessionSeed): void {
     this.#disposeRegistration();
+    this.#registrationFailed = false;
     // The fallback id read — replaced wholesale at each session_start so a
     // new session can never inherit the previous one's id. A later
     // permissions:ready payload (the official source) may upgrade it.
@@ -340,10 +342,10 @@ export class SessionLifecycle {
   }
 
   /**
-   * Permissions:ready fired. v27 fires ready at least once per session and
+   * Permissions:ready fired. ready fires at least once per session and
    * may repeat (a latch re-emits it at the node's first before_agent_start).
    * The payload carries the node's own session id — the official source
-   * (upstream: "Take sessionId from the permissions:ready payload") — so a
+   * — so a
    * non-null id is adopted (a null payload never clobbers a real one).
    * Register once per session, for the session's own node; the service it
    * resolves is stable for the session, so repeats must NOT dispose and
@@ -352,8 +354,8 @@ export class SessionLifecycle {
    * @param payload - The ready event payload; only `sessionId` is read
    *   (runtime-narrowed — the event bus is untyped at runtime).
    */
-  onPermissionsReady(payload: PermissionsReadyEvent): void {
-    const id = payload?.sessionId;
+  onPermissionsReady(payload: unknown): void {
+    const id = isObjectRecord(payload) ? payload.sessionId : undefined;
     if (typeof id === "string" && id !== "") {
       this.#sessionId = id;
     }
@@ -388,12 +390,12 @@ export class SessionLifecycle {
   }
 
   #tryRegister(): void {
-    if (this.#registered) return;
+    if (this.#registered || this.#registrationFailed) return;
     const session = this.#session;
     if (!session?.config) {
       return;
     }
-    // v27 keys the service locator per session node. No session id (neither
+    // The service locator is keyed per session node. No session id (neither
     // the ready payload nor the session_start self-read produced one) means
     // no keyed service — skip, asks defer.
     if (this.#sessionId === null) {
@@ -404,16 +406,30 @@ export class SessionLifecycle {
       return;
     }
     try {
+      // Engine selection: the single place the provider shape fans out.
+      // string = registry reference (LLM engine); object = direct
+      // connection (Jev engine — TypeSafe SDK, no registry involved).
+      // The config union's members carry the pairing, so the typeof
+      // branch narrows straight to each engine's config type.
+      // An unresolvable engine throws here → caught below → fail-safe
+      // session start (no auto-review), never a per-ask surprise.
+      const config = session.config;
+      const engine: ReviewerEngine = hasTypesafeProvider(config)
+        ? createJevEngine({ config })
+        : createLlmEngine({
+            config,
+            registry: session.registry,
+            modelCall: this.#deps.modelCall,
+          });
       const deps: ReviewPipelineDeps = {
-        config: session.config,
-        registry: session.registry,
+        config,
+        engine,
         sessionManager: session.sessionManager,
         cwd: session.cwd,
         circuitBreaker: session.circuitBreaker,
         verdictCache: session.verdictCache,
         denyHistory: session.denyHistory,
         overrides: this.#overrides,
-        modelCall: this.#deps.modelCall,
         notify: this.#ambientNotify,
       };
       const authorize = this.#deps.createPipeline(deps);
@@ -421,7 +437,7 @@ export class SessionLifecycle {
       this.#registered = true;
     } catch (e) {
       if (isDuplicateAuthorizerError(e, LINK_NAME)) {
-        // "already registered" is never benign in v27: every node owns its
+        // "already registered" is never benign: every node owns its
         // service, so a duplicate means a STALE registration survived
         // disposal (the /reload dispose glitch) and still governs asks
         // with the previous session's deps.
@@ -429,12 +445,14 @@ export class SessionLifecycle {
           "stale ai-guard registration survived disposal — asks are governed by the previous session's pipeline (deferring to the prompt)",
           "error",
         );
+        this.#registrationFailed = true;
         return;
       }
       this.feedbackNotify(
-        `failed to register the reviewer — running with no auto-review (${e instanceof Error ? e.message : String(e)})`,
+        `failed to register the reviewer — running with no auto-review (${errorMessage(e)})`,
         "error",
       );
+      this.#registrationFailed = true;
     }
   }
 }

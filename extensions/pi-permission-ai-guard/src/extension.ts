@@ -5,11 +5,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  type Authorizer,
-  PERMISSIONS_READY_CHANNEL,
-  type PermissionsReadyEvent,
-} from "@gotgenes/pi-permission-system";
+import { type Authorizer, PERMISSIONS_READY_CHANNEL } from "@gotgenes/pi-permission-system";
 
 import { readDecisionLog } from "#src/audit/decision-log-reader.ts";
 import { readTailLinesFromFile } from "#src/audit/log-tail-fs.ts";
@@ -22,8 +18,8 @@ import {
 } from "#src/config/config-layer.ts";
 import { MODE_VALUES, NOTIFY_LEVEL_VALUES } from "#src/config/config-schema.ts";
 import { CYCLE_MODE_VALUES, EMPHASIZED_MODE, MODE_BLURBS } from "#src/config/mode-table.ts";
-import { warn } from "#src/logger.ts";
 import { type ModelCallFn, createModelCall } from "#src/model/model-review.ts";
+import { warn } from "#src/notice.ts";
 import { type ReviewPipelineDeps, createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { RuntimeSettings, type EnumSettingSpec } from "#src/session/runtime-settings.ts";
 import { SessionLifecycle } from "#src/session/session-lifecycle.ts";
@@ -159,7 +155,7 @@ export function createAiGuardExtension(
     }
   });
 
-  // v27: ready fires at least once per session and may repeat. The payload
+  // Ready fires at least once per session and may repeat. The payload
   // carries the node's session id — the official source for the
   // session-keyed service locator (the lifecycle falls back to the
   // session_start ctx self-read for hosts whose payload is null) — and the
@@ -168,16 +164,15 @@ export function createAiGuardExtension(
   // regardless of adjudication mode (upstream accepts links on relaying
   // nodes too).
   pi.events.on(PERMISSIONS_READY_CHANNEL, (payload) => {
-    // pi's event bus is untyped — the channel contract IS this payload
-    // shape (the lifecycle runtime-narrows the one field it reads).
-    lifecycle.onPermissionsReady(payload as PermissionsReadyEvent);
+    // pi's event bus is untyped — the lifecycle accepts unknown and
+    // runtime-narrows the one field it reads.
+    lifecycle.onPermissionsReady(payload);
   });
 
   pi.on("session_tree", (_event, ctx) => {
     // Tree navigation (branch/rewind) can move the active branch past
     // setting entries — re-derive the overrides from the new branch and
-    // re-sync the footer (the todo.ts pattern: reconstruct on
-    // session_start + session_tree).
+    // re-sync the footer.
     if (!lifecycle.session) return;
     lifecycle.onSessionTree(ctx);
     settings.restore(ctx.sessionManager);

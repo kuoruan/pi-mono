@@ -39,14 +39,17 @@ import type {
   PromptPermissionDetails,
 } from "@gotgenes/pi-permission-system";
 
-import type { SessionManagerLike } from "#src/ask/transcript-stripper.ts";
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
 import { type ModelRegistryLike, createModelCall } from "#src/model/model-review.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
+import { createJevEngine } from "#src/review/engines/jev/index.ts";
+import { createLlmEngine } from "#src/review/engines/llm/index.ts";
+import type { SessionManagerLike } from "#src/review/request/transcript-stripper.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
+import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
 
-type ProviderName = "anthropic" | "openai";
+type ProviderName = "anthropic" | "openai" | "typesafe";
 type VerdictKind = "allow" | "deny" | "defer";
 
 // Both provider factories return Provider<"anthropic-messages"> /
@@ -61,10 +64,10 @@ Usage: npx tsx scripts/integration-test.ts --api-key <key> [options]
 
 Options:
   --api-key <key>      API key for the model provider (required)
-  --base-url <url>     Base URL for the model API (default: https://api.anthropic.com)
-  --model <id>         Model ID to use (default: claude-haiku-4-5)
-  --provider <p>       "anthropic" or "openai" (default: anthropic)
-  --timeout <ms>       Timeout in milliseconds (default: 30000)
+  --base-url <url>     Base URL for the model API (default: the provider's own URL;
+                       typesafe passes it through unset, so the SDK's env/default applies)
+  --model <id>         Model ID to use (default: claude-haiku-4-5; Jev: jev-1.13)
+  --provider <p>       "anthropic", "openai", or "typesafe" (default: anthropic)
   --repeat <n>         Run each case n times and report the verdict distribution (default: 1)
   --help               Show this help
 
@@ -73,7 +76,8 @@ Environment variables (fallbacks):
 
 interface CliArgs {
   apiKey: string;
-  baseUrl: string;
+  /** Undefined for typesafe: the SDK falls back to TYPESAFE_BASE_URL. */
+  baseUrl: string | undefined;
   modelId: string;
   provider: ProviderName;
   timeoutMs: number;
@@ -108,8 +112,10 @@ function parseCliArgs(): CliArgs {
   }
 
   const provider = values.provider ?? "anthropic";
-  if (provider !== "anthropic" && provider !== "openai") {
-    console.error(`Error: --provider must be "anthropic" or "openai" (got "${provider}")`);
+  if (provider !== "anthropic" && provider !== "openai" && provider !== "typesafe") {
+    console.error(
+      `Error: --provider must be "anthropic", "openai", or "typesafe" (got "${provider}")`,
+    );
     process.exit(1);
   }
 
@@ -119,10 +125,20 @@ function parseCliArgs(): CliArgs {
     process.exit(1);
   }
 
+  const isTypesafe = provider === "typesafe";
   return {
     apiKey,
-    baseUrl: values["base-url"] ?? process.env.PI_AI_GUARD_BASE_URL ?? "https://api.anthropic.com",
-    modelId: values.model ?? process.env.PI_AI_GUARD_MODEL ?? "claude-haiku-4-5",
+    // Only the typesafe path has a provider-owned default: the SDK resolves
+    // its own URL and model, so borrowing Anthropic's would quietly send a
+    // Jev run to the wrong endpoint.
+    baseUrl:
+      values["base-url"] ??
+      process.env.PI_AI_GUARD_BASE_URL ??
+      (isTypesafe ? undefined : DEFAULT_BASE_URLS[provider]),
+    modelId:
+      values.model ??
+      process.env.PI_AI_GUARD_MODEL ??
+      (isTypesafe ? "jev-1.13" : "claude-haiku-4-5"),
     provider,
     timeoutMs: Number(values.timeout ?? process.env.PI_AI_GUARD_TIMEOUT ?? "30000"),
     repeat,
@@ -131,6 +147,11 @@ function parseCliArgs(): CliArgs {
 
 // ── Provider/model construction ─────────────────────────────────────
 
+const DEFAULT_BASE_URLS = {
+  anthropic: "https://api.anthropic.com",
+  openai: "https://api.openai.com/v1",
+} as const;
+
 function buildModel(args: CliArgs): Model<any> {
   const isAnthropic = args.provider === "anthropic";
   return {
@@ -138,7 +159,7 @@ function buildModel(args: CliArgs): Model<any> {
     name: args.modelId,
     api: isAnthropic ? "anthropic-messages" : "openai-responses",
     provider: args.provider,
-    baseUrl: args.baseUrl,
+    baseUrl: args.baseUrl ?? (isAnthropic ? DEFAULT_BASE_URLS.anthropic : DEFAULT_BASE_URLS.openai),
     reasoning: false,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -258,23 +279,35 @@ interface LogEvent {
 function buildHarness(
   tc: TestCase,
   config: AiGuardConfig,
-  model: Model<any>,
+  model: Model<any> | null,
   apiKey: string,
-  providerInstance: AnyProvider,
+  providerInstance: AnyProvider | null, // null on the Jev path (no registry)
 ): {
   authorize: ReturnType<typeof createReviewPipeline>;
   log: AuthorizerLog & { events: LogEvent[] };
 } {
-  const registry: ModelRegistryLike = {
-    find: () => model,
-    getApiKeyAndHeaders: async () => ({ ok: true, apiKey }),
-    // Integration harness: stand in for the agent's registry by delegating
-    // to the real provider (dev-only; pi-ai >= 0.86 brands the provider input).
-    complete: (m, context, options) =>
-      // The harness only runs the anthropic/openai providers, both Simple.
-      providerInstance
-        .streamSimple(m, normalizeContext(context), options as SimpleStreamOptions | undefined)
-        .result(),
+  // The fake registry only exists on the LLM path (Jev never touches it) —
+  // built lazily inside the branch so its non-null inputs stay non-null.
+  const llmEngine = (): ReviewerEngine => {
+    if (model === null || providerInstance === null) {
+      throw new Error("LLM harness requires a model and provider instance");
+    }
+    const registry: ModelRegistryLike = {
+      find: () => model,
+      getApiKeyAndHeaders: async () => ({ ok: true, apiKey }),
+      // Integration harness: stand in for the agent's registry by delegating
+      // to the real provider (dev-only; pi-ai >= 0.86 brands the provider input).
+      complete: (m, context, options) =>
+        // The harness only runs the anthropic/openai providers, both Simple.
+        providerInstance
+          .streamSimple(m, normalizeContext(context), options as SimpleStreamOptions | undefined)
+          .result(),
+    };
+    return createLlmEngine({
+      config: config as typeof config & { provider: string; instructions: string | null },
+      registry,
+      modelCall: createModelCall(() => registry),
+    });
   };
   const events: LogEvent[] = [];
   const log: AuthorizerLog & { events: LogEvent[] } = {
@@ -282,16 +315,22 @@ function buildHarness(
     review: (event, details) => events.push({ event, details }),
     debug: (event, details) => events.push({ event, details }),
   };
+  const provider = config.provider;
   const authorize = createReviewPipeline({
     config,
-    registry,
+    // Jev path: the engine owns the SDK call — no registry, model, or
+    // provider instance involved. LLM path: unchanged fake registry.
+    // The typeof guard narrows `provider` inline for each engine's deps type.
+    engine:
+      typeof provider === "object" && provider !== null
+        ? createJevEngine({ config: { ...config, provider } })
+        : llmEngine(),
     sessionManager: tc.sessionManager ?? emptySession(),
     cwd: process.cwd(),
     circuitBreaker: new CircuitBreaker(),
     verdictCache: new VerdictCache(),
     denyHistory: [],
     overrides: {},
-    modelCall: createModelCall(() => registry),
     // CLI: escalation messages surface on the console — no TUI footer here.
     notify: (message, level) => console.log(`[${level ?? "info"}] ${message}`),
   });
@@ -337,9 +376,9 @@ function bashPayload(value: string, surface = "bash"): PromptPayload {
 async function runCase(
   tc: TestCase,
   config: AiGuardConfig,
-  model: Model<any>,
+  model: Model<any> | null,
   apiKey: string,
-  providerInstance: AnyProvider,
+  providerInstance: AnyProvider | null,
   quiet = false,
 ): Promise<{ pass: boolean; verdictKind: VerdictKind }> {
   const { authorize, log } = buildHarness(tc, config, model, apiKey, providerInstance);
@@ -571,21 +610,28 @@ const totalCases = groups.reduce((n, g) => n + g.cases.length, 0);
 
 async function main(): Promise<void> {
   const args = parseCliArgs();
-  const model = buildModel(args);
-  const providerInstance = buildProvider(args.provider);
+  const isTypesafe = args.provider === "typesafe";
+  const model = isTypesafe ? null : buildModel(args);
+  const providerInstance = isTypesafe ? null : buildProvider(args.provider);
   const config: AiGuardConfig = configSchema.parse({
-    provider: args.provider,
+    provider: isTypesafe
+      ? { type: "typesafe", baseUrl: args.baseUrl, apiKey: args.apiKey }
+      : args.provider,
     model: args.modelId,
     reasoning: "off",
     timeoutMs: args.timeoutMs,
     surfaces: ["bash", "mcp", "skill"],
   });
 
-  const api = args.provider === "anthropic" ? "anthropic-messages" : "openai-responses";
-  const repeat = args.repeat;
+  const api = isTypesafe
+    ? "typesafe/systemone"
+    : args.provider === "anthropic"
+      ? "anthropic-messages"
+      : "openai-responses";
   console.log("═".repeat(70));
   console.log("  pi-permission-ai-guard — Live Integration Test");
   console.log(`  Provider: ${args.provider} (${api})`);
+  const repeat = args.repeat;
   console.log(`  Model: ${args.modelId} via ${args.baseUrl}`);
   console.log(`  Timeout: ${args.timeoutMs}ms`);
   if (repeat > 1) {

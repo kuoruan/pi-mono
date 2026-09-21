@@ -25,7 +25,7 @@ export type VerdictLean = "allow" | "deny";
  * The valid lean values as a readonly set (derived so check and type never drift — see
  * {@link RISK_LEVELS}).
  */
-const VERDICT_LEANS: ReadonlySet<VerdictLean> = new Set<VerdictLean>(["allow", "deny"]);
+const VERDICT_LEANS: ReadonlySet<string> = new Set<VerdictLean>(["allow", "deny"]);
 
 /**
  * Parse the lean field off a defer verdict. Tolerant by doctrine: the
@@ -36,10 +36,18 @@ const VERDICT_LEANS: ReadonlySet<VerdictLean> = new Set<VerdictLean>(["allow", "
  * @param value - The raw `lean` field from the model's JSON reply.
  * @returns The lean when valid, or undefined (neutral).
  */
+function isVerdictLean(value: string): value is VerdictLean {
+  return VERDICT_LEANS.has(value);
+}
+
+/**
+ * Parse and validate the lean value from the model's JSON reply.
+ *
+ * @param value - The raw `lean` field from the model's JSON reply.
+ * @returns The lean when valid, or undefined (neutral).
+ */
 function parseLean(value: unknown): VerdictLean | undefined {
-  return typeof value === "string" && VERDICT_LEANS.has(value as VerdictLean)
-    ? (value as VerdictLean)
-    : undefined;
+  return typeof value === "string" && isVerdictLean(value) ? value : undefined;
 }
 
 /** Result of a model review call. */
@@ -119,17 +127,11 @@ export const GENERIC_DENY_REASON =
 
 /**
  * The valid risk levels as a readonly set, derived from {@link RiskLevel}
- * so the runtime check and the type can never drift apart. Built once at
- * module load; membership lookups are O(1).
+ * so the runtime check and the type can never drift apart.
  */
-const RISK_LEVELS: ReadonlySet<RiskLevel> = new Set<RiskLevel>([
-  "low",
-  "medium",
-  "high",
-  "critical",
-]);
+const RISK_LEVELS: ReadonlySet<string> = new Set<RiskLevel>(["low", "medium", "high", "critical"]);
 
-const VERDICT_VALUES: ReadonlySet<VerdictKind> = new Set<VerdictKind>(["allow", "deny", "defer"]);
+const VERDICT_VALUES: ReadonlySet<string> = new Set<VerdictKind>(["allow", "deny", "defer"]);
 
 /**
  * Type guard: is `value` one of the risk levels?
@@ -138,7 +140,7 @@ const VERDICT_VALUES: ReadonlySet<VerdictKind> = new Set<VerdictKind>(["allow", 
  * @returns True if `value` is a valid risk level (type-narrowed to `RiskLevel`).
  */
 function isRiskLevel(value: string): value is RiskLevel {
-  return RISK_LEVELS.has(value as RiskLevel);
+  return RISK_LEVELS.has(value);
 }
 
 /**
@@ -149,8 +151,7 @@ function isRiskLevel(value: string): value is RiskLevel {
  */
 function normalizeReason(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const reason = normalizeAndRedactText(value);
-  return reason || undefined;
+  return normalizeAndRedactText(value) || undefined;
 }
 
 function parseRiskLevel(value: unknown): RiskLevel | undefined {
@@ -301,7 +302,7 @@ export function parseVerdictObject(
 ): ReviewOutcome {
   const verdict = args.verdict;
   const raw = safeStringify(args);
-  if (typeof verdict !== "string" || !VERDICT_VALUES.has(verdict as VerdictKind)) {
+  if (typeof verdict !== "string" || !VERDICT_VALUES.has(verdict)) {
     return {
       verdict: { kind: "defer" },
       deferKind: "invalid-verdict-value",

@@ -1,7 +1,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import { stripTranscript } from "#src/ask/transcript-stripper.ts";
+import { stripTranscript } from "#src/review/request/transcript-stripper.ts";
 
 function makeEntry(type: string, data: Record<string, unknown>): unknown {
   return {
