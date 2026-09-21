@@ -1,5 +1,22 @@
 # pi-permission-ai-guard
 
+## 0.10.0
+
+### Minor Changes
+
+- bb014d5: Add a Jev reviewer path: set `provider` to `{ type: "typesafe" }` to review through TypeSafe's Jev (System One) instead of an LLM. Three built-in questions (`danger_category`, `intent_match`, `risk`) synthesize the verdict — allow needs matching intent plus risk below the deny line. Thresholds live in a new `typesafe` section (`intentThreshold`, `riskThreshold`, `confidenceThreshold`, optional per-attempt `timeoutMs`); `reasoning`/`maxTokens` are ignored in Jev mode, `instructions` overlays onto the built-in questions instead of replacing them, and ask fields are redacted before they leave, matching the LLM path.
+
+### Patch Changes
+
+- 913a6f1: Emit an `ai_guard.coverage` debug breadcrumb when an ask falls outside this link's surfaces, so a thought-covered-but-never-reviewed misconfig is discoverable with diagnostics on. The ask still defers.
+- ef8caa6: Collect the pipeline gates' release ritual into a `disposition` module: `releaseMachineryGate` owns the four reviewer-failure gates' disposal, the new `releaseVerdictGate` owns the cache-hit and fresh-model gates' mapping side effects. Zero behavior change.
+- 360b4e2: Support `@gotgenes/pi-permission-system` 33.x (peer `>=27.1.1 <34.0.0`): the 33.x public surface is identical, so no code change was needed.
+- 2c9005a: Route model calls through `ModelRegistry.complete` (upstream tightened the provider input; requires pi >= 0.84). Key the verdict cache context on trusted intent only, so agent retries hit between user turns.
+- 7532394: Count the reviewer's own refusals as terminal for `/ai-guard report` candidate groups — a model deny the mode escalated from a defer (`emittedVerdict`) now disqualifies the group, and a valid-JSON non-object log line (`null`) is skipped like any corrupt line instead of crashing the panel.
+- 347a763: Harden `shortHash` (verdict-cache keys, log correlation) from dual-32-bit Math.imul to 16-char SHA-256, so an agent-influenced command cannot preimage onto an allowed command's key and inherit its verdict.
+- 7532394: Stop three ways the guard could fall silent or mislead: a failed registration now retries on the next session instead of latching for the process lifetime; an unexpected pipeline crash still defers but says so on the notify line; and a session whose config failed to load clears the footer instead of leaving the previous session's mode on display.
+- d6abba7: Recognize `verdict=` alongside `verdict:` when scanning malformed model replies, so a pseudo-JSON verdict like `{verdict="deny"}` stops the scan instead of being skipped as brace noise.
+
 ## 0.9.1
 
 ### Patch Changes
