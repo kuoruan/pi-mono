@@ -3,8 +3,7 @@
  *
  * Each verdict-bearing gate decides a verdict; releasing it — writing the
  * audit record, sending the operator notice, attaching the agent
- * instruction — used to be hand-copied per gate, so the ritual's interface
- * was as complex as any gate. This module owns both release shapes
+ * instruction — lives here, once. This module owns both release shapes
  * (the pass-through gates — policy, surface-unmatched — and the breaker's
  * own trip ritual stay outside by design):
  *
@@ -18,27 +17,22 @@
  *   `mapped()` record annotation, and the agent instruction on a returned deny.
  *
  * The pure deciding rules stay where they are (`resolveMapping` /
- * `machineryTarget` in verdict-mode): this module performs, it does not
+ * `machineryTarget` in verdict-rule): this module performs, it does not
  * decide. Gates declare verdict + facts; the ritual lives here.
  */
 
 import type { AuthorizerLog, AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
-import { DECISION_EVENT, type DecisionRecordEntry, mapped } from "#src/audit/decision-record.ts";
+import { type DecisionRecordEntry, mapped } from "#src/audit/decision-record.ts";
+import { DECISION_EVENT } from "#src/audit/events.ts";
 import type { Mode } from "#src/config/config-schema.ts";
 import type { RiskLevel } from "#src/model/model-verdict.ts";
-import type { NotifyFn } from "#src/review/review-pipeline.ts";
+import type { NotifyFn } from "#src/notice.ts";
 
 import { type CircuitBreaker } from "./circuit-breaker.ts";
 import type { PreCallMachineryKind } from "./machinery-kinds.ts";
-import {
-  machineryDenyReason,
-  machineryDeferNotice,
-  machineryTarget,
-  type ModelDeferInfo,
-  resolveMapping,
-  withAgentInstruction,
-} from "./verdict-mode.ts";
+import { machineryDenyReason, machineryDeferNotice, withAgentInstruction } from "./verdict-copy.ts";
+import { machineryTarget, type ModelDeferInfo, resolveMapping } from "./verdict-rule.ts";
 
 /**
  * What a verdict release hands back to its gate: the record to write, and
@@ -58,8 +52,7 @@ export interface VerdictRelease {
  * model-unresolved, transcript-error, auth-failed).
  *
  * The shared invariants — a broken reviewer never rubber-stamps, every
- * reviewer-relevant gate writes the review stream — live here instead of
- * being hand-copied per gate.
+ * reviewer-relevant gate writes the review stream — live here.
  *
  * @param mode - The effective mode (the machinery lane's only input).
  * @param kind - The classified machinery failure (pre-call: the review

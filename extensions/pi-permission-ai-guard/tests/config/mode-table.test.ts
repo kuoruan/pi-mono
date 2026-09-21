@@ -60,6 +60,7 @@ describe("modeWarnings", () => {
     transcript: { maxUserMessages: 5, maxToolCalls: 10, maxCharsPerEntry: 1000 },
     surfaces: ["bash"],
     instructions: null,
+    typesafe: { booleanThreshold: 0.5, confidenceFloor: 0.5 },
     cache: { maxEntries: 128 },
     notifyLevel: "info" as const,
   };

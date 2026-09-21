@@ -53,6 +53,10 @@ describe("readDecisionLog", () => {
       "",
       JSON.stringify({ event: "ai_guard.decision", gate: "model" }),
       "{broken",
+      // Valid JSON that is not a record — consumers narrow by field access.
+      "null",
+      "42",
+      "[]",
     ].join("\n");
     const entries = readDecisionLog({ readTailLines: seam(body) });
     expect(entries).toHaveLength(1);

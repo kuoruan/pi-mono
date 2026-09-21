@@ -13,9 +13,9 @@
  * done).
  */
 
-import { type ThemeColor } from "@earendil-works/pi-coding-agent";
+import { type KeybindingsManager, type Theme } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
-import { type Component, type Keybinding } from "@earendil-works/pi-tui";
+import { type Component, type OverlayOptions } from "@earendil-works/pi-tui";
 import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
 
 /**
@@ -70,50 +70,27 @@ export interface RecordDetail {
 export type RecordDetailResult = "closed";
 
 /**
- * The theme's legal background-color keys. The host's `ThemeBg` is not
- * exported through its package surface (only `ThemeColor` is), so this
- * mirrors it — a new host background key needs a one-line sync here,
- * and a typo becomes a compile error either way.
+ * The theme slice a dialog component consumes — the host's `Theme`
+ * narrowed to the calls the dialogs use, so a wrong color key is a
+ * compile error (the runtime throws "Unknown theme color" — the type
+ * keeps that a never-event).
  */
-export type DialogThemeBg =
-  | "selectedBg"
-  | "scrollbarThumb"
-  | "searchMatchBg"
-  | "userMessageBg"
-  | "customMessageBg"
-  | "toolPendingBg"
-  | "toolSuccessBg"
-  | "toolErrorBg";
+export type DialogTheme = Pick<Theme, "fg" | "bg" | "bold">;
 
 /**
- * The theme slice a dialog component consumes — structurally the host's
- * `Theme` narrowed to what the dialogs use, with the color keys typed
- * so a wrong key is a compile error (the runtime throws "Unknown theme
- * color" — the type keeps that a never-event).
+ * The keybindings slice a dialog component consumes — the host's
+ * `KeybindingsManager` narrowed to the matches call (a typo'd action
+ * name is a compile error, not a silently-never-matching key check).
  */
-export interface DialogTheme {
-  fg(kind: ThemeColor, text: string): string;
-  bg(kind: DialogThemeBg, text: string): string;
-  bold(text: string): string;
-}
+export type DialogKeybindings = Pick<KeybindingsManager, "matches">;
 
 /**
- * The keybindings slice a dialog component consumes — structurally the
- * host's `KeybindingsManager` narrowed to the matches call, with the
- * action typed as the pi-tui keybinding union (a typo'd action name is
- * a compile error, not a silently-never-matching key check).
- */
-export interface DialogKeybindings {
-  matches(data: string, action: Keybinding): boolean;
-}
-
-/**
- * The overlay options shape a custom-dialog call carries (the slice of
- * the host's OverlayOptions the dialogs use).
+ * The options shape a custom-dialog call carries: the host's
+ * `ctx.ui.custom` options (overlay flag + pi-tui overlay positioning).
  */
 export interface DialogOverlayOptions {
   overlay?: boolean;
-  overlayOptions?: Record<string, unknown>;
+  overlayOptions?: OverlayOptions | (() => OverlayOptions);
 }
 
 /**
@@ -175,7 +152,7 @@ class RecordDetailComponent implements Component {
     this.#done = done;
     // The official dialog frame: border → spacer → title → spacer →
     // body → spacer → help → border — the same rhythm every host dialog
-    // (and pps's settings modal) uses, so the overlay reads as native.
+    // uses, so the overlay reads as native.
     this.#frame = new Container();
     this.#frame.addChild(new DynamicBorder((text) => theme.fg("accent", text)));
     this.#frame.addChild(new Spacer(1));

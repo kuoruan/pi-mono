@@ -17,14 +17,14 @@ import type { PermissionCheckResult, PermissionQuery } from "@gotgenes/pi-permis
 import { expect } from "vitest";
 
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
+import type { ModelCallFn, ModelRegistryLike } from "#src/model/model-review.ts";
+import type { NotifyFn } from "#src/notice.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
-import type {
-  NotifyFn,
-  ReviewPipelineDeps,
-  createReviewPipeline,
-} from "#src/review/review-pipeline.ts";
+import { createLlmEngine } from "#src/review/engines/llm/index.ts";
+import type { ReviewPipelineDeps, createReviewPipeline } from "#src/review/review-pipeline.ts";
+import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
-import { withAgentInstruction } from "#src/review/verdict-mode.ts";
+import { withAgentInstruction } from "#src/review/verdict-copy.ts";
 import { makeDetails } from "#test/fixtures.ts";
 
 export const baseConfig: AiGuardConfig = configSchema.parse({
@@ -197,10 +197,10 @@ export async function expectVerdict(
  */
 export const defaultRegistry = (
   overrides: Partial<{
-    find: ReviewPipelineDeps["registry"]["find"];
-    getApiKeyAndHeaders: ReviewPipelineDeps["registry"]["getApiKeyAndHeaders"];
+    find: ModelRegistryLike["find"];
+    getApiKeyAndHeaders: ModelRegistryLike["getApiKeyAndHeaders"];
   }> = {},
-): ReviewPipelineDeps["registry"] => ({
+): ModelRegistryLike => ({
   // Unit tests drive the pipeline through the `modelCall` seam, never
   // the registry — `complete` is unreachable here.
   complete: () => {
@@ -212,6 +212,23 @@ export const defaultRegistry = (
 });
 
 /**
+ * Default LLM engine: registry + modelCall wrapped behind the engine seam.
+ *
+ * @param opts - Optional `modelCall`/`registry` overrides for fixtures.
+ * @returns An LLM reviewer engine.
+ */
+export const makeEngine = (
+  opts: { modelCall?: ModelCallFn; registry?: ModelRegistryLike } = {},
+): ReviewerEngine =>
+  createLlmEngine({
+    // Fixture configs are LLM-shaped (string provider); the narrow proves it.
+    config: baseConfig as typeof baseConfig & { provider: string; instructions: string | null },
+    registry: opts.registry ?? defaultRegistry(),
+    modelCall:
+      opts.modelCall ?? makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
+  });
+
+/**
  * Build a ReviewPipeline from resolved session state. Overrides replace the
  * direct values (not lazy getters) — the pipeline closes over them once.
  *
@@ -221,15 +238,13 @@ export const defaultRegistry = (
 export function makePipeline(overrides: Partial<ReviewPipelineDeps> = {}): ReviewPipelineDeps {
   return {
     config: baseConfig,
-    registry: defaultRegistry(),
+    engine: makeEngine(),
     sessionManager: makeSessionManagerWith([]),
     cwd: "/project",
     circuitBreaker: new CircuitBreaker(),
     verdictCache: new VerdictCache(),
     denyHistory: [],
     overrides: {},
-    modelCall: makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
-    // Required in production (the lifecycle's notify bridge); tests that
     // don't assert notifications get a no-op.
     notify: () => {},
     ...overrides,

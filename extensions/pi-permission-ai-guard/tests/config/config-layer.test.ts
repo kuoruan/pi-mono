@@ -356,7 +356,7 @@ describe("persistConfigLayer", () => {
     const result = persistConfigLayer({
       target: "global",
       env: env(),
-      config: { ...fullConfig, provider: "anthropic", mode: "lenient" },
+      config: configSchema.parse({ ...fullConfig, provider: "anthropic", mode: "lenient" }),
     });
     expect(result.changed).toBe(true);
     const written = vol.readFileSync(

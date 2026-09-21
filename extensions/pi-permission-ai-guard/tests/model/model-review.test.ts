@@ -2,7 +2,7 @@ import type { AssistantMessage, Model, Context, SimpleStreamOptions } from "@ear
 import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 import { describe, expect, it, vi } from "vitest";
 
-import { MODEL_CALL_ERROR_EVENT } from "#src/audit/decision-record.ts";
+import { MODEL_CALL_ERROR_EVENT } from "#src/audit/events.ts";
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
 import {
   type ModelCallFn,

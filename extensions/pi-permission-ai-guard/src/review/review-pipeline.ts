@@ -6,50 +6,44 @@
  * state is captured by closure at construction time.
  */
 
-import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { Authorizer } from "@gotgenes/pi-permission-system";
 
-import { type DriftWarnState, openAsk } from "#src/ask/ask.ts";
-import { buildReviewPrompt, buildReviewSystemPrompt } from "#src/ask/prompt.ts";
-import { reviewRequestCacheMaterial, type ReviewRequestContext } from "#src/ask/review-request.ts";
-import { type SessionManagerLike, stripTranscript } from "#src/ask/transcript-stripper.ts";
 import {
   BREAKER_DENY_REASON,
-  CACHE_LOOKUP_EVENT,
-  COVERAGE_EVENT,
-  DECISION_EVENT,
   DecisionRecord,
-  MODEL_REPLY_EVENT,
-  SHORT_CIRCUIT_EVENT,
   cacheLookup,
   coverage,
   modelReply,
   shortCircuit,
 } from "#src/audit/decision-record.ts";
-import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import {
-  type ModelCallFn,
-  type ModelCallContext,
-  type ModelRegistryLike,
-  type ResolvedRequestAuth,
-  reviewModel,
-} from "#src/model/model-review.ts";
-import { effectiveOverride, type SessionOverrides } from "#src/session/session-overrides.ts";
-import { normalizeAndRedactText, shortHash } from "#src/utils.ts";
+  CACHE_LOOKUP_EVENT,
+  COVERAGE_EVENT,
+  DECISION_EVENT,
+  MODEL_REPLY_EVENT,
+  SHORT_CIRCUIT_EVENT,
+} from "#src/audit/events.ts";
+import type { AiGuardConfig } from "#src/config/config-schema.ts";
+import { effectiveOverride, type SessionOverrides } from "#src/config/session-overrides.ts";
+import type { NotifyFn } from "#src/notice.ts";
+import { type DriftWarnState, openAsk } from "#src/review/request/ask.ts";
+import {
+  reviewRequestCacheMaterial,
+  type ReviewRequestContext,
+} from "#src/review/request/review-request.ts";
+import {
+  type SessionManagerLike,
+  stripTranscript,
+} from "#src/review/request/transcript-stripper.ts";
+import { errorMessage, normalizeAndRedactText, shortHash } from "#src/utils.ts";
 
 import { accountModelOutcome, type CircuitBreaker, consumeTrip } from "./circuit-breaker.ts";
 import { releaseMachineryGate, releaseVerdictGate } from "./disposition.ts";
 import { PRE_CALL_MACHINERY_KINDS } from "./machinery-kinds.ts";
+import { isMachineryFailure, type ReviewerEngine } from "./reviewer-engine.ts";
 import type { VerdictCache } from "./verdict-cache.ts";
-import { applyVerdictMode, type ModelDeferInfo, withAgentInstruction } from "./verdict-mode.ts";
-
-/**
- * Fire-and-forget user notification — the host UI context's own notify
- * signature (the extension wraps ctx.ui.notify; absent in headless tests
- * and when no UI context was captured).
- */
-export type NotifyFn = ExtensionUIContext["notify"];
+import { withAgentInstruction } from "./verdict-copy.ts";
+import { applyVerdictMode, type ModelDeferInfo } from "./verdict-rule.ts";
 
 /**
  * One model-gate deny recorded for the session's denied panel — what the
@@ -79,8 +73,8 @@ export interface DenyRecord {
 export interface ReviewPipelineDeps {
   /** Validated extension config. */
   config: AiGuardConfig;
-  /** Model registry — resolves the reviewer model. */
-  registry: ModelRegistryLike;
+  /** The reviewer backend (LLM or Jev) — the only seam the pipeline reviews through. */
+  engine: ReviewerEngine;
   /** Session manager for transcript stripping (trusted intent + tool calls). */
   sessionManager: SessionManagerLike;
   /** Session working directory (from session_start); the policy boundary. */
@@ -91,8 +85,6 @@ export interface ReviewPipelineDeps {
   verdictCache: VerdictCache;
   /** Session-scoped runtime overrides (/ai-guard, ctrl+alt+g); consulted before config. */
   overrides: SessionOverrides;
-  /** The one-shot model call (see `ModelCallFn`). */
-  modelCall: ModelCallFn;
   /** Session model-gate deny log (the /ai-guard denied panel's data). */
   denyHistory: DenyRecord[];
   /**
@@ -122,12 +114,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
 
   const driftState: DriftWarnState = { warned: false };
 
-  // Session invariant, computed once: `config.instructions` is fixed for the
-  // pipeline's lifetime, and the ~10KB system prompt is rebuilt per call
-  // otherwise (only the user prompt varies per ask).
-  const systemPrompt = buildReviewSystemPrompt(deps.config.instructions);
-
-  return async (details, query, log) => {
+  const authorize: Authorizer["authorize"] = async (details, query, log) => {
     const { config } = deps;
     // Session-scoped override (/ai-guard, ctrl+alt+g) wins over the config
     // default — the typed per-field accessor spells the rule once (see
@@ -253,33 +240,11 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       return verdict;
     }
 
-    // 5. Resolve the model. Fails fast on a config error, and sits BEFORE
-    // the cache (an unresolved model makes every ask a machinery failure;
-    // the cache lookup adds nothing). registry.find is the one unwrapped
-    // dependency call in the pipeline — a throwing registry collapses into
-    // model-unresolved like an absent one.
-    const modelId = `${config.provider}/${config.model}`;
-    let model: Model<Api> | undefined;
-    try {
-      model = deps.registry.find(config.provider, config.model);
-    } catch {
-      model = undefined;
-    }
-    if (!model) {
-      // An unresolved model makes every ask a machinery failure — strict
-      // and permissive deny what would fall to the human, the others defer.
-      const record = DecisionRecord.modelUnresolved(base, modelId);
-      return releaseMachineryGate(
-        mode,
-        PRE_CALL_MACHINERY_KINDS.modelUnresolved,
-        record,
-        deps.circuitBreaker,
-        log,
-        deps.notify,
-      );
-    }
+    // Model resolution lives behind the engine seam. An unresolvable engine is
+    // a construction-time throw in extension.ts, not a per-ask machinery
+    // failure.
 
-    // 6. Strip transcript (feeds both the prompt and the cache fingerprint).
+    // Strip transcript (feeds both the prompt and the cache fingerprint).
     let transcript;
     try {
       transcript = stripTranscript(deps.sessionManager, {
@@ -291,7 +256,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       log.debug(
         SHORT_CIRCUIT_EVENT,
         shortCircuit(requestId, surface, PRE_CALL_MACHINERY_KINDS.transcriptError, {
-          error: normalizeAndRedactText(e instanceof Error ? e.message : String(e)),
+          error: normalizeAndRedactText(errorMessage(e)),
         }),
       );
       const record = DecisionRecord.transcriptError(base);
@@ -305,7 +270,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       );
     }
 
-    // 7. Cache lookup. The request snapshot contains the action context,
+    // Cache lookup. The request snapshot contains the action context,
     // working directory, and policy-derived path boundary, so a verdict
     // cannot cross those contexts.
     const commandHash = shortHash(reviewRequestCacheMaterial(request));
@@ -350,38 +315,40 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // Cache miss: record the miss reason for telemetry.
     log.debug(CACHE_LOOKUP_EVENT, cacheLookup(requestId, surface, lookup.missReason));
 
-    // 8. Resolve auth — AFTER the cache: a hit never needed auth, and a
-    // repeat ask survives an auth flap via its cached verdict.
-    // getApiKeyAndHeaders is wrapped to never throw — a thrown error and an
-    // { ok: false } result both collapse to one auth-failed defer path.
-    const auth = await resolveAuth(deps.registry, model);
-    if (!auth.ok) {
-      const record = DecisionRecord.authFailed(base, modelId, normalizeAndRedactText(auth.error));
+    // Engine review. Model resolution, auth, prompt building, and the
+    // call all live behind the engine seam — the pipeline only sees the
+    // outcome (or a tagged pre-call machinery failure for the machinery
+    // lane). Sits AFTER the cache: a hit never needed a call, and auth
+    // stays inside the engine (a hit never needed auth).
+    const engineResult = await deps.engine.review({
+      transcript,
+      request,
+      log,
+      requestId,
+    });
+    if (isMachineryFailure(engineResult)) {
+      // Total by construction: `EngineMachineryKind` admits only the two
+      // engine kinds, and only model-unresolved owns a record of its own.
+      const isModelUnresolved = engineResult.kind === PRE_CALL_MACHINERY_KINDS.modelUnresolved;
+      const record = isModelUnresolved
+        ? DecisionRecord.modelUnresolved(base, engineResult.modelId)
+        : DecisionRecord.authFailed(
+            base,
+            engineResult.modelId,
+            normalizeAndRedactText(engineResult.detail),
+          );
       return releaseMachineryGate(
         mode,
-        PRE_CALL_MACHINERY_KINDS.authFailed,
+        isModelUnresolved
+          ? PRE_CALL_MACHINERY_KINDS.modelUnresolved
+          : PRE_CALL_MACHINERY_KINDS.authFailed,
         record,
         deps.circuitBreaker,
         log,
         deps.notify,
       );
     }
-
-    // Build the user prompt (redaction happens inside buildReviewPrompt;
-    // the system prompt is the factory-level invariant above).
-    const userPrompt = buildReviewPrompt(transcript, request);
-
-    // Model review.
-    const callCtx: ModelCallContext = {
-      model,
-      modelCall: deps.modelCall,
-      auth: { apiKey: auth.apiKey, headers: auth.headers },
-      reasoning: config.reasoning,
-      maxTokens: config.maxTokens,
-      log,
-      requestId,
-    };
-    const reviewOutcome = await reviewModel(callCtx, systemPrompt, userPrompt, config.timeoutMs);
+    const { outcome: reviewOutcome, modelId } = engineResult;
 
     // Raw replies are verbose AND unnecessary for clean verdicts (the
     // structured record + sentinel suffice) — only defer failures keep the
@@ -477,23 +444,28 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // cache-hit gate above.
     return verdict;
   };
-}
 
-/**
- * Resolve model auth, normalizing a thrown error into an { ok: false } result
- * so the caller has a single failure path.
- *
- * @param registry - The model registry to resolve auth from.
- * @param model - The model to resolve auth for.
- * @returns The resolved auth, or an `{ ok: false, error }` result on failure.
- */
-async function resolveAuth(
-  registry: ModelRegistryLike,
-  model: Model<Api>,
-): Promise<ResolvedRequestAuth> {
-  try {
-    return await registry.getApiKeyAndHeaders(model);
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
+  // Top-level fail-safe: an unexpected throw anywhere in the pipeline
+  // (query.checkPermission, an injected log call, a mapping bug) defers to
+  // the human decision — the chain link never crashes the host's ask flow.
+  return async (details, query, log) => {
+    try {
+      return await authorize(details, query, log);
+    } catch (e) {
+      // The cause has to reach the operator: a silent defer is
+      // indistinguishable from a review that raised no objection. Best-effort
+      // — the notify bridge is itself one of the things that can throw here.
+      try {
+        deps.notify(
+          `reviewer crashed — deferring to the prompt (${normalizeAndRedactText(errorMessage(e))})`,
+          // Error-grade, like the breaker's total trip: the review
+          // function is DOWN and recovery needs the operator's hand.
+          "error",
+        );
+      } catch {
+        // No channel left; the defer still holds.
+      }
+      return { kind: "defer" };
+    }
+  };
 }

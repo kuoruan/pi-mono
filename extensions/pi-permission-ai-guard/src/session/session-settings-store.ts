@@ -12,12 +12,8 @@
 
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 
-import type { AiGuardConfig } from "#src/config/config-schema.ts";
-
-import type { SessionOverrides } from "./session-overrides.ts";
-
-/** The persisted setting names — the field-name intersection both types share. */
-export type SettingName = keyof SessionOverrides & keyof AiGuardConfig;
+import type { OverridableKey } from "#src/config/session-overrides.ts";
+import { isObjectRecord } from "#src/utils.ts";
 
 /**
  * Branch-reader surface the restore scan needs — derived from the host's
@@ -43,7 +39,7 @@ export const SETTING_ENTRY_TYPE = "ai-guard-setting";
  */
 export function persistSetting(
   appendEntry: (customType: string, data?: unknown) => void,
-  name: SettingName,
+  name: OverridableKey,
   value: string | null,
 ): void {
   appendEntry(SETTING_ENTRY_TYPE, { [name]: value });
@@ -64,7 +60,7 @@ export function persistSetting(
  * @returns The persisted override, or undefined for none.
  */
 export function restoreSetting(
-  name: SettingName,
+  name: OverridableKey,
   validValues: readonly string[],
   reader: SessionBranchReader,
 ): string | undefined {
@@ -73,9 +69,9 @@ export function restoreSetting(
     const entry = branch[i];
     if (entry?.type !== "custom" || entry.customType !== SETTING_ENTRY_TYPE) continue;
     const data = entry.data;
-    if (data === null || typeof data !== "object") continue;
+    if (!isObjectRecord(data)) continue;
     if (!(name in data)) continue;
-    const value = (data as Record<string, string | null>)[name];
+    const value = data[name];
     return typeof value === "string" && validValues.includes(value) ? value : undefined;
   }
   return undefined;

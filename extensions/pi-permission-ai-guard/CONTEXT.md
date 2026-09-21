@@ -7,9 +7,9 @@ A Pi extension that reviews permission **asks** with a light model, using a toke
 Six directories under `src/`, one per concept cluster (the glossary sections below map onto them):
 
 - `config/` — the operator-configured surface: schema, layered load/persist, the mode ladder's declarative facts.
-- `ask/` — from permission ask to review prompt: eligibility, the structured projection (ADR 0011), cache identity, transcript stripping, prompt rendering.
+- `review/request/` — from permission ask to review input: eligibility, the structured projection (ADR 0011), cache identity, transcript stripping. Prompt rendering lives with its engine in `review/engines/llm/prompt.ts`.
 - `model/` — talking to the reviewer model: auth/call/retry, verdict parsing.
-- `review/` — the review engine and its verdicts: the pipeline, mode mapping, the failure taxonomy, circuit breaker, verdict cache.
+- `review/` — the review engines and their verdicts: the pipeline, the `ReviewerEngine` seam, `engines/llm` vs `engines/jev` (each engine self-contained: request building, call, outcome synthesis), mode mapping, the failure taxonomy, circuit breaker, verdict cache.
 - `session/` — session state and the operator surface: lifecycle, the `/ai-guard` command table, overrides, session-file persistence.
 - `audit/` — the decision record and its readers: record factories, the review-log reader + fs tail adapter, report candidates.
 
@@ -76,13 +76,21 @@ Note: `external_directory`/`path` asks reach this link, but any `allow` on them 
 
 ### Review
 
-**Model call path**: Model calls go through `ModelRegistry.complete` (the agent's own call path — raw `Context` in, auth + transcript normalization inside the registry). Never the provider layer directly: upstream brands the provider input, so `getProvider().streamSimple()` breaks on every tightening. Known asymmetry: the pipeline auth gate accepts compatibility-headers providers that `prepareRequest` rejects — both fail safe to `call-failed` defer, and such a provider could not run the agent itself. _Avoid_: provider-layer calls
+**ReviewerEngine**: The `ReviewOutcome` producer seam (`review(ctx) -> EngineReviewResult | EngineMachineryFailure`). Two self-contained engines under `review/engines/`: LLM (the `ModelRegistry.complete` text path) and Jev (ADR 0005 — the TypeSafe SDK `systemOne` path; answers are calibrated probabilities, never text, so deny reasons synthesize from the danger-category name; a danger hit denies before the confidence-floor check, and low confidence defers like the LLM lean). The session lifecycle picks the engine from the provider shape (object = Jev); the pipeline never branches on it.
+
+**TypeSafe vs Jev**: Two independent axes, two words — pick by what the change would touch.
+
+- **TypeSafe** is the _transport/provider_ surface: the `@typesafe-ai/sdk` client (`TypesafeClientLike`, `createTypesafeClient`, `TypesafeConnection`), the SDK's `systemOne` wire shapes (`TypesafeSystemOneResponse`, `TypesafeRawAnswer`), the provider value (`{ type: "typesafe" }`), the `typesafe` config section, the `TYPESAFE_*` env fallbacks, and the `modelId` prefix (`typesafe/<model>`).
+- **Jev** is the _model strategy_: the ported question set (`JEV_QUESTION_IDS`, `questions.ts` criteria/rubric), the calibrated answers and their projection (`TypesafeRawAnswer` → `JevAnswers`, `JevThresholds`), the instruction overlay (`JevOverlay`), and the verdict synthesis (`synthesizeJevVerdict`).
+
+If the change is "a different SDK, API, or provider field", the name is TypeSafe; if it is "a different question set, calibration, or deny rule", the name is Jev. The engine (`engines/jev/`, `createJevEngine`) is named for the strategy — the transport is the adapter it hides behind `TypesafeClientLike`.
+**Model call path** (LLM engine only — Jev reaches its model through the TypeSafe SDK's `systemOne` instead): LLM calls go through `ModelRegistry.complete` (the agent's own call path — raw `Context` in, auth + transcript normalization inside the registry). Never the provider layer directly: upstream brands the provider input, so `getProvider().streamSimple()` breaks on every tightening. Known asymmetry: the pipeline auth gate accepts compatibility-headers providers that `prepareRequest` rejects — both fail safe to `call-failed` defer, and such a provider could not run the agent itself. _Avoid_: provider-layer calls
 
 **Full review**: The JSON-verdict review. The model receives a stripped transcript + the permission request and is asked to return `{"verdict":"allow|deny|defer","reason":"...","riskLevel":"..."}`. A tolerant parser extracts the JSON from prose-wrapped replies, so providers that wrap JSON in text still work. Deny and defer carry a `reason`; allow omits it. A deny reason must state what makes the request dangerous — an assessment that concludes "safe" must be an `allow` (the reason binds to the verdict; a live contradictory pair is a model misfire, not a pipeline error).
 
 **Upstream retry**: One retry per mechanism per review, budgeted inside `timeoutMs` (the total-budget promise — a review never exceeds one window):
 
-- **Provider errors** (408/409/429/5xx and connection-level failures, per pi-ai's classifier) retry inside pi-ai's provider layer, with backoff and `retry-after`; the timeout signal spans every attempt.
+- **Provider errors** (408/409/429/5xx and connection-level failures, per pi-ai's classifier) retry inside pi-ai's provider layer, with backoff and `retry-after`; the timeout signal spans every attempt. Jev instead fails a timed-out attempt outright (only 408/429/5xx retry inside the SDK) — `typesafe.timeoutMs` is strictly per-attempt.
 - **Empty replies** (200 with no usable text) retry at the review layer, gated on the first attempt consuming less than half the window (the retry always has ≥ half a window).
 
 The retry carries no provider-layer retry — three requests is the hard ceiling. `attempts: 2` marks a retried review in the decision record; the retry's budgetless provider errors fail straight to `call-failed`. The first attempt's empty diagnostic goes to the debug stream before the retry replaces the reply.
@@ -106,7 +114,7 @@ The retry carries no provider-layer retry — three requests is the hard ceiling
 
 **Disposition**: The single release seam for every gate that emits a verdict — machinery or mapped (the breaker's own trip ritual stays beside the breaker by design). A gate declares verdict + facts, and the disposition owns the release ritual (audit annotation, operator notice, agent instruction). _Avoid_: escalation footwork
 
-**Policy suggestion**: A report candidate for a deterministic permission rule: the same ask (surface + target) reached the model ≥3 times, every occurrence in one trusted-intent context (same `contextHash`), with no terminal deny anywhere. Evidence, never authorization — the report renders copy-paste rule fragments; adopting one is the operator's explicit action in the permission system's config.
+**Policy suggestion**: A report candidate for a deterministic permission rule: the same ask (surface + target) reached the model ≥3 times, every occurrence in one trusted-intent context (same `contextHash`), and neither side ever refused it — no operator terminal deny, and no reviewer deny (including one a mode escalated out of a defer). Evidence, never authorization — the report renders copy-paste rule fragments; adopting one is the operator's explicit action in the permission system's config.
 
 ### Transcript
 
@@ -130,7 +138,7 @@ All from `@gotgenes/pi-permission-system` (peer range `>=27.1.1 <33.0.0` — a b
 
 ## Prompt writing principles
 
-The safety rules prompt (`SAFETY_RULES` in `src/ask/prompt.ts`) is the semantic instruction fed to the review model. These principles govern how it is written and maintained.
+The safety rules prompt (`SAFETY_RULES` in `src/review/engines/llm/prompt.ts`) is the semantic instruction fed to the review model. These principles govern how it is written and maintained.
 
 ### 1. Semantic, not literal
 

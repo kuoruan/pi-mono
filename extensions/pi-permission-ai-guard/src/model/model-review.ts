@@ -24,13 +24,10 @@ import {
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 
-import {
-  MODEL_CALL_ERROR_EVENT,
-  MODEL_REPLY_EVENT,
-  modelCallError,
-} from "#src/audit/decision-record.ts";
+import { modelCallError } from "#src/audit/decision-record.ts";
+import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT } from "#src/audit/events.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
-import { normalizeAndRedactText } from "#src/utils.ts";
+import { classifyAbortish, errorMessage, normalizeAndRedactText } from "#src/utils.ts";
 
 import {
   type ModelCallDeferKind,
@@ -72,12 +69,12 @@ type CallResult =
 
 /**
  * Resolved auth fields needed to make a model call. Extracted from
- * {@link ResolvedRequestAuth} after the pipeline's auth gate has passed.
+ * {@link ResolvedRequestAuth} after the engine's auth step has passed.
  */
 export type ModelCallAuth = Pick<SimpleStreamOptions, "apiKey" | "headers">;
 
 /**
- * Everything a model review call needs, captured once. The pipeline builds
+ * Everything a model review call needs, captured once. The LLM engine builds
  * this from its resolved model + auth + call context; {@link reviewModel}
  * consumes it.
  */
@@ -105,11 +102,6 @@ export interface ModelCallContext {
  * provider input, so a direct `getProvider().streamSimple()` call breaks
  * whenever upstream tightens it.
  *
- * NOTE: prefer `registry.streamSimple` once the peer floor reaches 0.86
- * (provider-neutral options + a streaming result; `complete` is its
- * one-shot sibling on the same pipeline). This factory stays a
- * `ModelCallFn` either way, so the switch is implementation-only.
- *
  * @param getRegistry - Function returning the model registry (or undefined if unavailable).
  * @returns A `ModelCallFn` that completes a model call via `registry.complete`.
  */
@@ -135,10 +127,9 @@ function reportCallFailure(
   deferKind: ModelCallDeferKind,
   error: unknown,
 ): void {
-  const rawError = error instanceof Error ? error.message : String(error);
   ctx.log.debug(
     MODEL_CALL_ERROR_EVENT,
-    modelCallError(ctx.requestId, deferKind, normalizeAndRedactText(rawError)),
+    modelCallError(ctx.requestId, deferKind, normalizeAndRedactText(errorMessage(error))),
   );
 }
 
@@ -197,10 +188,7 @@ async function executeCall(
     const reply = await ctx.modelCall(ctx.model, context, options);
     return { ok: true, reply, latencyMs: Date.now() - startedAt };
   } catch (e) {
-    const deferKind: ModelCallDeferKind =
-      e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")
-        ? "timeout"
-        : "call-failed";
+    const deferKind: ModelCallDeferKind = classifyAbortish(e) ?? "call-failed";
     reportCallFailure(ctx, deferKind, e);
     return { ok: false, deferKind, latencyMs: Date.now() - startedAt };
   }
@@ -330,13 +318,7 @@ function logEmptyDiagnostic(
     errorMessage: result.reply.errorMessage
       ? normalizeAndRedactText(result.reply.errorMessage)
       : null,
-    contentTypes: Array.isArray(result.reply.content)
-      ? result.reply.content.map((b) =>
-          typeof b === "object" && b !== null && "type" in b
-            ? (b as { type: string }).type
-            : typeof b,
-        )
-      : [],
+    contentTypes: result.reply.content.map((b) => b.type),
   };
   ctx.log.debug(MODEL_REPLY_EVENT, {
     requestId: ctx.requestId,

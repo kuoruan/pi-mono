@@ -14,7 +14,7 @@ import type { ConfigEnv, ConfigLayerTarget, LoadConfigResult } from "#src/config
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
 import { createAiGuardExtension } from "#src/extension.ts";
 import type { ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
-import type { CompletionItem } from "#src/session/runtime-settings.ts";
+import type { CompletionItem } from "#src/session/command/table.ts";
 import { SETTING_ENTRY_TYPE } from "#src/session/session-settings-store.ts";
 import { makeUiCtx } from "#test/host-ctx.ts";
 
@@ -485,6 +485,7 @@ describe("createAiGuardExtension lifecycle", () => {
         maxTokens: 4096,
         reasoning: "off" as const,
         instructions: null,
+        typesafe: { booleanThreshold: 0.5, confidenceFloor: 0.5 },
         mode: "default" as const,
         notifyLevel: "info" as const,
       },

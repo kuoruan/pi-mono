@@ -29,7 +29,7 @@ import type {
 } from "@gotgenes/pi-permission-system";
 
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
-import { warn } from "#src/logger.ts";
+import { warn } from "#src/notice.ts";
 import { PRE_CALL_MACHINERY_KINDS } from "#src/review/machinery-kinds.ts";
 import { globMatch } from "#src/utils.ts";
 
@@ -63,9 +63,6 @@ export interface NoTargetReason {
   /** The resolved surface, so the caller need not recompute it for logging. */
   surface: string | undefined;
 }
-
-/** The surface list a review scans — derived from the config contract, not re-declared. */
-export type SurfaceScope = Pick<AiGuardConfig, "surfaces">;
 
 /**
  * The result of {@link resolveReviewTarget}: either the resolved
@@ -107,15 +104,15 @@ export interface AskContext {
    * canonical alias of a flagged path. For `path`/`external_directory` (one
    * path) this is exact. For `bash_external_directory` (possibly many flagged
    * paths) this is the alias of the first external-path entry that carries
-   * one, not per-path attribution — a known, bounded limitation (see ADR 0007
-   * §5 / CONTEXT.md: `allow` is capped to `defer` on this surface regardless).
+   * one, not per-path attribution — a known, bounded limitation (see
+   * CONTEXT.md: `allow` is capped to `defer` on this surface regardless).
    */
   readonly resolvedAlias?: string;
   /** Canonical boundary from `details.accessIntent.boundaryValue` (path surfaces). */
   readonly canonicalBoundary?: string;
   /** The session working directory — the policy containment boundary. */
   readonly workingDirectory: string;
-  /** Model-generated advisories (ADR 0011 §8); currently always empty (no annotator registered). */
+  /** Model-generated advisories; currently always empty (no annotator registered). */
   readonly annotations: readonly PromptAnnotation[];
 }
 
@@ -232,7 +229,7 @@ function surfaceOf(details: PromptPermissionDetails): string | undefined {
 
 /**
  * The path surface families that carry the read/write capability axis in
- * pi-permission-system (ADR 0013 §3): each has `_read`/`_write` directional
+ * pi-permission-system: each has `_read`/`_write` directional
  * members a proven-direction access routes to. Pinned here because the
  * upstream family resolver is internal — if upstream adds a family, this
  * set grows with it (a config naming the bare family keeps matching its
@@ -301,7 +298,7 @@ function matchSurface(configured: readonly string[], surface: string): boolean {
  * Extract the review target (the value being authorized).
  *
  * Primary source is `payload.request.value`; the `details` display-override
- * fields (still present in v27) are the fail-safe fallback chain for a
+ * fields are the fail-safe fallback chain for a
  * `forwarded` (degraded) ask whose `value` is empty.
  *
  * `accessIntent.matchValues` (when present, for the path surface) are joined
@@ -351,7 +348,7 @@ function extractTarget(details: PromptPermissionDetails): string | undefined {
  * no target extractable) is an unexpected ask (logged).
  *
  * Target extraction takes `payload.request.value` as the primary value;
- * the `details` display-override fields (still present in v27 for forwarded
+ * the `details` display-override fields (forwarded
  * / degraded asks) are the fail-safe fallback chain. The `"no-target"`
  * reason stays reachable: a `forwarded` (degraded) ask whose `value` is `""`
  * and whose fallback chain is entirely empty still yields `no-target` rather
@@ -365,7 +362,7 @@ function extractTarget(details: PromptPermissionDetails): string | undefined {
  */
 export function resolveReviewTarget(
   details: PromptPermissionDetails,
-  config: SurfaceScope,
+  config: Pick<AiGuardConfig, "surfaces">,
 ): ReviewTargetResolution {
   const surface = surfaceOf(details);
   if (!surface) return { reason: "surface-unmatched" };
@@ -401,7 +398,7 @@ export type OpenAskResult =
  */
 export function openAsk(
   details: PromptPermissionDetails,
-  config: SurfaceScope,
+  config: Pick<AiGuardConfig, "surfaces">,
   cwd: string,
   driftState?: DriftWarnState,
 ): OpenAskResult {

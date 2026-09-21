@@ -22,6 +22,7 @@ function model(opts: {
   target?: string;
   contextHash?: string;
   verdict?: string;
+  emittedVerdict?: string;
 }): LogEntry {
   return {
     event: "ai_guard.decision",
@@ -31,6 +32,7 @@ function model(opts: {
     target: opts.target ?? "git status",
     contextHash: "contextHash" in opts ? opts.contextHash : "ctxh1",
     ...(opts.verdict !== undefined ? { verdict: opts.verdict } : {}),
+    ...(opts.emittedVerdict !== undefined ? { emittedVerdict: opts.emittedVerdict } : {}),
   };
 }
 
@@ -124,9 +126,29 @@ describe("buildReportCandidates", () => {
       model({ requestId: "r1", target: "ls", contextHash: "ctxh1" }),
       model({ requestId: "r2", target: "ls", contextHash: "ctxh1", verdict: "deny" }),
       model({ requestId: "r3", target: "ls", contextHash: "ctxh1" }),
+      // A fourth allow keeps the group above the threshold after the deny
+      // is dropped from the occurrences — otherwise this passes for the
+      // wrong reason (too few records, not the refusal).
+      model({ requestId: "r5", target: "ls", contextHash: "ctxh1" }),
     ];
     // No permission_request.denied record is present — the model deny
     // itself disqualifies the group even if upstream never wrote one.
+    expect(buildReportCandidates(entries)).toHaveLength(0);
+  });
+
+  it("excludes groups whose mode escalated a defer into a deny", () => {
+    const entries = [
+      model({ requestId: "r1", target: "ls", contextHash: "ctxh1" }),
+      model({
+        requestId: "r2",
+        target: "ls",
+        contextHash: "ctxh1",
+        verdict: "defer",
+        emittedVerdict: "deny",
+      }),
+      model({ requestId: "r3", target: "ls", contextHash: "ctxh1" }),
+      model({ requestId: "r5", target: "ls", contextHash: "ctxh1" }),
+    ];
     expect(buildReportCandidates(entries)).toHaveLength(0);
   });
 

@@ -2,13 +2,9 @@
  * Decision record: the audit-log entry emitted at each decision gate in the
  * review pipeline.
  *
- * Previously each gate (policy-decided, circuit-breaker, model-unresolved,
- * auth-failed, transcript-error, no-target, cache-hit, model) hand-built its
- * own `log.review(DECISION_EVENT, {...})` payload with a different ad-hoc
- * shape. The audit schema — which fields every decision record must carry —
- * existed only implicitly, duplicated across gate literals. This module is the single
- * source of truth: the shared fields are captured once in `DecisionBase`,
- * and each gate's constructor adds only what's specific to it.
+ * Every gate's record shares its common fields through `DecisionBase`; this
+ * module is the single source of truth — the shared fields are captured
+ * once, and each gate's constructor adds only what's specific to it.
  *
  * Log-stream doctrine: the REVIEW stream (log.review, always on) carries one bounded decision
  * record per REVIEWER-RELEVANT gate — the model gate, the circuit breaker, and the reviewer's
@@ -131,19 +127,6 @@ export interface CoverageRecord {
   /** Admits the record to be passed as an AuthorizerLog details payload. */
   [k: string]: unknown;
 }
-
-/** The event constants live here so callers don't redeclare them. */
-export const DECISION_EVENT = "ai_guard.decision";
-
-export const SHORT_CIRCUIT_EVENT = "ai_guard.short_circuit";
-
-export const MODEL_REPLY_EVENT = "ai_guard.model_reply";
-
-export const CACHE_LOOKUP_EVENT = "ai_guard.cache_lookup";
-
-export const MODEL_CALL_ERROR_EVENT = "ai_guard.model_call_error";
-
-export const COVERAGE_EVENT = "ai_guard.coverage";
 
 /**
  * The deny reason emitted when the circuit breaker trips. Shared by the

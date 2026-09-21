@@ -44,6 +44,15 @@ export type PreCallMachineryKind =
   (typeof PRE_CALL_MACHINERY_KINDS)[keyof typeof PRE_CALL_MACHINERY_KINDS];
 
 /**
+ * The pre-call kinds an engine may report. The pipeline produces the other
+ * two itself (`transcript-error`, `no-target`), so a reviewer backend cannot
+ * park a failure it never owned in a lane meant for its own setup failures.
+ */
+export type EngineMachineryKind =
+  | (typeof PRE_CALL_MACHINERY_KINDS)["modelUnresolved"]
+  | (typeof PRE_CALL_MACHINERY_KINDS)["authFailed"];
+
+/**
  * Any machinery failure, wherever it happens: the parser's in-call defer
  * kinds ∪ the pre-call kinds. The taxonomy's single statement —
  * consumers (`machineryDenyReason`, `machineryDeferNotice`, the

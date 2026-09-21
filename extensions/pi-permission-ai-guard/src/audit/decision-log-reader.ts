@@ -21,6 +21,8 @@
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
+import { isObjectRecord } from "#src/utils.ts";
+
 /**
  * A parsed log line — a loose union of the record shapes this link and
  * the permission system write. Consumers narrow by `event`.
@@ -32,8 +34,10 @@ export interface LogEntry {
   requestId?: string;
   /** The decision gate (model, cache-hit, circuit-breaker, …). */
   gate?: string;
-  /** The link's verdict (allow / deny / defer). */
+  /** The model's judgment (allow / deny / defer). */
   verdict?: string;
+  /** The verdict the link emitted when the mode changed it (deny escalations, softened denies). */
+  emittedVerdict?: string;
   /** The reviewer's lean on a defer. */
   lean?: string | null;
   /** The tool surface. */
@@ -108,8 +112,13 @@ export function readLogLines(
     try {
       // Parse-boundary cast: the output is unknown and consumers narrow by
       // `event` (the loose LogEntry union) — the tolerance policy of this
-      // module, not a shape guarantee.
-      entries.push(JSON.parse(line) as LogEntry);
+      // module, not a shape guarantee. Valid JSON that is not an object (a
+      // bare `null`, a number) is no record either: it joins the corrupt
+      // lines rather than reaching consumers as a crash.
+      const parsed = JSON.parse(line);
+      if (isObjectRecord(parsed)) {
+        entries.push(parsed as unknown as LogEntry);
+      }
     } catch {
       // Corrupt line — skip; the log is append-only and best-effort.
     }

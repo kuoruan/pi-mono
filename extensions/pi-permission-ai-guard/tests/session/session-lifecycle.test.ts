@@ -93,7 +93,7 @@ describe("SessionLifecycle — the resetBreaker seam", () => {
     const breaker = calls[0]!.circuitBreaker;
     for (let i = 0; i < 3; i++) breaker.recordVerdict("deny");
     expect(lifecycle.resetBreaker()).toBe("consecutive");
-    expect(breaker.isTripped({ consecutive: 3, total: 20, verdict: "deny" })).toBe(false);
+    expect(breaker.trippedTier({ consecutive: 3, total: 20, verdict: "deny" })).toBeUndefined();
   });
 
   it("throws a clear error between sessions (the surface guards first)", () => {
@@ -202,6 +202,25 @@ describe("SessionLifecycle — session identity + registration guard", () => {
         },
       } as never),
     ).toBeNull();
+  });
+
+  it("retries a failed registration in the next session (the latch is per-session)", () => {
+    const { lifecycle } = makeLifecycle();
+    mocks.registerAuthorizer.mockImplementationOnce(() => {
+      throw new Error("service exploded");
+    });
+    lifecycle.onSessionStart(makeSeed());
+    expect(mocks.registerAuthorizer).toHaveBeenCalledTimes(1);
+
+    // Still latched within the session: a ready re-emission must not notify
+    // again.
+    lifecycle.onPermissionsReady({ sessionId: "s1", adjudicatesLocally: true });
+    expect(mocks.registerAuthorizer).toHaveBeenCalledTimes(1);
+
+    // A new session tries again — the operator may have just fixed whatever
+    // made the registration throw.
+    lifecycle.onSessionStart(makeSeed());
+    expect(mocks.registerAuthorizer).toHaveBeenCalledTimes(2);
   });
 });
 

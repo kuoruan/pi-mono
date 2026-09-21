@@ -12,10 +12,11 @@
 
 import type { LogEntry } from "#src/audit/decision-log-reader.ts";
 import { buildReportCandidates } from "#src/audit/report.ts";
-import type { DenyRecord, NotifyFn } from "#src/review/review-pipeline.ts";
+import type { NotifyFn } from "#src/notice.ts";
+import type { DenyRecord } from "#src/review/review-pipeline.ts";
 
+import type { AiGuardUiContext } from "./command/ui-context.ts";
 import { type RecordDetail, showRecordDetail } from "./record-detail.ts";
-import type { AiGuardUiContext } from "./runtime-settings.ts";
 
 /**
  * What the panels read. Kept apart from
@@ -134,15 +135,13 @@ export async function openDeniedPanel(deps: PanelDeps, ctx: AiGuardUiContext): P
     deps.notify(`pass a picker-capable UI to browse the ${history.length} deny record(s)`, "info");
     return;
   }
-  const recent = history.toReversed();
   // The list line is a scan index (metadata + truncated command, the pick
   // seam's uniqueness discipline); the overlay detail is the reading
-  // surface — the command and the reason whole, no notify ceiling (the old
-  // single-line echo truncated at 200).
+  // surface — the command and the reason whole, no notify ceiling.
   const record = await pickItem(
     ctx,
     "ai-guard denied — pick a record to view its reason",
-    recent,
+    history.toReversed(),
     (d) =>
       `deny${d.riskLevel ? ` (${d.riskLevel})` : ""} — ${d.target} [${d.surface}] (${d.timestamp.slice(11, 23)})`,
   );

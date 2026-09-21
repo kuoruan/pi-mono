@@ -1,5 +1,5 @@
 /**
- * Prompt construction for the AI guard.
+ * The LLM engine's prompt: system prompt plus per-ask user prompt.
  *
  * The review system prompt combines the shared safety knowledge
  * ({@link SAFETY_RULES}) with the fixed verdict output contract. The user
@@ -18,10 +18,9 @@
  * 3. Permission request (the exact ask being reviewed)
  */
 
+import type { ReviewRequestContext } from "#src/review/request/review-request.ts";
+import type { StrippedTranscript } from "#src/review/request/transcript-stripper.ts";
 import { encodeActionTextForPrompt, normalizeAndRedactText } from "#src/utils.ts";
-
-import type { ReviewRequestContext } from "./review-request.ts";
-import type { StrippedTranscript } from "./transcript-stripper.ts";
 
 /**
  * The single source of safety knowledge. Organized as three tiers by

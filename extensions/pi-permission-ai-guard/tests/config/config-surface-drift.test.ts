@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { leafPaths } from "#src/config/config-layer.ts";
 import {
   BREAKER_VERDICT_VALUES,
   MODE_VALUES,
@@ -34,23 +35,15 @@ const schemaJson = JSON.parse(
 };
 
 /**
- * Collect leaf paths and values from a materialized config object.
+ * Collect leaf paths and values from a materialized config object, as a
+ * dotted-path → value map (built on the same leaf enumeration the edit
+ * algorithm uses, so this test cannot drift from what edits walk).
  *
  * @param obj - The parsed config (defaults applied).
- * @param base - The path prefix for recursive calls.
  * @returns A path → value map of every leaf.
  */
-function leafPaths(obj: Record<string, unknown>, base = ""): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    const path = base ? `${base}.${key}` : key;
-    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-      Object.assign(out, leafPaths(value as Record<string, unknown>, path));
-    } else {
-      out[path] = value;
-    }
-  }
-  return out;
+function flatLeafPaths(obj: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(leafPaths(obj).map((e) => [e.path.join("."), e.value]));
 }
 
 /**
@@ -77,7 +70,7 @@ function jsonDefaults(
 
 describe("config surface drift", () => {
   it("JSON-schema defaults match the zod schema's materialized defaults", () => {
-    const zodSide = leafPaths(configSchema.parse({ provider: "x", model: "x" }));
+    const zodSide = flatLeafPaths(configSchema.parse({ provider: "x", model: "x" }));
     // Required fields carry no default; everything else is the default set.
     delete zodSide.provider;
     delete zodSide.model;

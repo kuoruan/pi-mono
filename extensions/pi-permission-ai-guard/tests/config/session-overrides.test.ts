@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 
 import { configSchema } from "#src/config/config-schema.ts";
-import { effectiveConfig, effectiveOverride } from "#src/session/session-overrides.ts";
+import { effectiveConfig, effectiveOverride } from "#src/config/session-overrides.ts";
 
 /**
  * A minimal valid config — the schema's own defaults define the base.

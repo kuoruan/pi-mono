@@ -23,8 +23,9 @@ import {
   parse as parseJsonc,
   printParseErrorCode,
 } from "jsonc-parser";
+import type { z } from "zod";
 
-import { isObjectRecord } from "#src/utils.ts";
+import { errorMessage, isObjectRecord } from "#src/utils.ts";
 
 import { type AiGuardConfig, EXTENSION_ID, configSchema } from "./config-schema.ts";
 import { modeWarnings } from "./mode-table.ts";
@@ -202,8 +203,11 @@ function readLayer(dir: string, issues: ConfigIssue[]): Record<string, unknown> 
   try {
     text = readFileSync(path, "utf-8");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    issues.push({ path: "$", message: `Failed to read config: ${message}`, sourcePath: path });
+    issues.push({
+      path: "$",
+      message: `Failed to read config: ${errorMessage(error)}`,
+      sourcePath: path,
+    });
     return undefined;
   }
   const parsed = parseLayerText(text);
@@ -281,7 +285,7 @@ interface LeafEntry {
  * @param path - The accumulated property path.
  * @returns Leaf entries (path + value).
  */
-function leafPaths(value: unknown, path: string[] = []): LeafEntry[] {
+export function leafPaths(value: unknown, path: string[] = []): LeafEntry[] {
   if (isObjectRecord(value)) {
     const leaves: LeafEntry[] = [];
     for (const key of Object.keys(value)) {
@@ -290,6 +294,34 @@ function leafPaths(value: unknown, path: string[] = []): LeafEntry[] {
     return leaves;
   }
   return [{ path, value }];
+}
+
+/**
+ * Flatten zod issues into path-qualified entries: the config schema is a
+ * two-member union, and a union failure nests its members' issues —
+ * surface the best member's (fewest issues) so paths stay qualified.
+ *
+ * Hand-rolled because zod's own utilities do not fit: `flattenError` /
+ * `prettifyError` drop paths entirely, and `treeifyError` merges BOTH
+ * members' issues per field (duplicated messages plus the other member's
+ * unrelated provider error) in a tree this flat path/message list would
+ * have to walk anyway.
+ *
+ * @param issues - The top-level zod issues from a failed parse.
+ * @returns Path-qualified issues from the most plausible union member.
+ */
+function flattenZodIssues(issues: readonly z.core.$ZodIssue[]): ConfigIssue[] {
+  const out: ConfigIssue[] = [];
+  for (const issue of issues) {
+    if (issue.code === "invalid_union" && Array.isArray(issue.errors)) {
+      const members = issue.errors;
+      const best = members.reduce((a, b) => (b.length < a.length ? b : a), members[0] ?? []);
+      out.push(...flattenZodIssues(best));
+    } else {
+      out.push({ path: issue.path.join(".") || "$", message: issue.message });
+    }
+  }
+  return out;
 }
 
 export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
@@ -314,9 +346,7 @@ export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
 
   const parsed = configSchema.safeParse(merged);
   if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      issues.push({ path: issue.path.join(".") || "$", message: issue.message });
-    }
+    issues.push(...flattenZodIssues(parsed.error.issues));
     return { issues };
   }
 
@@ -379,31 +409,31 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
   }
   const canonical = configSchema.safeParse(config);
   if (!canonical.success) {
-    const first = canonical.error.issues[0];
+    const first = flattenZodIssues(canonical.error.issues)[0];
     return {
       path: "",
       created: false,
       changed: false,
-      error: `the snapshot is invalid — ${first?.path.join(".") || "$"}: ${first?.message}`,
+      error: `the snapshot is invalid — ${first?.path || "$"}: ${first?.message}`,
     };
   }
   const agentDir = resolveAgentDir(env);
   const dir = target === "global" ? getGlobalConfigDir(agentDir) : getProjectConfigDir(env.cwd);
   const createPath =
     target === "global" ? getGlobalConfigPath(agentDir) : getProjectConfigPath(env.cwd);
-  // Edit whichever candidate exists (jsonc-first); otherwise create .jsonc.
-  const path = resolveLayerFile(dir)?.path ?? createPath;
-
-  if (!existsSync(path)) {
-    return createLayerFile(path, canonical.data);
+  // Edit whichever candidate exists (jsonc-first); otherwise create .jsonc
+  // (resolveLayerFile stat'ed both candidates, so a resolved path exists).
+  const existing = resolveLayerFile(dir);
+  if (!existing) {
+    return createLayerFile(createPath, canonical.data);
   }
+  const path = existing.path;
 
   let text: string;
   try {
     text = readFileSync(path, "utf-8");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { path, created: false, changed: false, error: message };
+    return { path, created: false, changed: false, error: errorMessage(error) };
   }
   return editLayerFile(path, canonical.data, text);
 }
@@ -423,8 +453,7 @@ function createLayerFile(path: string, data: AiGuardConfig): SaveConfigResult {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { path, created: false, changed: false, error: message };
+    return { path, created: false, changed: false, error: errorMessage(error) };
   }
   return { path, created: true, changed: true };
 }
@@ -452,14 +481,12 @@ function editLayerFile(path: string, data: AiGuardConfig, text: string): SaveCon
         : `${file} root is not a JSON object`;
     return { path, created: false, changed: false, error: message };
   }
-  const current = parsed.value;
-
   // Leaf-by-leaf diff: apply each changed leaf sequentially against the
   // running text, so jsonc-parser edits never overlap.
   let running = text;
   let changed = false;
   for (const { path: leafPath, value } of leafPaths(data)) {
-    const previous = readPath(current, leafPath);
+    const previous = readPath(parsed.value, leafPath);
     if (previous === MISSING || !isDeepStrictEqual(previous, value)) {
       let edits;
       try {
@@ -519,8 +546,7 @@ function editLayerFile(path: string, data: AiGuardConfig, text: string): SaveCon
   try {
     writeFileSync(path, running, "utf-8");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { path, created: false, changed: false, error: message };
+    return { path, created: false, changed: false, error: errorMessage(error) };
   }
   return { path, created: false, changed: true };
 }
