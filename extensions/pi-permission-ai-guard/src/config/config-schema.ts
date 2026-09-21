@@ -1,6 +1,8 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { z } from "zod";
 
+import { isObjectRecord } from "#src/utils.ts";
+
 export const EXTENSION_ID = "pi-permission-ai-guard";
 export const LINK_NAME = "ai-guard";
 
@@ -48,8 +50,59 @@ export const REASONING_VALUES: readonly ModelThinkingLevel[] = [
   "max",
 ];
 
-export const configSchema = z.object({
-  provider: z.string().min(1),
+/**
+ * The four System One question ids — a config-level contract. The schema
+ * validates instruction overlays against this list, and the Jev engine
+ * builds its questions from it; both sides share the one source so a new
+ * question is one entry, not two lists that can drift.
+ */
+export const JEV_QUESTION_IDS = [
+  "danger_category",
+  "intent_match",
+  "unconditionally_safe",
+  "risk",
+] as const;
+
+/** Membership check for the overlay ids (string-keyed: config keys are strings). */
+const JEV_QUESTION_ID_SET: ReadonlySet<string> = new Set(JEV_QUESTION_IDS);
+
+/** One of the four System One question ids. */
+export type JevQuestionId = (typeof JEV_QUESTION_IDS)[number];
+
+/** A direct TypeSafe connection (object provider) — both fields optional. */
+export const typesafeProviderSchema = z
+  .object({
+    type: z.literal("typesafe"),
+    baseUrl: z.string().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
+  })
+  .strict();
+
+export type TypesafeProvider = z.infer<typeof typesafeProviderSchema>;
+
+/** A Jev instruction overlay value: string, JSON object, or array (SDK EntryType). */
+const jevInstructionValueSchema = z.union([
+  z.string().min(1),
+  z.record(z.string(), z.json()),
+  z.array(z.json()),
+]);
+
+/**
+ * `instructions` in Jev mode: shorthand string (shared background) or
+ * `{ background?, questions? }` overlay. Unknown question ids and empty
+ * objects are rejected by the cross-field checks below.
+ */
+const jevInstructionsSchema = z.union([
+  z.string().min(1),
+  z
+    .object({
+      background: jevInstructionValueSchema.optional(),
+      questions: z.record(z.string().min(1), jevInstructionValueSchema).optional(),
+    })
+    .strict(),
+]);
+
+const configBaseSchema = z.object({
   model: z.string().min(1),
   reasoning: z.enum(REASONING_VALUES).default("off"),
   timeoutMs: z.number().int().min(1).max(300_000).default(15_000),
@@ -80,10 +133,17 @@ export const configSchema = z.object({
   // Empty array = review nothing. Excludes-only (no includes) = review nothing.
   surfaces: z.array(z.string().min(1)).default(["bash", "mcp", "skill"]),
 
-  // Custom safety rules for the full review. When provided, replaces the
-  // built-in rules entirely; the verdict output format is always appended.
-  // null = use the built-in rules.
-  instructions: z.string().min(1).nullable().default(null),
+  // Jev behavior thresholds (object providers only).
+  typesafe: z
+    .object({
+      booleanThreshold: z.number().min(0).max(1).default(0.5),
+      confidenceFloor: z.number().min(0).max(1).default(0.5),
+      // SDK timeout per attempt (retries cover 408/429/5xx only —
+      // a timeout fails the call outright). Falls back to top-level
+      // timeoutMs when omitted.
+      timeoutMs: z.number().int().min(1).max(300_000).optional(),
+    })
+    .default({ booleanThreshold: 0.5, confidenceFloor: 0.5 }),
 
   // How the link disposes the reviewer's non-allow verdicts (the leniency
   // ladder, strictest first). Hard-tier denies (riskLevel high|critical,
@@ -130,5 +190,68 @@ export const configSchema = z.object({
     .default({ maxEntries: 128 }),
 });
 
+/**
+ * Custom safety rules (`instructions`): LLM mode (string provider) takes
+ * plain text replacing the built-in rules entirely, or null for the
+ * built-ins; Jev mode (object provider) additionally accepts a
+ * `{ background?, questions? }` overlay onto the built-ins.
+ * `reasoning`/`maxTokens` are ignored in Jev mode.
+ */
+export const configSchema = z
+  .union([
+    configBaseSchema.extend({
+      provider: z.string().min(1),
+      instructions: z.string().min(1).nullable().default(null),
+    }),
+    configBaseSchema.extend({
+      provider: typesafeProviderSchema,
+      instructions: z
+        .union([z.string().min(1), jevInstructionsSchema])
+        .nullable()
+        .default(null),
+    }),
+  ])
+  .superRefine((config, ctx) => {
+    // Overlay checks are Jev-only; object instructions on a string provider
+    // are structurally impossible (the union's LLM member takes strings only).
+    if (typeof config.provider !== "object") return;
+    if (isObjectRecord(config.instructions)) {
+      const overlay = config.instructions;
+      if (overlay.background === undefined && overlay.questions === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["instructions"],
+          message: "empty instructions overlay — set background and/or questions",
+        });
+      }
+      for (const id of Object.keys(overlay.questions ?? {})) {
+        if (!JEV_QUESTION_ID_SET.has(id)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["instructions", "questions", id],
+            message: `unknown question id "${id}" — expected one of ${JEV_QUESTION_IDS.join(", ")}`,
+          });
+        }
+      }
+    }
+  });
+
 /** Validated extension configuration (zod schema inference). */
 export type AiGuardConfig = z.infer<typeof configSchema>;
+
+/** The config union's TypeSafe member (object provider — the Jev engine's config). */
+export type TypesafeConfig = Extract<AiGuardConfig, { provider: TypesafeProvider }>;
+
+/** The config union's registry member (string provider — the LLM engine's config). */
+export type RegistryConfig = Extract<AiGuardConfig, { provider: string }>;
+
+/**
+ * The provider's runtime shape selects the engine; the config union's
+ * members carry the pairing. This predicate narrows to the TypeSafe member.
+ *
+ * @param config - The validated config.
+ * @returns True when the provider is a direct TypeSafe connection.
+ */
+export function hasTypesafeProvider(config: AiGuardConfig): config is TypesafeConfig {
+  return typeof config.provider === "object";
+}
