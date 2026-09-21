@@ -4,8 +4,20 @@
   "type": "object",
   "properties": {
     "provider": {
-      "type": "string",
-      "minLength": 1
+      "anyOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "typesafe" },
+            "baseUrl": { "type": "string", "minLength": 1 },
+            "apiKey": { "type": "string", "minLength": 1 }
+          },
+          "required": ["type"],
+          "additionalProperties": false,
+          "description": "Direct TypeSafe connection (Jev reviewer). Both baseUrl and apiKey are optional: unset values fall back to TYPESAFE_BASE_URL / TYPESAFE_API_KEY, then the SDK built-in default URL."
+        }
+      ]
     },
     "model": {
       "type": "string",
@@ -115,10 +127,43 @@
           "minLength": 1
         },
         {
+          "type": "object",
+          "properties": {
+            "background": true,
+            "questions": { "type": "object" }
+          },
+          "additionalProperties": false,
+          "description": "Jev-mode overlay (object providers only): shared background plus per-question additions keyed by stable question id (danger_category, intent_match, unconditionally_safe, risk). LLM mode accepts only the string form."
+        },
+        {
           "type": "null"
         }
       ],
       "default": null
+    },
+    "typesafe": {
+      "type": "object",
+      "properties": {
+        "booleanThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5
+        },
+        "confidenceFloor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 300000,
+          "description": "SDK timeout per attempt (timeouts fail outright — only 408/429/5xx retry). Falls back to top-level timeoutMs when omitted."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": ["provider", "model"],
