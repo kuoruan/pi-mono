@@ -131,14 +131,15 @@ const configBaseSchema = z.object({
   // Jev behavior thresholds (object providers only).
   typesafe: z
     .object({
-      booleanThreshold: z.number().min(0).max(1).default(0.5),
-      confidenceFloor: z.number().min(0).max(1).default(0.5),
+      intentThreshold: z.number().min(0).max(1).default(0.5),
+      riskThreshold: z.number().min(0).max(1).default(0.5),
+      confidenceThreshold: z.number().min(0).max(1).default(0.5),
       // SDK timeout per attempt (retries cover 408/429/5xx only —
       // a timeout fails the call outright). Falls back to top-level
       // timeoutMs when omitted.
       timeoutMs: z.number().int().min(1).max(300_000).optional(),
     })
-    .default({ booleanThreshold: 0.5, confidenceFloor: 0.5 }),
+    .default({ intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.5 }),
 
   // How the link disposes the reviewer's non-allow verdicts (the leniency
   // ladder, strictest first). Hard-tier denies (riskLevel high|critical,

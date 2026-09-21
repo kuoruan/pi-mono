@@ -4,7 +4,11 @@ import { DANGER_NONE } from "#src/review/engines/jev/questions.ts";
 import { projectRawAnswers, synthesizeJevVerdict } from "#src/review/engines/jev/verdict.ts";
 import type { JevAnswers, JevThresholds } from "#src/review/engines/jev/verdict.ts";
 
-const THRESHOLDS: JevThresholds = { booleanThreshold: 0.5, confidenceFloor: 0.6 };
+const THRESHOLDS: JevThresholds = {
+  intentThreshold: 0.5,
+  riskThreshold: 0.5,
+  confidenceThreshold: 0.6,
+};
 
 function confident(overrides: Partial<JevAnswers> = {}): JevAnswers {
   return {
@@ -107,6 +111,13 @@ describe("synthesizeJevVerdict", () => {
     expect(synthesizeJevVerdict(confident({ riskScore: 0.5 }), THRESHOLDS, 7).verdict.kind).toBe(
       "deny",
     );
+  });
+
+  it("follows a raised risk line: 0.6 allows under a 0.7 line", () => {
+    const raised = { ...THRESHOLDS, riskThreshold: 0.7 };
+    expect(synthesizeJevVerdict(confident({ riskScore: 0.6 }), raised, 7).verdict).toEqual({
+      kind: "allow",
+    });
   });
 
   it("defers when intent is not established and the risk score is low", () => {

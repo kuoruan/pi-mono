@@ -144,17 +144,26 @@
     "typesafe": {
       "type": "object",
       "properties": {
-        "booleanThreshold": {
+        "intentThreshold": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "default": 0.5
+          "default": 0.5,
+          "description": "Intent probability at or above which the anchor counts as authorizing the action."
         },
-        "confidenceFloor": {
+        "riskThreshold": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "default": 0.5
+          "default": 0.5,
+          "description": "Risk score at or above which the action denies (soft tier). Raising it widens what auto-allows in every mode."
+        },
+        "confidenceThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "Minimum answer confidence; below it the verdict defers."
         },
         "timeoutMs": {
           "type": "integer",

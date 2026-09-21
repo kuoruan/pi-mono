@@ -17,8 +17,9 @@ export interface JevAnswers {
 }
 
 export interface JevThresholds {
-  booleanThreshold: number;
-  confidenceFloor: number;
+  intentThreshold: number;
+  riskThreshold: number;
+  confidenceThreshold: number;
 }
 
 /** One raw SDK answer (the per-question shape the SDK returns). */
@@ -74,14 +75,14 @@ const KEY_CONFIDENCES = [
 
 function deriveLean(answers: JevAnswers, thresholds: JevThresholds): VerdictLean | undefined {
   if (answers.dangerCategory !== DANGER_NONE) return "deny";
-  if (answers.intentMatch < thresholds.booleanThreshold) return "deny";
+  if (answers.intentMatch < thresholds.intentThreshold) return "deny";
   return undefined;
 }
 
 /**
  * Synthesize a {@link ReviewOutcome} from calibrated answers, top-down:
- * danger hit → deny (before the confidence floor — a danger defer could
- * otherwise lean-allow in permissive mode); below-floor confidence → defer;
+ * danger hit → deny (before the confidence check — a danger defer could
+ * otherwise lean-allow in permissive mode); below-threshold confidence → defer;
  * intent + risk below the deny line → allow;
  * otherwise the DENY-Unless lane — a risk score at or above the deny bar is a
  * soft deny, anything below it defers.
@@ -92,7 +93,7 @@ function deriveLean(answers: JevAnswers, thresholds: JevThresholds): VerdictLean
  * danger categories reach the hard tier.
  *
  * @param answers - The calibrated answers.
- * @param thresholds - The boolean/confidence thresholds.
+ * @param thresholds - The intent/risk/confidence thresholds.
  * @param latencyMs - The call latency for the audit record.
  * @returns The synthesized review outcome.
  */
@@ -110,32 +111,35 @@ export function synthesizeJevVerdict(
   }
   const weakest = KEY_CONFIDENCES.reduce((a, b) => (answers[a.key] <= answers[b.key] ? a : b));
   const minConfidence = answers[weakest.key];
-  if (minConfidence < thresholds.confidenceFloor) {
+  if (minConfidence < thresholds.confidenceThreshold) {
     return {
       verdict: { kind: "defer" },
       deferKind: "model-defer",
-      deferReason: `unsure about this action (${weakest.axis} confidence ${minConfidence.toFixed(2)} < ${thresholds.confidenceFloor.toFixed(2)})`,
+      deferReason: `unsure about this action (${weakest.axis} confidence ${minConfidence.toFixed(2)} < ${thresholds.confidenceThreshold.toFixed(2)})`,
       lean: deriveLean(answers, thresholds),
       latencyMs,
     };
   }
   // Allow needs both: the anchor authorizes it AND risk stays below the
   // deny line.
-  if (answers.intentMatch >= thresholds.booleanThreshold && answers.riskScore < 0.5) {
+  if (
+    answers.intentMatch >= thresholds.intentThreshold &&
+    answers.riskScore < thresholds.riskThreshold
+  ) {
     return { verdict: { kind: "allow" }, latencyMs };
   }
-  if (answers.riskScore >= 0.5) {
+  if (answers.riskScore >= thresholds.riskThreshold) {
     return {
       verdict: { kind: "deny", reason: GENERIC_DENY_REASON },
       latencyMs,
       riskLevel: answers.riskScore >= 0.75 ? "medium" : "low",
     };
   }
-  // Only intent can still fall short here (risk≥0.5 already denied above).
+  // Only intent can still fall short here (risk at or above the line already denied above).
   return {
     verdict: { kind: "defer" },
     deferKind: "model-defer",
-    deferReason: `unsure this matches your request (intent_match ${answers.intentMatch.toFixed(2)} < ${thresholds.booleanThreshold.toFixed(2)})`,
+    deferReason: `unsure this matches your request (intent_match ${answers.intentMatch.toFixed(2)} < ${thresholds.intentThreshold.toFixed(2)})`,
     lean: deriveLean(answers, thresholds),
     latencyMs,
   };

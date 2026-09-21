@@ -76,7 +76,7 @@ Note: `external_directory`/`path` asks reach this link, but any `allow` on them 
 
 ### Review
 
-**ReviewerEngine**: The `ReviewOutcome` producer seam (`review(ctx) -> EngineReviewResult | EngineMachineryFailure`). Two self-contained engines under `review/engines/`: LLM (the `ModelRegistry.complete` text path) and Jev (ADR 0005 — the TypeSafe SDK `systemOne` path; answers are calibrated probabilities, never text, so deny reasons synthesize from the danger-category name; a danger hit denies before the confidence-floor check, and low confidence defers like the LLM lean). The session lifecycle picks the engine from the provider shape (object = Jev); the pipeline never branches on it.
+**ReviewerEngine**: The `ReviewOutcome` producer seam (`review(ctx) -> EngineReviewResult | EngineMachineryFailure`). Two self-contained engines under `review/engines/`: LLM (the `ModelRegistry.complete` text path) and Jev (ADR 0005 — the TypeSafe SDK `systemOne` path; answers are calibrated probabilities, never text, so deny reasons synthesize from the danger-category name; a danger hit denies before the confidence check, and low confidence defers like the LLM lean). The session lifecycle picks the engine from the provider shape (object = Jev); the pipeline never branches on it.
 
 **TypeSafe vs Jev**: Two independent axes, two words — pick by what the change would touch.
 

@@ -35,8 +35,9 @@ describe("provider union", () => {
     const parsed = configSchema.safeParse(jevBase);
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
-    expect(parsed.data.typesafe.booleanThreshold).toBe(0.5);
-    expect(parsed.data.typesafe.confidenceFloor).toBe(0.5);
+    expect(parsed.data.typesafe.intentThreshold).toBe(0.5);
+    expect(parsed.data.typesafe.riskThreshold).toBe(0.5);
+    expect(parsed.data.typesafe.confidenceThreshold).toBe(0.5);
     expect(parsed.data.typesafe.timeoutMs).toBeUndefined();
   });
 });

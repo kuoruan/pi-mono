@@ -123,11 +123,14 @@ Caps for the stripped transcript (see the stripping table above). Defaults follo
 
 Set `provider` to `{ "type": "typesafe" }` to review through TypeSafe's Jev (System One) instead of an LLM. `model` carries the Jev id (`jev-1.13`, `jev-latest`). Connection fields are optional: unset `baseUrl`/`apiKey` fall back to `TYPESAFE_BASE_URL` / `TYPESAFE_API_KEY`, then the SDK built-in default URL. Pointing `baseUrl` at `https://openrouter.ai/api` with an OpenRouter key routes through OpenRouter (model ids pass through bare; responses carry extra `id`/`provider`/`usage.cost`, passed through).
 
-| Field              | Default | Description                                                                                                    |
-| ------------------ | ------- | -------------------------------------------------------------------------------------------------------------- |
-| `booleanThreshold` | `0.5`   | Noul probability at which a yes/no answer counts as true                                                       |
-| `confidenceFloor`  | `0.5`   | Minimum answer confidence; below it the verdict defers                                                         |
-| `timeoutMs`        | —       | SDK timeout per attempt (timeouts fail outright — only 408/429/5xx retry); falls back to top-level `timeoutMs` |
+| Field                 | Default | Description                                                                                                    |
+| --------------------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `intentThreshold`     | `0.5`   | Intent probability at or above which the anchor counts as authorizing the action                               |
+| `riskThreshold`       | `0.5`   | Risk score at or above which the action denies (soft tier — see mode ladder below)                             |
+| `confidenceThreshold` | `0.5`   | Minimum answer confidence; below it the verdict defers                                                         |
+| `timeoutMs`           | —       | SDK timeout per attempt (timeouts fail outright — only 408/429/5xx retry); falls back to top-level `timeoutMs` |
+
+A risk deny lands on the soft tier (low/medium), so `permissive` mode lets it through — raising `riskThreshold` widens what auto-allows in every mode, including `strict`. Only a danger-category hit denies hard. The 0.75 medium/low tier split does not follow `riskThreshold`.
 
 In Jev mode `reasoning`/`maxTokens` are ignored, and `instructions` overlays rather than replaces: a string is shared background for every question; `{ background?, questions? }` adds onto the built-in set (`danger_category`, `intent_match`, `risk`).
 
