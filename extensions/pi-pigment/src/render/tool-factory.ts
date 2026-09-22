@@ -96,9 +96,12 @@ export interface WrapperSpec<TState extends object> {
   /**
    * Cleanup before the factory's error frame renders — for wrappers whose
    * delegated SDK renderer owns resources that its own (bypassed)
-   * renderResult would have released (the shell tools' timing interval).
+   * renderResult would have released (the shell tools' timing interval),
+   * and for bridging the failure into render state (the shell tools'
+   * exit-badge parse). Receives the extracted failure message — the same
+   * text the frame renders, "Error" when the result carried no text.
    */
-  onError?: (ctx: RenderContext<TState>) => void;
+  onError?: (ctx: RenderContext<TState>, message: string) => void;
   /**
    * Which TUI shell frames this tool's renders (ToolDefinition.renderShell):
    *
@@ -238,10 +241,10 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       }
 
       if (status === "error") {
-        // Tool-specific cleanup (the shell tools' SDK renderer would have
-        // released its own resources in the final render we bypass).
-        spec.onError?.(ctx);
         const message = firstTextOf(result) || "Error";
+        // Tool-specific cleanup and the failure bridge — the contract
+        // lives on WrapperSpec.onError.
+        spec.onError?.(ctx, message);
         // The Took footer the bypassed native renderer would have shown,
         // from the same armed clock — undefined on a row that never armed
         // one (a resumed error row, exactly like pi's own renderers).

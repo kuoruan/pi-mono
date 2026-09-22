@@ -215,6 +215,26 @@ describe("renderResult error frame", () => {
     );
   });
 
+  it("the badge stays out of a SHELL error frame's identity stamps too", () => {
+    const { orig } = makeOrig({ name: "bash", label: "bash" });
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    const theme = buildRenderTheme();
+    const wrapped = wrappedFor(orig, {});
+    const message = "boom\n\nCommand exited with code 1";
+    const component = wrapped.renderResult(
+      { content: [{ type: "text", text: message }] } as never,
+      { expanded: false, isPartial: false },
+      theme,
+      ctx,
+    ) as TextDouble;
+    // The badge is DERIVED from the message (which is already stamped) —
+    // it must never join the stamp list as a redundant input.
+    expect(component.previewIdentity).toBe(
+      taskKeyOf("bash", [0, "", viewFor(theme).palette.identity, message]),
+    );
+  });
+
   it("the error frame keeps one Took across re-renders of the same call", async () => {
     const { orig } = makeOrig({
       async execute() {
@@ -490,6 +510,49 @@ describe("onError hook", () => {
       ctx,
     );
     expect(cleaned).toBe(true);
+  });
+
+  it("hands onError the extracted failure message, every frame (idempotent re-bridge)", () => {
+    const { orig } = makeOrig();
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    const seen: string[] = [];
+    const wrapped = wrappedFor(orig, {
+      onError: (_c, message) => {
+        seen.push(message);
+      },
+    });
+    const result = {
+      content: [{ type: "text", text: "boom\n\nCommand exited with code 1" }],
+    } as never;
+    // updateDisplay re-runs renderResult per frame — onError fires each
+    // time with the SAME message, so a state-stashed bridge (the shell
+    // badge) rewrites idempotently.
+    wrapped.renderResult(result, { expanded: true, isPartial: false }, buildRenderTheme(), ctx);
+    wrapped.renderResult(result, { expanded: true, isPartial: false }, buildRenderTheme(), ctx);
+    expect(seen).toEqual([
+      "boom\n\nCommand exited with code 1",
+      "boom\n\nCommand exited with code 1",
+    ]);
+  });
+
+  it("hands onError 'Error' when the result carries no text", () => {
+    const { orig } = makeOrig();
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    const seen: string[] = [];
+    const wrapped = wrappedFor(orig, {
+      onError: (_c, message) => {
+        seen.push(message);
+      },
+    });
+    wrapped.renderResult(
+      { content: [] } as never,
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    expect(seen).toEqual(["Error"]);
   });
 
   it("does not run on non-error renders", () => {

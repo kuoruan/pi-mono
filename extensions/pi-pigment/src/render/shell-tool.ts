@@ -5,6 +5,12 @@
  * whose language is known with certainty — and leaves the OUTPUT to the
  * SDK's native renderer (timing, preview windows, truncation footers).
  *
+ * The call header is also the status surface: the frame stays a clean prompt
+ * line, and once the call settles a muted `·` suffix rides the echo — the
+ * same "header body + status suffix" family grammar as write's "✓ new file".
+ * onError bridges the message's status line into render state, and every
+ * later frame composes the suffix fresh (never into the highlight cache).
+ *
  * Why not color the output (design decision): guessing an output's
  * language from the command was fragile (cd-prefixed anchors, heredoc
  * bodies, mixed producers) and misfires are worse than plain. The command
@@ -25,10 +31,17 @@ import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
+import { shellBadgeText, shellExitBadgeOf } from "./error-frame.ts";
 import { astInjectRegions, fallbackHeredocRegions } from "./heredoc-inject.ts";
 import type { RenderView } from "./session.ts";
 import { createToolWrapper } from "./tool-factory.ts";
-import { argsSettled, type ShellState, type ToolServices, argsOf } from "./tool-services.ts";
+import {
+  argsSettled,
+  callStateOf,
+  type ShellState,
+  type ToolServices,
+  argsOf,
+} from "./tool-services.ts";
 
 /** The per-shell rendering inputs: the grammar and the prompt glyph. */
 export interface ShellToolProfile {
@@ -56,8 +69,9 @@ export function createShellWrapper(
     // frame's background across every result row (the native renderer's
     // timing/packing child Texts compose inside it).
     renderShell: "default",
-    onError: (ctx) => {
-      ctx.state.endedAt ??= Date.now();
+    onError: (ctx, message) => {
+      // Parsed once here; later call-header frames read it (the suffix).
+      ctx.state.exitBadge = shellExitBadgeOf(message);
     },
     renderCall: ({ text, view, ctx, renderArgs }) => {
       const { palette, piTheme: theme } = view;
@@ -69,9 +83,16 @@ export function createShellWrapper(
         ctx.state.startedAt = Date.now();
         ctx.state.endedAt = undefined;
       }
-      const timeoutSuffix =
-        callArgs.timeout !== undefined ? theme.fg("muted", ` (timeout ${callArgs.timeout}s)`) : "";
-
+      // Settled-state suffix, composed fresh at setText (never into the highlight cache).
+      const status = callStateOf(ctx);
+      if (status !== "error") ctx.state.exitBadge = undefined;
+      const badge = ctx.state.exitBadge;
+      const mark = badge
+        ? shellBadgeText(badge, theme)
+        : status === "success"
+          ? theme.fg("success", theme.bold("✓"))
+          : "";
+      const statusSuffix = mark ? ` ${theme.fg("muted", "·")} ${mark}` : "";
       // The highlighted command, once ready: shell-grammar colors over a
       // toolTitle base (uncolored tokens inherit it). Cached per command
       // AND theme identity — a mid-session theme switch re-highlights
@@ -83,14 +104,14 @@ export function createShellWrapper(
           ? (ctx.state.commandHighlight as string | undefined)
           : undefined;
       if (cached !== undefined) {
-        text.setText(`${profile.prompt} ${cached}${timeoutSuffix}`);
+        text.setText(`${profile.prompt} ${cached}${statusSuffix}`);
         return text;
       }
 
       // Plain display now; the highlighted form swaps in via invalidate.
       const safeCommand = inertText(command);
       text.setText(
-        theme.fg("toolTitle", theme.bold(`${profile.prompt} ${safeCommand}`)) + timeoutSuffix,
+        theme.fg("toolTitle", theme.bold(`${profile.prompt} ${safeCommand}`)) + statusSuffix,
       );
 
       // Highlight once the args settle (streaming frames stay plain — the

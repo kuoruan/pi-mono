@@ -9,7 +9,7 @@ import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
-import type { WriteState } from "#src/render/tool-services.ts";
+import type { ShellState, WriteState } from "#src/render/tool-services.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
@@ -379,8 +379,8 @@ describe("write renderResult branches (memfs)", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as TextDouble;
-    const rendered = plain(await component.previewTask!.render(60));
+    );
+    const rendered = plain(await component!.previewTask!.render(60));
     const rows = rendered.split("\n");
     // The wrapped line's continuation rows repeat the gutter shape: the
     // bar over the blank number/sign columns ("▌   " = gutterWidth cols).
@@ -538,6 +538,38 @@ describe("session-restore shapes (argsComplete false, isPartial false)", () => {
     ctx.isPartial = true; // live streaming: command may still grow
     bash.renderCall({ command: "echo gro" }, buildRenderTheme(), ctx);
     expect(ctx.state.commandHighlightFor).toBeUndefined();
+  });
+
+  it("bridges the shell failure badge onto a restored error row's call header", async () => {
+    const tools = await registerTools();
+    const bash = tools.find((t) => t.name === "bash");
+    if (!bash?.renderCall || !bash.renderResult) throw new Error("bash not registered");
+    const { ctx } = makeRenderCtx<ShellState>();
+    // Restored shape: a fresh state, args never marked complete, a final
+    // ERROR result — exactly what /resume replays.
+    ctx.argsComplete = false;
+    ctx.isPartial = false;
+    ctx.isError = true;
+    // The settled error render bridges the status line into state (the
+    // frame itself stays body-only: the badge is the call header's now).
+    bash.renderResult(
+      {
+        content: [{ type: "text", text: "boom\n\nCommand exited with code 1" }],
+        isError: true,
+      },
+      { expanded: false, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    // The NEXT call-header frame (updateDisplay re-runs both renders)
+    // picks the badge up: the command echo carries the inline suffix.
+    const component = bash.renderCall(
+      { command: "false" },
+      buildRenderTheme(),
+      ctx,
+    ) as TextComponent;
+    const text = plain(component.text.text);
+    expect(text).toBe("$ false · ✗ exit 1");
   });
 
   it("renders the edit stats header on restore (not the bare header)", async () => {
@@ -912,18 +944,5 @@ describe("bash command highlighting (renderCall)", () => {
     // Shell grammar colors the command (e.g. the --stat flag or string).
     expect(settled.text.text).toContain("\x1b[38;2;");
     expect(plain(settled.text.text)).toContain("$ git diff --stat");
-  });
-
-  it("shows the timeout suffix (SDK parity)", async () => {
-    const tools = await registerTools();
-    const bash = tools.find((t) => t.name === "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx } = makeRenderCtx();
-    const component = bash.renderCall(
-      { command: "sleep 100", timeout: 30 },
-      buildRenderTheme(),
-      ctx,
-    ) as TextComponent;
-    expect(plain(component.text.text)).toContain("(timeout 30s)");
   });
 });

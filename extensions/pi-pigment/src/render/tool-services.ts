@@ -122,6 +122,24 @@ export interface ExecutionTimingState {
 }
 
 /**
+ * The shell failure taxonomy parsed from an error message's status line
+ * (the patterns live beside error-frame's UPSTREAM CONTRACT MIRROR).
+ * Exit codes 128-255 are the signal range (killed/terminated) — a
+ * different failure KIND than a plain non-zero exit (Ghostty's
+ * command-blocks stripe makes the same distinction), and it earns its
+ * own color.
+ */
+export interface ShellExitBadge {
+  /** The failure kind. */
+  kind: "error" | "signal" | "timeout" | "aborted" | "terminated";
+  /**
+   * The exit code (error/signal) or the timeout seconds (timeout); 0 for
+   * the code-less kinds (aborted/terminated).
+   */
+  value: number;
+}
+
+/**
  * The shell tools' render state. Co-authored with the SDK: our renderCall
  * stashes the command fields, and the SDK's native bash/powershell
  * renderResult (which the wrapper delegates output rendering to) reads
@@ -142,6 +160,14 @@ export interface ShellState extends ExecutionTimingState {
    * error) so no path that replaces that render leaks it.
    */
   interval?: ReturnType<typeof setInterval>;
+  /**
+   * The parsed failure badge, bridged by onError from the error message's
+   * status line — the call header's "✗ exit 1" suffix reads it on the
+   * frame after the error lands. Meaningless outside the error state
+   * (which is terminal), so renderCall drops it on any non-error frame —
+   * a state re-armed for a new execution starts badge-free.
+   */
+  exitBadge?: ShellExitBadge;
 }
 
 /**

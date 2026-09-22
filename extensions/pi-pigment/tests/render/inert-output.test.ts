@@ -12,7 +12,6 @@ import { parseHitLine } from "#src/render/tool-grep.ts";
 import { renderUnified } from "#src/render/unified-view.ts";
 import {
   type DrivenTaskComponent,
-  type TextDouble,
   buildRenderTheme,
   plain,
   makeRenderCtx,
@@ -107,14 +106,14 @@ describe("inert output property (ADR 0004)", () => {
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as DrivenTaskComponent;
+    );
     component.render(120); // the placeholder frame, synchronously
     const placeholder = plain(component.text.text);
     expect(NON_SGR_ESCAPE.test(placeholder)).toBe(false);
     expect(placeholder).toContain("^[]52;c;AAAAAA^G");
     // And the fallback text (the protocol's failure surface) is the same
     // inerted plain form.
-    const task = (component as TextDouble).previewTask;
+    const task = component.previewTask;
     expect(task?.fallback).toBeDefined();
     expect(NON_SGR_ESCAPE.test(plain(task!.fallback))).toBe(false);
   });
@@ -133,9 +132,10 @@ describe("inert output property (ADR 0004)", () => {
     expect(frame).toContain("^[]52;c;AAAAAA^G");
   });
 
-  it("badges the shell exit status into the error frame's header", () => {
+  it("stays headless on a recognized status line (the badge rides the call header)", () => {
     const theme = buildRenderTheme();
-    // Plain non-zero exit: ✗ N, error-colored.
+    // exit and timeout here prove the inert body still carries the status
+    // line; signal/abort/terminate shapes are pinned in error-frame-shape.
     const frame = formatToolErrorResult({
       name: "bash",
       message: `ls: cannot access 'x': No such file or directory\n\nCommand exited with code 2`,
@@ -145,19 +145,12 @@ describe("inert output property (ADR 0004)", () => {
       indicatorStyle: "bar",
       width: 120,
     });
-    expect(frame).toContain("✗ exit 2");
-    // The signal range (128-255) earns the sig label and warning color.
-    const signal = formatToolErrorResult({
-      name: "bash",
-      message: "output\n\nCommand exited with code 143",
-      theme,
-      pathShortener: (p: string) => p,
-      expanded: false,
-      indicatorStyle: "bar",
-      width: 120,
-    });
-    expect(signal).toContain("✗ exit 143");
-    // Timeout and abort carry their own statuses.
+    expect(frame).not.toContain("✗");
+    expect(frame).not.toContain("bash");
+    expect(frame).toContain("Command exited with code 2");
+    // signal exits, timeouts, aborts and terminations behave the same
+    // (their shapes are pinned in error-frame-shape.test.ts); one more
+    // here proves the inert body still carries the status line.
     const timeout = formatToolErrorResult({
       name: "bash",
       message: "partial output\n\nCommand timed out after 30 seconds",
@@ -167,17 +160,8 @@ describe("inert output property (ADR 0004)", () => {
       indicatorStyle: "bar",
       width: 120,
     });
-    expect(timeout).toContain("✗ timeout 30s");
-    const aborted = formatToolErrorResult({
-      name: "bash",
-      message: "Command aborted",
-      theme,
-      pathShortener: (p: string) => p,
-      expanded: false,
-      indicatorStyle: "bar",
-      width: 120,
-    });
-    expect(aborted).toContain("aborted");
+    expect(timeout).not.toContain("✗");
+    expect(timeout).toContain("Command timed out after 30 seconds");
     // Non-shell tools never badge (no exit-code semantics).
     const write = formatToolErrorResult({
       name: "write",
@@ -232,7 +216,7 @@ describe("inert output property (ADR 0004)", () => {
     };
     const text = makeTextComponent();
     renderPlainTextFallback(text as never, buildRenderTheme(), fakeResult as never);
-    const out = plain((text as TextDouble).text.text);
+    const out = plain(text.text.text);
     expect(NON_SGR_ESCAPE.test(out)).toBe(false);
     expect(out).toContain("^[]52;c;AAAAAA^G");
   });

@@ -6,8 +6,9 @@
  *
  * - Edit/write/grep/find/ls: the CALL header above already names the tool — the error body renders
  *   alone (bar rows + optional Took, nothing else; no second header row).
- * - Bash/powershell: the call header is the command echo (`$ …`), so the error frame OWNS a header
- *   carrying the ✗ N badge (new information).
+ * - Bash/powershell: the call header is the command echo, so it carries the failure badge as its
+ *   suffix ("✗ exit 1" — see bash-call-shape.test.ts); a RECOGNIZED status line renders body-only
+ *   here too, and the frame's own name header remains only for an unrecognized shell failure.
  *
  * All assertions are on plain(rendered) — the final setText text, SGR
  * stripped — so a row's exact leading whitespace (the bar column, the
@@ -16,10 +17,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { shellBadgeText, shellExitBadgeOf } from "#src/render/error-frame.ts";
 import type { PreviewTextHost } from "#src/render/text-task.ts";
 import type { ShellState } from "#src/render/tool-services.ts";
 import type { PaletteTheme } from "#src/theme/palette.ts";
 import {
+  buildFakeTheme,
   buildRenderTheme,
   makeRenderCtx,
   plain,
@@ -87,6 +90,9 @@ describe("edit error frame shape", () => {
     // presence — the call header above still shows the bare "← edit",
     // so the error frame must NOT add a second "← edit" row.
     expect(rows.filter((r) => /^\s*(← )?edit\b/.test(r))).toEqual([]);
+    // Body-only: the frame opens with the separator blank, then the bar
+    // rows over the message.
+    expect(rows[0]).toBe("");
     expect(rows.some((r) => r.startsWith("▌ Validation failed"))).toBe(true);
   });
 
@@ -283,7 +289,7 @@ describe("edit error frame shape", () => {
     expect(ctx.state.interval).toBeUndefined();
   });
 
-  it("does not repeat the call header — the body starts directly with the bar row", async () => {
+  it("does not repeat the call header — the body opens with the separator blank, then the bar row", async () => {
     const tools = await registerTools();
     const edit = toolOf(tools, "edit");
     const { ctx } = makeRenderCtx();
@@ -312,8 +318,10 @@ describe("edit error frame shape", () => {
     // start).
     const headerRows = rows.filter((r) => /^\s*(← )?edit\b/.test(r));
     expect(headerRows).toEqual([]);
-    // The body is bar rows over the message: bar flush at column 0,
-    // content one space after.
+    // Body-only: the frame's first row is the separator blank; the bar
+    // rows over the message follow (bar flush at column 0, content one
+    // space after).
+    expect(rows[0]).toBe("");
     expect(rows.some((r) => r.startsWith("▌ Could not find the exact text"))).toBe(true);
   });
 
@@ -384,6 +392,8 @@ describe("write error frame shape", () => {
     // message text itself may mention "write" — the header shape is
     // `name path…`, a row LEADING with the name).
     expect(rows.filter((r) => /^\s*(← )?(write|create)\b/.test(r))).toEqual([]);
+    // Body-only: the frame opens with the separator blank.
+    expect(rows[0]).toBe("");
     expect(rows.some((r) => r.startsWith("▌ Failed to write file"))).toBe(true);
   });
 
@@ -411,7 +421,7 @@ describe("write error frame shape", () => {
       { path: "/render-project/new.ts", content: "x" },
       buildRenderTheme(),
       ctx,
-    ) as TextDouble;
+    );
     const painted = header.customBgFn?.("← create x") ?? "";
     // The line OPENS with the theme's ERROR bg (48;2;40;30;30 — not the
     // success tint 48;2;30;30;40 the pre-fix renderCall always
@@ -478,7 +488,7 @@ describe("bash error frame shape", () => {
     expect(rows.some((r) => r.startsWith("▌ match exactly"))).toBe(true);
   });
 
-  it("owns its header with the exit-code badge (the call header is the command echo)", async () => {
+  it("stays headless when the status line parses — the badge rides the call header", async () => {
     const tools = await registerTools();
     const bash = toolOf(tools, "bash");
     const { ctx } = makeRenderCtx();
@@ -500,15 +510,108 @@ describe("bash error frame shape", () => {
       ctx,
     );
     const rows = rowsOf(component);
-    // Exactly one header row: `bash ✗ exit 1` — the badge rides the
-    // name, flush at the frame's left edge (the Box's pad is the row's
-    // only indent, like every other row in the frame).
-    const header = rows.find((r) => r.includes("bash"));
-    expect(header).toBeDefined();
-    expect(header).toMatch(/^bash ✗ exit 1\s*$/);
-    // Body rows: bar flush + blank bar rows for the message's leading
-    // blank lines (the appendStatus separator's shape, rendered as-is).
+    // NO name header: the call header above (the command echo) carries the
+    // "✗ exit 1" badge inline — a second header would say it twice.
+    expect(rows.filter((r) => r.includes("bash"))).toEqual([]);
+    // Body-only: the frame's first row is the separator blank (the pad
+    // the old standalone header's bottomPad used to leave); the blank
+    // bar rows for the message's own leading blank lines follow (the
+    // appendStatus separator's shape, rendered as-is).
+    expect(rows[0]).toBe("");
     expect(rows.some((r) => r.startsWith("▌ Command exited with code 1"))).toBe(true);
+  });
+
+  it("treats the terminated status line as a recognized badge (headless too)", async () => {
+    const tools = await registerTools();
+    const bash = toolOf(tools, "bash");
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    ctx.args = { command: "yes | head -c 1" };
+
+    const component = bash.renderResult!(
+      {
+        content: [{ type: "text", text: "\n\nCommand terminated without an exit code" }],
+        isError: true,
+      } as never,
+      { expanded: false, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    const rows = rowsOf(component);
+    expect(rows.filter((r) => r.includes("bash"))).toEqual([]);
+    expect(rows[0]).toBe("");
+    expect(rows.some((r) => r.startsWith("▌ Command terminated without an exit code"))).toBe(true);
+  });
+
+  it("keeps its name header when the tail parses to no badge (the degraded case)", async () => {
+    const tools = await registerTools();
+    const bash = toolOf(tools, "bash");
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    ctx.args = { command: "false" };
+
+    const component = bash.renderResult!(
+      {
+        content: [{ type: "text", text: "spawn bash failed: no such file" }],
+        isError: true,
+      } as never,
+      { expanded: false, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    const rows = rowsOf(component);
+    // The unrecognized failure still names its tool — degraded, not broken.
+    expect(rows[0]).toBe("bash");
+    expect(rows.some((r) => r.startsWith("▌ spawn bash failed"))).toBe(true);
+  });
+});
+
+describe("shell exit badge parse (the upstream status lines)", () => {
+  it("maps the four upstream status lines to their kinds", () => {
+    expect(shellExitBadgeOf("out\n\nCommand exited with code 1")).toEqual({
+      kind: "error",
+      value: 1,
+    });
+    expect(shellExitBadgeOf("out\n\nCommand exited with code 143")).toEqual({
+      kind: "signal",
+      value: 143,
+    });
+    expect(shellExitBadgeOf("out\n\nCommand timed out after 30 seconds")).toEqual({
+      kind: "timeout",
+      value: 30,
+    });
+    expect(shellExitBadgeOf("out\n\nCommand aborted")).toEqual({ kind: "aborted", value: 0 });
+    expect(shellExitBadgeOf("out\n\nCommand terminated without an exit code")).toEqual({
+      kind: "terminated",
+      value: 0,
+    });
+    expect(shellExitBadgeOf("no status line here")).toBeUndefined();
+  });
+
+  it("the badge text is the worded form — ✗ + verb + code, bold, colored by kind", () => {
+    const passThrough = buildRenderTheme();
+    expect(plain(shellBadgeText({ kind: "error", value: 1 }, passThrough))).toBe("✗ exit 1");
+    expect(plain(shellBadgeText({ kind: "signal", value: 143 }, passThrough))).toBe("✗ exit 143");
+    expect(plain(shellBadgeText({ kind: "timeout", value: 30 }, passThrough))).toBe(
+      "✗ timeout 30s",
+    );
+    expect(plain(shellBadgeText({ kind: "aborted", value: 0 }, passThrough))).toBe("✗ aborted");
+    expect(plain(shellBadgeText({ kind: "terminated", value: 0 }, passThrough))).toBe(
+      "✗ terminated",
+    );
+
+    // The code-less kinds warn (the single kind→color home); plain exits error.
+    const base = buildFakeTheme();
+    const warningMarked: PaletteTheme = {
+      ...base,
+      fg: (name, text) => (name === "warning" ? `«${text}»` : base.fg(name, text)),
+    };
+    expect(shellBadgeText({ kind: "terminated", value: 0 }, warningMarked)).toContain(
+      "✗ terminated",
+    );
+    expect(shellBadgeText({ kind: "aborted", value: 0 }, warningMarked)).toContain("✗ aborted");
+    expect(shellBadgeText({ kind: "error", value: 2 }, warningMarked)).not.toContain("«");
+    expect(plain(shellBadgeText({ kind: "error", value: 2 }, warningMarked))).toBe("✗ exit 2");
   });
 });
 
@@ -532,6 +635,7 @@ describe("grep error frame shape", () => {
     const rows = rowsOf(component);
     // Body alone: no row names the tool (the call header already did).
     expect(rows.filter((r) => /\bgrep\b/.test(r) && !r.startsWith("▌"))).toEqual([]);
+    expect(rows[0]).toBe("");
     expect(rows).toContain("▌ grep failed: bad regex");
   });
 });
@@ -555,6 +659,7 @@ describe("find error frame shape", () => {
     );
     const rows = rowsOf(component);
     expect(rows.filter((r) => /\bfind\b/.test(r) && !r.startsWith("▌"))).toEqual([]);
+    expect(rows[0]).toBe("");
     expect(rows).toContain("▌ find failed");
   });
 });
@@ -578,12 +683,13 @@ describe("ls error frame shape", () => {
     );
     const rows = rowsOf(component);
     expect(rows.filter((r) => /^\s*ls\b/.test(r))).toEqual([]);
+    expect(rows[0]).toBe("");
     expect(rows).toContain("▌ ls failed");
   });
 });
 
 describe("powershell error frame shape", () => {
-  it("owns its header with the exit-code badge (same grammar as bash)", async () => {
+  it("follows bash: headless on a recognized badge (the call header carries it)", async () => {
     const tools = await registerTools();
     const pwsh = toolOf(tools, "powershell");
     const { ctx } = makeRenderCtx();
@@ -600,9 +706,8 @@ describe("powershell error frame shape", () => {
       ctx,
     );
     const rows = rowsOf(component);
-    const header = rows.find((r) => r.includes("powershell"));
-    expect(header).toBeDefined();
-    expect(header).toMatch(/^powershell ✗ exit 1\s*$/);
+    expect(rows.filter((r) => r.includes("powershell"))).toEqual([]);
+    expect(rows[0]).toBe("");
     expect(rows.some((r) => r.startsWith("▌ Command exited with code 1"))).toBe(true);
   });
 });
@@ -635,6 +740,8 @@ describe("error frame bar follows indicatorStyle", () => {
     // the indicator column collapses entirely — the frame's Box padding
     // is the single leading space the row shows in the terminal.
     expect(rows.some((r) => r.includes("▌"))).toBe(false);
+    // Body-only still opens with the separator blank (no header above it).
+    expect(rows[0]).toBe("");
     expect(rows).toContain("Could not find the exact text");
   });
 

@@ -332,13 +332,16 @@ describe("bash onError: the native timing interval", () => {
       (ctx.state as { interval?: unknown }).interval = interval;
       ctx.isError = true;
       wrapped.renderResult(
-        { content: [{ type: "text", text: "boom" }] },
+        // The message carries the SDK's appended status line — onError
+        // bridges it into the render state (the call header's badge).
+        { content: [{ type: "text", text: "boom\n\nCommand exited with code 1" }] },
         { expanded: true, isPartial: false },
         buildRenderTheme(),
         ctx,
       );
       expect((ctx.state as { interval?: unknown }).interval).toBeUndefined();
       expect((ctx.state as { endedAt?: number }).endedAt).toBeTypeOf("number");
+      expect((ctx.state as { exitBadge?: unknown }).exitBadge).toEqual({ kind: "error", value: 1 });
       clearInterval(interval);
     } finally {
       vi.useRealTimers();

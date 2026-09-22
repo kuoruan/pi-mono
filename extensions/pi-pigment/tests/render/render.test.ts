@@ -336,7 +336,7 @@ describe("rendering pipeline", () => {
         { expanded: true, isPartial: false },
         theme,
         ctx,
-      ) as TextDouble;
+      );
     };
     // The full list, spelled out: [palette.identity, diff.lines.length,
     // language, streaming]. The parsed diff comes through the same parser
@@ -370,7 +370,7 @@ describe("rendering pipeline", () => {
         { expanded, isPartial: false },
         theme,
         ctx,
-      ) as TextDouble;
+      );
     };
     // [fp, palette.identity, lineCount, stats.fingerprint, expand, streaming].
     // lineCount and the fingerprint come from the wrapper's own stats memo
@@ -493,7 +493,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as TextDouble;
+    );
 
     // The TUI drives components through render(width) — the wrapper must
     // run the attached task through that path (bare components render
