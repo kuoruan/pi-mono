@@ -4,23 +4,23 @@ export const DANGER_NONE = "none";
 /** The nine DENY-Always categories as Choice criteria (condensed from SAFETY_RULES). */
 export const DANGER_CRITERIA: Record<string, string> = {
   secrets_credentials:
-    "Exposing secret material outward, reading secret stores, or printing token-bearing environment variables: private keys, tokens, .env, shell history, or key and credential files.",
+    "Exposing secret material outward, reading secret stores, or printing authentication material: stored secrets or credential files.",
   irreversible_destruction:
-    "Deleting or overwriting data without recovery (rm -rf of non-regenerable paths, disk formats, dropping databases, hard VCS resets).",
+    "Deleting or overwriting data without recovery (removing non-regenerable paths, reformatting volumes, dropping databases, hard VCS resets).",
   sensitive_data_egress:
     "Sending secrets or sensitive local data externally, beyond the approved payload or destination.",
   system_tampering:
-    "Creating persistent privileged entry points or weakening security (/etc/passwd, sudoers, authorized_keys, setuid, disabling logs).",
+    "Creating persistent privileged entry points or weakening security (system identity stores, privilege configuration, boot-time hooks, disabling logs).",
   persistent_system_changes:
     "Creating system-level scheduled tasks, startup services, or daemons outside the project scope.",
   external_code_execution:
-    "Executing fetched remote code (curl|bash, npm install from URL, eval of fetched content).",
+    "Executing fetched remote code (piping a download into a shell, installing from a URL, evaluating fetched content).",
   external_exposure:
     "Starting listeners reachable by external clients (non-loopback bind, port forwarding, public exposure).",
   destructive_vcs:
     "Force-pushing to or deleting main/master/shared branches; modifying .git/hooks, .git/config, .gitmodules to execute code.",
   resource_abuse_dos:
-    "Unbounded or system-level resource exhaustion (fork bombs, disk-filling, unbounded memory/CPU).",
+    "Unbounded or system-level resource exhaustion (rapid process spawning, filling disks, unbounded memory/CPU).",
   none: "None of the above — the action matches no always-deny category.",
 };
 

@@ -78,6 +78,8 @@ Note: `external_directory`/`path` asks reach this link, but any `allow` on them 
 
 **ReviewerEngine**: The `ReviewOutcome` producer seam (`review(ctx) -> EngineReviewResult | EngineMachineryFailure`). Two self-contained engines under `review/engines/`: LLM (the `ModelRegistry.complete` text path) and Jev (ADR 0005 — the TypeSafe SDK `systemOne` path; answers are calibrated probabilities, never text, so deny reasons synthesize from the danger-category name; a danger hit denies before the confidence check, and low confidence defers like the LLM lean). The session lifecycle picks the engine from the provider shape (object = Jev); the pipeline never branches on it.
 
+**WAF note**: the danger Choice criteria doubles as an attack-word list, and TypeSafe's Cloudflare WAF scores the request body — literal commands, system paths, or exploit spellings in criteria wording accumulate WAF score until the whole call returns HTTP 403 (full outage 2026-09-23, fixed by slimming `DANGER_CRITERIA` to descriptive wording). Keep criteria descriptive, never imperative; provider error pages are truncated to 300 chars before logging so they cannot reflux into the next request's state.
+
 **TypeSafe vs Jev**: Two independent axes, two words — pick by what the change would touch.
 
 - **TypeSafe** is the _transport/provider_ surface: the `@typesafe-ai/sdk` client (`TypesafeClientLike`, `createTypesafeClient`, `TypesafeConnection`), the SDK's `systemOne` wire shapes (`TypesafeSystemOneResponse`, `TypesafeRawAnswer`), the provider value (`{ type: "typesafe" }`), the `typesafe` config section, the `TYPESAFE_*` env fallbacks, and the `modelId` prefix (`typesafe/<model>`).
