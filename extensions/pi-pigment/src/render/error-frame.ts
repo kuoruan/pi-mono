@@ -185,14 +185,16 @@ export function shellExitBadgeOf(message: string): ShellExitBadge | undefined {
 }
 
 /**
- * The badge suffix's failure-kind color: plain non-zero exits error;
- * everything else (signal band, timeouts, aborts, code-less terminations) warns.
+ * The badge suffix's failure-kind color: plain non-zero exits error,
+ * no-match exit 1 dims to muted (needs the command), everything else warns.
  *
  * @param badge - The parsed status.
+ * @param command - The shell command text (used to determine benign exits).
  * @returns The theme color name.
  */
-function shellBadgeColorOf(badge: ShellExitBadge): StateColor {
-  return badge.kind === "error" ? "error" : "warning";
+function shellBadgeColorOf(badge: ShellExitBadge, command?: string): StateColor {
+  if (badge.kind !== "error") return "warning";
+  return isBenignExit(command, badge) ? "muted" : "error";
 }
 
 /**
@@ -220,15 +222,58 @@ function shellBadgeLabel(badge: ShellExitBadge): string {
 }
 
 /**
+ * Commands whose exit 1 means "nothing found", not failure: grep-family
+ * no-match, test-family false condition, diff-family no-difference.
+ * Matched against the command's first word (and `git diff --quiet`'s
+ * first two); compound commands (pipes, &&, ;) never qualify.
+ *
+ * @param command - The shell command text (undefined = unknown, not benign).
+ * @param badge - The parsed status (only error-kind exit 1 qualifies).
+ * @returns True when exit 1 is a benign no-match result.
+ */
+export function isBenignExit(command: string | undefined, badge: ShellExitBadge): boolean {
+  if (badge.kind !== "error" || badge.value !== 1 || !command) return false;
+  // Compound commands never qualify (fail-closed): only a lone SimpleCommand
+  // gets the dim treatment.
+  if (/[|&;\n]/.test(command.replace(/'[^']*'|"[^"]*"/g, ""))) return false;
+  // Five tokens cover git's flag shuffles (diff --cached --stat --quiet);
+  // beyond that a miss stays red (fail-closed).
+  const head = command.trimStart().split(/\s+/, 5);
+  // --quiet is a flag (position-free); grep shares grep's no-match semantics.
+  if (head[0] === "git" && (head.includes("--quiet") || head[1] === "grep")) return true;
+  return BENIGN_EXIT_COMMANDS.has(head[0] ?? "");
+}
+
+/** Benign-exit command heads: exit 1 is "nothing found", not failure. */
+const BENIGN_EXIT_COMMANDS = new Set([
+  "grep",
+  "rg",
+  "ack",
+  "test",
+  "[",
+  "[[",
+  "diff",
+  "cmp",
+  "Select-String",
+]);
+
+/**
  * The badge's styled form — the worded label, bold, in the kind's color.
+ * Pass the command for benign-exit dimming (exit 1 that means no-match
+ * renders muted, text unchanged).
  *
  * @param badge - The parsed status.
  * @param theme - The pi theme (colors).
+ * @param command - The shell command text (optional, enables dimming).
  * @returns The styled badge text (no leading separator — the call site
  *   composes the muted `·` + spaces around it).
  */
-export function shellBadgeText(badge: ShellExitBadge, theme: PaletteTheme): string {
-  return theme.fg(shellBadgeColorOf(badge), theme.bold(shellBadgeLabel(badge)));
+export function shellBadgeText(
+  badge: ShellExitBadge,
+  theme: PaletteTheme,
+  command?: string,
+): string {
+  return theme.fg(shellBadgeColorOf(badge, command), theme.bold(shellBadgeLabel(badge)));
 }
 
 /**
@@ -304,6 +349,7 @@ export function formatToolErrorResult(input: ErrorFrameInput): string {
   // none mode — the frame Box's own padding is the single leading space
   // the row keeps (collapsing the column here means no second space
   // appears after the pad). The failure-kind coloring rides the glyph.
+  // Deliberately no command: the bar is frame-level (failed), the dim lives on the header suffix only.
   const barKind = badge ? shellBadgeColorOf(badge) : "error";
   const barGlyph = borderBar(indicatorStyle);
   const prefix = barGlyph ? `${theme.fg(barKind, barGlyph)} ` : "";

@@ -12,6 +12,7 @@ import type { FindToolInput, ToolDefinition } from "@earendil-works/pi-coding-ag
 import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/language.ts";
+import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 
 import { accentEmphasis, emphasize, type EmphasisSpec } from "./pattern-emphasis.ts";
 import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
@@ -30,12 +31,9 @@ interface StyleFindPathOptions {
   /** The result path. */
   path: string;
   /** The pi theme (dim/accent/toolOutput fg). */
-  theme: {
-    fg(name: "dim" | "accent" | "toolOutput", text: string): string;
-    bold(text: string): string;
-  };
+  theme: Pick<PaletteTheme, "fg" | "bold">;
   /** The resolved palette (type colors). */
-  palette: { fgCode: string };
+  palette: Pick<DiffPalette, "fgCode">;
   /** The glob's anchor run ("" emphasizes nothing). */
   anchor: string;
   /** The emphasis spec (bold + accent fg). */

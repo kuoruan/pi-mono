@@ -88,7 +88,7 @@ export function createShellWrapper(
       if (status !== "error") ctx.state.exitBadge = undefined;
       const badge = ctx.state.exitBadge;
       const mark = badge
-        ? shellBadgeText(badge, theme)
+        ? shellBadgeText(badge, theme, command)
         : status === "success"
           ? theme.fg("success", theme.bold("✓"))
           : "";

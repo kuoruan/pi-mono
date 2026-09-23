@@ -17,7 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { shellBadgeText, shellExitBadgeOf } from "#src/render/error-frame.ts";
+import { isBenignExit, shellBadgeText, shellExitBadgeOf } from "#src/render/error-frame.ts";
 import type { PreviewTextHost } from "#src/render/text-task.ts";
 import type { ShellState } from "#src/render/tool-services.ts";
 import type { PaletteTheme } from "#src/theme/palette.ts";
@@ -663,6 +663,46 @@ describe("shell exit badge parse (the upstream status lines)", () => {
     expect(shellBadgeText({ kind: "aborted", value: 0 }, warningMarked)).toContain("✗ aborted");
     expect(shellBadgeText({ kind: "error", value: 2 }, warningMarked)).not.toContain("«");
     expect(plain(shellBadgeText({ kind: "error", value: 2 }, warningMarked))).toBe("✗ exit 2");
+  });
+
+  it("dims benign exit 1 to muted (no-match, not failure)", () => {
+    const theme = buildFakeTheme();
+    const exit1 = { kind: "error", value: 1 } as const;
+    // Benign heads: text unchanged, color muted.
+    for (const cmd of [
+      "grep foo",
+      "rg --files",
+      "test -f a",
+      "[ -n x ]",
+      "diff a b",
+      "git diff --quiet",
+    ]) {
+      expect(isBenignExit(cmd, exit1)).toBe(true);
+      expect(plain(shellBadgeText(exit1, theme, cmd))).toBe("✗ exit 1");
+      expect(shellBadgeText(exit1, theme, cmd)).toContain(theme.getFgAnsi("muted"));
+    }
+    // Non-benign: other codes, other commands, compound commands, unknown.
+    expect(isBenignExit("grep foo", { kind: "error", value: 2 })).toBe(false);
+    // find/fd exit 1 is a real error (bad path) — their no-match exits 0.
+    expect(isBenignExit("find . -name x", exit1)).toBe(false);
+    expect(isBenignExit("fd foo", exit1)).toBe(false);
+    // git grep shares grep's no-match semantics; [[ is test-family.
+    expect(isBenignExit("git grep -q foo", exit1)).toBe(true);
+    expect(isBenignExit("[[ 1 == 2 ]]", exit1)).toBe(true);
+    // ack documents exit 1 = no match (grep-compatible).
+    expect(isBenignExit("ack foo", exit1)).toBe(true);
+    // --quiet is a flag: position-free (git diff --cached --quiet).
+    expect(isBenignExit("git diff --cached --quiet", exit1)).toBe(true);
+    // A newline is a command separator too — the exit may come from line 2.
+    expect(isBenignExit("grep foo\nfalse", exit1)).toBe(false);
+    expect(isBenignExit("ls", exit1)).toBe(false);
+    expect(isBenignExit("grep a | head", exit1)).toBe(false);
+    expect(isBenignExit("grep a && echo hi", exit1)).toBe(false);
+    expect(isBenignExit("grep 'a|b'", exit1)).toBe(true);
+    expect(isBenignExit(undefined, exit1)).toBe(false);
+    expect(isBenignExit("grep foo", { kind: "timeout", value: 1 })).toBe(false);
+    // Without the command the badge stays error red (fail-closed).
+    expect(shellBadgeText(exit1, theme)).toContain(theme.getFgAnsi("error"));
   });
 });
 

@@ -277,6 +277,20 @@ describe("shell call header failure badge (renderCall)", () => {
     expect(cachedCommand).not.toContain("✗");
   });
 
+  it("dims a benign no-match exit 1 (grep) to muted", async () => {
+    const tools = await registerTools();
+    const bash = toolOf(tools, "bash");
+    if (!bash?.renderCall) throw new Error("bash not registered");
+    const { ctx } = makeRenderCtx<ShellState>();
+    const theme = buildFakeTheme();
+    ctx.isError = true;
+    ctx.state.exitBadge = { kind: "error", value: 1 };
+    const call = bash.renderCall({ command: "grep foo bar" }, theme, ctx);
+    expect(plain(call.text.text)).toBe("$ grep foo bar · ✗ exit 1");
+    expect(call.text.text).toContain(theme.getFgAnsi("muted"));
+    expect(call.text.text).not.toContain(theme.getFgAnsi("error"));
+  });
+
   it("renders no args timeout suffix, explicit args included", async () => {
     const tools = await registerTools();
     const bash = toolOf(tools, "bash");
