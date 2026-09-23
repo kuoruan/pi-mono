@@ -283,6 +283,8 @@ describe("write renderResult branches (memfs)", () => {
       expect(rendered.split("\n").filter((l) => /const v\d+ = /.test(l)).length).toBe(10);
       expect(rendered).toContain("14 more lines");
 
+      // The tail hugs the diff body (probe: expand hint on the next line).
+      expect(rendered).toMatch(/const v9 = 9;[^\n]*\n\.\.\. \(14 more lines/);
       // Expanded re-attaches (the key carries the expand state) and renders
       // the full body.
       const expanded = write.renderResult?.(

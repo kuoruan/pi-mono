@@ -178,6 +178,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     // content) lands synchronously; the async highlight swaps in later.
     component.render(120);
     const text = plain(component.text.text);
+    expect(text.startsWith("\n")).toBe(true);
     expect(text).toContain("app.ts:1:");
     expect(text).toContain("const value = 42;");
   });
@@ -261,8 +262,9 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     ) as DrivenTaskComponent;
     const text = await settledText(component, "app.ts");
     const lines = text.split("\n");
-    expect(lines[0]).toContain("app.ts");
-    expect(lines[1]).toContain("notes.txt");
+    // lines[0] is the header gap (native bash's leading blank line).
+    expect(lines[1]).toContain("app.ts");
+    expect(lines[2]).toContain("notes.txt");
     expect(lines[lines.length - 1]).toBe("[500 entries limit reached. Use limit=1000 for more]");
     // The notice is a footer row — exactly one of them, and no tree
     // connector ever prefixes it (the pre-fix bug: `└── [500 entries…]`).
@@ -452,6 +454,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
       ctx,
     ) as DrivenTaskComponent;
     const collapsedText = await settledText(collapsed, "├── ");
+    expect(collapsedText.startsWith("\n")).toBe(true);
     expect(collapsedText).toContain("├── ");
     expect(collapsedText).toContain("more lines, ctrl+o to expand");
     expect(collapsedText).toMatch(/Took \d+\.\ds/);
@@ -465,6 +468,62 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     const expandedText = await settledText(expanded, "└── ");
     expect(expandedText).toContain("└── "); // the elbow on the last entry
     expect(expandedText).not.toContain("more lines");
+  });
+
+  it("find separates the body and the tail with a blank line", async () => {
+    for (let i = 0; i < 30; i++) writeFileSync(join(tempDir, `g${i}.ts`), "x\n");
+    const tools = await registerTools();
+    const find = tools.find((t) => t.name === "find");
+    if (!find?.renderResult) throw new Error("find not registered");
+    const result = await find.execute(
+      "t1",
+      { pattern: "*.ts", path: tempDir },
+      undefined,
+      undefined,
+      undefined,
+    );
+    const { ctx } = makeRenderCtx();
+    seedTiming(ctx);
+    const component = find.renderResult(
+      result,
+      { expanded: false, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    ) as DrivenTaskComponent;
+    const text = await settledText(component, "g0.ts");
+    // The body breathes below the call header (native bash's leading gap);
+    // the body hugs the expand hint (one window) — the tail's own segments
+    // breathe below it.
+    expect(text.startsWith("\n")).toBe(true);
+    expect(text).toMatch(/g\d+\.ts\n\.\.\. \(\d+ more lines/);
+  });
+
+  it("find separates a notice-only tail from the body with a blank line", async () => {
+    const tools = await registerTools();
+    const find = tools.find((t) => t.name === "find");
+    if (!find?.renderResult) throw new Error("find not registered");
+    const { ctx } = makeRenderCtx();
+    seedTiming(ctx);
+    // 5 paths, no collapse — but a limit notice in details (the SDK sets
+    // both the text's last line and details in one path).
+    const component = find.renderResult(
+      {
+        content: [
+          {
+            type: "text",
+            text: "h0.ts\nh1.ts\nh2.ts\nh3.ts\nh4.ts\n\n[5 results limit reached. Use limit=10 for more]",
+          },
+        ],
+        details: { resultLimitReached: 5 },
+      },
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    ) as DrivenTaskComponent;
+    const text = await settledText(component, "h0.ts");
+    // No collapse (5 < 20) but a limit notice: the notice is a footnote,
+    // not window chrome — blank line above it.
+    expect(text).toMatch(/h\d+\.ts\n\n\[5 results limit reached\./);
   });
 
   it("Took comes from the render-state clock: a live row has one, a resumed row does not", async () => {
@@ -505,7 +564,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     expect(resumedText).not.toMatch(/Took/);
   });
 
-  it("ls rows never emit a full SGR reset and the Took footer sits a blank line below the tree", async () => {
+  it("ls rows never emit a full SGR reset and the Took footer hugs the tree", async () => {
     mkdirSync(join(tempDir, "sub"));
     writeFileSync(join(tempDir, "app.ts"), "x\n");
     writeFileSync(join(tempDir, "notes.txt"), "x\n");
@@ -579,6 +638,21 @@ describe("the window authority (collapsedView)", () => {
     expect(tail).toContain("ctrl+o to expand");
   });
 
+  it("puts the expand hint and Took on their own lines (native bash layout)", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `L${i}`);
+    const { tail } = collapsedView(lines, {
+      budget: 15,
+      expanded: false,
+      tookMs: 1200,
+      theme: buildRenderTheme(),
+    });
+    expect(plain(tail).split("\n")).toEqual([
+      "... (15 more lines, ctrl+o to expand)",
+      "",
+      "Took 1.2s",
+    ]);
+  });
+
   it("expands to everything when no cap is set (grep/find/ls)", () => {
     const lines = Array.from({ length: 30 }, (_, i) => `L${i}`);
     const { shown, tail } = collapsedView(lines, {
@@ -615,10 +689,28 @@ describe("the window authority (collapsedView)", () => {
     // The notice is not a body line: the window still shows the full budget.
     expect(shown.length).toBe(15);
     expect(shown).not.toContain(notice);
-    expect(tail.split("\n")).toEqual(["... (15 more lines, ctrl+o to expand)", notice]);
+    expect(tail.split("\n")).toEqual(["... (15 more lines, ctrl+o to expand)", "", notice]);
   });
 
-  it("colors the tail: the Took segment rides success, the separator and notice keep theirs", () => {
+  it("puts Took last: notice above, Took closes the tail (native bash order)", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `L${i}`);
+    const { tail } = collapsedView(lines, {
+      budget: 15,
+      expanded: false,
+      tookMs: 1200,
+      notice: "[50.0KB limit reached]",
+      theme: buildRenderTheme(),
+    });
+    expect(plain(tail).split("\n")).toEqual([
+      "... (15 more lines, ctrl+o to expand)",
+      "",
+      "[50.0KB limit reached]",
+      "",
+      "Took 1.2s",
+    ]);
+  });
+
+  it("colors the tail: each footer rides its own line and color", () => {
     const theme = buildFakeTheme();
     const lines = Array.from({ length: 30 }, (_, i) => `L${i}`);
     const { tail } = collapsedView(lines, {
@@ -631,10 +723,10 @@ describe("the window authority (collapsedView)", () => {
     // A tail footer exists only on a settled, successful call (the
     // factory's error branch returns before spec.renderResult; a pending
     // frame has no measured duration) — the success code on the Took
-    // segment pins that invariant, not a runtime state check. The
-    // separator and the notice keep their own colors.
+    // line pins that invariant, not a runtime state check. Footers ride
+    // their own lines (the native bash layout); the notice keeps warning.
     expect(tail).toContain(`${theme.getFgAnsi("success")}Took 1.2s`);
-    expect(tail).toContain(`${theme.getFgAnsi("muted")} · `);
+    expect(tail).not.toContain("·");
     expect(tail).toContain(`${theme.getFgAnsi("warning")}[50.0KB limit reached]`);
   });
 });

@@ -21,6 +21,8 @@ import { createToolWrapper } from "./tool-factory.ts";
 import {
   COLLAPSED_LINES,
   collapsedView,
+  HEADER_GAP,
+  joinBodyTail,
   outputMemoOf,
   outputTaskKey,
   renderPlainOutput,
@@ -150,7 +152,11 @@ export function createGrepWrapper(
       // Render-side collapse (the agent's context keeps the full output):
       // the shared collapsedView owns the budget, hidden-count, and the
       // affordance+Took tail composition.
-      const { shown: shownLines, tail } = collapsedView(lines, {
+      const {
+        shown: shownLines,
+        tail,
+        hidden,
+      } = collapsedView(lines, {
         budget: COLLAPSED_LINES.grep,
         expanded: options.expanded,
         tookMs,
@@ -167,7 +173,11 @@ export function createGrepWrapper(
         literal: callArgs.literal === true,
         ignoreCase: callArgs.ignoreCase === true,
       };
-      const plain = `${renderPlainOutput(shownLines, theme)}${tail ? `\n${tail}` : ""}`;
+      const plain = joinBodyTail(
+        `${HEADER_GAP}${renderPlainOutput(shownLines, theme)}`,
+        tail,
+        hidden,
+      );
       attachPreviewTask(
         text,
         definePreviewTask({
@@ -181,12 +191,16 @@ export function createGrepWrapper(
           // Streaming frames skip highlighting entirely (the plain form is
           // the placeholder AND the frame); the settled frame re-renders
           // once through renderHighlighted and populates the cache.
-          render: async () =>
-            pending
-              ? plain
-              : `${await renderHighlighted({ lines: shownLines, pattern, flags, view })}${
-                  tail ? `\n${tail}` : ""
-                }`,
+          render: async () => {
+            if (pending) return plain;
+            const highlighted = await renderHighlighted({
+              lines: shownLines,
+              pattern,
+              flags,
+              view,
+            });
+            return joinBodyTail(`${HEADER_GAP}${highlighted}`, tail, hidden);
+          },
         }),
       );
       return text;

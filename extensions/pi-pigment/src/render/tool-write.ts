@@ -34,7 +34,7 @@ import {
   setDiffPreviewTask,
 } from "./text-task.ts";
 import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
-import { COLLAPSED_LINES, collapsedView, streamingStamp } from "./tool-output.ts";
+import { COLLAPSED_LINES, collapsedView, joinBodyTail, streamingStamp } from "./tool-output.ts";
 import {
   argsSettled,
   callStateOf,
@@ -393,21 +393,25 @@ export function createWriteWrapper(
               // expanded cap (MAX_RENDER_LINES) flow through one call, one
               // tail grammar (write shows no Took footer — the SDK's own
               // write renderer never did either).
-              const { shown, tail } = collapsedView(bodyLines, {
+              const { shown, tail, hidden } = collapsedView(bodyLines, {
                 budget: COLLAPSED_LINES.write,
                 expanded: options.expanded,
                 expandedCap: MAX_RENDER_LINES,
                 theme,
               });
-              return `${padDiffBody(
-                newFileBody({
-                  lines: shown,
+              return joinBodyTail(
+                `${padDiffBody(
+                  newFileBody({
+                    lines: shown,
+                    palette,
+                    indicatorGlyph: borderBar(indicatorStyle),
+                    width,
+                  }),
                   palette,
-                  indicatorGlyph: borderBar(indicatorStyle),
-                  width,
-                }),
-                palette,
-              )}${tail ? `\n${tail}` : ""}`;
+                )}`,
+                tail,
+                hidden,
+              );
             },
           }),
         );

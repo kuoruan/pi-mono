@@ -15,6 +15,8 @@ import { createToolWrapper } from "./tool-factory.ts";
 import {
   COLLAPSED_LINES,
   collapsedView,
+  HEADER_GAP,
+  joinBodyTail,
   outputMemoOf,
   outputTaskKey,
   renderPlainOutput,
@@ -64,14 +66,22 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
 
       // Collapsed up front (grep/find's shape): the placeholder and the
       // fallback never flash or strand the full listing.
-      const { shown: shownEntries, tail: plainTail } = collapsedView(entries, {
+      const {
+        shown: shownEntries,
+        tail: plainTail,
+        hidden,
+      } = collapsedView(entries, {
         budget: COLLAPSED_LINES.ls,
         expanded: options.expanded,
         tookMs,
         notice: derived.notice,
         theme,
       });
-      const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
+      const plain = joinBodyTail(
+        `${HEADER_GAP}${renderPlainOutput(shownEntries, theme)}`,
+        plainTail,
+        hidden,
+      );
       attachPreviewTask(
         text,
         definePreviewTask({
@@ -86,7 +96,11 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
             // Render-side collapse (ctrl+o expands) over the tree: the
             // shared collapsedView owns the budget and the affordance+Took
             // tail.
-            const { shown, tail } = collapsedView(entries, {
+            const {
+              shown,
+              tail,
+              hidden: swapHidden,
+            } = collapsedView(entries, {
               budget: COLLAPSED_LINES.ls,
               expanded: options.expanded,
               tookMs,
@@ -126,7 +140,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
 
             // One blank line separates the footer from the tree (the
             // collapse affordance/Took row is a footer, not a tree row).
-            return tail ? `${rows.join("\n")}\n\n${tail}` : rows.join("\n");
+            return joinBodyTail(`${HEADER_GAP}${rows.join("\n")}`, tail, swapHidden);
           },
         }),
       );

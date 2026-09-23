@@ -29,6 +29,33 @@ import type { ExecutionTimingState } from "./tool-services.ts";
 export const COLLAPSED_LINES = { grep: 15, find: 20, ls: 20, write: 10 } as const;
 
 /**
+ * The header gap: one blank line between the call header and the result
+ * body (the native bash renderer's leading `\\n` — bash.js paints its
+ * output body with a leading newline). It lives on the BODY side by
+ * necessity, not by design: the SDK's Text component exposes setText
+ * but no read-back, so the wrapper cannot append the gap to the native
+ * header it doesn't own — the body leads with the gap instead. One
+ * constant so the three wrappers (grep/find/ls) can't drift.
+ */
+export const HEADER_GAP = "\n";
+
+/**
+ * Join a body to its tail: the expand hint hugs the body (it is the
+ * window's own chrome — "more below"), while a notice/Took-led tail is a
+ * footnote and breathes below a blank line. The caller passes hidden
+ * (the window's own count — > 0 means the tail leads with the hint).
+ *
+ * @param body - The rendered body (already carrying HEADER_GAP).
+ * @param tail - The collapsedView tail ("" when nothing follows).
+ * @param hidden - The window's hidden count.
+ * @returns The joined block.
+ */
+export function joinBodyTail(body: string, tail: string, hidden: number): string {
+  if (!tail) return body;
+  return `${body}${hidden > 0 ? "\n" : "\n\n"}${tail}`;
+}
+
+/**
  * The tail a windowed body appends — one shape across tools, so the
  * affordance reads uniformly: the collapsed window advertises the expand
  * key (the hint text arrives pre-rendered — the SDK's keyHint resolves
@@ -394,11 +421,22 @@ export interface ViewOptions {
   theme: PaletteTheme;
 }
 
+/** The collapsed window: the shown slice, the tail block, and the hidden count. */
+export interface CollapsedWindow {
+  /** The lines inside the window. */
+  shown: string[];
+  /** The tail block (expand hint / notice / Took, "" when nothing follows). */
+  tail: string;
+  /** The lines the window is hiding (> 0 means the tail leads with the hint). */
+  hidden: number;
+}
+
 /**
  * The collapsed body view: which lines to show and the affordance tail to
  * append — one authority for the collapse predicate, the hidden-count,
- * and the `… more lines · ctrl+o · Took` composition shared by every
- * collapsed body (grep/find/ls, write's create preview). Per-tool
+ * and the footer-line tail (expand hint, Took, notice — one per line,
+ * the native bash layout) shared by every collapsed body (grep/find/ls,
+ * write's create preview). Per-tool
  * variance (the budgets, how lines are derived — filtering empties or
  * not) stays at call sites; this owns the shape: one window concept with
  * two regimes (collapsed budget + optional expanded cap) and one tail
@@ -409,10 +447,7 @@ export interface ViewOptions {
  * @returns The shown lines and the tail line ("" when nothing is hidden
  * and no time was measured).
  */
-export function collapsedView(
-  lines: string[],
-  opts: ViewOptions,
-): { shown: string[]; tail: string } {
+export function collapsedView(lines: string[], opts: ViewOptions): CollapsedWindow {
   const { budget, expanded, expandedCap, tookMs, notice, theme } = opts;
   // An absent result source means no footer (write's create preview —
   // the SDK's own write renderer never showed timing either).
@@ -420,10 +455,17 @@ export function collapsedView(
   const window = collapsed ? budget : (expandedCap ?? lines.length);
   const hidden = lines.length - Math.min(lines.length, window);
   const shown = lines.slice(0, window);
-  const footers = [
+  // Footers read top-down: the expand hint, the limit notice (the SDK's
+  // warning about the whole output — the native renderers show the same
+  // information as a `[Truncated: …]` line), and Took closes the tail
+  // (the native bash order: warnings before Took). One blank line
+  // between, the error frame's rhythm.
+  const alert = notice ? theme.fg("warning", notice) : "";
+  const tail = [
     // The collapsed regime advertises the expand key; an expanded cap
     // reports the remainder without an affordance.
     collapseTail(hidden, theme, expanded ? "" : expandKeyHint(theme)),
+    alert,
     // "success" is an invariant here, not a state check: the factory's
     // renderResult error branch returns before spec.renderResult runs (an
     // error result never reaches this view), and a pending frame's
@@ -432,12 +474,6 @@ export function collapsedView(
     tookFooter(tookMs, theme, "success"),
   ]
     .filter(Boolean)
-    .join(theme.fg("muted", " · "));
-  // The limit notice rides its own line under the tail: it is the SDK's
-  // warning about the whole output (the native renderers show the same
-  // information as a `[Truncated: …]` line), not part of the windowed
-  // body — so it is never counted against the budget nor hidden by it.
-  const alert = notice ? theme.fg("warning", notice) : "";
-  const tail = [footers, alert].filter(Boolean).join("\n");
-  return { shown, tail };
+    .join("\n\n");
+  return { shown, tail, hidden };
 }

@@ -20,6 +20,8 @@ import { createToolWrapper } from "./tool-factory.ts";
 import {
   COLLAPSED_LINES,
   collapsedView,
+  HEADER_GAP,
+  joinBodyTail,
   outputMemoOf,
   outputTaskKey,
   renderPlainOutput,
@@ -144,14 +146,22 @@ export function createFindWrapper(
       // collapsed to the window (grep's shape): a large result set must
       // not flash the full listing before the styled render swaps in, nor
       // show it permanently when the task fails.
-      const { shown: shownEntries, tail: plainTail } = collapsedView(all, {
+      const {
+        shown: shownEntries,
+        tail: plainTail,
+        hidden,
+      } = collapsedView(all, {
         budget: COLLAPSED_LINES.find,
         expanded: options.expanded,
         tookMs,
         notice: derived.notice,
         theme,
       });
-      const plain = `${renderPlainOutput(shownEntries, theme)}${plainTail ? `\n${plainTail}` : ""}`;
+      const plain = joinBodyTail(
+        `${HEADER_GAP}${renderPlainOutput(shownEntries, theme)}`,
+        plainTail,
+        hidden,
+      );
       attachPreviewTask(
         text,
         definePreviewTask({
@@ -163,7 +173,11 @@ export function createFindWrapper(
           fallback: plain,
           invalidate: ctx.invalidate,
           render: async () => {
-            const { shown: lines, tail } = collapsedView(all, {
+            const {
+              shown: lines,
+              tail,
+              hidden: swapHidden,
+            } = collapsedView(all, {
               budget: COLLAPSED_LINES.find,
               expanded: options.expanded,
               tookMs,
@@ -178,7 +192,7 @@ export function createFindWrapper(
               }
               return styleFindPath({ path: line, theme, palette, anchor, emphasis: emphasisSpec });
             });
-            return tail ? `${styled.join("\n")}\n${tail}` : styled.join("\n");
+            return joinBodyTail(`${HEADER_GAP}${styled.join("\n")}`, tail, swapHidden);
           },
         }),
       );
