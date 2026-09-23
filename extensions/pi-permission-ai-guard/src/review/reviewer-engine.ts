@@ -12,23 +12,18 @@
  * `createJevEngine` (the TypeSafe System One path).
  */
 
-import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
-
+import type { AuditCorrelation } from "#src/audit/decision-record.ts";
 import type { ReviewOutcome } from "#src/model/model-verdict.ts";
 import type { EngineMachineryKind } from "#src/review/machinery-kinds.ts";
 import type { ReviewRequestContext } from "#src/review/request/review-request.ts";
 import type { StrippedTranscript } from "#src/review/request/transcript-stripper.ts";
 
 /** What an engine needs from the pipeline per ask (no engine reaches past this). */
-export interface EngineCallContext {
+export interface EngineCallContext extends AuditCorrelation {
   /** The stripped transcript (prompt material + cache fingerprint source). */
   transcript: StrippedTranscript;
   /** The review request (ask + target). */
   request: ReviewRequestContext;
-  /** Audit log (call-failure and diagnostic records). */
-  log: AuthorizerLog;
-  /** Request id for audit-log correlation. */
-  requestId: string;
 }
 
 /** What an engine reports back: the outcome plus its audit identity. */

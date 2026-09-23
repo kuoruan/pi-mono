@@ -1,8 +1,7 @@
 import { APITimeoutError, APIUserAbortError } from "@typesafe-ai/sdk";
 
-import { modelCallError } from "#src/audit/decision-record.ts";
-import { MODEL_CALL_ERROR_EVENT } from "#src/audit/events.ts";
 import type { TypesafeConfig } from "#src/config/config-schema.ts";
+import { emitCallFailure } from "#src/model/model-review.ts";
 import type { ModelCallDeferKind, ReviewOutcome } from "#src/model/model-verdict.ts";
 import type {
   EngineCallContext,
@@ -10,7 +9,7 @@ import type {
   EngineReviewResult,
   ReviewerEngine,
 } from "#src/review/reviewer-engine.ts";
-import { classifyAbortish, errorMessage, normalizeAndRedactText } from "#src/utils.ts";
+import { classifyAbortish } from "#src/utils.ts";
 
 import { type TypesafeClientLike, buildJevRequest, createTypesafeClient } from "./client.ts";
 import { projectRawAnswers, synthesizeJevVerdict } from "./verdict.ts";
@@ -69,10 +68,7 @@ export function createJevEngine(deps: JevEngineDeps): ReviewerEngine {
         return { outcome, modelId };
       } catch (error) {
         const deferKind = classifyError(error);
-        ctx.log.debug(
-          MODEL_CALL_ERROR_EVENT,
-          modelCallError(ctx.requestId, deferKind, normalizeAndRedactText(errorMessage(error))),
-        );
+        emitCallFailure(ctx, deferKind, error);
         return {
           outcome: { verdict: { kind: "defer" }, deferKind, latencyMs: now() - startedAt },
           modelId,

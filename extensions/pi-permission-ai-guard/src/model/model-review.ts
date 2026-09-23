@@ -22,12 +22,16 @@ import {
   contentText,
 } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 
-import { modelCallError } from "#src/audit/decision-record.ts";
+import type { AuditCorrelation } from "#src/audit/decision-record.ts";
 import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT } from "#src/audit/events.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
-import { classifyAbortish, errorMessage, normalizeAndRedactText } from "#src/utils.ts";
+import {
+  classifyAbortish,
+  errorMessage,
+  normalizeAndRedactText,
+  truncateMiddle,
+} from "#src/utils.ts";
 
 import {
   type ModelCallDeferKind,
@@ -64,8 +68,8 @@ export type ModelRegistryLike = Pick<ModelRegistry, "find" | "getApiKeyAndHeader
  * outcome shapes without re-timing.
  */
 type CallResult =
-  | { ok: true; reply: AssistantMessage; latencyMs: number }
-  | { ok: false; deferKind: ModelCallDeferKind; latencyMs: number };
+  | { ok: true; reply: AssistantMessage; deferKind?: never; latencyMs: number }
+  | { ok: false; reply?: never; deferKind: ModelCallDeferKind; latencyMs: number };
 
 /**
  * Resolved auth fields needed to make a model call. Extracted from
@@ -78,7 +82,7 @@ export type ModelCallAuth = Pick<SimpleStreamOptions, "apiKey" | "headers">;
  * this from its resolved model + auth + call context; {@link reviewModel}
  * consumes it.
  */
-export interface ModelCallContext {
+export interface ModelCallContext extends AuditCorrelation {
   /** The resolved reviewer model. */
   model: Model<Api>;
   /** The one-shot model call (see `ModelCallFn`). */
@@ -89,11 +93,15 @@ export interface ModelCallContext {
   reasoning: AiGuardConfig["reasoning"];
   /** Reply budget — thinking blocks count against it on reasoning upstreams. */
   maxTokens: number;
-  /** Audit log for call-failure and diagnostic records. */
-  log: AuthorizerLog;
-  /** Request id for audit-log correlation. */
-  requestId: string;
 }
+
+/**
+ * Max chars of provider error text kept in diagnostics. Provider error pages
+ * (e.g. Cloudflare HTML) must not land in the log unbounded — the transcript
+ * feeds logs back into the next request's state, and a WAF then blocks its own
+ * error page.
+ */
+export const MAX_PROVIDER_ERROR_CHARS = 300;
 
 /**
  * Build the model completer on top of `ModelRegistry.complete` — the
@@ -118,19 +126,28 @@ export function createModelCall(getRegistry: () => ModelRegistryLike | undefined
 /**
  * Emit a call-failure record to the audit log (keyed by requestId).
  *
- * @param ctx - The resolved model-call context (for log + requestId).
+ * Takes the minimal log/requestId surface so both engines share it: the LLM
+ * `ModelCallContext` and the Jev `EngineCallContext` each carry these fields.
+ *
+ * The provider's error text is sanitized and truncated here, once, for every
+ * caller: error pages (e.g. Cloudflare HTML) must not land in the log unbounded —
+ * the transcript feeds logs back into the next request's state, and a WAF then
+ * blocks its own error page.
+ *
+ * @param ctx - The log + request id (a slice of either call context).
  * @param deferKind - The classified defer kind.
  * @param error - The thrown error.
  */
-function reportCallFailure(
-  ctx: ModelCallContext,
+export function emitCallFailure(
+  ctx: AuditCorrelation,
   deferKind: ModelCallDeferKind,
   error: unknown,
 ): void {
-  ctx.log.debug(
-    MODEL_CALL_ERROR_EVENT,
-    modelCallError(ctx.requestId, deferKind, normalizeAndRedactText(errorMessage(error))),
-  );
+  ctx.log.debug(MODEL_CALL_ERROR_EVENT, {
+    requestId: ctx.requestId,
+    deferKind,
+    error: truncateMiddle(normalizeAndRedactText(errorMessage(error)), MAX_PROVIDER_ERROR_CHARS),
+  });
 }
 
 /**
@@ -189,7 +206,7 @@ async function executeCall(
     return { ok: true, reply, latencyMs: Date.now() - startedAt };
   } catch (e) {
     const deferKind: ModelCallDeferKind = classifyAbortish(e) ?? "call-failed";
-    reportCallFailure(ctx, deferKind, e);
+    emitCallFailure(ctx, deferKind, e);
     return { ok: false, deferKind, latencyMs: Date.now() - startedAt };
   }
 }
@@ -253,7 +270,7 @@ export async function reviewModel(
     // the retry replaces the reply, and without this line the first
     // stopReason/contentTypes would be lost (the review stream keeps the
     // `attempts: 2` fact; this keeps the debug-level why).
-    logEmptyDiagnostic(ctx, result, 1);
+    emitEmptyReplyDiagnostic(ctx, buildEmptyReplyDiagnostic(result), result.latencyMs, 1);
     const second = await retryOnEmpty();
     if (second.ok) {
       // Either attempt's usable text wins; the retry's latency
@@ -296,44 +313,52 @@ export async function reviewModel(
 }
 
 /**
- * Log an empty-reply diagnostic to the debug stream — the why behind a
- * textless reply (stopReason, content types, error message). Shared by
- * the retry path (first attempt's diagnostic, before it is replaced) and
- * {@link classifyEmptyReply}.
+ * Build the empty-reply diagnostic — the why behind a textless reply
+ * (stopReason, content types, error message). Pure: no logging.
  *
- * @param ctx - The resolved model-call context (log target).
  * @param result - The successful call whose reply carried no text.
- * @param attempts - How many executeCall attempts produced this reply.
- * @returns The diagnostic payload (also returned by the caller for the
- * decision record).
+ * @returns The diagnostic payload for the decision record.
  */
-function logEmptyDiagnostic(
-  ctx: ModelCallContext,
+export function buildEmptyReplyDiagnostic(
   result: CallResult & { ok: true },
-  attempts?: number,
 ): ReviewOutcomeDiagnostic {
-  const diagnostic: ReviewOutcomeDiagnostic = {
+  return {
     stopReason: result.reply.stopReason ?? null,
     rawStopReason: result.reply.rawStopReason ?? null,
     errorMessage: result.reply.errorMessage
-      ? normalizeAndRedactText(result.reply.errorMessage)
+      ? truncateMiddle(normalizeAndRedactText(result.reply.errorMessage), MAX_PROVIDER_ERROR_CHARS)
       : null,
     contentTypes: result.reply.content.map((b) => b.type),
   };
+}
+
+/**
+ * Emit an empty-reply diagnostic to the debug stream. Sink only: emits, returns nothing.
+ *
+ * @param ctx - The log + request id (a slice of either call context).
+ * @param diagnostic - The payload from {@link buildEmptyReplyDiagnostic}.
+ * @param latencyMs - The call latency to record.
+ * @param attempts - How many executeCall attempts produced this reply.
+ */
+export function emitEmptyReplyDiagnostic(
+  ctx: AuditCorrelation,
+  diagnostic: ReviewOutcomeDiagnostic,
+  latencyMs: number,
+  attempts?: number,
+): void {
   ctx.log.debug(MODEL_REPLY_EVENT, {
     requestId: ctx.requestId,
     diagnostic: true,
     ...diagnostic,
-    latencyMs: result.latencyMs,
+    latencyMs,
     ...(attempts === undefined ? {} : { attempts }),
   });
-  return diagnostic;
 }
 
 /**
  * Classify an empty (no usable text) reply into the diagnostic defer
  * outcome: timeout when the stream was aborted, empty-reply otherwise.
- * Logs the debug diagnostic via {@link logEmptyDiagnostic}; shared by
+ * Emits the debug diagnostic via {@link emitEmptyReplyDiagnostic}; shared by
  * the first attempt and the empty-reply retry.
  *
  * @param ctx - The resolved model-call context (log target).
@@ -359,7 +384,9 @@ function classifyEmptyReply(
   //   retry exists for)
   const deferKind: ModelCallDeferKind =
     stopReason === "aborted" ? "timeout" : stopReason === "error" ? "call-failed" : "empty-reply";
-  const diagnostic = logEmptyDiagnostic(ctx, result, attempts);
+
+  const diagnostic = buildEmptyReplyDiagnostic(result);
+  emitEmptyReplyDiagnostic(ctx, diagnostic, result.latencyMs, attempts);
 
   return {
     verdict: { kind: "defer" },

@@ -18,18 +18,27 @@
  */
 
 import type {
+  AuthorizerLog,
   AuthorizerVerdict,
   PermissionCheckResult,
   PermissionState,
 } from "@gotgenes/pi-permission-system";
 
 import type { BreakerVerdict } from "#src/config/config-schema.ts";
-import type { ModelCallDeferKind, ReviewOutcome } from "#src/model/model-verdict.ts";
+import type { ReviewOutcome } from "#src/model/model-verdict.ts";
 import {
   PRE_CALL_MACHINERY_KINDS,
   type PreCallMachineryKind,
 } from "#src/review/machinery-kinds.ts";
 import { normalizeAndRedactText } from "#src/utils.ts";
+
+/** The audit-log correlation slice every call context carries (log + request id). */
+export interface AuditCorrelation {
+  /** Audit log for call-failure and diagnostic records. */
+  log: AuthorizerLog;
+  /** Request id for audit-log correlation (matches the gate's permission-review entry). */
+  requestId: string;
+}
 
 /** Shared context captured once for every decision record. */
 export interface DecisionBase {
@@ -102,18 +111,6 @@ export interface CacheLookupRecord {
   surface: string;
   /** Why the cache missed (disabled / no-entry / context-changed). */
   missReason: string;
-  /** Admits the record to be passed as an AuthorizerLog details payload. */
-  [k: string]: unknown;
-}
-
-/** A model-call-error debug record (emitted when the model call throws). */
-export interface ModelCallErrorRecord {
-  /** The ask's request id. */
-  requestId: string;
-  /** The classified defer kind (timeout / call-failed). */
-  deferKind: ModelCallDeferKind;
-  /** The sanitized error message. */
-  error: string;
   /** Admits the record to be passed as an AuthorizerLog details payload. */
   [k: string]: unknown;
 }
@@ -451,22 +448,6 @@ export function cacheLookup(
   missReason: string,
 ): CacheLookupRecord {
   return { requestId, surface, missReason };
-}
-
-/**
- * Build a model-call-error debug record.
- *
- * @param requestId - The ask's request id.
- * @param deferKind - The classified defer kind (timeout / call-failed).
- * @param error - The sanitized error message.
- * @returns A model-call-error debug record.
- */
-export function modelCallError(
-  requestId: string,
-  deferKind: ModelCallDeferKind,
-  error: string,
-): ModelCallErrorRecord {
-  return { requestId, deferKind, error };
 }
 
 /**
