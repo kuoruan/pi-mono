@@ -308,19 +308,29 @@ export function expandKeyHint(theme: PaletteTheme): string {
 }
 
 /**
+ * The call's outcome as a theme color: pending rows stay uncolored (no footer
+ * at all), settled rows paint their state (success green, failure by kind).
+ */
+export type StateColor = "muted" | "success" | "error" | "warning";
+
+/**
  * The `Took 1.2s` footer from the measured execution time — bash's native
  * renderer shows one; grep/find/ls had none until this. Formatting is
  * pi's shell-renderer body byte-identically (`(ms / 1000).toFixed(1)` +
  * "s" — bash.js), so settled rows read the same whichever renderer
- * painted them.
+ * painted them. The color carries the call's STATE: success on the
+ * collapsed tail, the failure kind on an error frame.
  *
  * @param ms - The measured duration in milliseconds.
- * @param theme - The pi theme (muted fg).
+ * @param theme - The pi theme.
+ * @param color - The state color. "muted" has no production caller left
+ *   — it is the reserved slot for coloring a native Elapsed footer
+ *   should one ever be painted (pi's own stay untouched today).
  * @returns The styled footer line, or "" when unmeasured.
  */
-export function tookFooter(ms: number | undefined, theme: PaletteTheme): string {
+export function tookFooter(ms: number | undefined, theme: PaletteTheme, color: StateColor): string {
   if (ms === undefined) return "";
-  return theme.fg("muted", `Took ${(ms / 1000).toFixed(1)}s`);
+  return theme.fg(color, `Took ${(ms / 1000).toFixed(1)}s`);
 }
 
 /**
@@ -414,7 +424,12 @@ export function collapsedView(
     // The collapsed regime advertises the expand key; an expanded cap
     // reports the remainder without an affordance.
     collapseTail(hidden, theme, expanded ? "" : expandKeyHint(theme)),
-    tookFooter(tookMs, theme),
+    // "success" is an invariant here, not a state check: the factory's
+    // renderResult error branch returns before spec.renderResult runs (an
+    // error result never reaches this view), and a pending frame's
+    // stopTiming returns undefined (no footer at all) — a tail footer
+    // exists only on a settled, successful call.
+    tookFooter(tookMs, theme, "success"),
   ]
     .filter(Boolean)
     .join(theme.fg("muted", " · "));

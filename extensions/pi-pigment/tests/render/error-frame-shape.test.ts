@@ -566,6 +566,57 @@ describe("bash error frame shape", () => {
   });
 });
 
+describe("the error frame's Took color follows the failure kind", () => {
+  // The footer color is the frame's bar kind (one failure-kind reading):
+  // a plain exit renders error, the code-less kinds (timeout, signal,
+  // aborted, terminated) warn, and a non-shell frame — no badge to
+  // refine the kind — renders error too.
+  it("bash: exit-1 renders the footer error, timeout/terminated warn", async () => {
+    const tools = await registerTools();
+    const bash = toolOf(tools, "bash");
+    const theme = buildFakeTheme();
+    const render = (message: string): string => {
+      const { ctx } = makeRenderCtx();
+      ctx.isError = true;
+      ctx.args = { command: "false" };
+      seedTiming(ctx, 42);
+      const component = bash.renderResult!(
+        { content: [{ type: "text", text: message }], isError: true } as never,
+        { expanded: false, isPartial: false },
+        theme,
+        ctx,
+      ) as TextDouble;
+      return component.text.text;
+    };
+    expect(render("boom\n\nCommand exited with code 1")).toContain(
+      `${theme.getFgAnsi("error")}Took 0.0s`,
+    );
+    expect(render("boom\n\nCommand timed out after 30 seconds")).toContain(
+      `${theme.getFgAnsi("warning")}Took 0.0s`,
+    );
+    expect(render("boom\n\nCommand terminated without an exit code")).toContain(
+      `${theme.getFgAnsi("warning")}Took 0.0s`,
+    );
+  });
+
+  it("non-shell: no badge to refine the kind — the footer renders error", async () => {
+    const tools = await registerTools();
+    const edit = toolOf(tools, "edit");
+    const theme = buildFakeTheme();
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    ctx.args = { path: "/render-project/app.ts", edits: [] };
+    seedTiming(ctx, 42);
+    const component = edit.renderResult!(
+      { content: [{ type: "text", text: "nope" }], isError: true } as never,
+      { expanded: false, isPartial: false },
+      theme,
+      ctx,
+    ) as TextDouble;
+    expect(component.text.text).toContain(`${theme.getFgAnsi("error")}Took 0.0s`);
+  });
+});
+
 describe("shell exit badge parse (the upstream status lines)", () => {
   it("maps the four upstream status lines to their kinds", () => {
     expect(shellExitBadgeOf("out\n\nCommand exited with code 1")).toEqual({

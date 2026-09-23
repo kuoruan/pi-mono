@@ -30,7 +30,7 @@ import {
   getWidthAwareText,
   type PreviewTextHost,
 } from "./text-task.ts";
-import { armTiming, firstTextOf, stopTiming, tookFooter } from "./tool-output.ts";
+import { armTiming, firstTextOf, stopTiming } from "./tool-output.ts";
 import {
   type ExecutionTimingState,
   type ShellState,
@@ -245,13 +245,12 @@ export function createToolWrapper<TState extends object = Record<string, unknown
         // Tool-specific cleanup and the failure bridge — the contract
         // lives on WrapperSpec.onError.
         spec.onError?.(ctx, message);
-        // The Took footer the bypassed native renderer would have shown,
-        // from the same armed clock — undefined on a row that never armed
-        // one (a resumed error row, exactly like pi's own renderers).
-        const took = tookMs !== undefined ? tookFooter(tookMs, theme) : "";
         // ONE builder drives both the synchronous placeholder and the
         // width-aware preview task: the task re-renders at the TUI's real
-        // width so every wrapped visual row carries the bar column.
+        // width so every wrapped visual row carries the bar column. The
+        // frame composes and colors the Took footer itself from tookMs
+        // (undefined on a row that never armed the clock — a resumed
+        // error row, exactly like pi's own renderers — no footer).
         const frame = (width: number): string =>
           formatToolErrorResult({
             name: orig.name,
@@ -260,7 +259,7 @@ export function createToolWrapper<TState extends object = Record<string, unknown
             pathShortener: services.shortPath,
             expanded: options.expanded,
             indicatorStyle: services.indicatorStyle,
-            took,
+            tookMs,
             width,
           });
         // The attach guard (previewIdentity compare) replaces the old
@@ -273,7 +272,11 @@ export function createToolWrapper<TState extends object = Record<string, unknown
           text,
           definePreviewTask({
             prefix: orig.name,
-            stamps: [options.expanded ? 1 : 0, took, palette.identity, message],
+            // The stamps must cover every input the render closure
+            // captures — tookMs among them; the -1 sentinel (a number,
+            // not "") keeps unmeasured distinguishable from a measured
+            // 0ms.
+            stamps: [options.expanded ? 1 : 0, tookMs ?? -1, palette.identity, message],
             widthAware: true,
             placeholder,
             fallback: placeholder,

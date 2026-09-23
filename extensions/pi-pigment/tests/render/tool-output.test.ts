@@ -617,6 +617,26 @@ describe("the window authority (collapsedView)", () => {
     expect(shown).not.toContain(notice);
     expect(tail.split("\n")).toEqual(["... (15 more lines, ctrl+o to expand)", notice]);
   });
+
+  it("colors the tail: the Took segment rides success, the separator and notice keep theirs", () => {
+    const theme = buildFakeTheme();
+    const lines = Array.from({ length: 30 }, (_, i) => `L${i}`);
+    const { tail } = collapsedView(lines, {
+      budget: 15,
+      expanded: false,
+      tookMs: 1234,
+      notice: "[50.0KB limit reached]",
+      theme,
+    });
+    // A tail footer exists only on a settled, successful call (the
+    // factory's error branch returns before spec.renderResult; a pending
+    // frame has no measured duration) — the success code on the Took
+    // segment pins that invariant, not a runtime state check. The
+    // separator and the notice keep their own colors.
+    expect(tail).toContain(`${theme.getFgAnsi("success")}Took 1.2s`);
+    expect(tail).toContain(`${theme.getFgAnsi("muted")} · `);
+    expect(tail).toContain(`${theme.getFgAnsi("warning")}[50.0KB limit reached]`);
+  });
 });
 
 describe("the limit notice (the SDK's details, not the text shape)", () => {

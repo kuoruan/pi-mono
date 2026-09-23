@@ -9,11 +9,13 @@ import { createToolWrapper, renderPlainTextFallback } from "#src/render/tool-fac
 import type { ResultContentBlock } from "#src/render/tool-output.ts";
 import { taskKeyOf } from "#src/render/tool-output.ts";
 import {
+  buildFakeTheme,
   buildRenderTheme,
   makeRenderCtx,
   makeRenderSession,
   makeTextComponent,
   plain,
+  seedTiming,
   type TextComponent,
   type TextDouble,
   viewFor,
@@ -211,7 +213,9 @@ describe("renderResult error frame", () => {
     // expected value composes through the same taskKeyOf the call site uses
     // — splitting the identity back apart cannot recover the list.
     expect(component.previewIdentity).toBe(
-      taskKeyOf("probe", [1, "", viewFor(theme).palette.identity, "exploded"]),
+      // tookMs ?? -1: the unmeasured sentinel (-1, a number — 0ms stays
+      // distinguishable from never-measured).
+      taskKeyOf("probe", [1, -1, viewFor(theme).palette.identity, "exploded"]),
     );
   });
 
@@ -231,7 +235,34 @@ describe("renderResult error frame", () => {
     // The badge is DERIVED from the message (which is already stamped) —
     // it must never join the stamp list as a redundant input.
     expect(component.previewIdentity).toBe(
-      taskKeyOf("bash", [0, "", viewFor(theme).palette.identity, message]),
+      taskKeyOf("bash", [0, -1, viewFor(theme).palette.identity, message]),
+    );
+  });
+
+  it("the error frame's Took color follows the failure kind", () => {
+    const { orig } = makeOrig({ name: "bash", label: "bash" });
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    seedTiming(ctx, 42);
+    const theme = buildFakeTheme();
+    const wrapped = wrappedFor(orig, {});
+    const render = (message: string): string => {
+      const component = wrapped.renderResult(
+        { content: [{ type: "text", text: message }] } as never,
+        { expanded: true, isPartial: false },
+        theme,
+        ctx,
+      ) as TextDouble;
+      return component.text.text;
+    };
+    // The error branch passes tookMs into the frame, which colors the
+    // footer by its bar kind: a plain exit renders error, a timeout
+    // warns (one failure-kind mapping, no separate footer logic).
+    expect(render("boom\n\nCommand exited with code 1")).toContain(
+      `${theme.getFgAnsi("error")}Took 0.0s`,
+    );
+    expect(render("boom\n\nCommand timed out after 30 seconds")).toContain(
+      `${theme.getFgAnsi("warning")}Took 0.0s`,
     );
   });
 

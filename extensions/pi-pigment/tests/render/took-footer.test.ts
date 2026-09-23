@@ -9,23 +9,37 @@ import { describe, expect, it } from "vitest";
 
 import { armTiming, stopTiming, tookFooter } from "#src/render/tool-output.ts";
 import type { ExecutionTimingState } from "#src/render/tool-services.ts";
-import { buildRenderTheme, plain } from "#test/fixtures.ts";
+import { buildFakeTheme, buildRenderTheme, plain } from "#test/fixtures.ts";
 
 describe("tookFooter (pi shell-renderer parity)", () => {
   it("is empty when the duration is unknown", () => {
-    expect(tookFooter(undefined, buildRenderTheme())).toBe("");
+    expect(tookFooter(undefined, buildRenderTheme(), "muted")).toBe("");
   });
 
   // Same body as pi's native formatDuration: seconds with one decimal,
   // always — 8ms reads "0.0s", exactly like bash's settled row.
   it("formats every duration as seconds with one decimal", () => {
     const theme = buildRenderTheme();
-    expect(plain(tookFooter(8, theme))).toBe("Took 0.0s");
-    expect(plain(tookFooter(999, theme))).toBe("Took 1.0s");
-    expect(plain(tookFooter(1234, theme))).toBe("Took 1.2s");
-    expect(plain(tookFooter(9500, theme))).toBe("Took 9.5s");
-    expect(plain(tookFooter(65_000, theme))).toBe("Took 65.0s");
-    expect(plain(tookFooter(3_722_000, theme))).toBe("Took 3722.0s");
+    expect(plain(tookFooter(8, theme, "muted"))).toBe("Took 0.0s");
+    expect(plain(tookFooter(999, theme, "muted"))).toBe("Took 1.0s");
+    expect(plain(tookFooter(1234, theme, "muted"))).toBe("Took 1.2s");
+    expect(plain(tookFooter(9500, theme, "muted"))).toBe("Took 9.5s");
+    expect(plain(tookFooter(65_000, theme, "muted"))).toBe("Took 65.0s");
+    expect(plain(tookFooter(3_722_000, theme, "muted"))).toBe("Took 3722.0s");
+  });
+
+  // The state color rides the footer: the escape matches the requested
+  // slot and the body text survives plain() (which strips only SGR
+  // escapes — never other characters). No adjacency pinning: only that
+  // the color is present and the text is exact.
+  it("takes the requested state color", () => {
+    const theme = buildFakeTheme();
+    for (const color of ["muted", "success", "error", "warning"] as const) {
+      const footer = tookFooter(1234, theme, color);
+      expect(footer).toContain(theme.getFgAnsi(color));
+      expect(plain(footer)).toBe("Took 1.2s");
+    }
+    expect(tookFooter(undefined, theme, "success")).toBe("");
   });
 });
 

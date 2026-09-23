@@ -142,6 +142,7 @@ export function buildFakeTheme(overrides?: FakeThemeOverrides): PaletteTheme {
     muted: "\x1b[38;2;130;130;140m",
     dim: "\x1b[38;2;110;110;120m",
     success: "\x1b[38;2;100;200;120m",
+    warning: "\x1b[38;2;230;170;80m",
     error: "\x1b[38;2;255;100;100m",
     toolDiffAdded: overrides?.diffAdded ?? "\x1b[38;2;80;220;120m",
     toolDiffRemoved: overrides?.diffRemoved ?? "\x1b[38;2;240;90;90m",

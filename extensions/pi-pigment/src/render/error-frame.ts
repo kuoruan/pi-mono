@@ -25,7 +25,7 @@ import {
 } from "./header.ts";
 import { injectBg } from "./inject-bg.ts";
 import { borderBar } from "./row-frame.ts";
-import { collapseTail, expandKeyHint } from "./tool-output.ts";
+import { collapseTail, expandKeyHint, tookFooter, type StateColor } from "./tool-output.ts";
 import type { CallState, ShellExitBadge } from "./tool-services.ts";
 
 /**
@@ -191,7 +191,7 @@ export function shellExitBadgeOf(message: string): ShellExitBadge | undefined {
  * @param badge - The parsed status.
  * @returns The theme color name.
  */
-function shellBadgeColorOf(badge: ShellExitBadge): "warning" | "error" {
+function shellBadgeColorOf(badge: ShellExitBadge): StateColor {
   return badge.kind === "error" ? "error" : "warning";
 }
 
@@ -252,10 +252,12 @@ export interface ErrorFrameInput {
    */
   indicatorStyle: IndicatorStyle;
   /**
-   * The styled Took footer ("" when unmeasured), framed below the body
-   * with one blank row between (the native frame's composition).
+   * The measured execution time (undefined when unmeasured — no footer),
+   * rendered beneath the body with one blank row between (the native
+   * frame's composition); the color follows the bar kind (the shell
+   * badge's failure kind, error for non-shell frames).
    */
-  took?: string;
+  tookMs?: number;
   /** The visual render width (the preview task's width). */
   width: number;
 }
@@ -281,7 +283,7 @@ export interface ErrorFrameInput {
  * footer, no trailing pad).
  */
 export function formatToolErrorResult(input: ErrorFrameInput): string {
-  const { name, message, theme, pathShortener, expanded, indicatorStyle, took = "", width } = input;
+  const { name, message, theme, pathShortener, expanded, indicatorStyle, tookMs, width } = input;
   // Body-only unless the shell status is unrecognized (ownership above).
   const isShell = name === "bash" || name === "powershell";
   const badge = isShell ? shellExitBadgeOf(message) : undefined;
@@ -296,8 +298,7 @@ export function formatToolErrorResult(input: ErrorFrameInput): string {
           },
           pathShortener,
         )}\n`
-      : // Body-only frame: the top pad keeps the one separator blank the
-        // old standalone header's bottomPad used to leave above the body.
+      : // Body-only frame: one separator blank above the body.
         "\n";
   // The row prefix: the bar glyph + one space in bar mode; EMPTY in
   // none mode — the frame Box's own padding is the single leading space
@@ -324,7 +325,9 @@ export function formatToolErrorResult(input: ErrorFrameInput): string {
     body.push(` ${collapseTail(hidden, theme, expandKeyHint(theme))}`);
   }
   // The Took footer joins beneath the body (one blank row between, the
-  // native frame's composition); none when unmeasured.
-  const footer = took ? `\n\n${took}` : "";
+  // native frame's composition); none when unmeasured. Its color is the
+  // bar kind — the frame's one failure-kind reading (error for non-shell
+  // frames, the badge's kind for shell ones).
+  const footer = tookMs !== undefined ? `\n\n${tookFooter(tookMs, theme, barKind)}` : "";
   return `${header}${body.join("\n")}${footer}`;
 }
