@@ -103,9 +103,8 @@ describe("grammar-state seeding (embedded grammars)", () => {
     // The property: the seeded render colors tokens (multiple distinct fg
     // escapes over the script lines), the unseeded one is flat — this is
     // exactly the "vue partial diff renders uncolored" report.
-    const fgEscapes = (s: string): Set<string> => countFgEscapes(s);
-    expect(fgEscapes(seeded).size).toBeGreaterThan(3);
-    expect(fgEscapes(unseeded).size).toBeLessThan(fgEscapes(seeded).size);
+    expect(countFgEscapes(seeded).size).toBeGreaterThan(3);
+    expect(countFgEscapes(unseeded).size).toBeLessThan(countFgEscapes(seeded).size);
     // And the script content itself survived the render (token boundaries
     // split it in the styled form — the plain form still carries the line).
     expect(plain(seeded)).toContain("count.value += 1;");

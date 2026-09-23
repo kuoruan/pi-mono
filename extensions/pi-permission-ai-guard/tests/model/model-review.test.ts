@@ -92,34 +92,48 @@ const nonErrorCompleteSimple = async (): Promise<AssistantMessage> => {
   throw "plain string error";
 };
 
+const allowCompleteSimple = async (): Promise<AssistantMessage> =>
+  makeReply([{ type: "text", text: '{"verdict":"allow"}' }]);
+
+const denyCompleteSimple = async (): Promise<AssistantMessage> =>
+  makeReply([{ type: "text", text: '{"verdict":"deny","reason":"Unsafe"}' }], "stop");
+
+const allowSpacedCompleteSimple = async (): Promise<AssistantMessage> =>
+  makeReply([{ type: "text", text: '{"verdict": "allow"}' }], "stop");
+
+const emptyCompleteSimple = async (): Promise<AssistantMessage> => makeReply([], "stop");
+
+const abortedCompleteSimple = async (): Promise<AssistantMessage> => makeReply([], "aborted");
+
+const errorResolvedCompleteSimple = async (): Promise<AssistantMessage> => makeReply([], "error");
+
+const denyRiskyCompleteSimple = async (): Promise<AssistantMessage> =>
+  makeReply(
+    [{ type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' }],
+    "stop",
+  );
+
 describe("reviewModel", () => {
   it("returns allow verdict from text reply", async () => {
-    const modelCall = async (): Promise<AssistantMessage> =>
-      makeReply([{ type: "text", text: '{"verdict":"allow"}' }]);
-    const ctx = makeContext(modelCall);
+    const ctx = makeContext(allowCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "allow" });
   });
 
   it("returns deny verdict with reason", async () => {
-    const modelCall = async (): Promise<AssistantMessage> =>
-      makeReply([{ type: "text", text: '{"verdict":"deny","reason":"Unsafe"}' }], "stop");
-    const ctx = makeContext(modelCall);
+    const ctx = makeContext(denyCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "deny", reason: "Unsafe" });
   });
 
   it("falls back to text parsing when no JSON", async () => {
-    const modelCall = async (): Promise<AssistantMessage> =>
-      makeReply([{ type: "text", text: '{"verdict": "allow"}' }], "stop");
-    const ctx = makeContext(modelCall);
+    const ctx = makeContext(allowSpacedCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "allow" });
   });
 
   it("defers when model returns empty content", async () => {
-    const modelCall = async (): Promise<AssistantMessage> => makeReply([], "stop");
-    const ctx = makeContext(modelCall);
+    const ctx = makeContext(emptyCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferKind).toBe("empty-reply");
@@ -198,8 +212,7 @@ describe("reviewModel", () => {
     // AbortSignal.timeout() does not throw — the Anthropic provider catches
     // the abort and resolves with an empty AssistantMessage whose stopReason
     // is "aborted". This must be classified as "timeout" for telemetry.
-    const modelCall = async (): Promise<AssistantMessage> => makeReply([], "aborted");
-    const ctx = makeContext(modelCall);
+    const ctx = makeContext(abortedCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferKind).toBe("timeout");
@@ -211,8 +224,7 @@ describe("reviewModel", () => {
     // model behavior. The bucket must say so: "call-failed" joins the
     // thrown path, and "empty-reply" stays reserved for genuine model
     // silence (a completed reply that chose to say nothing).
-    const modelCall = async (): Promise<AssistantMessage> => makeReply([], "error");
-    const ctx = makeContext(modelCall);
+    const ctx = makeContext(errorResolvedCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferKind).toBe("call-failed");
@@ -292,21 +304,14 @@ describe("reviewModel", () => {
 
 describe("reviewModel — riskLevel passthrough", () => {
   it("passes riskLevel through from the verdict", async () => {
-    const modelCall = async (): Promise<AssistantMessage> =>
-      makeReply(
-        [{ type: "text", text: '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}' }],
-        "stop",
-      );
-    const ctx = makeContext(modelCall);
+    const ctx = makeContext(denyRiskyCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "deny", reason: "unsafe" });
     expect(result.riskLevel).toBe("high");
   });
 
   it("leaves riskLevel undefined when omitted", async () => {
-    const modelCall = async (): Promise<AssistantMessage> =>
-      makeReply([{ type: "text", text: '{"verdict":"allow"}' }]);
-    const ctx = makeContext(modelCall);
+    const ctx = makeContext(allowCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.riskLevel).toBeUndefined();
   });

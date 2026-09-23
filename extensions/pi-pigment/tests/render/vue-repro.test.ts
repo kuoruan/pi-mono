@@ -31,6 +31,24 @@ vi.mock("fs/promises");
 const linesOfState = (state: object): string =>
   ((state as { seedLines?: string[] }).seedLines ?? []).join("\n");
 
+// Render one edit call and hand back its row state + rendered preview.
+const runEdit = async (path: string, oldText: string, newText: string) => {
+  const tools = await registerTools({ cwd: CWD });
+  const edit = toolOf(tools, "edit");
+  const args = { path, edits: [{ oldText, newText }] };
+  const result = await edit.execute!("t-seq", args, undefined, undefined, undefined);
+  const mc = makeRenderCtx();
+  mc.ctx.args = args;
+  const component = edit.renderResult!(
+    result,
+    { expanded: true, isPartial: false },
+    buildFakeTheme({ syntaxColors: true }),
+    mc.ctx,
+  ) as unknown as TextDouble;
+  const out = await component.previewTask!.render(140);
+  return { state: mc.ctx.state, out };
+};
+
 const CWD = "/render-project";
 
 /**
@@ -186,24 +204,6 @@ describe("vue edit result coloring — long file, mid-file change", () => {
 });
 
 describe("the seed memo's lifetime (per row, not per file)", () => {
-  // Render one edit call and hand back its row state + rendered preview.
-  const runEdit = async (path: string, oldText: string, newText: string) => {
-    const tools = await registerTools({ cwd: CWD });
-    const edit = toolOf(tools, "edit");
-    const args = { path, edits: [{ oldText, newText }] };
-    const result = await edit.execute!("t-seq", args, undefined, undefined, undefined);
-    const mc = makeRenderCtx();
-    mc.ctx.args = args;
-    const component = edit.renderResult!(
-      result,
-      { expanded: true, isPartial: false },
-      buildFakeTheme({ syntaxColors: true }),
-      mc.ctx,
-    ) as unknown as TextDouble;
-    const out = await component.previewTask!.render(140);
-    return { state: mc.ctx.state, out };
-  };
-
   it(
     "a second edit of the same file seeds from the file WITH the first edit applied",
     { timeout: 30000 },

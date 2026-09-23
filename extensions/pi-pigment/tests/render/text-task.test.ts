@@ -38,6 +38,38 @@ function makeHost(): {
   return { current: () => current, text };
 }
 
+/**
+ * Drive one width-aware render loop: attach a task, render at 80, then
+ * resize to 120 and count renders.
+ *
+ * @param widthAware - Whether the task re-renders on width change.
+ * @returns The render count.
+ */
+async function driveRenderLoop(widthAware: boolean): Promise<number> {
+  const host = makeHost();
+  let renders = 0;
+  attachPreviewTask(
+    host.text,
+    definePreviewTask({
+      prefix: "t",
+      stamps: ["frozen"],
+      widthAware,
+      placeholder: "loading…",
+      fallback: "F",
+      invalidate: () => {},
+      render: async () => {
+        renders += 1;
+        return "body";
+      },
+    }),
+  );
+  host.text.render(80);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  host.text.render(120); // the resize event
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  return renders;
+}
+
 describe("attachPreviewTask (the attach guard)", () => {
   it("stamps the identity and writes the placeholder, but NEVER invalidates", () => {
     // Pins the no-invalidate contract. Platform mechanics (upstream
@@ -154,32 +186,8 @@ describe("definePreviewTask (the task builder)", () => {
     // The widthAware decision, exercised through the real frame loop:
     // a width-sensitive preview re-renders when the width changes; a
     // width-neutral one keeps its frame.
-    const drive = async (widthAware: boolean): Promise<number> => {
-      const host = makeHost();
-      let renders = 0;
-      attachPreviewTask(
-        host.text,
-        definePreviewTask({
-          prefix: "t",
-          stamps: ["frozen"],
-          widthAware,
-          placeholder: "loading…",
-          fallback: "F",
-          invalidate: () => {},
-          render: async () => {
-            renders += 1;
-            return "body";
-          },
-        }),
-      );
-      host.text.render(80);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      host.text.render(120); // the resize event
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      return renders;
-    };
-    expect(await drive(true)).toBe(2); // resize → fresh key → re-render
-    expect(await drive(false)).toBe(1); // same key → the frame stands
+    expect(await driveRenderLoop(true)).toBe(2); // resize → fresh key → re-render
+    expect(await driveRenderLoop(false)).toBe(1); // same key → the frame stands
   });
 });
 

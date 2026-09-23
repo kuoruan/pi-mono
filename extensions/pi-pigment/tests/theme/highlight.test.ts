@@ -49,6 +49,28 @@ async function themeName(view: ReturnType<typeof viewFor>): Promise<string> {
   return typeof theme === "string" ? theme : theme.name;
 }
 
+/**
+ * A view for the github-dark direct selection over the given theme.
+ *
+ * @param theme - The frame's pi theme.
+ * @returns The bound view.
+ */
+async function githubDarkView(theme: ReturnType<typeof buildFakeTheme>) {
+  const { selection } = await resolveSyntaxThemeSelection("github-dark", ENV);
+  return makeRenderSession({ selection }).forTheme(theme);
+}
+
+/**
+ * The slash grammar's product for a value (the session's selection).
+ *
+ * @param value - The syntaxTheme config value.
+ * @returns The resolved selection.
+ */
+async function selectionFor(value: string) {
+  const { selection } = await resolveSyntaxThemeSelection(value, ENV);
+  return selection;
+}
+
 describe("highlight (the session's render entry)", () => {
   beforeEach(() => {
     resetPigmentForTest();
@@ -166,17 +188,6 @@ describe("theme selections (the session's inputs)", () => {
   afterEach(() => {
     resetPigmentForTest();
   });
-
-  /**
-   * A view for the github-dark direct selection over the given theme.
-   *
-   * @param theme - The frame's pi theme.
-   * @returns The bound view.
-   */
-  async function githubDarkView(theme: ReturnType<typeof buildFakeTheme>) {
-    const { selection } = await resolveSyntaxThemeSelection("github-dark", ENV);
-    return makeRenderSession({ selection }).forTheme(theme);
-  }
 
   it("bundled-name enforcement produces an -aa- object keyed per background set", async () => {
     // A theme WITHOUT syntax colors, so the bundled-name path (not auto) triggers.
@@ -350,17 +361,6 @@ describe("the recommended pairs (the slash grammar)", () => {
   afterEach(() => {
     resetPigmentForTest();
   });
-
-  /**
-   * The slash grammar's product for a value (the session's selection).
-   *
-   * @param value - The syntaxTheme config value.
-   * @returns The resolved selection.
-   */
-  async function selectionFor(value: string) {
-    const { selection } = await resolveSyntaxThemeSelection(value, ENV);
-    return selection;
-  }
 
   it("every recommended pair resolves through the slash grammar and follows the palette's light/dark bit", async () => {
     for (const pair of Object.values(RECOMMENDED_PAIRS)) {

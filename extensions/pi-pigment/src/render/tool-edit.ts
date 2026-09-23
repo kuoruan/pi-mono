@@ -51,6 +51,38 @@ function diffLineCountLabel(diffLineCount: unknown, theme: PaletteTheme): string
 }
 
 /**
+ * The "N edits (M diff lines)" label for edit stats.
+ *
+ * @param edits - Number of edit operations.
+ * @param diffLines - Total diff lines.
+ * @param theme - The active pi theme.
+ * @returns The styled label.
+ */
+function editEditsCountLabel(edits: number, diffLines: number, theme: PaletteTheme): string {
+  const n = edits === 1 ? "1 edit" : `${edits} edits`;
+  return `${n}${diffLineCountLabel(diffLines, theme)}`;
+}
+
+/**
+ * The `N edits (+M diff lines) +A -D` stats suffix for an edit header,
+ * from the state bridge (renderResult stashed the counts from result
+ * details + args).
+ *
+ * @param state - The edit render state.
+ * @param theme - The active pi theme.
+ * @param palette - The resolved palette (summarize colors).
+ * @returns The styled suffix, or "" when no stats exist.
+ */
+function editCallStatsSuffix(state: EditState, theme: PaletteTheme, palette: DiffPalette): string {
+  if (state.editCount === undefined || state.diffLines === undefined) return "";
+  const count = editEditsCountLabel(state.editCount, state.diffLines, theme);
+  return resultLine(
+    theme.fg("muted", count),
+    summarize(state.added ?? 0, state.removed ?? 0, palette),
+  );
+}
+
+/**
  * Build the edit wrapper around `origEdit`: execute delegates verbatim (the
  * SDK's edit tool already rejects ambiguous/overlapping edits by throwing —
  * the harness converts throws into error results our error frame renders)
@@ -66,42 +98,6 @@ export function createEditWrapper(
   services: ToolServices,
 ): ToolDefinition {
   const { shortPath, indicatorStyle } = services;
-
-  /**
-   * The "N edits (M diff lines)" label for edit stats.
-   *
-   * @param edits - Number of edit operations.
-   * @param diffLines - Total diff lines.
-   * @param theme - The active pi theme.
-   * @returns The styled label.
-   */
-  function editEditsCountLabel(edits: number, diffLines: number, theme: PaletteTheme): string {
-    const n = edits === 1 ? "1 edit" : `${edits} edits`;
-    return `${n}${diffLineCountLabel(diffLines, theme)}`;
-  }
-
-  /**
-   * The `N edits (+M diff lines) +A -D` stats suffix for an edit header,
-   * from the state bridge (renderResult stashed the counts from result
-   * details + args).
-   *
-   * @param state - The edit render state.
-   * @param theme - The active pi theme.
-   * @param palette - The resolved palette (summarize colors).
-   * @returns The styled suffix, or "" when no stats exist.
-   */
-  function editCallStatsSuffix(
-    state: EditState,
-    theme: PaletteTheme,
-    palette: DiffPalette,
-  ): string {
-    if (state.editCount === undefined || state.diffLines === undefined) return "";
-    const count = editEditsCountLabel(state.editCount, state.diffLines, theme);
-    return resultLine(
-      theme.fg("muted", count),
-      summarize(state.added ?? 0, state.removed ?? 0, palette),
-    );
-  }
 
   // Execution delegates verbatim (the factory's default path): the SDK's
   // details shape (diff, patch, firstChangedLine) persists into the

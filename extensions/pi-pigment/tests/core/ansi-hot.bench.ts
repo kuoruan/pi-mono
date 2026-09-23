@@ -54,6 +54,11 @@ const _diffBody = diffBody;
 // vanish once their result is dropped).
 let sink = 0;
 
+const walkForEachCell = (line: string): void => {
+  _forEachCell(line, (_start, _end, cols, isEscape) => {
+    if (!isEscape) sink += cols;
+  });
+};
 /**
  * The line-width distribution the mixed-frame bench assumes (see
  * LINE_WIDTH_SAMPLE): the styledWidth widths must keep matching it, or
@@ -87,19 +92,14 @@ test("measurePlain", async ({ bench }) => {
 });
 
 test("forEachCell", async ({ bench }) => {
-  const walk = (line: string): void => {
-    _forEachCell(line, (_start, _end, cols, isEscape) => {
-      if (!isEscape) sink += cols;
-    });
-  };
   await bench("styled code line (escape + token cells)", () => {
-    walk(_styledLine);
+    walkForEachCell(_styledLine);
   }).run();
   await bench("plain ASCII line", () => {
-    walk(_plainLine);
+    walkForEachCell(_plainLine);
   }).run();
   await bench("CJK line (wide-cell path)", () => {
-    walk(_cjkLine);
+    walkForEachCell(_cjkLine);
   }).run();
 });
 

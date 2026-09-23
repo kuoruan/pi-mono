@@ -27,6 +27,23 @@ const NAMED_ENTITIES: Record<string, string> = {
 };
 
 /**
+ * Decode the XML entities a plist string may carry (numeric + the five named).
+ *
+ * @param value - The raw string content.
+ * @returns The decoded string.
+ */
+function decodePlistEntities(value: string): string {
+  return value
+    .replace(/&#(\d+);/g, (_whole, digits: string) =>
+      String.fromCodePoint(Number.parseInt(digits, 10)),
+    )
+    .replace(/&#x([0-9a-fA-F]+);/g, (_whole, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/&amp;|&lt;|&gt;|&quot;|&apos;/g, (entity) => NAMED_ENTITIES[entity]);
+}
+
+/**
  * Parse a .tmTheme XML plist into a plain object (the TextMate JSON shape
  * the converter consumes: a root dict with a `settings` array). Strict by
  * design — a theme file is static, hand-checkable content, so a parse
@@ -91,24 +108,13 @@ export function parsePlistTheme(content: string): Record<string, unknown> {
     }
     return { name, selfClosed };
   };
-
-  const decode = (value: string): string =>
-    value
-      .replace(/&#(\d+);/g, (_whole, digits: string) =>
-        String.fromCodePoint(Number.parseInt(digits, 10)),
-      )
-      .replace(/&#x([0-9a-fA-F]+);/g, (_whole, hex: string) =>
-        String.fromCodePoint(Number.parseInt(hex, 16)),
-      )
-      .replace(/&amp;|&lt;|&gt;|&quot;|&apos;/g, (entity) => NAMED_ENTITIES[entity]);
-
   const parseTagValue = (selfClosed: boolean): string => {
     if (selfClosed) return "";
     // Capture until the closing tag; its name is not validated (the
     // fast-plist lineage trusts the structure once open tags matched).
     const value = captureThrough("</");
     skipUntil(">");
-    return decode(value);
+    return decodePlistEntities(value);
   };
 
   const push = (newState: State, newCur: unknown): void => {
