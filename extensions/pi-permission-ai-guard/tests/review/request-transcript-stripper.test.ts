@@ -125,26 +125,33 @@ describe("stripTranscript", () => {
     expect(result.trustedIntent).toContain("message 7");
   });
 
-  it("collapses adjacent duplicate nudges without consuming quota", () => {
+  it("drops bare continuations before the quota check", () => {
     const entries = [
       makeMessage("user", "fix the table component"),
       makeMessage("user", "go on"),
-      makeMessage("user", "go on"),
-      makeMessage("user", "anything else"),
+      makeMessage("user", "继续!"),
+      makeMessage("user", "anything else?"),
     ];
     const result = strip(entries, { ...opts, maxUserMessages: 3 });
-    expect(result.trustedIntent).toEqual(["fix the table component", "go on", "anything else"]);
+    expect(result.trustedIntent).toEqual(["fix the table component", "anything else?"]);
+    expect(result.strippedCount).toBe(2);
   });
 
-  it("keeps non-adjacent repeats in their own slots", () => {
+  it("collapses adjacent exact repeats without consuming quota", () => {
     const entries = [
-      makeMessage("user", "keep fixing A"),
-      makeMessage("user", "go on"),
-      makeMessage("user", "keep fixing B"),
-      makeMessage("user", "go on"),
+      makeMessage("user", "fix the table component"),
+      makeMessage("user", "fix the table component"),
+      makeMessage("user", "and the tests"),
     ];
-    const result = strip(entries, { ...opts, maxUserMessages: 4 });
-    expect(result.trustedIntent).toEqual(["keep fixing A", "go on", "keep fixing B", "go on"]);
+    const result = strip(entries, { ...opts, maxUserMessages: 2 });
+    expect(result.trustedIntent).toEqual(["fix the table component", "and the tests"]);
+    expect(result.strippedCount).toBe(1);
+  });
+
+  it("keeps narrowing signals even when short", () => {
+    const entries = [makeMessage("user", "do whatever is needed"), makeMessage("user", "stop")];
+    const result = strip(entries, { ...opts, maxUserMessages: 2 });
+    expect(result.trustedIntent).toEqual(["do whatever is needed", "stop"]);
   });
 
   it("respects maxToolCalls limit", () => {

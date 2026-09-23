@@ -19,6 +19,8 @@ import {
   truncateMiddle,
 } from "#src/utils.ts";
 
+import { isBareContinuation } from "./bare-continuation.ts";
+
 export interface StrippedTranscript {
   /**
    * Trusted user messages in chronological order (the most recent N are
@@ -181,16 +183,21 @@ export function stripTranscript(
   // credentials — a truncation point landing mid-key leaves a fragment too
   // short for any redaction pattern to match, and the fragment ships to the
   // model raw.
-  // Adjacent duplicates collapse: a repeated nudge carries one authorization
-  // signal, so a repeat must not consume quota and push the real task sentence
-  // out of the window. Exact match only — near-duplicates with different
-  // punctuation keep their own slot.
   const pushTrustedIntent = (text: string): void => {
     const sanitized = text
       ? truncateMiddle(normalizeAndRedactText(text), options.maxCharsPerEntry)
       : "";
-    if (!sanitized || trustedIntent.length >= options.maxUserMessages) return;
-    if (sanitized === trustedIntent[trustedIntent.length - 1]) return;
+    // Drop before the quota check: a bare continuation or an adjacent exact
+    // repeat carries no new authorization, and either must never evict a real
+    // task sentence from the window.
+    const isNoise =
+      !sanitized ||
+      isBareContinuation(sanitized) ||
+      sanitized === trustedIntent[trustedIntent.length - 1];
+    if (isNoise || trustedIntent.length >= options.maxUserMessages) {
+      strippedCount++;
+      return;
+    }
     trustedIntent.push(sanitized);
   };
 

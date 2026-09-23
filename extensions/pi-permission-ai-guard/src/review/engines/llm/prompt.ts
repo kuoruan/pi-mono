@@ -314,9 +314,10 @@ function buildTranscriptSections(transcript: StrippedTranscript): string[] {
 
   // 1. Trusted user intent — the only carrier of authorization. The LATEST
   // user message is the authorization anchor (the request the agent is
-  // currently acting on); earlier messages are context. The anchor is
-  // rendered as its own section so the model never has to guess which
-  // message carries the current authorization.
+  // currently acting on); earlier messages are context. Bare continuations
+  // never reach the window (the stripper drops them), so latest is always a
+  // real message. The anchor is rendered as its own section so the model
+  // never has to guess which message carries the current authorization.
   const intent = transcript.trustedIntent;
   if (intent.length > 0) {
     const anchor = intent[intent.length - 1] ?? "";
