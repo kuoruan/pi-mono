@@ -181,10 +181,17 @@ export function stripTranscript(
   // credentials — a truncation point landing mid-key leaves a fragment too
   // short for any redaction pattern to match, and the fragment ships to the
   // model raw.
+  // Adjacent duplicates collapse: a repeated nudge carries one authorization
+  // signal, so a repeat must not consume quota and push the real task sentence
+  // out of the window. Exact match only — near-duplicates with different
+  // punctuation keep their own slot.
   const pushTrustedIntent = (text: string): void => {
-    if (text && trustedIntent.length < options.maxUserMessages) {
-      trustedIntent.push(truncateMiddle(normalizeAndRedactText(text), options.maxCharsPerEntry));
-    }
+    const sanitized = text
+      ? truncateMiddle(normalizeAndRedactText(text), options.maxCharsPerEntry)
+      : "";
+    if (!sanitized || trustedIntent.length >= options.maxUserMessages) return;
+    if (sanitized === trustedIntent[trustedIntent.length - 1]) return;
+    trustedIntent.push(sanitized);
   };
 
   // Walk entries in reverse (most recent first) to prioritize recent context

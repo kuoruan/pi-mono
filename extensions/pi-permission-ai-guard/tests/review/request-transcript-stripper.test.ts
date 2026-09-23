@@ -125,6 +125,28 @@ describe("stripTranscript", () => {
     expect(result.trustedIntent).toContain("message 7");
   });
 
+  it("collapses adjacent duplicate nudges without consuming quota", () => {
+    const entries = [
+      makeMessage("user", "fix the table component"),
+      makeMessage("user", "go on"),
+      makeMessage("user", "go on"),
+      makeMessage("user", "anything else"),
+    ];
+    const result = strip(entries, { ...opts, maxUserMessages: 3 });
+    expect(result.trustedIntent).toEqual(["fix the table component", "go on", "anything else"]);
+  });
+
+  it("keeps non-adjacent repeats in their own slots", () => {
+    const entries = [
+      makeMessage("user", "keep fixing A"),
+      makeMessage("user", "go on"),
+      makeMessage("user", "keep fixing B"),
+      makeMessage("user", "go on"),
+    ];
+    const result = strip(entries, { ...opts, maxUserMessages: 4 });
+    expect(result.trustedIntent).toEqual(["keep fixing A", "go on", "keep fixing B", "go on"]);
+  });
+
   it("respects maxToolCalls limit", () => {
     const entries = Array.from({ length: 15 }, (_, i) =>
       makeAssistantWithToolCall("bash", { command: `cmd${i}` }),
