@@ -38,6 +38,15 @@ export interface StrippedTranscript {
   toolCalls: string[];
   /** Number of entries that were stripped (for logging) */
   strippedCount: number;
+  /**
+   * Breakdown of strippedCount, present on stripper output: bare
+   * continuations ("go on") and adjacent exact repeats dropped before the
+   * quota check. The remaining stripped entries are quota overflows and
+   * untrusted content (assistant text, tool results, summaries).
+   */
+  droppedContinuationCount?: number;
+  /** Adjacent exact repeats collapsed before the quota check. */
+  droppedRepeatCount?: number;
 }
 
 /** Options for transcript stripping. */
@@ -175,6 +184,8 @@ export function stripTranscript(
   const trustedIntent: string[] = [];
   const toolCalls: string[] = [];
   let strippedCount = 0;
+  let droppedContinuationCount = 0;
+  let droppedRepeatCount = 0;
 
   // The trusted-intent pipeline: sanitized (injection + secrets) then
   // truncated before it enters the transcript — the ONLY write path, so a
@@ -190,11 +201,21 @@ export function stripTranscript(
     // Drop before the quota check: a bare continuation or an adjacent exact
     // repeat carries no new authorization, and either must never evict a real
     // task sentence from the window.
-    const isNoise =
-      !sanitized ||
-      isBareContinuation(sanitized) ||
-      sanitized === trustedIntent[trustedIntent.length - 1];
-    if (isNoise || trustedIntent.length >= options.maxUserMessages) {
+    if (!sanitized) {
+      strippedCount++;
+      return;
+    }
+    if (isBareContinuation(sanitized)) {
+      strippedCount++;
+      droppedContinuationCount++;
+      return;
+    }
+    if (sanitized === trustedIntent[trustedIntent.length - 1]) {
+      strippedCount++;
+      droppedRepeatCount++;
+      return;
+    }
+    if (trustedIntent.length >= options.maxUserMessages) {
       strippedCount++;
       return;
     }
@@ -283,5 +304,5 @@ export function stripTranscript(
   trustedIntent.reverse();
   toolCalls.reverse();
 
-  return { trustedIntent, toolCalls, strippedCount };
+  return { trustedIntent, toolCalls, strippedCount, droppedContinuationCount, droppedRepeatCount };
 }

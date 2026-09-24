@@ -349,6 +349,9 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       );
     }
     const { outcome: reviewOutcome, modelId } = engineResult;
+    // The anchor the intent check judged against, for both engines and every
+    // outcome kind — the transcript is the single source, not each engine.
+    reviewOutcome.authorizationAnchor = transcript.trustedIntent.at(-1);
 
     // Raw replies are verbose AND unnecessary for clean verdicts (the
     // structured record + sentinel suffice) — only defer failures keep the

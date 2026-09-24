@@ -135,6 +135,8 @@ describe("stripTranscript", () => {
     const result = strip(entries, { ...opts, maxUserMessages: 3 });
     expect(result.trustedIntent).toEqual(["fix the table component", "anything else?"]);
     expect(result.strippedCount).toBe(2);
+    expect(result.droppedContinuationCount).toBe(2);
+    expect(result.droppedRepeatCount).toBe(0);
   });
 
   it("collapses adjacent exact repeats without consuming quota", () => {
@@ -146,6 +148,8 @@ describe("stripTranscript", () => {
     const result = strip(entries, { ...opts, maxUserMessages: 2 });
     expect(result.trustedIntent).toEqual(["fix the table component", "and the tests"]);
     expect(result.strippedCount).toBe(1);
+    expect(result.droppedContinuationCount).toBe(0);
+    expect(result.droppedRepeatCount).toBe(1);
   });
 
   it("keeps narrowing signals even when short", () => {

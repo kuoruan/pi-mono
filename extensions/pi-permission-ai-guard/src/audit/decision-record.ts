@@ -350,6 +350,8 @@ export const DecisionRecord = {
       attempts: reviewOutcome.attempts,
       strippedCount,
       contextHash,
+      // The latest trusted user message the intent check authorized against.
+      authorizationAnchor: reviewOutcome.authorizationAnchor ?? null,
       verdict: reviewOutcome.verdict.kind,
       // Persist the sanitized model explanation for deny or defer. For
       // defer, `deferKind` carries the classification (timeout / model-defer
