@@ -1,5 +1,16 @@
 # pi-pigment
 
+## 0.2.3
+
+### Patch Changes
+
+- 98a72f1: Dim benign shell exit 1: grep/rg/ack/test/diff-family no-match badges render muted instead of error red.
+- e01732b: Paint grep/find matches as blocks: the match keeps its bold accent foreground over pi's own searchMatchBg background (the surface the TUI's search uses), and the match close re-opens the line canvas (toolSuccessBg) instead of a bare 49m so the row past the match keeps its background (`baseBg`, mirroring `baseFg`).
+- fefb7e5: Own the output tools' shared result-body assembly in `output-assembly`: the empty guard, swap key, settled-frame shortcut, windowed plain body, and preview-task attach live once — grep/find/ls supply only prefix, budget, notice, and their styled callback.
+- 4110034: Unify the output tools' vertical rhythm: the collapsed tail's segments (expand hint, limit notice, Took) each take their own row with a blank line between and Took closing the tail (the native bash order); the body leads with a header gap (the native bash renderer's leading newline) and hugs a collapse hint (`... (N more lines)`) while a notice/Took-led tail breathes below a blank line (`joinBodyTail`); `collapsedView` returns the hidden count (`CollapsedWindow`) so wrappers stop recomputing it.
+- d7889a7: Shell failures read at a glance: bash/powershell call headers now carry the parsed failure badge inline as a muted `·`-separated suffix — `$ cmd · ✗ exit 1` (`✗ exit 143`, `✗ timeout 30s`, `✗ aborted`, and the new `✗ terminated` for the upstream "Command terminated without an exit code" status line) — composed fresh per frame outside the highlight cache, with the args' own `(timeout Ns)` declaration suffix gone (the badge is the one timeout wording). The settled success frame rides the symmetric plain check — `$ cmd · ✓` (bold, success-colored, after the same muted `·`) — pending frames stay bare. The error frame stays body-only on a recognized status line (its bare name header remains only for unrecognized shell failures), and the failure-kind color mapping lives in one home beside the ✗-prefixed label forms.
+- ad1d38f: Took footers carry the call's state color: collapsed grep/find/ls tails render green (a tail footer only exists on success); error frames follow the failure kind (plain exits and non-shell tools error, timeouts/signals/aborts/terminations warn). Unmeasured rows show no footer; bash/powershell native timing stays muted.
+
 ## 0.2.2
 
 ### Patch Changes
