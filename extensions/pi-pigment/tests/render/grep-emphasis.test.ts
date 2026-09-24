@@ -9,7 +9,7 @@ import {
 } from "#src/core/escapes.ts";
 import { emphasize, riskyPattern } from "#src/render/pattern-emphasis.ts";
 import { parseHitLine, renderHitLine } from "#src/render/tool-grep.ts";
-import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
+import { FALLBACK_THEME } from "#src/theme/scheme.ts";
 import { buildRenderTheme, viewFor } from "#test/fixtures.ts";
 
 const STR_FG = "\x1b[38;2;220;220;170m"; // a syntax-string color
@@ -70,14 +70,14 @@ describe("renderHitLine (plain-text hit lines carry their own fg)", () => {
     const hit = parseHitLine("src/a.ts:1: const aa = 1; // aa");
     expect(hit).not.toBeNull();
     const theme = buildRenderTheme();
-    const palette = viewFor().palette;
+    const scheme = viewFor().scheme;
     const out = renderHitLine({
       hit: hit!,
       content: "const aa = 1; // aa",
       pattern: "aa",
       flags: { literal: true, ignoreCase: false },
       theme,
-      palette,
+      scheme,
     });
     // The content opens with the toolOutput fg (the plain-text path has
     // no token spans to carry one — without this, the muted prefix bled
@@ -150,7 +150,7 @@ describe("renderHitLine match block (searchMatchBg)", () => {
       pattern: "find",
       flags: { literal: true, ignoreCase: false },
       theme,
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     // The matched run carries pi's search-match surface; the close
     // re-opens the line canvas (toolSuccessBg) — a bare 49m would punch
@@ -179,7 +179,7 @@ describe("renderHitLine prefix coloring", () => {
       pattern: "",
       flags: { literal: false, ignoreCase: false },
       theme,
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(out.startsWith(MUTED)).toBe(true);
   });
@@ -191,9 +191,9 @@ describe("renderHitLine prefix coloring", () => {
       pattern: "",
       flags: { literal: false, ignoreCase: false },
       theme,
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
-    expect(out.startsWith(FALLBACK_PALETTE.fgDim)).toBe(true);
+    expect(out.startsWith(FALLBACK_THEME.fgDim)).toBe(true);
   });
 
   it("skips empty regex matches (an x* pattern must not wrap every position)", () => {

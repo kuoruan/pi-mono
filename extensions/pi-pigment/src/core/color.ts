@@ -1,6 +1,6 @@
 /**
  * Pure color math: the RGB/hex/ANSI-color conversions and WCAG measures
- * the palette and syntax themes derive from. No SGR escape literals
+ * the scheme and syntax themes derive from. No SGR escape literals
  * live here (escapes.ts owns those) — everything in this module maps colors
  * to colors or numbers. Backed by @ctrl/tinycolor (WCAG contrast is
  * bit-identical to the spec; see ADR 0001 for why colord was rejected).
@@ -11,14 +11,14 @@ import type { RgbColor } from "@earendil-works/pi-tui";
 
 import { SEQ_ESC } from "./escapes.ts";
 
-/** The 6×6×6 color-cube channel values of the XTerm 256-color palette. */
+/** The 6×6×6 color-cube channel values of the XTerm 256-color scheme. */
 const CUBE_CHANNELS = [0, 95, 135, 175, 215, 255] as const;
 
 /**
  * Decode an XTerm 256-color index (16-231 cube, 232-255 grayscale) into RGB.
  * Indices 0-15 (system colors) have no portable RGB mapping — null.
  *
- * @param index - The 256-color palette index.
+ * @param index - The 256-color scheme index.
  * @returns The decoded RGB, or null for system colors.
  */
 function decodeAnsi256(index: number): RgbColor | null {

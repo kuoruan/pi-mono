@@ -24,7 +24,7 @@ import { SgrState } from "#src/core/sgr.ts";
 import { injectBg } from "#src/render/inject-bg.ts";
 import { wordDiffAnalysis } from "#src/render/word-diff.ts";
 import { wrapAnsi } from "#src/render/wrap.ts";
-import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
+import { FALLBACK_THEME } from "#src/theme/scheme.ts";
 import { plain } from "#test/fixtures.ts";
 
 const RED_BG = "\x1b[48;2;255;0;0m";
@@ -269,7 +269,7 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
   it("wraps a CJK line that fits the code-unit budget but exceeds columns", () => {
     // 25 CJK chars = 25 code units but 50 columns; width 40 must wrap.
     const cjk = "汉".repeat(25);
-    const rows = wrapAnsi(cjk, { width: 40, maxRows: 10, fillBg: "", palette: FALLBACK_PALETTE });
+    const rows = wrapAnsi(cjk, { width: 40, maxRows: 10, fillBg: "", scheme: FALLBACK_THEME });
     expect(rows.length).toBeGreaterThan(1);
     // Every row's visible width is at most 40 columns.
     for (const row of rows) {
@@ -282,9 +282,9 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
     // Escaped content has no plain fast path — the cell walk's final push
     // must reproduce the fits formula (content + fillBg + pad + reset).
     const styled = `${GREEN_FG}abc${reset}`;
-    expect(
-      wrapAnsi(styled, { width: 5, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
-    ).toEqual([`${styled}  ${reset}`]);
+    expect(wrapAnsi(styled, { width: 5, maxRows: 3, fillBg: "", scheme: FALLBACK_THEME })).toEqual([
+      `${styled}  ${reset}`,
+    ]);
   });
 
   it("fits gate: styled content shorter than width takes the measured path", () => {
@@ -292,13 +292,14 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
     // single-row output byte for byte (no break, no tracker traffic).
     const reset = "\u001b[0m";
     const styled = `${GREEN_FG}ab${reset}`;
-    expect(
-      wrapAnsi(styled, { width: 4, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
-    ).toEqual([`${styled}  ${reset}`]);
+    expect(wrapAnsi(styled, { width: 4, maxRows: 3, fillBg: "", scheme: FALLBACK_THEME })).toEqual([
+      `${styled}  ${reset}`,
+    ]);
     // One column over: the gate declines and the walk breaks the row.
-    expect(
-      wrapAnsi(styled, { width: 1, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
-    ).toEqual([`${GREEN_FG}a${reset}`, `${GREEN_FG}b${reset}${reset}`]);
+    expect(wrapAnsi(styled, { width: 1, maxRows: 3, fillBg: "", scheme: FALLBACK_THEME })).toEqual([
+      `${GREEN_FG}a${reset}`,
+      `${GREEN_FG}b${reset}${reset}`,
+    ]);
   });
 
   it("keeps SGR state across an OSC sequence (its payload is not parameters)", () => {
@@ -310,7 +311,7 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
     const reset = "\u001b[0m";
     const link = `${SEQ_ESC}]8;;http://example/0;2;1${SEQ_BEL}`;
     const content = `${GREEN_FG}abcd${link}efgh${reset}`;
-    const rows = wrapAnsi(content, { width: 5, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE });
+    const rows = wrapAnsi(content, { width: 5, maxRows: 3, fillBg: "", scheme: FALLBACK_THEME });
     expect(rows).toHaveLength(2);
     expect(rows[0]).toContain(link); // the link bytes ride in the open row's slice
     expect(plain((rows[0] ?? "").replace(link, ""))).toBe("abcde");
@@ -321,16 +322,16 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
 
   it("CJK content that fits emits one row byte-identical to the pad formula", () => {
     const reset = "\u001b[0m";
-    expect(
-      wrapAnsi("你好", { width: 6, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
-    ).toEqual([`你好  ${reset}`]);
+    expect(wrapAnsi("你好", { width: 6, maxRows: 3, fillBg: "", scheme: FALLBACK_THEME })).toEqual([
+      `你好  ${reset}`,
+    ]);
   });
 
   it("breaks before a wide char that would cross the boundary (no 1-column overflow)", () => {
     // 19 CJK chars (38 cols) + "x" — the narrow char fits at column 39.
     // 20 CJK chars (40 cols) + "x" — the x crosses; the row must stop at 40.
     const line = "汉".repeat(20) + "x";
-    const rows = wrapAnsi(line, { width: 40, maxRows: 10, fillBg: "", palette: FALLBACK_PALETTE });
+    const rows = wrapAnsi(line, { width: 40, maxRows: 10, fillBg: "", scheme: FALLBACK_THEME });
     expect(rows[0]).not.toContain("x");
     expect(measurePlain(plain(rows[0]))).toBeLessThanOrEqual(40);
     expect(rows.length).toBeGreaterThan(1);
@@ -345,7 +346,7 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
       width: 8,
       maxRows: 2,
       fillBg,
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     const last = rows[rows.length - 1]!;
     expect(measurePlain(plain(last))).toBe(8);
@@ -360,11 +361,11 @@ describe("wrapAnsi wide-character (CJK) columns", () => {
     // Every row occupies exactly `width` columns and closes with reset —
     // the split view butts its right half against the left, so rows must
     // never under- or over-flow their column budget.
+    expect(wrapAnsi("hello", { width: 8, maxRows: 3, fillBg: "", scheme: FALLBACK_THEME })).toEqual(
+      [`hello   ${reset}`],
+    );
     expect(
-      wrapAnsi("hello", { width: 8, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
-    ).toEqual([`hello   ${reset}`]);
-    expect(
-      wrapAnsi("exactfit", { width: 8, maxRows: 3, fillBg: "", palette: FALLBACK_PALETTE }),
+      wrapAnsi("exactfit", { width: 8, maxRows: 3, fillBg: "", scheme: FALLBACK_THEME }),
     ).toEqual([`exactfit${reset}`]);
   });
 });
@@ -374,7 +375,7 @@ describe("wrapAnsi plain-ASCII rows", () => {
     const fillBg = "\x1b[48;2;10;20;30m";
     const reset = "\u001b[0m";
     const line = "ab".repeat(70); // 140 columns
-    const rows = wrapAnsi(line, { width: 60, maxRows: 10, fillBg, palette: FALLBACK_PALETTE });
+    const rows = wrapAnsi(line, { width: 60, maxRows: 10, fillBg, scheme: FALLBACK_THEME });
     expect(rows.length).toBe(3); // 60 + 60 + 20 — not 4 with an empty tail
     expect(rows[0]).toBe(`${line.slice(0, 60)}${fillBg}${reset}`);
     // Row opens repeat the carried SGR state (the previous row's fillBg
@@ -392,7 +393,7 @@ describe("wrapAnsi plain-ASCII rows", () => {
     // The unit version of the bench's 150-line / width 60 / budget 3 shape.
     const fillBg = "\x1b[48;2;10;20;30m";
     const line = "ab".repeat(100); // 200 columns
-    const rows = wrapAnsi(line, { width: 60, maxRows: 3, fillBg, palette: FALLBACK_PALETTE });
+    const rows = wrapAnsi(line, { width: 60, maxRows: 3, fillBg, scheme: FALLBACK_THEME });
     expect(rows.length).toBe(3);
     expect(rows[2]).toContain("›");
     expect(plain(rows[2]).endsWith("›")).toBe(true);
@@ -407,7 +408,7 @@ describe("wrapAnsi plain-ASCII rows", () => {
       width: 2,
       maxRows: 2,
       fillBg: "",
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(rows.length).toBe(2);
     expect(plain(rows[0])).toBe("ab");
@@ -416,7 +417,7 @@ describe("wrapAnsi plain-ASCII rows", () => {
 
   it("an exact multiple of the width ends at the boundary (no empty tail row)", () => {
     const line = "ab".repeat(60); // 120 columns = width * 2
-    const rows = wrapAnsi(line, { width: 60, maxRows: 10, fillBg: "", palette: FALLBACK_PALETTE });
+    const rows = wrapAnsi(line, { width: 60, maxRows: 10, fillBg: "", scheme: FALLBACK_THEME });
     expect(rows.length).toBe(2);
     expect(plain(rows[0])).toBe(line.slice(0, 60));
     expect(plain(rows[1])).toBe(line.slice(60));
@@ -436,7 +437,7 @@ function referenceWrapAnsi(
   options: { width: number; maxRows: number; fillBg: string },
 ): string[] {
   const { width, maxRows, fillBg } = options;
-  const palette = FALLBACK_PALETTE;
+  const scheme = FALLBACK_THEME;
   const rows: string[] = [];
   let row = "";
   let rowCols = 0;
@@ -444,7 +445,7 @@ function referenceWrapAnsi(
   let effectiveWidth = width;
   const breakRow = (): void => {
     const state = referenceAnsiState(row);
-    rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+    rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + scheme.rowReset);
     row = state + fillBg;
     rowCols = 0;
     if (rows.length >= maxRows - 1) {
@@ -478,18 +479,18 @@ function referenceWrapAnsi(
         row +
           fillBg +
           " ".repeat(Math.max(0, effectiveWidth - rowCols)) +
-          palette.rowReset +
-          palette.fgDim +
+          scheme.rowReset +
+          scheme.fgDim +
           "›" +
-          palette.rowReset,
+          scheme.rowReset,
       );
     } else {
-      rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+      rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + scheme.rowReset);
     }
     return rows;
   }
   if (row.length > 0 || rows.length === 0) {
-    rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + palette.rowReset);
+    rows.push(row + fillBg + " ".repeat(Math.max(0, width - rowCols)) + scheme.rowReset);
   }
   return rows;
 }
@@ -549,7 +550,7 @@ describe("wrapAnsi incremental SGR state (differential)", () => {
           width: c.width,
           maxRows: c.maxRows,
           fillBg: c.fillBg,
-          palette: FALLBACK_PALETTE,
+          scheme: FALLBACK_THEME,
         }),
       ).toEqual(referenceWrapAnsi(c.content, c));
     }
@@ -563,7 +564,7 @@ describe("wrapAnsi incremental SGR state (differential)", () => {
       width: 12,
       maxRows: 2,
       fillBg: "",
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(rows).toHaveLength(2);
     const [first, last] = rows;
@@ -580,7 +581,7 @@ describe("wrapAnsi incremental SGR state (differential)", () => {
       width: 40,
       maxRows: 1,
       fillBg: "",
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(wide).toHaveLength(1);
     expect(measurePlain(wide[0]!)).toBe(40);
@@ -605,7 +606,7 @@ describe("injectBg / wordDiffAnalysis code-point alignment", () => {
       ranges: [[5, 10]],
       baseBg: base,
       highlightBg: hi,
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(out.startsWith(`${base}你好世界 `)).toBe(true);
     expect(out).toContain(`${hi}value`);
@@ -647,7 +648,7 @@ describe("injectBg / wordDiffAnalysis code-point alignment", () => {
       ranges: [[15, 20]],
       baseBg: base,
       highlightBg: hi,
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(out).toContain(`${hi}valor`);
     expect(out).not.toContain(`${hi}alor`);
@@ -657,7 +658,7 @@ describe("injectBg / wordDiffAnalysis code-point alignment", () => {
       ranges: [[5, 11]],
       baseBg: base,
       highlightBg: hi,
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(out2).toContain(`${hi}camino`);
     expect(out2).not.toContain(`${hi}amino`);
@@ -673,7 +674,7 @@ describe("injectBg / wordDiffAnalysis code-point alignment", () => {
       ranges: [[6, 12]],
       baseBg: base,
       highlightBg: hi,
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(out).toContain(`${hi}accent`);
     expect(out).not.toContain(`${hi}ccent`);
@@ -690,7 +691,7 @@ describe("injectBg / wordDiffAnalysis code-point alignment", () => {
       ranges: [[15, 20]],
       baseBg: base,
       highlightBg: hi,
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(out).toContain(`${hi}valor`);
     expect(out).not.toContain(`${hi}alor`);

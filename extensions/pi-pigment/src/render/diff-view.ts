@@ -11,7 +11,7 @@
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
 import { MAX_HL_CHARS } from "#src/theme/highlight.ts";
-import type { DiffPalette } from "#src/theme/palette.ts";
+import type { ResolvedTheme } from "#src/theme/scheme.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import type { RenderView } from "./session.ts";
@@ -27,9 +27,9 @@ export interface DiffViewOptions {
   /** Render width in columns (the views clamp to MIN_RENDER_WIDTH). */
   width: number;
   /**
-   * The frame's derived view (the session seam): `palette` for the row
+   * The frame's derived view (the session seam): `scheme` for the row
    * frames and word emphasis, `highlight` for the code blocks. One input
-   * — the palette and the highlighter can never diverge.
+   * — the scheme and the highlighter can never diverge.
    */
   view: RenderView;
   /**
@@ -64,11 +64,11 @@ export const MIN_RENDER_WIDTH = 40;
  * same bytes in both.
  *
  * @param hidden - The hidden logical-line count.
- * @param palette - The resolved diff palette (the row frame's colors).
+ * @param scheme - The resolved diff scheme (the row frame's colors).
  * @returns The styled tail row.
  */
-export function hiddenLinesTail(hidden: number, palette: DiffPalette): string {
-  return `${palette.bgBase}${palette.fgDim}  ... (${hidden} more lines)${palette.rowReset}`;
+export function hiddenLinesTail(hidden: number, scheme: ResolvedTheme): string {
+  return `${scheme.bgBase}${scheme.fgDim}  ... (${hidden} more lines)${scheme.rowReset}`;
 }
 
 /** The highlightPairSides inputs. */

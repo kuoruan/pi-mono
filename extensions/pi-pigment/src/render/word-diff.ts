@@ -10,7 +10,7 @@
 import { diffWords, type Change } from "diff";
 
 import { codePointCount } from "#src/core/ansi.ts";
-import type { DiffPalette } from "#src/theme/palette.ts";
+import type { ResolvedTheme } from "#src/theme/scheme.ts";
 
 /** Word-level emphasis requires at least this similarity between paired lines. */
 const WORD_DIFF_MIN_SIM = 0.15;
@@ -241,23 +241,22 @@ export interface EmphasizedPair {
  * feeds both the verdict and this painter.
  *
  * @param parts - The jsdiff change list for the pair.
- * @param palette - The resolved palette (word-level backgrounds).
+ * @param scheme - The resolved scheme (word-level backgrounds).
  * @returns The emphasized old/new pair.
  */
-export function paintWordDiff(parts: readonly Change[], palette: DiffPalette): EmphasizedPair {
+export function paintWordDiff(parts: readonly Change[], scheme: ResolvedTheme): EmphasizedPair {
   let oldOutput = "";
   let newOutput = "";
   for (const part of parts) {
     if (part.removed) {
       const { lead, body, trail } = trimChunkWhitespace(part.value);
       oldOutput += lead;
-      if (body)
-        oldOutput += `${palette.bgRemovedWord}${body}${palette.rowReset}${palette.bgRemoved}`;
+      if (body) oldOutput += `${scheme.bgRemovedWord}${body}${scheme.rowReset}${scheme.bgRemoved}`;
       oldOutput += trail;
     } else if (part.added) {
       const { lead, body, trail } = trimChunkWhitespace(part.value);
       newOutput += lead;
-      if (body) newOutput += `${palette.bgAddedWord}${body}${palette.rowReset}${palette.bgAdded}`;
+      if (body) newOutput += `${scheme.bgAddedWord}${body}${scheme.rowReset}${scheme.bgAdded}`;
       newOutput += trail;
     } else {
       oldOutput += part.value;
@@ -275,13 +274,13 @@ export function paintWordDiff(parts: readonly Change[], palette: DiffPalette): E
  *
  * @param oldText - Plain old line content.
  * @param newText - Plain new line content.
- * @param palette - The resolved palette (word-level backgrounds).
+ * @param scheme - The resolved scheme (word-level backgrounds).
  * @returns The emphasized old/new pair.
  */
 export function plainWordDiff(
   oldText: string,
   newText: string,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
 ): EmphasizedPair {
-  return paintWordDiff(diffWords(oldText, newText), palette);
+  return paintWordDiff(diffWords(oldText, newText), scheme);
 }

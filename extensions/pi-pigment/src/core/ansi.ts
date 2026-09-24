@@ -4,7 +4,7 @@
  * affect diff rendering), inert-text sanitization (ADR 0004), and cell
  * geometry (measurement, truncation, wrapping). Everything here is a pure
  * function of its arguments; pure color math (RGB/hex/WCAG) lives in
- * color.ts; palette-dependent helpers stay in palette.ts.
+ * color.ts; scheme-dependent helpers stay in scheme.ts.
  */
 
 import { visibleWidth, type RgbColor } from "@earendil-works/pi-tui";

@@ -145,7 +145,7 @@ export async function hlBlockResolved(
   try {
     // Render through our own token→ANSI path (forced truecolor): the
     // cli wrapper routes through ansis' AMBIENT instance, which collapses
-    // under NO_COLOR — breaking the palette/syntax color contract.
+    // under NO_COLOR — breaking the scheme/syntax color contract.
     const output = await renderThemeToAnsi(code, language, theme, seed);
     // shiki emits one (empty) token line per trailing newline; the
     // block's line contract is `code`'s own lines — a trailing newline

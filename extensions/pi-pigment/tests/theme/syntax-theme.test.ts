@@ -1,4 +1,4 @@
-import { themeCacheKey } from "#src/theme/palette.ts";
+import { themeCacheKey } from "#src/theme/scheme.ts";
 import {
   applySemanticPatches,
   buildPiSyntaxTheme,
@@ -26,14 +26,14 @@ const DARK = { successBg: DARK_BG, syntaxColors: true } as const;
 const CODE = "const answer = 42; // note";
 
 /**
- * Resolve a palette + syntax theme pair for a fake theme.
+ * Resolve a scheme + syntax theme pair for a fake theme.
  *
  * @param overrides - The fake theme overrides.
  * @returns The generated theme, or null when syntax colors are absent.
  */
 function derive(overrides?: FakeThemeOverrides): PiSyntaxTheme | null {
   const theme = buildFakeTheme(overrides);
-  return buildPiSyntaxTheme(theme, viewFor(theme).palette, themeCacheKey(theme));
+  return buildPiSyntaxTheme(theme, viewFor(theme).scheme, themeCacheKey(theme));
 }
 
 // ---------------------------------------------------------------------------
@@ -108,8 +108,8 @@ function themeForegrounds(theme: PiSyntaxTheme): string[] {
  */
 function backgroundHexes(overrides: FakeThemeOverrides | typeof LIGHT | typeof DARK): string[] {
   const theme = buildFakeTheme(overrides);
-  const palette = viewFor(theme).palette;
-  return [palette.bgAdded, palette.bgRemoved, palette.bgAddedWord, palette.bgRemovedWord]
+  const scheme = viewFor(theme).scheme;
+  return [scheme.bgAdded, scheme.bgRemoved, scheme.bgAddedWord, scheme.bgRemovedWord]
     .map((escape) => escape.match(/48;2;(\d+);(\d+);(\d+)m/))
     .filter((m): m is RegExpMatchArray => m !== null)
     .map(
@@ -454,8 +454,8 @@ describe("buildPiSyntaxTheme user patches", () => {
 
   it("replaces patched keys verbatim and enforces the rest", () => {
     const theme = buildFakeTheme(DARK);
-    const palette = viewFor(theme).palette;
-    const patched = buildPiSyntaxTheme(theme, palette, "k", { keyword: "#123456" })!;
+    const scheme = viewFor(theme).scheme;
+    const patched = buildPiSyntaxTheme(theme, scheme, "k", { keyword: "#123456" })!;
     const keywordRule = patched.tokenColors.find((rule) => rule.scope.includes("keyword"));
     // Verbatim — NOT lifted to AA.
     expect(keywordRule?.settings?.foreground).toBe("#123456");
@@ -466,9 +466,9 @@ describe("buildPiSyntaxTheme user patches", () => {
 
   it("folds user colors into the identity hash (reload freshness)", () => {
     const theme = buildFakeTheme(DARK);
-    const palette = viewFor(theme).palette;
-    const a = buildPiSyntaxTheme(theme, palette, "k")!;
-    const b = buildPiSyntaxTheme(theme, palette, "k", { keyword: "#123456" })!;
+    const scheme = viewFor(theme).scheme;
+    const a = buildPiSyntaxTheme(theme, scheme, "k")!;
+    const b = buildPiSyntaxTheme(theme, scheme, "k", { keyword: "#123456" })!;
     expect(a.name).not.toBe(b.name);
   });
 });

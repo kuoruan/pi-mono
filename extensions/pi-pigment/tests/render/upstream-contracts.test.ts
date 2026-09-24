@@ -31,7 +31,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createShellWrapper } from "#src/render/shell-tool.ts";
 import { expandKeyHint } from "#src/render/tool-output.ts";
 import type { RenderContext } from "#src/render/tool-services.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 import {
   buildRenderTheme,
   makeRenderCtx,

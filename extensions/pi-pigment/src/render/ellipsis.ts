@@ -124,7 +124,7 @@ export function fitHeaderLine(
 /**
  * A call header task's inputs — the call-varying parts (body/suffix/
  * newline/prefix) plus the frame's own view/ctx/services, which fill the
- * mechanical fields (ellipsis switch, expand state, palette identity,
+ * mechanical fields (ellipsis switch, expand state, scheme identity,
  * theme, invalidate). One shape behind all five header sites; the stamp
  * list must cover the render closure.
  */
@@ -133,7 +133,7 @@ export interface HeaderParts {
   text: PreviewTextHost;
   /** The task key prefix (per tool). */
   prefix: string;
-  /** The frame's derived view (palette + pi theme). */
+  /** The frame's derived view (scheme + pi theme). */
   view: RenderView;
   /** The render context (expand state + invalidate). */
   ctx: RenderContext<object>;
@@ -151,13 +151,13 @@ export interface HeaderParts {
  * Attach a call header task: off means always-full setText (clearing
  * any stale task — the host is reused across frames); on attaches a
  * width-aware task whose stamps cover every render input (body, suffix,
- * the expanded bit for ctrl+o refit, the palette).
+ * the expanded bit for ctrl+o refit, the scheme).
  *
  * @param parts - The header task's inputs.
  */
 export function renderHeaderLine(parts: HeaderParts): void {
   const { text, prefix, view, ctx, services, body, suffix = "", newline = "\n" } = parts;
-  const { palette, piTheme: theme } = view;
+  const { scheme, theme } = view;
   // Both marks are muted chrome (the theme owns the slot): the ellipsis
   // breathes in spaces, the fold mark trails one (no glyph crowding).
   const marks: EllipsisMarks = {
@@ -179,7 +179,7 @@ export function renderHeaderLine(parts: HeaderParts): void {
       // The trailing blank follows the call state (pending headers own
       // none) — without it a pending→error transition keeps the
       // blank-less frame and glues the header to the body below.
-      stamps: [body, suffix, ctx.expanded ? 1 : 0, palette.identity, newline],
+      stamps: [body, suffix, ctx.expanded ? 1 : 0, scheme.identity, newline],
       widthAware: true,
       placeholder: fit(termW()),
       fallback: full,

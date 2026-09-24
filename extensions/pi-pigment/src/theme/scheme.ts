@@ -1,6 +1,6 @@
 /**
- * The diff palette: theme + diff-root overrides → every diff color. The
- * derivation is pure (`deriveDiffPalette`); the session owns memoization,
+ * The resolved theme: theme + diff-root overrides → every render color. The
+ * derivation is pure (`deriveResolvedTheme`); the session owns memoization,
  * the polarity warning, and threading the snapshot into renders
  * (session.ts). Diff-root overrides
  * (ADR 0003) replace the derivation INPUTS: a translucent tint anchors the
@@ -10,12 +10,12 @@
  * toolSuccessBg). The canvas is never a root (ADR 0006). There are no
  * presets and no environment variables.
  *
- * `resolve(theme)` is the single entry: it re-derives the whole palette when
+ * `resolve(theme)` is the single entry: it re-derives the whole scheme when
  * the theme or the effective roots change and returns the current snapshot.
  * Header backgrounds and diff-body backgrounds read the same snapshot, so
  * they can never diverge. The module's only I/O is the one-shot polarity
  * warning inside resolve — derivation itself is pure (derivePalette takes
- * the theme, the effective roots, and the polarity; returns the palette
+ * the theme, the effective roots, and the polarity; returns the scheme
  * plus its polarity audit), and all mutable state lives in one explicit
  * state object.
  */
@@ -62,7 +62,7 @@ export interface DiffRootSide {
 }
 
 /**
- * Diff-root overrides — the palette derivation inputs (ADR 0003): the
+ * Diff-root overrides — the scheme derivation inputs (ADR 0003): the
  * line-scoped side slots only. The box canvas is not a root (ADR 0006):
  * it is the pi theme's own `toolSuccessBg` — one canvas concept, no
  * runtime override path.
@@ -96,7 +96,7 @@ export function isRootHex(slot: keyof DiffRootSide, hex: string): boolean {
 
 /**
  * The roots spec as stored per session: polarity-shared roots plus
- * per-polarity variants; the effective roots merge at palette-derivation
+ * per-polarity variants; the effective roots merge at scheme-derivation
  * time (variant wins per key).
  */
 export interface DiffRootsSpec {
@@ -125,7 +125,7 @@ export interface PaletteTheme {
   fg(name: ThemeColor, text: string): string;
   /** The named color's foreground escape, or an empty string. */
   getFgAnsi(name: ThemeColor): string;
-  /** One of the background slots the palette reads. */
+  /** One of the background slots the scheme reads. */
   getBgAnsi(name: PaletteBgColor): string;
   /** Wrap text in one of the background slots' escape. */
   bg(name: PaletteBgColor, text: string): string;
@@ -133,21 +133,21 @@ export interface PaletteTheme {
   bold(text: string): string;
 }
 
-/** The theme bg slots the palette reads. */
+/** The theme bg slots the scheme reads. */
 const THEME_BG_KEYS = ["toolSuccessBg", "toolErrorBg", "searchMatchBg"] as const;
 
-/** The theme bg slots the palette and headers read (SDK `ThemeBg` subset). */
+/** The theme bg slots the scheme and headers read (SDK `ThemeBg` subset). */
 export type PaletteBgColor = (typeof THEME_BG_KEYS)[number];
 
 /**
- * The resolved palette snapshot — every ANSI value the renderers consume.
+ * The resolved scheme snapshot — every ANSI value the renderers consume.
  * Field names coordinate with the DiffRoots config stems through the
  * fg/bg abbreviation family (one pattern, `<fg|bg><Owner>`):
  * `diff.background` → `bgBase`, `added.text` → `fgAdded`, and the
  * ladder slots `line`/`word`/`gutter` → `bgAdded`/`bgAddedWord`/
  * `bgAddedGutter` (mirrored on the removed side).
  */
-export interface DiffPalette {
+export interface ResolvedTheme {
   /** Background for added lines. */
   bgAdded: string;
   /** Background for removed lines. */
@@ -216,8 +216,8 @@ const FALLBACK_FG: Record<string, RgbColor> = {
   gutter: { r: 100, g: 100, b: 100 },
 } as const;
 
-/** Fallback palette used before the first resolve() and for theme-less contexts. */
-export const FALLBACK_PALETTE: DiffPalette = {
+/** Fallback scheme used before the first resolve() and for theme-less contexts. */
+export const FALLBACK_THEME: ResolvedTheme = {
   bgAdded: bgRgb(FALLBACK_BG.added),
   bgRemoved: bgRgb(FALLBACK_BG.removed),
   bgAddedWord: bgRgb(FALLBACK_BG.addedWord),
@@ -243,7 +243,7 @@ export const FALLBACK_PALETTE: DiffPalette = {
 // Theme identity
 // ---------------------------------------------------------------------------
 
-/** The theme fg slots the palette reads (identity + derivation inputs). */
+/** The theme fg slots the scheme reads (identity + derivation inputs). */
 const THEME_FG_KEYS = [
   "toolTitle",
   "accent",
@@ -266,19 +266,19 @@ interface ThemeKeyMemo {
 
 /**
  * A stable key for the theme's rendered diff-relevant colors. Two themes that
- * render these keys identically are interchangeable as far as the palette is
+ * render these keys identically are interchangeable as far as the scheme is
  * concerned; any change (theme switch, hot-reloaded theme file) changes the key.
  *
  * CONTENT-verified memo, not identity-only: production passes the constant
  * module Theme proxy, and pi's setTheme swaps the instance BEHIND the proxy —
  * an identity hit alone must never be trusted (it pinned the first theme's
- * palette forever — the stale-diff-on-theme-switch report). On every call the
+ * scheme forever — the stale-diff-on-theme-switch report). On every call the
  * walk reads all slots as raw ANSI (getFgAnsi/getBgAnsi — the values, no
  * wrapper strings) and compares them against the memo's parts; an identical
  * read returns the stored key with zero string building, any drift rebuilds.
  * Because the comparison covers EVERY slot derivePalette reads, drift cannot
  * hide. Every slot derivePalette reads must sit in the reads (a dim-only
- * reload that missed the key kept the old palette snapshot once before).
+ * reload that missed the key kept the old scheme snapshot once before).
  *
  * @param theme - The theme to key.
  * @returns A string unique to the theme's rendered diff colors.
@@ -361,20 +361,20 @@ function mergeRoots(a: DiffRoots | undefined, b: DiffRoots | undefined): DiffRoo
 }
 
 /**
- * The pure palette derivation the seam calls per frame: theme + roots →
+ * The pure scheme derivation the seam calls per frame: theme + roots →
  * snapshot. No memo, no warning I/O — the session (session.ts) owns
  * both. The snapshot identity (theme content + roots) is recomputed here,
  * so every snapshot is self-describing and comparable.
  *
- * @param theme - The active pi theme (undefined or unreadable → the fallback palette).
+ * @param theme - The active pi theme (undefined or unreadable → the fallback scheme).
  * @param rootsSpec - The session's diff-root spec.
  * @returns The snapshot and its polarity audit.
  */
-export function deriveDiffPalette(
+export function deriveResolvedTheme(
   theme: PaletteTheme | undefined,
   rootsSpec: DiffRootsSpec | undefined,
 ): DerivedPalette {
-  if (!theme?.getFgAnsi) return { palette: FALLBACK_PALETTE, polarityOffenders: [] };
+  if (!theme?.getFgAnsi) return { scheme: FALLBACK_THEME, polarityOffenders: [] };
   const isLight = deriveIsLight(theme);
   const roots = effectiveRoots(rootsSpec, isLight);
   const identity = [themeCacheKey(theme), rootsKey(rootsSpec)].join("\0");
@@ -424,7 +424,7 @@ function opaqueRootRgb(hex: string): RgbColor | null {
 
 /**
  * The background-root overrides whose COMPOSITED color contradicts the pi
- * theme's polarity — enforcement direction assumes a consistent palette
+ * theme's polarity — enforcement direction assumes a consistent scheme
  * (ADR 0002). Translucent tints are judged by their composited word-level
  * color (the actual rendered surface), so a tint cannot produce a false
  * warning.
@@ -467,16 +467,16 @@ function polarityOffenders(
 /** A background override or tint root contradicting the theme's polarity (ADR 0002). */
 type PolarityOffense = "background" | `${DiffSide}.tint`;
 
-/** The pure derivation result: the palette plus its polarity audit. */
+/** The pure derivation result: the scheme plus its polarity audit. */
 interface DerivedPalette {
-  /** The derived palette. */
-  palette: DiffPalette;
+  /** The derived scheme. */
+  scheme: ResolvedTheme;
   /** Background-root overrides contradicting the theme's polarity (ADR 0002). */
   polarityOffenders: PolarityOffense[];
 }
 
 /**
- * Derive the full palette from a theme and the effective diff roots — pure
+ * Derive the full scheme from a theme and the effective diff roots — pure
  * (no I/O; the session owns the one-shot polarity report). Roots replace the
  * derivation inputs
  * (added.text→toolDiffAdded, removed.text→toolDiffRemoved,
@@ -490,7 +490,7 @@ interface DerivedPalette {
  * @param roots - The effective diff roots for the theme's polarity.
  * @param isLight - The pi theme's own polarity (never root-derived).
  * @param identity - The cache identity of the inputs (carried on the snapshot).
- * @returns The derived palette and its polarity audit.
+ * @returns The derived scheme and its polarity audit.
  */
 function derivePalette(
   theme: PaletteTheme,
@@ -503,10 +503,10 @@ function derivePalette(
 
   // Foregrounds: theme colors when present, roots override, fallbacks last.
   // Only OPAQUE foreground roots are meaningful (a fg is never composited).
-  let fgAdded = FALLBACK_PALETTE.fgAdded;
-  let fgRemoved = FALLBACK_PALETTE.fgRemoved;
-  let fgDim = FALLBACK_PALETTE.fgDim;
-  let fgGutter = FALLBACK_PALETTE.fgGutter;
+  let fgAdded = FALLBACK_THEME.fgAdded;
+  let fgRemoved = FALLBACK_THEME.fgRemoved;
+  let fgDim = FALLBACK_THEME.fgDim;
+  let fgGutter = FALLBACK_THEME.fgGutter;
   try {
     fgAdded = theme.getFgAnsi("toolDiffAdded") || fgAdded;
     fgRemoved = theme.getFgAnsi("toolDiffRemoved") || fgRemoved;
@@ -533,12 +533,12 @@ function derivePalette(
   // Backgrounds: blend the effective diff fg into the effective tool boxes.
   let bgBase = SEQ_BG_DEFAULT;
   let reset = SEQ_RESET;
-  let bgAdded = FALLBACK_PALETTE.bgAdded;
-  let bgRemoved = FALLBACK_PALETTE.bgRemoved;
-  let bgAddedWord = FALLBACK_PALETTE.bgAddedWord;
-  let bgRemovedWord = FALLBACK_PALETTE.bgRemovedWord;
-  let bgAddedGutter = FALLBACK_PALETTE.bgAddedGutter;
-  let bgRemovedGutter = FALLBACK_PALETTE.bgRemovedGutter;
+  let bgAdded = FALLBACK_THEME.bgAdded;
+  let bgRemoved = FALLBACK_THEME.bgRemoved;
+  let bgAddedWord = FALLBACK_THEME.bgAddedWord;
+  let bgRemovedWord = FALLBACK_THEME.bgRemovedWord;
+  let bgAddedGutter = FALLBACK_THEME.bgAddedGutter;
+  let bgRemovedGutter = FALLBACK_THEME.bgRemovedGutter;
 
   try {
     const addRgb =
@@ -608,7 +608,7 @@ function derivePalette(
   }
 
   return {
-    palette: {
+    scheme: {
       bgAdded,
       bgRemoved,
       bgAddedWord,

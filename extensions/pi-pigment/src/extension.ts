@@ -20,7 +20,7 @@
  * manifest discovers themes/); resources_discover lists the user's
  * converted pigment-*.json outputs and maps them for ours-detection;
  * the `/pigment convert` command does the manual conversion. Rendering
- * is zero-config: the palette auto-derives from the active pi theme
+ * is zero-config: the scheme auto-derives from the active pi theme
  * (a pigment-* theme IS the theme — canvas, boxes, and diff slots baked
  * at generation time) and the syntax tokens follow the detection chain
  * (override > ours > the theme's nine colors).

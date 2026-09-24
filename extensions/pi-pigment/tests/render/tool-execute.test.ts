@@ -806,7 +806,7 @@ describe("grep renderResult highlight swap", () => {
     const { ctx } = makeRenderCtx();
     // A counting theme: fg/bold are the payload builders the plain
     // placeholder path uses (renderPlainOutput per line + the collapse
-    // tail). getFgAnsi/getBgAnsi are NOT counted — the palette derivation's
+    // tail). getFgAnsi/getBgAnsi are NOT counted — the scheme derivation's
     // content-validated key reads them on every frame by design.
     const base = buildRenderTheme();
     let built = 0;

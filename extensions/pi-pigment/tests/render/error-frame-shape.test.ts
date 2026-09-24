@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isBenignExit, shellBadgeText, shellExitBadgeOf } from "#src/render/error-frame.ts";
 import type { PreviewTextHost } from "#src/render/text-task.ts";
 import type { ShellState } from "#src/render/tool-services.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
@@ -104,7 +104,7 @@ describe("edit error frame shape", () => {
     ctx.args = { path: "/render-project/app.ts", edits: [] };
     const theme = buildRenderTheme();
 
-    // Live call: the header Text's custom bg = the palette's base tint.
+    // Live call: the header Text's custom bg = the scheme's base tint.
     const live = edit.renderCall(
       { path: "/render-project/app.ts", edits: [] },
       theme,
@@ -112,7 +112,7 @@ describe("edit error frame shape", () => {
     ) as PreviewTextHost;
     expect(typeof live.customBgFn).toBe("function");
     const liveBg = live.customBgFn!("row");
-    expect(liveBg).toContain("48;2;30;30;40"); // toolSuccessBg in the fake theme's palette
+    expect(liveBg).toContain("48;2;30;30;40"); // toolSuccessBg in the fake theme's scheme
 
     // Failed call: isError flips the header to the ERROR tint so the
     // header row matches the all-error frame below it (the default
@@ -230,7 +230,7 @@ describe("edit error frame shape", () => {
     if (!edit?.renderCall) throw new Error("edit not registered");
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "/render-project/app.ts", edits: [] };
-    // A 256-color success slot: the palette cannot parse it and would
+    // A 256-color success slot: the scheme cannot parse it and would
     // derive a neutral canvas — the header must still paint the slot the
     // TUI's frame Box paints, so the row matches the frame.
     const theme: PaletteTheme = {
@@ -425,7 +425,7 @@ describe("write error frame shape", () => {
     const painted = header.customBgFn?.("← create x") ?? "";
     // The line OPENS with the theme's ERROR bg (48;2;40;30;30 — not the
     // success tint 48;2;30;30;40 the pre-fix renderCall always
-    // reapplied); the palette's rowReset tail re-opens bgBase by design.
+    // reapplied); the scheme's rowReset tail re-opens bgBase by design.
     expect(painted.startsWith("\x1b[48;2;40;30;30m")).toBe(true);
   });
 });

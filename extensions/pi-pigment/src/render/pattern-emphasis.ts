@@ -17,7 +17,7 @@ import {
   SEQ_RESET,
   SEQ_RESET_BARE,
 } from "#src/core/escapes.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 
 /** How the caller wants the pattern matched (grep/find flags). */
 export interface MatchFlags {

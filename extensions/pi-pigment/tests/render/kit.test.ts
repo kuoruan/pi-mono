@@ -81,7 +81,7 @@ function kitFor() {
 async function renderResultText(
   tool: { renderResult: (r: unknown, o: unknown, t: unknown, c: unknown) => unknown },
   result: unknown,
-  theme = viewFor().piTheme,
+  theme = viewFor().theme,
 ): Promise<string> {
   const { ctx, invalidated } = makeRenderCtx<Record<string, unknown>>();
   ctx.args = { pattern: "done" };

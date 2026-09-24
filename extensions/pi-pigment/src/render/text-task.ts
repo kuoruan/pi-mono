@@ -266,20 +266,20 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
     seedFor,
     streaming = false,
   } = input;
-  const theme = view.piTheme;
-  const palette = view.palette;
+  const theme = view.theme;
+  const scheme = view.scheme;
   clearToolHeaderBg(text);
   // ONE stamp list feeds both compares: the identity (the attach guard)
   // and the width-appended render key derive from the same list through
   // definePreviewTask — everything else is frozen per task (the diff, the
-  // palette identity). The streaming bit separates partial frames from
+  // scheme identity). The streaming bit separates partial frames from
   // the settled one, so the final frame re-arms and colors in even when
   // the content no longer grows.
   attachPreviewTask(
     text,
     definePreviewTask({
       prefix: keyPrefix,
-      stamps: [palette.identity, diff.lines.length, language ?? "", streamingStamp(streaming)],
+      stamps: [scheme.identity, diff.lines.length, language ?? "", streamingStamp(streaming)],
       widthAware: true,
       placeholder: theme.fg("muted", " rendering diff…"),
       fallback: "",
@@ -349,7 +349,7 @@ async function renderPaddedDiff(
     seed,
   };
   const body = await (useSplit ? renderSplit : renderUnified)(frame);
-  return padDiffBody(body, view.palette);
+  return padDiffBody(body, view.scheme);
 }
 
 /**

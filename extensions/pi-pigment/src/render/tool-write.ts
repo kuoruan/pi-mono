@@ -19,7 +19,7 @@ import { type ParsedDiff, parseDiff } from "#src/core/diff.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { countLines, linesOf } from "#src/core/lines.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
+import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
 import { seedFromText } from "#src/theme/seed.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
@@ -83,8 +83,8 @@ const MAX_RENDER_LINES = 150;
 interface NewFileBodyOptions {
   /** The highlighted (or plain) file lines. */
   lines: readonly string[];
-  /** The resolved palette. */
-  palette: DiffPalette;
+  /** The resolved scheme. */
+  scheme: ResolvedTheme;
   /** The indicator column's glyph (borderBar's result). */
   indicatorGlyph: string;
   /** The render width in columns (the preview task's width). */
@@ -103,7 +103,7 @@ interface NewFileBodyOptions {
  * @returns The framed body.
  */
 function newFileBody(options: NewFileBodyOptions): string {
-  const { lines, palette, indicatorGlyph, width } = options;
+  const { lines, scheme, indicatorGlyph, width } = options;
   const numberWidth = Math.max(2, String(lines.length).length);
   const gutter = gutterWidth(numberWidth, indicatorGlyph);
   const codeWidth = Math.max(20, width - gutter);
@@ -113,21 +113,21 @@ function newFileBody(options: NewFileBodyOptions): string {
         type: "add",
         number: i + 1,
         numberWidth,
-        palette,
+        scheme,
         indicatorGlyph,
       });
       // Unlimited wrap budget: the file PREVIEW must show its content
       // (the diff views' narrow-terminal row cap truncates overlong
       // lines behind a › marker).
-      const wrapped = wrapAnsi(injectBg(line, { baseBg: frame.codeBg, palette }), {
+      const wrapped = wrapAnsi(injectBg(line, { baseBg: frame.codeBg, scheme }), {
         width: codeWidth,
         maxRows: Number.POSITIVE_INFINITY,
         fillBg: frame.codeBg,
-        palette,
+        scheme,
       });
-      const rows = [`${frame.gutter}${wrapped[0]}${palette.rowReset}`];
+      const rows = [`${frame.gutter}${wrapped[0]}${scheme.rowReset}`];
       for (let rowIndex = 1; rowIndex < wrapped.length; rowIndex++) {
-        rows.push(`${frame.continuation}${wrapped[rowIndex]}${palette.rowReset}`);
+        rows.push(`${frame.continuation}${wrapped[rowIndex]}${scheme.rowReset}`);
       }
       return rows;
     })
@@ -142,10 +142,14 @@ function newFileBody(options: NewFileBodyOptions): string {
  *
  * @param state - The write wrapper's render state.
  * @param theme - The pi theme.
- * @param palette - The resolved palette.
+ * @param scheme - The resolved scheme.
  * @returns The styled summary segment, or "" when nothing landed yet.
  */
-function writeSummarySegment(state: WriteState, theme: PaletteTheme, palette: DiffPalette): string {
+function writeSummarySegment(
+  state: WriteState,
+  theme: PaletteTheme,
+  scheme: ResolvedTheme,
+): string {
   if (state.noChange) return theme.fg("success", "✓ no changes");
   // The line count lives in the stats memo (the bridge field the header
   // used to read died with it — the memo is set by the SAME renderResult,
@@ -154,7 +158,7 @@ function writeSummarySegment(state: WriteState, theme: PaletteTheme, palette: Di
     return theme.fg("success", `✓ new file (${state.newFileStats.lineCount} lines)`);
   }
   if (state.added !== undefined && state.removed !== undefined) {
-    return summarize(state.added, state.removed, palette);
+    return summarize(state.added, state.removed, scheme);
   }
   return "";
 }
@@ -229,7 +233,7 @@ export function createWriteWrapper(
     // streaming line count. The content preview is the result render's
     // (every wrapper's shape: call = header/feedback, result = content).
     renderCall: ({ text, view, ctx, renderArgs }) => {
-      const { palette, piTheme: theme } = view;
+      const { scheme, theme } = view;
       const callArgs = argsOf<WriteToolInput>(renderArgs);
       const fp = callArgs.path ?? "";
       // Cache the existence probe per path in the render state — renderCall
@@ -251,7 +255,7 @@ export function createWriteWrapper(
       // tail — every wrapper's summaries live here, the result slot
       // carries only content): streaming counts while args grow, then the
       // bridged result summary once renderResult stashes it.
-      const summary = writeSummarySegment(ctx.state, theme, palette);
+      const summary = writeSummarySegment(ctx.state, theme, scheme);
       // While the content argument still streams, its growing line count
       // prefixes the summary (counted without allocating — streaming
       // frames re-run this over the full accumulated content).
@@ -281,7 +285,7 @@ export function createWriteWrapper(
     // Render the finished call: the diff preview (async task), the new-file
     // preview, the no-change notice, or a plain fallback.
     renderResult: ({ text, view, ctx, result, options }) => {
-      const { palette, piTheme: theme } = view;
+      const { scheme, theme } = view;
       const { details: d } = result as { details: WriteResultDetails | undefined };
       if (d?.kind === "diff") {
         // The stats bridge (the edit wrapper's shape): the call header
@@ -365,14 +369,14 @@ export function createWriteWrapper(
             prefix: "nf",
             stamps: [
               fp,
-              palette.identity,
+              scheme.identity,
               lineCount,
               stats.fingerprint,
               options.expanded ? "x" : "c",
               streamingStamp(pending),
             ],
             widthAware: true,
-            placeholder: padDiffBody(theme.fg("muted", "rendering file…"), palette),
+            placeholder: padDiffBody(theme.fg("muted", "rendering file…"), scheme),
             fallback: "",
             invalidate: ctx.invalidate,
             render: async (width: number) => {
@@ -405,11 +409,11 @@ export function createWriteWrapper(
                 `${padDiffBody(
                   newFileBody({
                     lines: shown,
-                    palette,
+                    scheme,
                     indicatorGlyph: borderBar(indicatorStyle),
                     width,
                   }),
-                  palette,
+                  scheme,
                 )}`,
                 tail,
                 hidden,

@@ -2,9 +2,9 @@
  * The pi-derived syntax theme: a TextMate theme built from the active pi
  * theme's own nine `syntax*` colors (the colors pi itself uses for code),
  * WCAG-adjusted for the five diff backgrounds. This replaced a fixed
- * bundled palette as the "auto" behavior (ADR 0001): syntax colors now
- * adapt to the pi theme like the palette does, instead of borrowing a
- * fixed palette calibrated for someone else's editor background.
+ * bundled scheme as the "auto" behavior (ADR 0001): syntax colors now
+ * adapt to the pi theme like the scheme does, instead of borrowing a
+ * fixed scheme calibrated for someone else's editor background.
  *
  * Contrast enforcement: VS Code-calibrated syntax colors sit on our blended
  * diff backgrounds, and the word-emphasis backgrounds (bgAddedWord/bgRemovedWord) sit
@@ -23,7 +23,7 @@ import type { BundledTheme, ThemeRegistration } from "shiki";
 import { contrastRatio, parseAnsiRgb, parseHexColor, rgbToHex } from "#src/core/color.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 
-import type { DiffPalette, PaletteTheme } from "./palette.ts";
+import type { ResolvedTheme, PaletteTheme } from "./scheme.ts";
 
 /** WCAG AA contrast ratio for normal-size text. */
 const WCAG_AA = 4.5;
@@ -121,7 +121,7 @@ function minContrast(color: RgbColor, backgrounds: readonly RgbColor[]): number 
 }
 
 /**
- * Nudge a color's HSL lightness toward the palette's safe extreme until it
+ * Nudge a color's HSL lightness toward the scheme's safe extreme until it
  * clears WCAG AA over every background. Hue and saturation are preserved.
  * Returns the original color when it already complies. Exported for the
  * pi-theme converter (the AA tool is shared, not forked).
@@ -190,33 +190,33 @@ function bgRgbOr(escape: string, fallback: RgbColor): RgbColor {
 /**
  * The renderer backgrounds a syntax color must stay readable on, as RGB.
  *
- * @param palette - The resolved diff palette.
+ * @param scheme - The resolved diff scheme.
  * @returns The five render backgrounds (base canvas + add/del/emphasis blends; neutral fallback for
  *   background-less palettes).
  */
-export function aaCheckBackgrounds(palette: DiffPalette): RgbColor[] {
-  const neutral = palette.isLight ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
+export function aaCheckBackgrounds(scheme: ResolvedTheme): RgbColor[] {
+  const neutral = scheme.isLight ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
   return [
-    bgRgbOr(palette.bgBase, neutral),
-    bgRgbOr(palette.bgAdded, neutral),
-    bgRgbOr(palette.bgRemoved, neutral),
-    bgRgbOr(palette.bgAddedWord, neutral),
-    bgRgbOr(palette.bgRemovedWord, neutral),
+    bgRgbOr(scheme.bgBase, neutral),
+    bgRgbOr(scheme.bgAdded, neutral),
+    bgRgbOr(scheme.bgRemoved, neutral),
+    bgRgbOr(scheme.bgAddedWord, neutral),
+    bgRgbOr(scheme.bgRemovedWord, neutral),
   ];
 }
 
 /**
- * The canvas color's hex — the diff palette's base background when it
+ * The canvas color's hex — the diff scheme's base background when it
  * carries a truecolor value, else the polarity's neutral (the fallback
  * only fires when bgBase is theme-name-based rather than rgb).
  *
- * @param palette - The resolved diff palette.
+ * @param scheme - The resolved diff scheme.
  * @returns The hex color for editor.background.
  */
-function canvasBgHex(palette: DiffPalette): string {
-  const bgRgb = parseAnsiRgb(palette.bgBase);
+function canvasBgHex(scheme: ResolvedTheme): string {
+  const bgRgb = parseAnsiRgb(scheme.bgBase);
   if (bgRgb) return rgbToHex(bgRgb);
-  return palette.isLight ? "#ffffff" : "#000000";
+  return scheme.isLight ? "#ffffff" : "#000000";
 }
 
 /**
@@ -228,8 +228,8 @@ function canvasBgHex(palette: DiffPalette): string {
  * colors are never AA-enforced); the rest walk AA as usual.
  *
  * @param theme - The active pi theme.
- * @param palette - The resolved diff palette (backgrounds + lightness bit).
- * @param themeKey - The palette's cache key; keys both the theme name and
+ * @param scheme - The resolved diff scheme (backgrounds + lightness bit).
+ * @param themeKey - The scheme's cache key; keys both the theme name and
  *   the caller's memo so hot theme switches invalidate correctly.
  * @param userColors - Semantic color patches (the syntaxTheme object's
  *   effective colors for the current polarity), or undefined.
@@ -237,7 +237,7 @@ function canvasBgHex(palette: DiffPalette): string {
  */
 export function buildPiSyntaxTheme(
   theme: PaletteTheme,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
   themeKey: string,
   userColors?: SemanticColors,
 ): PiSyntaxTheme | null {
@@ -248,7 +248,7 @@ export function buildPiSyntaxTheme(
     raw.set(key, rgb);
   }
 
-  const backgrounds = aaCheckBackgrounds(palette);
+  const backgrounds = aaCheckBackgrounds(scheme);
   // Total by construction, and typed as such: `raw` holds every
   // SEMANTIC_KEYS entry (the loop above bails on any miss) and every entry
   // is written here — so the reads below need no fallback, and none can
@@ -258,19 +258,19 @@ export function buildPiSyntaxTheme(
     const patched = userColors?.[key];
     // A user patch is verbatim; anything falsy (including an empty string,
     // which no schema allows) falls through to the enforced variant.
-    adjusted[key] = patched || rgbToHex(enforceWcag(rgb, backgrounds, !palette.isLight));
+    adjusted[key] = patched || rgbToHex(enforceWcag(rgb, backgrounds, !scheme.isLight));
   }
 
-  // The canvas color's hex: the parsed palette bg, else the polarity's
+  // The canvas color's hex: the parsed scheme bg, else the polarity's
   // neutral (the fallback only fires when bgBase carries no truecolor).
-  const bgHex = canvasBgHex(palette);
+  const bgHex = canvasBgHex(scheme);
   // Stable identity for Shiki's name-based dedup: derived colors + theme key
   // + user patches (so config reloads produce a fresh name/cache entry).
   const identity = `${SEMANTIC_KEYS.map((key) => adjusted[key]).join("")}|${themeKey}|${JSON.stringify(userColors ?? {})}`;
 
   return {
-    name: `pi-${palette.isLight ? "light" : "dark"}-${fnv1a(identity)}`,
-    type: palette.isLight ? "light" : "dark",
+    name: `pi-${scheme.isLight ? "light" : "dark"}-${fnv1a(identity)}`,
+    type: scheme.isLight ? "light" : "dark",
     colors: {
       "editor.background": bgHex,
       "editor.foreground": adjusted.punctuation,
@@ -459,7 +459,7 @@ export function buildSemanticTheme(
  * Enforce WCAG AA on every fg color of a TextMate theme (bundled names
  * and the fallback pair — the colors WE choose). Each distinct foreground —
  * tokenColors rules and the editor default fg — walks HSL lightness toward
- * the palette-safe extreme until it clears AA on every background; hue and
+ * the scheme-safe extreme until it clears AA on every background; hue and
  * fontStyle are preserved, non-hex colors are skipped. Immutable: the input
  * theme is never modified (bundled-theme loaders return shared references).
  *

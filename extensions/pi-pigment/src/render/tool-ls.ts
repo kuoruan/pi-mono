@@ -13,7 +13,7 @@ import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
 import { assembleOutputBody } from "./output-assembly.ts";
@@ -67,7 +67,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
   return createToolWrapper(origLs, services, {
     renderShell: "default",
     renderCall: ({ text, view, ctx, renderArgs }) => {
-      const { piTheme: theme } = view;
+      const { theme } = view;
       const args = argsOf<LsToolInput>(renderArgs);
       renderHeaderLine({
         text,
@@ -80,7 +80,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
       return text;
     },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
-      const { palette, piTheme: theme } = view;
+      const { scheme, theme } = view;
       // Inert at intake (ADR 0004): filenames can carry control bytes too.
       // The derivation is memoized on the result object's identity.
       const derive = outputMemoOf(ctx.state);
@@ -93,7 +93,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
         isEmpty: entries.length === 0,
         budget: COLLAPSED_LINES.ls,
         derived,
-        paletteIdentity: palette.identity,
+        paletteIdentity: scheme.identity,
         tookMs,
         expanded: options.expanded,
         notice: derived.notice,
@@ -125,7 +125,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
             // fg() closes (a full \x1b[0m would kill pi core's frame
             // canvas and whiten the row's tail padding).
             if (detectLanguage(entry)) {
-              return `${connector}${palette.fgCode}${entry}${SEQ_FG_DEFAULT}`;
+              return `${connector}${scheme.fgCode}${entry}${SEQ_FG_DEFAULT}`;
             }
             return `${connector}${theme.fg("toolOutput", entry)}`;
           });

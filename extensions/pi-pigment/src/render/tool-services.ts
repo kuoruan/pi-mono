@@ -8,7 +8,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import type { HeaderEllipsis, IndicatorStyle } from "#src/config/config-schema.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 
 import { shortHome } from "./paths.ts";
 import type { RenderSession } from "./session.ts";
@@ -292,7 +292,7 @@ export interface ToolServices {
   textFactory: TextComponentFactory;
   /**
    * The per-session render seam (session.ts) — the one read path
-   * for the session's derived state (palette, resolved token theme,
+   * for the session's derived state (scheme, resolved token theme,
    * highlighting). The factory binds it per frame (`forTheme(theme)`);
    * nothing else in the render pipeline reads session state.
    */

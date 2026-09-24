@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loadPigmentConfig } from "#src/config/config-layer.ts";
 import { configSchema } from "#src/config/config-schema.ts";
-import { isRootHex } from "#src/theme/palette.ts";
+import { isRootHex } from "#src/theme/scheme.ts";
 import { vol, writeFile } from "#test/memfs.ts";
 
 vi.mock("node:fs");

@@ -20,7 +20,7 @@ import type {
 import { parsePatchFiles } from "#src/core/diff.ts";
 import { linesOf } from "#src/core/lines.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
+import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
 import { seedFromLines } from "#src/theme/seed.ts";
 
 import { setCallHeader } from "./error-frame.ts";
@@ -70,15 +70,15 @@ function editEditsCountLabel(edits: number, diffLines: number, theme: PaletteThe
  *
  * @param state - The edit render state.
  * @param theme - The active pi theme.
- * @param palette - The resolved palette (summarize colors).
+ * @param scheme - The resolved scheme (summarize colors).
  * @returns The styled suffix, or "" when no stats exist.
  */
-function editCallStatsSuffix(state: EditState, theme: PaletteTheme, palette: DiffPalette): string {
+function editCallStatsSuffix(state: EditState, theme: PaletteTheme, scheme: ResolvedTheme): string {
   if (state.editCount === undefined || state.diffLines === undefined) return "";
   const count = editEditsCountLabel(state.editCount, state.diffLines, theme);
   return resultLine(
     theme.fg("muted", count),
-    summarize(state.added ?? 0, state.removed ?? 0, palette),
+    summarize(state.added ?? 0, state.removed ?? 0, scheme),
   );
 }
 
@@ -118,13 +118,13 @@ export function createEditWrapper(
     // Render the in-flight call header: "← edit" + path + stats, framed
     // once the edit arguments complete.
     renderCall: ({ text, view, ctx, renderArgs }) => {
-      const { palette, piTheme: theme } = view;
+      const { scheme, theme } = view;
       const callArgs = argsOf<EditToolInput>(renderArgs);
       const fp = callArgs.path ?? "";
 
       // Pre-bridge (streaming) the stats are "" — the same header as the
       // suffix-less shape, so one call serves both frames.
-      const stats = editCallStatsSuffix(ctx.state, theme, palette);
+      const stats = editCallStatsSuffix(ctx.state, theme, scheme);
       // The header row's background follows the call's outcome (the
       // shared setCallHeader home — the default shell's content Box
       // already paints its own error bg, but the header Text's custom bg
@@ -146,7 +146,7 @@ export function createEditWrapper(
     },
 
     renderResult: ({ text, view, ctx, result }) => {
-      const { piTheme: theme } = view;
+      const { theme } = view;
       // Lazily adapt the SDK's own stashed patch (the text it actually
       // matched) into our ParsedDiff — parse on render, not execute, so
       // result.details stays byte-identical to the native tool's (ADR

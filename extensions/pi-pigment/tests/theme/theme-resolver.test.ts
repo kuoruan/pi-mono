@@ -100,7 +100,7 @@ describe("theme file materialization", () => {
     const { selection } = await resolveSyntaxThemeSelection("explicit-roots", env());
     if (selection.kind !== "file") throw new Error("unreachable");
     // ADR 0006: the roots ride the file's diffRoots — the converter
-    // decides what the tints become, not the palette.
+    // decides what the tints become, not the scheme.
     expect(selection.file.diffRoots).toEqual({ added: { text: "#101a20" } });
   });
 });
@@ -132,7 +132,7 @@ describe("string resolution", () => {
     const { selection, rootsSpec } = await resolveSyntaxThemeSelection("mine", env());
     if (selection.kind !== "file") throw new Error("unreachable");
     // ADR 0006: file diff keys ride the selection (the converter's
-    // input), never the palette's roots spec.
+    // input), never the scheme's roots spec.
     expect(selection.file.diffRoots).toEqual({ added: { text: "#3fb950" } });
     expect(rootsSpec).toBeUndefined();
   });
@@ -454,11 +454,11 @@ describe("VS Code colors passthrough (ADR 0003)", () => {
 
   it("end-to-end: a user config tint anchors the word slot over the pi canvas", async () => {
     // ADR 0006: the file channel's tints ride the converter (generation
-    // time); the USER's config tints remain the palette's roots — this
+    // time); the USER's config tints remain the scheme's roots — this
     // e2e pins that surviving path with the real github-dark values.
     {
       // Fake pi theme: dark canvas (13,17,23) ≈ github-dark's #0d1117.
-      const palette = viewFor(
+      const scheme = viewFor(
         buildFakeTheme({
           successBg: "\x1b[48;2;13;17;23m",
           errorBg: "\x1b[48;2;13;17;23m",
@@ -468,13 +468,13 @@ describe("VS Code colors passthrough (ADR 0003)", () => {
             topLevel: { added: { tint: "#3fb9504d" }, removed: { tint: "#ff7b724d" } },
           },
         },
-      ).palette;
+      ).scheme;
       // Word slot = composite(#3fb950 at 77/255 over #0d1117) = (28,68,40).
-      expect(palette.bgAddedWord).toBe("\x1b[48;2;28;68;40m");
+      expect(scheme.bgAddedWord).toBe("\x1b[48;2;28;68;40m");
       // Line slot = alpha/2 = the author's own 15% line intent → (21,42,32).
-      expect(palette.bgAdded).toBe("\x1b[48;2;21;42;32m");
+      expect(scheme.bgAdded).toBe("\x1b[48;2;21;42;32m");
       // The canvas stays the pi theme's — context rows untouched.
-      expect(palette.bgBase).toBe("\x1b[48;2;13;17;23m");
+      expect(scheme.bgBase).toBe("\x1b[48;2;13;17;23m");
     }
   });
 });
@@ -716,7 +716,7 @@ describe("direct bundled-theme names (the @shikijs/themes channel)", () => {
     expect(selection.kind === "file" && selection.file.theme.type).toBe("dark");
     // ADR 0006: the canvas is the CONVERTER's input (editor.background
     // itself), the native diffEditor tints ride diffRoots — the override
-    // selects tokens only, never the palette's roots.
+    // selects tokens only, never the scheme's roots.
     expect(selection.kind === "file" && selection.file.diffRoots?.added?.tint).toBe("#4d937550");
     expect(selection.kind === "file" && selection.file.diffRoots?.removed?.tint).toBe("#ab595950");
     expect(rootsSpec).toBeUndefined();

@@ -29,7 +29,7 @@ import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
  */
 export async function renderUnified(options: DiffViewOptions): Promise<string> {
   const { diff, language, maxLines, width, view, indicator, seed } = options;
-  const palette = view.palette;
+  const scheme = view.scheme;
   if (!diff.lines.length) return "";
   const { visible, oldSource, newSource } = unifiedWindow(diff.lines, maxLines);
   const renderWidth = Math.max(MIN_RENDER_WIDTH, width);
@@ -60,16 +60,16 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
 
   // Append one unified row (sign + line number + body) to the output.
   const emitRow = (type: "del" | "add" | "ctx", number: number | null, body: string): void => {
-    const frame = diffRowFrame({ type, number, numberWidth, palette, indicatorGlyph });
+    const frame = diffRowFrame({ type, number, numberWidth, scheme, indicatorGlyph });
     const rows = wrapAnsi(expandTabs(body), {
       width: codeWidth,
       maxRows: adaptiveWrapRows(renderWidth),
       fillBg: frame.codeBg,
-      palette,
+      scheme,
     });
-    output.push(`${frame.gutter}${rows[0]}${palette.rowReset}`);
+    output.push(`${frame.gutter}${rows[0]}${scheme.rowReset}`);
     for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
-      output.push(`${frame.continuation}${rows[rowIndex]}${palette.rowReset}`);
+      output.push(`${frame.continuation}${rows[rowIndex]}${scheme.rowReset}`);
     }
   };
 
@@ -97,14 +97,14 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
         const left = Math.floor(padding / 2);
         const right = padding - left;
         output.push(
-          `${palette.bgBase}${palette.fgDim}${"─".repeat(left)}${label}${"─".repeat(right)}${palette.rowReset}`,
+          `${scheme.bgBase}${scheme.fgDim}${"─".repeat(left)}${label}${"─".repeat(right)}${scheme.rowReset}`,
         );
       }
       index++;
       continue;
     }
     if (line.type === "ctx") {
-      emitRow("ctx", line.newNum, `${palette.bgBase}${SEQ_DIM}${oldHl(line)}`);
+      emitRow("ctx", line.newNum, `${scheme.bgBase}${SEQ_DIM}${oldHl(line)}`);
       newIndex++;
       index++;
       continue;
@@ -138,9 +138,9 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
           d.oldNum,
           injectBg(oldHl(d), {
             ranges: wordDiff.oldRanges,
-            baseBg: palette.bgRemoved,
-            highlightBg: palette.bgRemovedWord,
-            palette,
+            baseBg: scheme.bgRemoved,
+            highlightBg: scheme.bgRemovedWord,
+            scheme,
           }),
         );
         emitRow(
@@ -148,37 +148,37 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
           a.newNum,
           injectBg(newHl(a), {
             ranges: wordDiff.newRanges,
-            baseBg: palette.bgAdded,
-            highlightBg: palette.bgAddedWord,
-            palette,
+            baseBg: scheme.bgAdded,
+            highlightBg: scheme.bgAddedWord,
+            scheme,
           }),
         );
       } else {
         // The analysis already ran the pair's word diff — its parts feed
         // the painter directly, so the plain path pays one diffWords per
         // pair (not two).
-        const plain = paintWordDiff(wordDiff.parts, palette);
-        emitRow("del", d.oldNum, `${palette.bgRemoved}${plain.old}`);
-        emitRow("add", a.newNum, `${palette.bgAdded}${plain.new}`);
+        const plain = paintWordDiff(wordDiff.parts, scheme);
+        emitRow("del", d.oldNum, `${scheme.bgRemoved}${plain.old}`);
+        emitRow("add", a.newNum, `${scheme.bgAdded}${plain.new}`);
       }
       continue;
     }
     for (const deletion of deletions) {
       const body = canHighlight
-        ? injectBg(oldHl(deletion), { baseBg: palette.bgRemoved, palette })
-        : `${palette.bgRemoved}${deletion.content}`;
+        ? injectBg(oldHl(deletion), { baseBg: scheme.bgRemoved, scheme })
+        : `${scheme.bgRemoved}${deletion.content}`;
       emitRow("del", deletion.oldNum, body);
     }
     for (const addition of additions) {
       const body = canHighlight
-        ? injectBg(newHl(addition), { baseBg: palette.bgAdded, palette })
-        : `${palette.bgAdded}${addition.content}`;
+        ? injectBg(newHl(addition), { baseBg: scheme.bgAdded, scheme })
+        : `${scheme.bgAdded}${addition.content}`;
       emitRow("add", addition.newNum, body);
     }
   }
 
   if (diff.lines.length > visible.length) {
-    output.push(hiddenLinesTail(diff.lines.length - visible.length, palette));
+    output.push(hiddenLinesTail(diff.lines.length - visible.length, scheme));
   }
   return output.join("\n");
 }

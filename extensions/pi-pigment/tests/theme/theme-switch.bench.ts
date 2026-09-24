@@ -17,7 +17,7 @@ import type { HighlighterCore, ThemedToken } from "shiki/core";
  * measuring the same work — with a fixed identity every iteration after the first
  * would be a cache hit and measure nothing. The cold legs also build a session per
  * iteration, because a switch is a session (the render state is per-session by
- * construction), so their numbers include the palette derivation the switch pays.
+ * construction), so their numbers include the scheme derivation the switch pays.
  *
  * The tokenize-only split names the tokenizer's share; the remainder is our ANSI
  * rendering, not shiki. It runs on a representative bundled theme because
@@ -39,7 +39,7 @@ import { beforeAll, test } from "vitest";
 
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
 import { clearHighlightCacheForTest } from "#src/theme/highlight.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 import { ensureCore, renderTokenLinesAnsi } from "#src/theme/shiki-core.ts";
 import { buildFakeTheme, viewFor } from "#test/fixtures.ts";
 
@@ -82,7 +82,7 @@ const blocks = Array.from({ length: BLOCKS }, (_, i) => ({ code: block(i) }));
  *
  * @param name - The theme name.
  * @param tint - The keyword color's red channel.
- * @returns The palette-theme surface.
+ * @returns The scheme-theme surface.
  */
 function tinted(name: string, tint: number): PaletteTheme {
   const base = buildFakeTheme({ name, syntaxColors: true });
@@ -98,7 +98,7 @@ const themeB = tinted("bench-b", 200);
 const env = { cwd: process.cwd(), agentDir: "/tmp/pigment-theme-switch-bench" };
 
 // The warm leg reuses ONE session: a switch is a session, a steady-state frame is
-// not, so building one per iteration would fold the palette derivation (which a
+// not, so building one per iteration would fold the scheme derivation (which a
 // switch pays and a frame does not) into the cache-hit baseline.
 const warmView = viewFor(themeA, { themeEnv: env });
 let core: HighlighterCore | undefined;

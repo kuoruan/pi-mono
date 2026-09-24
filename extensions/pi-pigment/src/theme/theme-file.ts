@@ -22,7 +22,7 @@ import type { Issue } from "#src/core/issue.ts";
 import type { SessionEnv } from "#src/core/session-env.ts";
 
 import { flattenTranslucentTokens, loadBundledTheme } from "./bundled-intake.ts";
-import { DIFF_SIDES, isRootHex, type DiffRoots } from "./palette.ts";
+import { DIFF_SIDES, isRootHex, type DiffRoots } from "./scheme.ts";
 import type { MaterializedTheme } from "./syntax-theme.ts";
 import { parsePlistTheme } from "./tmtheme-plist.ts";
 

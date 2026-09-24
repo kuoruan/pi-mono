@@ -18,7 +18,7 @@ import type {
 import type { Component } from "@earendil-works/pi-tui";
 
 import { inertText } from "#src/core/ansi.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 
 import { ERROR_FRAME_DEFAULT_WIDTH, formatToolErrorResult, setToolErrorBg } from "./error-frame.ts";
 import { clearToolHeaderBg, resultLine } from "./header.ts";
@@ -41,12 +41,12 @@ import {
 
 /**
  * A renderResult implementation the factory calls with extracted text. The
- * frame's view carries the palette and the pi theme (the render vocabulary —
+ * frame's view carries the scheme and the pi theme (the render vocabulary —
  * the SDK's Theme class is structurally assignable, so wrappers never cast).
  */
 export type RenderResultBody<TState extends object> = (args: {
   text: PreviewTextHost;
-  /** The frame's derived view: `palette` + `piTheme`, and `highlight` (the session seam). */
+  /** The frame's derived view: `scheme` + `theme`, and `highlight` (the session seam). */
   view: RenderView;
   ctx: RenderContext<TState>;
   /** The raw SDK result (details carry the execute-side payload). */
@@ -76,7 +76,7 @@ export type RenderResultBody<TState extends object> = (args: {
 /** A renderCall implementation the factory calls. */
 export type RenderCallBody<TState extends object> = (args: {
   text: PreviewTextHost;
-  /** The frame's derived view: `palette` + `piTheme`, and `highlight` (the session seam). */
+  /** The frame's derived view: `scheme` + `theme`, and `highlight` (the session seam). */
   view: RenderView;
   ctx: RenderContext<TState>;
   /** The raw render args (may be partial while streaming). */
@@ -216,10 +216,10 @@ export function createToolWrapper<TState extends object = Record<string, unknown
     ): Component {
       const text = getWidthAwareText(ctx.lastComponent, textFactory);
       // The session seam binds this frame's derived state: one object
-      // carries the palette and the resolved token theme, so the two can
+      // carries the scheme and the resolved token theme, so the two can
       // never diverge inside a frame.
       const view = services.render.forTheme(theme);
-      const palette = view.palette;
+      const scheme = view.scheme;
       const status = callStateOf(ctx);
       // Stop the clock before any branch renders: the error frame reads the
       // duration too, and the first settled frame fixes endedAt (repeated
@@ -267,7 +267,7 @@ export function createToolWrapper<TState extends object = Record<string, unknown
         // frame; expand, theme swaps, or a new message change the
         // identity and re-arm through the protocol.
         const placeholder = frame(ERROR_FRAME_DEFAULT_WIDTH);
-        setToolErrorBg(text, theme, palette);
+        setToolErrorBg(text, theme, scheme);
         attachPreviewTask(
           text,
           definePreviewTask({
@@ -276,7 +276,7 @@ export function createToolWrapper<TState extends object = Record<string, unknown
             // captures — tookMs among them; the -1 sentinel (a number,
             // not "") keeps unmeasured distinguishable from a measured
             // 0ms.
-            stamps: [options.expanded ? 1 : 0, tookMs ?? -1, palette.identity, message],
+            stamps: [options.expanded ? 1 : 0, tookMs ?? -1, scheme.identity, message],
             widthAware: true,
             placeholder,
             fallback: placeholder,

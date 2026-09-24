@@ -8,7 +8,7 @@
 
 import { continuationTail, forEachCell, isPlainAscii, truncateBudget } from "#src/core/ansi.ts";
 import { SgrState } from "#src/core/sgr.ts";
-import type { DiffPalette } from "#src/theme/palette.ts";
+import type { ResolvedTheme } from "#src/theme/scheme.ts";
 
 /** Row budget for one wrapping line on wide terminals (≥180 columns). */
 const MAX_WRAP_ROWS_WIDE = 3;
@@ -38,8 +38,8 @@ export interface WrapAnsiOptions {
   maxRows: number;
   /** Background escape padding each row. */
   fillBg: string;
-  /** The resolved palette (rowReset re-opens rows). */
-  palette: DiffPalette;
+  /** The resolved scheme (rowReset re-opens rows). */
+  scheme: ResolvedTheme;
 }
 
 /**
@@ -90,7 +90,7 @@ function fitsWithin(content: string, width: number): number {
  * @returns The wrapped rows.
  */
 export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
-  const { width, maxRows, fillBg, palette } = options;
+  const { width, maxRows, fillBg, scheme } = options;
   if (width <= 0) return [""];
   // Plain fast path: pure printable ASCII needs no cell walk — one column
   // per code unit, so the fits gate and the wrapping both reduce to length
@@ -99,9 +99,9 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
   // fit the code-unit budget while overflowing visually.)
   if (isPlainAscii(content)) {
     if (content.length <= width) {
-      return [content + fillBg + " ".repeat(width - content.length) + palette.rowReset];
+      return [content + fillBg + " ".repeat(width - content.length) + scheme.rowReset];
     }
-    return wrapPlainAscii(content, width, maxRows, fillBg, palette);
+    return wrapPlainAscii(content, width, maxRows, fillBg, scheme);
   }
   // Non-plain content (escapes, CJK): a measure-only walk decides the fits
   // case up front — a fitting line takes one allocation-free walk plus one
@@ -110,7 +110,7 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
   // repeated pass is only as long as the first row.
   const used = width >= FITS_GATE_MIN_WIDTH ? fitsWithin(content, width) : -1;
   if (used !== -1) {
-    return [content + fillBg + " ".repeat(width - used) + palette.rowReset];
+    return [content + fillBg + " ".repeat(width - used) + scheme.rowReset];
   }
   // Row bytes are materialized LAZILY — a row is a contiguous slice of
   // `content` (its escapes ride inside the slice), so only a real break
@@ -143,7 +143,7 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
         // Load-bearing: the cell that triggered the break stays on the NEXT
         // row, so a cell wider than the row (2 cols at width 1) overdraws.
         " ".repeat(Math.max(0, width - rowCols)) +
-        palette.rowReset,
+        scheme.rowReset,
     );
     prefix = state + fillBg;
     // The `!== ""` guard is correctness, not micro-optimization: apply("")
@@ -176,8 +176,8 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
             rowContent +
             fillBg +
             " ".repeat(Math.max(0, effectiveWidth - rowCols)) +
-            palette.rowReset +
-            (width > 2 ? continuationTail(palette.rowReset, palette.fgDim) : ""),
+            scheme.rowReset +
+            (width > 2 ? continuationTail(scheme.rowReset, scheme.fgDim) : ""),
         );
         truncated = true;
         return true;
@@ -194,7 +194,7 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
       content.slice(rowStart) +
       fillBg +
       " ".repeat(Math.max(0, width - rowCols)) +
-      palette.rowReset,
+      scheme.rowReset,
   );
   return rows;
 }
@@ -212,7 +212,7 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
  * @param width - Target column width (> 0).
  * @param maxRows - Row budget.
  * @param fillBg - Background escape for each row's padding.
- * @param palette - The resolved palette (rowReset + fgDim for the marker).
+ * @param scheme - The resolved scheme (rowReset + fgDim for the marker).
  * @returns The wrapped rows.
  */
 function wrapPlainAscii(
@@ -220,7 +220,7 @@ function wrapPlainAscii(
   width: number,
   maxRows: number,
   fillBg: string,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
 ): string[] {
   const rows: string[] = [];
   let start = 0;
@@ -233,11 +233,11 @@ function wrapPlainAscii(
     const open = rows.length === 0 ? "" : rows.length === 1 ? fillBg : `${fillBg}${fillBg}`;
     if (armed && end < content.length) {
       rows.push(
-        `${open}${slice}${fillBg}${" ".repeat(room - slice.length)}${palette.rowReset}${width > 2 ? continuationTail(palette.rowReset, palette.fgDim) : ""}`,
+        `${open}${slice}${fillBg}${" ".repeat(room - slice.length)}${scheme.rowReset}${width > 2 ? continuationTail(scheme.rowReset, scheme.fgDim) : ""}`,
       );
       return rows;
     }
-    rows.push(`${open}${slice}${fillBg}${" ".repeat(width - slice.length)}${palette.rowReset}`);
+    rows.push(`${open}${slice}${fillBg}${" ".repeat(width - slice.length)}${scheme.rowReset}`);
     start = end;
   }
   return rows;

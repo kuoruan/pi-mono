@@ -75,7 +75,7 @@ export function createShellWrapper(
       ctx.state.exitBadge = shellExitBadgeOf(message);
     },
     renderCall: ({ text, view, ctx, renderArgs }) => {
-      const { palette, piTheme: theme } = view;
+      const { scheme, theme } = view;
       const callArgs = argsOf<BashToolInput>(renderArgs);
       const command = callArgs.command ?? "";
       ctx.state.command = command;
@@ -99,7 +99,7 @@ export function createShellWrapper(
       // AND theme identity — a mid-session theme switch re-highlights
       // instead of serving the old theme's colors; arg-streaming frames
       // re-render cheaply until args complete.
-      const cacheKey = `${palette.identity}\u0000${command}`;
+      const cacheKey = `${scheme.identity}\u0000${command}`;
       const cached =
         ctx.state.commandHighlightFor === cacheKey
           ? (ctx.state.commandHighlight as string | undefined)
@@ -164,7 +164,7 @@ export function createShellWrapper(
     // withheld (undefined): the native renderer builds its own Container
     // and must not receive our width-aware Text.
     renderResult: ({ text, view, ctx, result, options, origRenderResult }) =>
-      origRenderResult(result, options, view.piTheme, { ...ctx, lastComponent: undefined }) ?? text,
+      origRenderResult(result, options, view.theme, { ...ctx, lastComponent: undefined }) ?? text,
   });
 }
 

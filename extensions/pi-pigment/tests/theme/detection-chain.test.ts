@@ -13,7 +13,7 @@ import { buildFakeTheme, makeRenderSession, registerTools, viewFor } from "#test
  * The detection chain, end to end (ADR 0006): an active pi theme whose
  * name is one of OURS (the registered, converted themes) drives the
  * precise pipeline — the mapped shiki theme's full tokenColors, AA
- * enforced against the palette's blend backgrounds, rendered bytes and
+ * enforced against the scheme's blend backgrounds, rendered bytes and
  * all. An external theme falls back to the nine-color derivation.
  */
 import { vol, writeFile } from "#test/memfs.ts";
@@ -157,11 +157,11 @@ describe("session_start assembly (the detection in place)", () => {
     const dir = "/assembly-project";
     mkdirSync(join(dir, ".pi", "extensions", "pigment"), { recursive: true });
     // No config file at all: zero-config — the tools register, the
-    // palette derives from the pi theme, ours-detection runs per render.
+    // scheme derives from the pi theme, ours-detection runs per render.
     const tools = await registerTools({ cwd: dir, agentDir: join(dir, "agent") });
     expect(tools.length).toBe(7);
-    const palette = viewFor(buildFakeTheme()).palette;
-    expect(palette.bgBase).toBeTruthy(); // the pi theme's own canvas
+    const scheme = viewFor(buildFakeTheme()).scheme;
+    expect(scheme.bgBase).toBeTruthy(); // the pi theme's own canvas
   });
 
   it("an unresolvable override falls back to auto — tools still register, issue lands on stderr", async () => {

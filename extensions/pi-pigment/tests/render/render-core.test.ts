@@ -16,12 +16,12 @@ import { shouldUseSplit } from "#src/render/split-verdict.ts";
 import { renderSplit } from "#src/render/split-view.ts";
 import { renderUnified } from "#src/render/unified-view.ts";
 import { adaptiveWrapRows } from "#src/render/wrap.ts";
-import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
+import { FALLBACK_THEME } from "#src/theme/scheme.ts";
 import { plain, viewFor } from "#test/fixtures.ts";
 
 /**
  * The suite's view caller: the fixed frame (no language, the fallback
- * palette, the bar indicator) with only the per-test knobs explicit.
+ * scheme, the bar indicator) with only the per-test knobs explicit.
  *
  * @param view - Which diff view to render (split or unified).
  * @param diff - The parsed diff.
@@ -134,13 +134,13 @@ describe("renderUnified", () => {
     // under each word background, then assert the changed words carry
     // them EXACTLY — the tab (jsdiff merges it into the changed chunk,
     // and the renderer expands it to two columns) must stay out.
-    const palette = frame.palette;
+    const scheme = frame.scheme;
     const bgClasses = [
-      palette.bgRemovedWord,
-      palette.bgAddedWord,
-      palette.bgRemoved,
-      palette.bgAdded,
-      palette.bgBase,
+      scheme.bgRemovedWord,
+      scheme.bgAddedWord,
+      scheme.bgRemoved,
+      scheme.bgAdded,
+      scheme.bgBase,
     ];
     const spanOf = (bg: string): string => {
       let chars = "";
@@ -158,8 +158,8 @@ describe("renderUnified", () => {
       }
       return chars;
     };
-    expect(spanOf(palette.bgRemovedWord)).toBe("oldValue");
-    expect(spanOf(palette.bgAddedWord)).toBe("newValue");
+    expect(spanOf(scheme.bgRemovedWord)).toBe("oldValue");
+    expect(spanOf(scheme.bgAddedWord)).toBe("newValue");
   });
 
   it("returns an empty string for an empty diff", async () => {
@@ -217,18 +217,18 @@ describe("borderBar / adaptiveWrapRows", () => {
 
 describe("header helpers", () => {
   it("summarize builds the +N -M chip and the no-change fallback", () => {
-    expect(plain(summarize(3, 5, FALLBACK_PALETTE))).toBe("+3 -5");
-    expect(plain(summarize(2, 0, FALLBACK_PALETTE))).toBe("+2");
-    expect(plain(summarize(0, 4, FALLBACK_PALETTE))).toBe("-4");
-    expect(plain(summarize(0, 0, FALLBACK_PALETTE))).toBe("no changes");
+    expect(plain(summarize(3, 5, FALLBACK_THEME))).toBe("+3 -5");
+    expect(plain(summarize(2, 0, FALLBACK_THEME))).toBe("+2");
+    expect(plain(summarize(0, 4, FALLBACK_THEME))).toBe("-4");
+    expect(plain(summarize(0, 0, FALLBACK_THEME))).toBe("no changes");
   });
 
   it("chips close with the bare reset — no background re-open tail", () => {
     // The header row's background is injected (injectBg re-opens its
-    // baseBg after every reset) — the chip must NOT re-open the palette's
+    // baseBg after every reset) — the chip must NOT re-open the scheme's
     // bgBase itself, or that stale escape would overpaint the row tail
     // (the mechanism behind the theme-switch stale-chip report).
-    for (const chip of [summarize(3, 5, FALLBACK_PALETTE), summarize(0, 0, FALLBACK_PALETTE)]) {
+    for (const chip of [summarize(3, 5, FALLBACK_THEME), summarize(0, 0, FALLBACK_THEME)]) {
       expect(chip).toContain("\x1b[0m");
       // eslint-disable-next-line no-control-regex -- matches the SGR bg escapes the chip must not emit
       expect(chip).not.toMatch(/\x1b\[4[89]/);
@@ -308,7 +308,7 @@ describe("header helpers", () => {
     expect(rows[0]).toContain("Could not find the exact text");
   });
 
-  it("setToolErrorBg uses the theme's error background with a palette fallback", () => {
+  it("setToolErrorBg uses the theme's error background with a scheme fallback", () => {
     const painters: Array<((line: string) => string) | undefined> = [];
     const text = {
       setText(_s: string) {},
@@ -327,7 +327,7 @@ describe("header helpers", () => {
         fg: () => "",
         getBgAnsi: (name: string) => (name === "toolErrorBg" ? "\x1b[48;2;9;9;9m" : ""),
       } as never,
-      FALLBACK_PALETTE,
+      FALLBACK_THEME,
     );
     // Theme WITHOUT one (throws or returns undefined) falls back to background.
     setToolErrorBg(
@@ -336,7 +336,7 @@ describe("header helpers", () => {
         fg: () => "",
         getBgAnsi: () => undefined,
       } as never,
-      FALLBACK_PALETTE,
+      FALLBACK_THEME,
     );
     setToolErrorBg(
       text as never,
@@ -346,19 +346,19 @@ describe("header helpers", () => {
           throw new Error("no bg");
         },
       } as never,
-      FALLBACK_PALETTE,
+      FALLBACK_THEME,
     );
     expect(painters).toHaveLength(3);
     // Each painter actually paints: the themed one opens the theme's
-    // error background; the fallbacks open the palette's base.
+    // error background; the fallbacks open the scheme's base.
     const [themed, missing, throwing] = painters as [
       (line: string) => string,
       (line: string) => string,
       (line: string) => string,
     ];
     expect(themed("x")).toContain("\x1b[48;2;9;9;9m");
-    expect(missing("x")).toContain(FALLBACK_PALETTE.bgBase);
-    expect(throwing("x")).toContain(FALLBACK_PALETTE.bgBase);
+    expect(missing("x")).toContain(FALLBACK_THEME.bgBase);
+    expect(throwing("x")).toContain(FALLBACK_THEME.bgBase);
   });
 
   it("rejects narrow widths", () => {

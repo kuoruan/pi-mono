@@ -23,13 +23,13 @@ import { defaultIssueSink, type IssueSink } from "#src/core/issue.ts";
 import type { SessionEnv } from "#src/core/session-env.ts";
 import { hlBlockResolved, type HighlightBlock } from "#src/theme/highlight.ts";
 import {
-  deriveDiffPalette,
+  deriveResolvedTheme,
   polarityWarning,
   themeCacheKey,
-  type DiffPalette,
+  type ResolvedTheme,
   type DiffRootsSpec,
   type PaletteTheme,
-} from "#src/theme/palette.ts";
+} from "#src/theme/scheme.ts";
 import type { ShikiThemeInput } from "#src/theme/syntax-theme.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
 import {
@@ -42,19 +42,19 @@ import { collectConvertedThemes } from "#src/theme/user-themes.ts";
 /**
  * A session's render inputs: everything the derived state depends on — the
  * theme-resolution family (`ThemeResolveInputs`) plus the diff roots the
- * palette derivation consumes.
+ * scheme derivation consumes.
  */
 export interface RenderSessionInputs extends ThemeResolveInputs {
-  /** Diff-root overrides (the palette's `diff` inputs, already resolved). */
+  /** Diff-root overrides (the scheme's `diff` inputs, already resolved). */
   diffRoots: DiffRootsSpec | undefined;
 }
 
 /** One frame's derived view: bound to the pi theme the frame renders with. */
 export interface RenderView {
-  /** The resolved diff palette (WCAG-enforced, root-derived). */
-  readonly palette: DiffPalette;
+  /** The frame's color scheme (WCAG-enforced, root-derived). */
+  readonly scheme: ResolvedTheme;
   /** The pi theme this view is bound to (the chrome colors' source). */
-  readonly piTheme: PaletteTheme;
+  readonly theme: PaletteTheme;
   /**
    * The resolved token theme for this frame's polarity — the observation
    * point the golden-name / AA assertions (and non-tool renderers) read.
@@ -80,43 +80,43 @@ export interface RenderSession {
  * @returns The session seam.
  */
 export function createRenderSession(inputs: RenderSessionInputs): RenderSession {
-  // The per-session instance state: the active-theme memo, the palette
+  // The per-session instance state: the active-theme memo, the scheme
   // memo, and the one-shot polarity-warning flag — nothing here is
   // reachable from another session instance.
   const themeMemo: ActiveThemeMemo = createBoundedMap(8);
-  const paletteMemo = createBoundedMap<string, DiffPalette>(8);
+  const schemeMemo = createBoundedMap<string, ResolvedTheme>(8);
   let warned = false;
 
   /**
-   * Derive this frame's palette, reporting the polarity contradiction at
+   * Derive this frame's scheme, reporting the polarity contradiction at
    * most once per session. Memoized per theme CONTENT (`themeCacheKey` is
    * content-verified), so repeated frames of one theme reuse the same
    * snapshot object.
    *
    * @param theme - The frame's pi theme.
-   * @returns The resolved palette.
+   * @returns The resolved scheme.
    */
-  const deriveFor = (theme: PaletteTheme): DiffPalette => {
+  const deriveFor = (theme: PaletteTheme): ResolvedTheme => {
     const key = themeCacheKey(theme);
-    const cached = paletteMemo.get(key);
+    const cached = schemeMemo.get(key);
     if (cached) return cached;
-    const derived = deriveDiffPalette(theme, inputs.diffRoots);
+    const derived = deriveResolvedTheme(theme, inputs.diffRoots);
     if (!warned && derived.polarityOffenders.length > 0) {
       warned = true;
       console.error(polarityWarning(derived.polarityOffenders));
     }
-    paletteMemo.set(key, derived.palette);
-    return derived.palette;
+    schemeMemo.set(key, derived.scheme);
+    return derived.scheme;
   };
 
   return {
     forTheme(theme: PaletteTheme): RenderView {
-      const palette = deriveFor(theme);
+      const scheme = deriveFor(theme);
       const resolve = (): Promise<ShikiThemeInput | null> =>
-        resolveActiveThemeMemoized(themeMemo, inputs, palette, theme);
+        resolveActiveThemeMemoized(themeMemo, inputs, scheme, theme);
       return {
-        palette,
-        piTheme: theme,
+        scheme,
+        theme,
         activeTheme: resolve,
         highlight: async (block: HighlightBlock) => hlBlockResolved(block, await resolve()),
       };

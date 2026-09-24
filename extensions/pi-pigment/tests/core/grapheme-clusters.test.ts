@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { fitAnsi, forEachCell, measurePlain } from "#src/core/ansi.ts";
 import { SEQ_DIM, SEQ_RESET } from "#src/core/escapes.ts";
 import { wrapAnsi } from "#src/render/wrap.ts";
-import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
+import { FALLBACK_THEME } from "#src/theme/scheme.ts";
 import { plain } from "#test/fixtures.ts";
 
 /** The grapheme clusters of a string — the same segmentation pi-tui draws. */
@@ -172,7 +172,7 @@ describe("the grapheme-cluster width model (measurement must equal the renderer)
       width: 2,
       maxRows: 3,
       fillBg: "",
-      palette: FALLBACK_PALETTE,
+      scheme: FALLBACK_THEME,
     });
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => measurePlain(row) === 2)).toBe(true);

@@ -17,7 +17,7 @@
  *
  * This suite pins the four UNCOVERED scenarios:
  *
- * - Theme switch re-highlights (the cache key carries the palette identity)
+ * - Theme switch re-highlights (the cache key carries the scheme identity)
  * - Control bytes in the command defuse at intake (ADR 0004)
  * - The empty command renders the bare prompt
  * - A command superseded mid-highlight never lands (stale guard)
@@ -26,7 +26,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ShellState } from "#src/render/tool-services.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
@@ -52,7 +52,7 @@ beforeEach(() => {
 });
 
 describe("bash call header shape (renderCall)", () => {
-  it("re-highlights when the theme identity changes (the cache key carries the palette)", async () => {
+  it("re-highlights when the theme identity changes (the cache key carries the scheme)", async () => {
     const tools = await registerTools();
     const bash = toolOf(tools, "bash");
     if (!bash?.renderCall) throw new Error("bash not registered");
@@ -66,10 +66,10 @@ describe("bash call header shape (renderCall)", () => {
     const keyA = ctx.state.commandHighlightFor;
     expect(keyA).toBeDefined();
 
-    // Same command, theme whose DIFF-relevant colors differ (the palette
+    // Same command, theme whose DIFF-relevant colors differ (the scheme
     // identity — syntax slots are not identity): the cache key must
     // differ and a fresh highlight must fire (the old theme's colors
-    // must not ride the cached swap into the new palette's frames).
+    // must not ride the cached swap into the new scheme's frames).
     const swapsAfterA = invalidated.count;
     const themeB = buildFakeTheme({ diffAdded: "\x1b[38;2;81;220;121m" });
     bash.renderCall({ command: "git status --short" }, themeB, ctx);

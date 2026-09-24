@@ -8,7 +8,7 @@
  * materialization (name normalization, polarity check, translucent
  * flattening) is idempotent and its product is memoized per name — the
  * ONE materialized object every consumer shares. Nothing here touches the
- * palette, the roots, or pi — intake only.
+ * scheme, the roots, or pi — intake only.
  */
 import { themeNames } from "@shikijs/themes";
 import type { ThemeRegistration } from "shiki";

@@ -131,7 +131,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
         for (let tries = 0; tries < 100; tries++) {
           highlighted = component.text.text;
           // The AA-enforced string color (the raw syntaxString is
-          // lightened for the dark test palette).
+          // lightened for the dark test scheme).
           if (highlighted.includes("38;2;224;185;169m")) break;
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
@@ -242,14 +242,14 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     ) as DrivenTaskComponent;
     // The precomputed form: the identity IS outputTaskKey's join. Composing
     // the expectation through the same authorities (the output memo, the
-    // palette, the measured duration) keeps it exact — a dropped or
+    // scheme, the measured duration) keeps it exact — a dropped or
     // reordered stamp fails here.
     const derived = outputMemoOf({})(result as object);
     expect(component.previewIdentity).toBe(
       outputTaskKey({
         prefix: "g",
         derived,
-        identity: viewFor(theme).palette.identity,
+        identity: viewFor(theme).scheme.identity,
         elapsedMs: 12,
         expanded: true,
         streaming: false,
@@ -408,7 +408,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     expect(plain(finalC.text.text)).toMatch(/Took \d+\.\ds/);
   });
 
-  it("grep re-renders when the theme identity changes (the key carries the palette)", async () => {
+  it("grep re-renders when the theme identity changes (the key carries the scheme)", async () => {
     const tools = await registerTools();
     const grep = tools.find((t) => t.name === "grep");
     if (!grep?.renderResult || !grep.renderCall) throw new Error("grep not registered");

@@ -78,7 +78,7 @@ test("wrapAnsi (fits-width fast path)", async ({ bench }) => {
       width: 160,
       maxRows: 4,
       fillBg: "",
-      palette: _diffPalette,
+      scheme: _diffPalette,
     }).length;
   }).run();
 });
@@ -92,7 +92,7 @@ test("wrapAnsi (styled fits-width)", async ({ bench }) => {
       width: 160,
       maxRows: 3,
       fillBg: _diffPalette.bgBase,
-      palette: _diffPalette,
+      scheme: _diffPalette,
     }).length;
   }).run();
 });
@@ -103,7 +103,7 @@ test("wrapAnsi (real wrap)", async ({ bench }) => {
       width: 40,
       maxRows: 4,
       fillBg: _diffPalette.bgBase,
-      palette: _diffPalette,
+      scheme: _diffPalette,
     }).length;
   }).run();
 });
@@ -114,7 +114,7 @@ test("wrapAnsi (CJK double-width squeeze)", async ({ bench }) => {
       width: 20,
       maxRows: 6,
       fillBg: _diffPalette.bgBase,
-      palette: _diffPalette,
+      scheme: _diffPalette,
     }).length;
   }).run();
 });
@@ -125,7 +125,7 @@ test("wrapAnsi (overflow truncation)", async ({ bench }) => {
       width: 60,
       maxRows: 3,
       fillBg: _diffPalette.bgBase,
-      palette: _diffPalette,
+      scheme: _diffPalette,
     }).length;
   }).run();
 });
@@ -138,7 +138,7 @@ test("wrapAnsi (plain body, one wrap per line)", async ({ bench }) => {
         width: 60,
         maxRows: 3,
         fillBg: "",
-        palette: _diffPalette,
+        scheme: _diffPalette,
       }).length;
     }
   }).run();
@@ -150,7 +150,7 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
       type: "del",
       number: 12,
       numberWidth: 3,
-      palette: _diffPalette,
+      scheme: _diffPalette,
       indicatorGlyph: "│",
     }).gutter.length;
   }).run();
@@ -159,7 +159,7 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
       type: "add",
       number: 9,
       numberWidth: 3,
-      palette: _diffPalette,
+      scheme: _diffPalette,
       indicatorGlyph: "│",
     }).gutter.length;
   }).run();
@@ -168,7 +168,7 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
       type: "ctx",
       number: null,
       numberWidth: 2,
-      palette: _diffPalette,
+      scheme: _diffPalette,
       indicatorGlyph: "",
     }).gutter.length;
   }).run();
@@ -176,7 +176,7 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
 
 test("injectBg (the bg layer under every highlighted line)", async ({ bench }) => {
   await bench("styled line, no ranges (plain highlight)", () => {
-    sink += _injectBg(_styledLine, { baseBg: _diffPalette.bgBase, palette: _diffPalette }).length;
+    sink += _injectBg(_styledLine, { baseBg: _diffPalette.bgBase, scheme: _diffPalette }).length;
   }).run();
   await bench("styled line with 2 emphasis ranges (word-diff paint)", () => {
     sink += _injectBg(_styledLine, {
@@ -186,11 +186,11 @@ test("injectBg (the bg layer under every highlighted line)", async ({ bench }) =
         [2, 12],
         [16, 26],
       ],
-      palette: _diffPalette,
+      scheme: _diffPalette,
     }).length;
   }).run();
   await bench("plain line, no escapes (no-op scan)", () => {
-    sink += _injectBg(_plainLine, { baseBg: _diffPalette.bgBase, palette: _diffPalette }).length;
+    sink += _injectBg(_plainLine, { baseBg: _diffPalette.bgBase, scheme: _diffPalette }).length;
   }).run();
 });
 
@@ -264,7 +264,7 @@ test("wrapAnsi (mixed diff body)", async ({ bench }) => {
         width: 56,
         maxRows: 2,
         fillBg: _diffPalette.bgBase,
-        palette: _diffPalette,
+        scheme: _diffPalette,
       }).length;
     }
     sink += sum;

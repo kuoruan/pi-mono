@@ -326,18 +326,18 @@ describe("rendering pipeline", () => {
         ctx,
       );
     };
-    // The full list, spelled out: [palette.identity, diff.lines.length,
+    // The full list, spelled out: [scheme.identity, diff.lines.length,
     // language, streaming]. The parsed diff comes through the same parser
-    // the wrapper uses; palette.identity embeds a NUL, so the expectation
+    // the wrapper uses; scheme.identity embeds a NUL, so the expectation
     // composes through taskKeyOf rather than splitting the identity.
     const parsed = parsePatchFiles(patch)[0]!;
     expect(attach(false).previewIdentity).toBe(
-      taskKeyOf("ed", [viewFor(theme).palette.identity, parsed.lines.length, "typescript", ""]),
+      taskKeyOf("ed", [viewFor(theme).scheme.identity, parsed.lines.length, "typescript", ""]),
     );
     // The settle bit: the same inputs mid-stream must key differently, or
     // the final frame never re-renders in color.
     expect(attach(true).previewIdentity).toBe(
-      taskKeyOf("ed", [viewFor(theme).palette.identity, parsed.lines.length, "typescript", "s"]),
+      taskKeyOf("ed", [viewFor(theme).scheme.identity, parsed.lines.length, "typescript", "s"]),
     );
   });
 
@@ -360,7 +360,7 @@ describe("rendering pipeline", () => {
         ctx,
       );
     };
-    // [fp, palette.identity, lineCount, stats.fingerprint, expand, streaming].
+    // [fp, scheme.identity, lineCount, stats.fingerprint, expand, streaming].
     // lineCount and the fingerprint come from the wrapper's own stats memo
     // (not reachable here), so this pins the prefix, the trailing stamps,
     // and the identity's segment count — a dropped trailing stamp or a lost
@@ -371,7 +371,7 @@ describe("rendering pipeline", () => {
     // The expand and streaming bits both re-key.
     expect(attach(false, false).previewIdentity).not.toBe(identity);
     expect(attach(true, true).previewIdentity).not.toBe(identity);
-    // Segments: prefix + fp + palette.identity(theme key + roots key) +
+    // Segments: prefix + fp + scheme.identity(theme key + roots key) +
     // lineCount + fingerprint + expand + streaming.
     expect(identity.split("\u0000")).toHaveLength(8);
   });

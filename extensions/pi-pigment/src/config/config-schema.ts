@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { isOpaqueHex6 } from "#src/core/color.ts";
-import { isRootHex, type DiffRoots } from "#src/theme/palette.ts";
+import { isRootHex, type DiffRoots } from "#src/theme/scheme.ts";
 import { SEMANTIC_KEYS, type SemanticColors } from "#src/theme/syntax-theme.ts";
 
 /** The directory name the extension's themes/ and config live under (`extensions/<this>`). */

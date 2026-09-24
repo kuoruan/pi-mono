@@ -211,13 +211,13 @@ describe("renderResult error frame", () => {
     ) as TextDouble;
     // The full stamp list, spelled out: a dropped or reordered input fails
     // here (identity stability alone stays true either way).
-    // palette.identity embeds a NUL (theme key + roots key joined), so the
+    // scheme.identity embeds a NUL (theme key + roots key joined), so the
     // expected value composes through the same taskKeyOf the call site uses
     // — splitting the identity back apart cannot recover the list.
     expect(component.previewIdentity).toBe(
       // tookMs ?? -1: the unmeasured sentinel (-1, a number — 0ms stays
       // distinguishable from never-measured).
-      taskKeyOf("probe", [1, -1, viewFor(theme).palette.identity, "exploded"]),
+      taskKeyOf("probe", [1, -1, viewFor(theme).scheme.identity, "exploded"]),
     );
   });
 
@@ -237,7 +237,7 @@ describe("renderResult error frame", () => {
     // The badge is DERIVED from the message (which is already stamped) —
     // it must never join the stamp list as a redundant input.
     expect(component.previewIdentity).toBe(
-      taskKeyOf("bash", [0, -1, viewFor(theme).palette.identity, message]),
+      taskKeyOf("bash", [0, -1, viewFor(theme).scheme.identity, message]),
     );
   });
 

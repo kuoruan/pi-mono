@@ -1,5 +1,5 @@
 /**
- * The session render seam's tests: the seam's own contracts — the palette
+ * The session render seam's tests: the seam's own contracts — the scheme
  * equals the pure derivation, the active-theme observation point sees the
  * detection chain's product, and two sessions in one process never
  * pollute each other.
@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRenderSession, type RenderSessionInputs } from "#src/render/session.ts";
-import { deriveDiffPalette, type PaletteTheme } from "#src/theme/palette.ts";
+import { deriveResolvedTheme, type PaletteTheme } from "#src/theme/scheme.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
 import { collectConvertedThemes } from "#src/theme/user-themes.ts";
 import { buildFakeTheme, makeRenderSession, viewFor } from "#test/fixtures.ts";
@@ -32,27 +32,27 @@ function darkTheme(name?: string): PaletteTheme {
   return buildFakeTheme({ syntaxColors: true, name });
 }
 
-describe("the palette seam", () => {
+describe("the scheme seam", () => {
   beforeEach(() => {
     vol.reset();
   });
 
   it("forTheme returns exactly the pure derivation (no hidden singleton state)", () => {
-    const piTheme = darkTheme("external-theme");
+    const theme = darkTheme("external-theme");
     const roots = { topLevel: { added: { text: "#7ee787" } } };
     const view = createRenderSession({
       diffRoots: roots,
       selection: { kind: "auto" },
       themeEnv: ENV,
       convertedThemes: [],
-    }).forTheme(piTheme);
-    expect(view.palette).toEqual(deriveDiffPalette(piTheme, roots).palette);
-    expect(view.piTheme).toBe(piTheme);
+    }).forTheme(theme);
+    expect(view.scheme).toEqual(deriveResolvedTheme(theme, roots).scheme);
+    expect(view.theme).toBe(theme);
   });
 
-  it("an unreadable theme lands on the fallback palette", () => {
-    expect(viewFor({} as PaletteTheme).palette).toEqual(
-      deriveDiffPalette(undefined, undefined).palette,
+  it("an unreadable theme lands on the fallback scheme", () => {
+    expect(viewFor({} as PaletteTheme).scheme).toEqual(
+      deriveResolvedTheme(undefined, undefined).scheme,
     );
   });
 
@@ -170,9 +170,9 @@ describe("identity completeness (two sessions, one process)", () => {
       themeEnv: envB,
       convertedThemes: collectConvertedThemes(envB),
     });
-    const piTheme = darkTheme("pigment-low");
-    const viewA = sessionA.forTheme(piTheme);
-    const viewB = sessionB.forTheme(piTheme);
+    const theme = darkTheme("pigment-low");
+    const viewA = sessionA.forTheme(theme);
+    const viewB = sessionB.forTheme(theme);
 
     // Each session resolved its OWN file's keyword color — the discriminator
     // the old module-level memo (selection + theme name only) could confuse.
@@ -186,14 +186,14 @@ describe("identity completeness (two sessions, one process)", () => {
   });
 
   it("sessions with different selections stay independent", async () => {
-    const piTheme = darkTheme("external-theme");
+    const theme = darkTheme("external-theme");
     const env = { cwd: "/selection-project", agentDir: "/selection-project/agent" };
     const derived = createRenderSession({
       diffRoots: undefined,
       selection: { kind: "auto" },
       themeEnv: env,
       convertedThemes: [],
-    }).forTheme(piTheme);
+    }).forTheme(theme);
     const patched = createRenderSession({
       diffRoots: undefined,
       selection: {
@@ -203,7 +203,7 @@ describe("identity completeness (two sessions, one process)", () => {
       },
       themeEnv: env,
       convertedThemes: [],
-    }).forTheme(piTheme);
+    }).forTheme(theme);
 
     const derivedTheme = JSON.stringify(await derived.activeTheme());
     const patchedTheme = JSON.stringify(await patched.activeTheme());
@@ -213,13 +213,13 @@ describe("identity completeness (two sessions, one process)", () => {
   });
 
   it("a session built with no roots differs from one with roots (input-driven, no ambient)", () => {
-    const piTheme = darkTheme();
-    expect(makeRenderSession().forTheme(piTheme).palette).toEqual(
-      deriveDiffPalette(piTheme, undefined).palette,
+    const theme = darkTheme();
+    expect(makeRenderSession().forTheme(theme).scheme).toEqual(
+      deriveResolvedTheme(theme, undefined).scheme,
     );
     const rooted = makeRenderSession({
       diffRoots: { topLevel: { removed: { text: "#ff0000" } } },
-    }).forTheme(piTheme);
-    expect(rooted.palette).not.toEqual(deriveDiffPalette(piTheme, undefined).palette);
+    }).forTheme(theme);
+    expect(rooted.scheme).not.toEqual(deriveResolvedTheme(theme, undefined).scheme);
   });
 });

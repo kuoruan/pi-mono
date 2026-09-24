@@ -8,7 +8,7 @@
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import type { DiffLine } from "#src/core/diff.ts";
-import type { DiffPalette } from "#src/theme/palette.ts";
+import type { ResolvedTheme } from "#src/theme/scheme.ts";
 
 /**
  * The left-edge change-indicator glyph for `indicator` — the bar
@@ -28,19 +28,19 @@ export function borderBar(indicator: IndicatorStyle): string {
  *
  * @param value - The line number (null for unnumbered rows).
  * @param width - Gutter column width.
- * @param palette - The resolved palette (lnum fg + row close).
+ * @param scheme - The resolved scheme (lnum fg + row close).
  * @param fg - Foreground escape for the digits (defaults to fgGutter).
  * @returns The styled gutter cell.
  */
 export function lnum(
   value: number | null,
   width: number,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
   fg?: string,
 ): string {
   if (value === null) return " ".repeat(width);
   const text = String(value);
-  return `${fg ?? palette.fgGutter}${" ".repeat(Math.max(0, width - text.length))}${text}${palette.rowReset}`;
+  return `${fg ?? scheme.fgGutter}${" ".repeat(Math.max(0, width - text.length))}${text}${scheme.rowReset}`;
 }
 
 /**
@@ -109,8 +109,8 @@ export interface DiffRowFrameOptions {
   number: number | null;
   /** The line-number column width. */
   numberWidth: number;
-  /** The resolved palette. */
-  palette: DiffPalette;
+  /** The resolved scheme. */
+  scheme: ResolvedTheme;
   /** The indicator column's glyph (borderBar's result). */
   indicatorGlyph: string;
 }
@@ -126,30 +126,30 @@ export interface DiffRowFrameOptions {
  * @returns The row's frame facts.
  */
 export function diffRowFrame(options: DiffRowFrameOptions): DiffRowFrame {
-  const { type, number, numberWidth, palette, indicatorGlyph } = options;
+  const { type, number, numberWidth, scheme, indicatorGlyph } = options;
   // One dispatch over the row type — every per-type style field flows
   // from this single place.
   const { gutterBg, codeBg, signFg, sign, borderFg } =
     type === "del"
       ? {
-          gutterBg: palette.bgRemovedGutter,
-          codeBg: palette.bgRemoved,
-          signFg: palette.fgRemoved,
+          gutterBg: scheme.bgRemovedGutter,
+          codeBg: scheme.bgRemoved,
+          signFg: scheme.fgRemoved,
           sign: "-",
-          borderFg: palette.fgRemoved,
+          borderFg: scheme.fgRemoved,
         }
       : type === "add"
         ? {
-            gutterBg: palette.bgAddedGutter,
-            codeBg: palette.bgAdded,
-            signFg: palette.fgAdded,
+            gutterBg: scheme.bgAddedGutter,
+            codeBg: scheme.bgAdded,
+            signFg: scheme.fgAdded,
             sign: "+",
-            borderFg: palette.fgAdded,
+            borderFg: scheme.fgAdded,
           }
         : {
-            gutterBg: palette.bgBase,
-            codeBg: palette.bgBase,
-            signFg: palette.fgContext,
+            gutterBg: scheme.bgBase,
+            codeBg: scheme.bgBase,
+            signFg: scheme.fgContext,
             sign: " ",
             borderFg: "",
           };
@@ -157,10 +157,10 @@ export function diffRowFrame(options: DiffRowFrameOptions): DiffRowFrame {
   const border = !indicatorGlyph
     ? ""
     : borderFg
-      ? `${borderFg}${indicatorGlyph}${palette.rowReset}`
-      : `${palette.bgBase} `;
-  const numFg = borderFg || palette.fgGutter;
-  const gutter = `${border}${gutterBg}${lnum(number, numberWidth, palette, numFg)}${gutterBg} ${signFg}${sign}${gutterBg} ${palette.rowReset}`;
-  const continuation = `${border}${gutterBg}${" ".repeat(numberWidth + 3)}${palette.rowReset}`;
+      ? `${borderFg}${indicatorGlyph}${scheme.rowReset}`
+      : `${scheme.bgBase} `;
+  const numFg = borderFg || scheme.fgGutter;
+  const gutter = `${border}${gutterBg}${lnum(number, numberWidth, scheme, numFg)}${gutterBg} ${signFg}${sign}${gutterBg} ${scheme.rowReset}`;
+  const continuation = `${border}${gutterBg}${" ".repeat(numberWidth + 3)}${scheme.rowReset}`;
   return { signFg, sign, gutterBg, codeBg, border, numFg, gutter, continuation };
 }

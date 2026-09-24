@@ -118,7 +118,7 @@ describe("highlight (the session's render entry)", () => {
     expect(lines[0]).toMatch(/\x1b\[38;2;/);
   });
 
-  it("follows the palette's light/dark bit for the syntax theme", async () => {
+  it("follows the scheme's light/dark bit for the syntax theme", async () => {
     const session = makeRenderSession();
     expect(await themeName(session.forTheme(themed({ successBg: DARK_BG })))).toMatch(/^pi-dark-/);
     expect(await themeName(session.forTheme(themed({ successBg: LIGHT_BG })))).toMatch(
@@ -362,7 +362,7 @@ describe("the recommended pairs (the slash grammar)", () => {
     resetPigmentForTest();
   });
 
-  it("every recommended pair resolves through the slash grammar and follows the palette's light/dark bit", async () => {
+  it("every recommended pair resolves through the slash grammar and follows the scheme's light/dark bit", async () => {
     for (const pair of Object.values(RECOMMENDED_PAIRS)) {
       const session = makeRenderSession({
         selection: await selectionFor(`${pair.light}/${pair.dark}`),

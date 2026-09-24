@@ -65,11 +65,11 @@ _Avoid_: setActiveTools to force-activate dormant tools (extending the agent's t
 
 ### Palette
 
-**Color math**: src/core/color.ts — the pure color conversions (ANSI-color decode, hex parse/render, alpha compositing, RGB blend) and WCAG measures (luminance, contrast) that every palette and syntax-theme derivation flows through. No SGR escape production here — ansi.ts owns the escape layer; this module maps colors to colors or numbers (TinyColor-backed; ADR 0001's colord rejection note). _Avoid_: color math in ansi.ts (escape production and color math are separate concerns — the split keeps each to one home).
+**Color math**: src/core/color.ts — the pure color conversions (ANSI-color decode, hex parse/render, alpha compositing, RGB blend) and WCAG measures (luminance, contrast) that every scheme and syntax-theme derivation flows through. No SGR escape production here — ansi.ts owns the escape layer; this module maps colors to colors or numbers (TinyColor-backed; ADR 0001's colord rejection note). _Avoid_: color math in ansi.ts (escape production and color math are separate concerns — the split keeps each to one home).
 
-**Palette**: The set of diff background/foreground ANSI variables — one snapshot per frame, derived by the pure `deriveDiffPalette(theme, roots)` and memoized per theme content on the session's `RenderSession` (see `session.ts`). The resolved snapshot is an EXPLICIT render input: the factory binds it per frame via `services.render.forTheme(theme)`, and wrappers pass `view.palette` down through the views, layout primitives, and header painters — nobody re-derives or reads ambient state mid-render. _Avoid_: ambient palette reads.
+**Scheme**: The set of diff background/foreground ANSI variables — one snapshot per frame, derived by the pure `deriveResolvedTheme(theme, roots)` and memoized per theme content on the session's `RenderSession` (see `session.ts`). The resolved snapshot is an EXPLICIT render input: the factory binds it per frame via `services.render.forTheme(theme)`, and wrappers pass `view.palette` down through the views, layout primitives, and header painters — nobody re-derives or reads ambient state mid-render. _Avoid_: ambient palette reads.
 
-**Auto-derive**: The palette derivation path: add/context surfaces blend `toolDiffAdded` foreground into `toolSuccessBg`; removed surfaces use `toolDiffRemoved`/`toolErrorBg`. Runs when the pi theme or the effective diff roots change; no presets, no environment variables. _Avoid_: theme config (the palette is only configurable through diff roots).
+**Auto-derive**: The scheme derivation path: add/context surfaces blend `toolDiffAdded` foreground into `toolSuccessBg`; removed surfaces use `toolDiffRemoved`/`toolErrorBg`. Runs when the pi theme or the effective diff roots change; no presets, no environment variables. _Avoid_: theme config (the scheme is only configurable through diff roots).
 
 **Syntax theme**: The TOKEN override layer, selected by the `syntaxTheme` key.
 
@@ -108,13 +108,13 @@ Generation-time only — never at render time. The AA sweep is the BUNDLED ship 
 
 **Base layer / Override layer**: The theming split (ADR 0006). The base layer is the pi theme (`/settings` → Theme): every chrome color — borders, box backgrounds, state colors, markdown, thinking — renders from it at runtime, zero runtime setting. The override layer is the `syntaxTheme` config: token colors only. A generated theme joins the base layer (picked via /theme); a Shiki theme joins the override layer (referenced via syntaxTheme).
 
-**Diff roots**: The palette derivation inputs — `added`/`removed` sides with `text`/`tint` slots (ADR 0003, revised by 0006) — the only diff-color override surface.
+**Diff roots**: The scheme derivation inputs — `added`/`removed` sides with `text`/`tint` slots (ADR 0003, revised by 0006) — the only diff-color override surface.
 
 - `text` (opaque `#rrggbb`, shorthand `#rgb` accepted) is the side's line color.
 - `tint` (`#rrggbbaa`, shorthand `#rgba` accepted) anchors the word slot with the ladder scaling the family.
 - Parsing and expansion are TinyColor's (`parseHexForm`; the slot predicate `isRootHex` is the single home of what each slot accepts).
 
-The box canvas is NOT a root: the tool frame's three backgrounds are the pi theme's own slots — `toolPendingBg` (streaming), `toolSuccessBg` (success), `toolErrorBg` (error) — painted by the header helpers (`setToolSuccessBg`/`setToolErrorBg`; the pending header stays transparent over the Box's pending paint). Overriding roots re-runs derivation; palette outputs are never directly settable.
+The box canvas is NOT a root: the tool frame's three backgrounds are the pi theme's own slots — `toolPendingBg` (streaming), `toolSuccessBg` (success), `toolErrorBg` (error) — painted by the header helpers (`setToolSuccessBg`/`setToolErrorBg`; the pending header stays transparent over the Box's pending paint). Overriding roots re-runs derivation; scheme outputs are never directly settable.
 
 **Enforcement boundary**: The rule splitting AA adjustment from verbatim rendering.
 
@@ -128,7 +128,7 @@ The box canvas is NOT a root: the tool frame's three backgrounds are the pi them
 - The emphasis signal is BOLD + the theme's accent over the searchMatchBg block (the ripgrep/GNU grep convention — bold survives even where the accent overlaps a token color; `accentEmphasis` derives the spec; the match close re-opens the toolSuccessBg canvas).
 - A generic text primitive in pattern-emphasis; the grep and find wrappers are its clients.
 
-_Avoid_: emphasis via the palette's fgCode (the code-file type color — invisible when they coincide), per-line emphasis (grammar state must flow — see Grep block merge).
+_Avoid_: emphasis via the scheme's fgCode (the code-file type color — invisible when they coincide), per-line emphasis (grammar state must flow — see Grep block merge).
 
 **Collapsed view**: The render-side window authority (`collapsedView`, in the tool-output module alongside the output memo and the Took footer) for every collapsed body — grep/find/ls and write's create preview alike.
 
@@ -156,7 +156,7 @@ Callers own the source: write slices `args.content` at the last visible hunk's n
 **Async preview task**: The swap protocol's payload (`PreviewTask`: identity, placeholder, fallback, invalidate, key, render) attached to a Text component. TWO stamps, orthogonal:
 
 - `identity` (width-neutral) — the attach guard compares it: updateDisplay re-runs renderResult and re-attaches a fresh closure every cycle; only a CHANGED identity re-arms the placeholder, unchanged re-runs keep the rendered frame.
-- `key` (width-aware) — the render loop's cache key: diff previews key on width so a resize re-renders; grep's highlight keys on content identity (length + FNV-1a fingerprint), the palette identity (a mid-session theme switch re-renders), the measured duration (the footer-only delta between a streaming partial and the final frame, read from the render-state clock), and the expand mode (a resize doesn't re-render it).
+- `key` (width-aware) — the render loop's cache key: diff previews key on width so a resize re-renders; grep's highlight keys on content identity (length + FNV-1a fingerprint), the scheme identity (a mid-session theme switch re-renders), the measured duration (the footer-only delta between a streaming partial and the final frame, read from the render-state clock), and the expand mode (a resize doesn't re-render it).
 
 One rule: the stamps must see every input the closure captures. `definePreviewTask` (in text-task, the construction counterpart to the attach) makes the rule structural at the call sites: ONE stamp list derives both the identity and the render key (`widthAware` decides whether the width joins the key — the width-appended convention for layout-sensitive previews, the constant key for the output tools), so identity→key drift and per-wrapper key-closure copies no longer exist. The output tools compose their identity through `outputTaskKey` and pass it precomputed. The attach writes the placeholder synchronously (the every-wrapper setText idiom) but NEVER invalidates.
 

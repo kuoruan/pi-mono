@@ -1,9 +1,9 @@
 /**
- * Shared bench inputs: realistic ANSI lines, a full diff palette, and
+ * Shared bench inputs: realistic ANSI lines, a full diff scheme, and
  * paired word-diff source lines. The core and render bench files both
  * import from here so the measured inputs stay identical across them.
  */
-import type { DiffPalette } from "#src/theme/palette.ts";
+import type { ResolvedTheme } from "#src/theme/scheme.ts";
 
 /**
  * A representative highlighted code line: tokens with truecolor escapes.
@@ -79,8 +79,8 @@ export const cjkMarkLine = "  // 中文注释与一点组合标记\u0301";
 /** A 150-line diff body (one frame's worth at the render budget). */
 export const diffBody = Array.from({ length: 150 }, (_, i) => `${plainLine} // ${i}`).join("\n");
 
-/** The full diff palette (the same escape shapes the derivation emits). */
-export const diffPalette: DiffPalette = {
+/** The full diff scheme (the same escape shapes the derivation emits). */
+export const diffPalette: ResolvedTheme = {
   bgBase: "\x1b[48;2;30;30;40m",
   rowReset: "\x1b[0m",
   bgRemoved: "\x1b[48;2;53;30;34m",

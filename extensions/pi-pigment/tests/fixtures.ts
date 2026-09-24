@@ -1,6 +1,6 @@
 /**
  * Shared test fixtures: fake pi themes, Text-like components, and the mock
- * ExtensionAPI factory used across the render/tool/palette suites. One
+ * ExtensionAPI factory used across the render/tool/scheme suites. One
  * definition per fixture shape so projections can't drift between suites.
  */
 
@@ -21,7 +21,7 @@ import {
 import type { PreviewTask } from "#src/render/text-task.ts";
 import type { RenderContext } from "#src/render/tool-services.ts";
 import { clearHighlightCacheForTest } from "#src/theme/highlight.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 import type { ThemeSelection } from "#src/theme/theme-resolver.ts";
 
 /**

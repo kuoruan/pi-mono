@@ -13,7 +13,7 @@ import { createBoundedMap, type BoundedMap } from "#src/core/bounded-map.ts";
 import type { SessionEnv } from "#src/core/session-env.ts";
 
 import { loadBundledTheme } from "./bundled-intake.ts";
-import { themeCacheKey, type DiffPalette, type PaletteTheme } from "./palette.ts";
+import { themeCacheKey, type ResolvedTheme, type PaletteTheme } from "./scheme.ts";
 import {
   aaCheckBackgrounds,
   applySemanticPatches,
@@ -71,24 +71,24 @@ function fingerprintOf(target: ThemeSelection): string {
 
 /**
  * The identity the active-theme memo keys on: the selection, the pi theme
- * (name included — the ours-detection input), the palette roots
+ * (name included — the ours-detection input), the scheme roots
  * (backgrounds) — every input that changes the output.
  *
  * @param inputs - The session's render-time theme inputs.
- * @param palette - The resolved palette (backgrounds drive enforcement).
+ * @param scheme - The resolved scheme (backgrounds drive enforcement).
  * @param theme - The pi theme (its name drives ours-detection).
  * @returns A string unique to the resolution inputs.
  */
 function activeThemeIdentity(
   inputs: ThemeResolveInputs,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
   theme: PaletteTheme | undefined,
 ): string {
   // The background key carries ALL four blend backgrounds — the same key
   // enforceLoadedFile caches on — so identity and enforcement can never
   // disagree about which backgrounds a resolution saw (bgAdded/bgRemoved alone
   // happen to determine the word roots, but only by derivation). The
-  // palette's own identity (theme + roots, computed once at derivation)
+  // scheme's own identity (theme + roots, computed once at derivation)
   // covers its 8 fg + 2 bg slots; the nine syntax* colors ride separately —
   // a hot-reloaded custom pi theme can keep its name while changing only
   // those (the live-proxy theme object is replaced in place), and the
@@ -99,8 +99,8 @@ function activeThemeIdentity(
   return [
     fingerprintOf(inputs.selection),
     theme?.name ?? "",
-    palette.identity,
-    paletteBgKey(palette),
+    scheme.identity,
+    schemeBgKey(scheme),
     syntaxColors,
     convertedThemeIdentity(inputs.convertedThemes),
   ].join("\0");
@@ -128,14 +128,14 @@ function convertedThemeIdentity(converted: ReadonlyArray<ConvertedTheme>): strin
 }
 
 /**
- * The palette's four blend backgrounds as a cache key — the single source
+ * The scheme's four blend backgrounds as a cache key — the single source
  * both the active-theme memo and the enforced-variant cache key on.
  *
- * @param palette - The palette to serialize.
+ * @param scheme - The scheme to serialize.
  * @returns The `bg|bg|bg|bg` key.
  */
-function paletteBgKey(palette: DiffPalette): string {
-  return `${palette.bgAdded}|${palette.bgRemoved}|${palette.bgAddedWord}|${palette.bgRemovedWord}`;
+function schemeBgKey(scheme: ResolvedTheme): string {
+  return `${scheme.bgAdded}|${scheme.bgRemoved}|${scheme.bgAddedWord}|${scheme.bgRemovedWord}`;
 }
 
 /**
@@ -145,20 +145,20 @@ function paletteBgKey(palette: DiffPalette): string {
  *
  * @param memo - The session's memo instance.
  * @param inputs - The session's selection, conversions, and environment.
- * @param palette - The resolved palette the render uses.
+ * @param scheme - The resolved scheme the render uses.
  * @param theme - The pi theme behind it.
  * @returns The active theme, or null when unresolvable.
  */
 export async function resolveActiveThemeMemoized(
   memo: ActiveThemeMemo,
   inputs: ThemeResolveInputs,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
   theme: PaletteTheme | undefined,
 ): Promise<ShikiThemeInput | null> {
-  const identity = activeThemeIdentity(inputs, palette, theme);
+  const identity = activeThemeIdentity(inputs, scheme, theme);
   const memoized = memo.get(identity);
   if (memoized) return memoized;
-  const resolving = resolveSelection(inputs, palette, theme);
+  const resolving = resolveSelection(inputs, scheme, theme);
   // Bounded (a session sees few identities; the bound only matters for
   // long test runs).
   memo.set(identity, resolving);
@@ -166,39 +166,39 @@ export async function resolveActiveThemeMemoized(
 }
 
 /**
- * Resolve a selection against the render's palette polarity.
+ * Resolve a selection against the render's scheme polarity.
  *
  * @param inputs - The session's theme inputs.
- * @param palette - The resolved palette (polarity + enforcement backgrounds).
+ * @param scheme - The resolved scheme (polarity + enforcement backgrounds).
  * @param theme - The pi theme (the auto path's syntax color source).
  * @returns The theme input for codeToANSI, or null when unresolvable.
  */
 async function resolveSelection(
   inputs: ThemeResolveInputs,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
   theme: PaletteTheme | undefined,
 ): Promise<ShikiThemeInput | null> {
   const target = inputs.selection;
-  if (target.kind === "auto") return resolveAuto(inputs, palette, theme, {});
+  if (target.kind === "auto") return resolveAuto(inputs, scheme, theme, {});
   if (target.kind === "file") {
     const variantType = target.file.theme.type;
-    if (variantType === (palette.isLight ? "light" : "dark"))
-      return enforceLoadedFile(target.file, palette);
+    if (variantType === (scheme.isLight ? "light" : "dark"))
+      return enforceLoadedFile(target.file, scheme);
     // Polarity-gated: fall through to auto (patches would continue via the
     // object wrapper; a bare file selection has none).
-    return resolveAuto(inputs, palette, theme, {});
+    return resolveAuto(inputs, scheme, theme, {});
   }
   if (target.kind === "pair") {
-    const half = palette.isLight ? target.light : target.dark;
-    if (half && half.theme.type === (palette.isLight ? "light" : "dark"))
-      return enforceLoadedFile(half, palette);
+    const half = scheme.isLight ? target.light : target.dark;
+    if (half && half.theme.type === (scheme.isLight ? "light" : "dark"))
+      return enforceLoadedFile(half, scheme);
     // Missing half or mismatched type: fall through to auto.
-    return resolveAuto(inputs, palette, theme, {});
+    return resolveAuto(inputs, scheme, theme, {});
   }
 
   // Object selection: resolve the base for the current polarity, then
   // overlay the patches (top-level colors, then the variant's colors).
-  const variant = palette.isLight ? target.light : target.dark;
+  const variant = scheme.isLight ? target.light : target.dark;
   const patches: SemanticColors = { ...target.colors, ...variant?.colors };
   // A variant's own base (a per-polarity theme file) wins over the
   // object's shared base — the pair form for user theme files.
@@ -212,11 +212,11 @@ async function resolveSelection(
     if (variant?.colors && Object.keys(variant.colors).length > 0) {
       return buildSemanticTheme(
         { ...target.colors, ...variant.colors },
-        palette.isLight ? "light" : "dark",
+        scheme.isLight ? "light" : "dark",
         "variant",
       );
     }
-    return resolveAuto(inputs, palette, theme, patches);
+    return resolveAuto(inputs, scheme, theme, patches);
   }
   // File/pair base: bundled names AA-enforce, user files render verbatim;
   // polarity-gated halves fall through to auto (patches continue on
@@ -225,15 +225,15 @@ async function resolveSelection(
     base.kind === "file"
       ? base.file
       : base.kind === "pair"
-        ? palette.isLight
+        ? scheme.isLight
           ? base.light
           : base.dark
         : undefined;
-  if (!half || half.theme.type !== (palette.isLight ? "light" : "dark")) {
-    return resolveAuto(inputs, palette, theme, patches);
+  if (!half || half.theme.type !== (scheme.isLight ? "light" : "dark")) {
+    return resolveAuto(inputs, scheme, theme, patches);
   }
   if (!half.bundled) return applySemanticPatches(half.theme, patches, identityOf(target));
-  const enforced = await enforceLoadedFile(half, palette);
+  const enforced = await enforceLoadedFile(half, scheme);
   if (typeof enforced !== "string")
     return applySemanticPatches(enforced, patches, identityOf(target));
   if (!hasPatches(patches)) return enforced; // AA-clean id, nothing to overlay
@@ -250,7 +250,7 @@ async function resolveSelection(
  * Resolve the auto theme: ours-detection first (the active pi theme IS one
  * of ours — the /theme selection maps back to its shiki source for the
  * full-precision pipeline), then the pi-derived nine-color fallback. The
- * bundled sources ride full tokenColors AA-enforced against the palette's
+ * bundled sources ride full tokenColors AA-enforced against the scheme's
  * blend backgrounds; USER sources render VERBATIM (the enforcement
  * boundary — runtime AA is for our built-ins only, matching the
  * explicit-name path's user-file treatment). User patches apply verbatim
@@ -260,7 +260,7 @@ async function resolveSelection(
  * large-diff fallback philosophy.
  *
  * @param inputs - The session's theme inputs (selection + conversions + env).
- * @param palette - The resolved palette (backgrounds drive enforcement).
+ * @param scheme - The resolved scheme (backgrounds drive enforcement).
  * @param theme - The pi theme (name drives ours-detection; syntax colors
  *   drive the derived fallback).
  * @param patches - Semantic color patches.
@@ -268,7 +268,7 @@ async function resolveSelection(
  */
 async function resolveAuto(
   inputs: ThemeResolveInputs,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
   theme: PaletteTheme | undefined,
   patches: SemanticColors,
 ): Promise<ShikiThemeInput | null> {
@@ -283,14 +283,14 @@ async function resolveAuto(
         : loadUserTheme(ours.fileName, inputs.themeEnv);
     if (loaded) {
       // The precise pipeline. BUNDLED sources ride full tokenColors,
-      // AA-enforced against the palette's blend backgrounds (pi-pigment
+      // AA-enforced against the scheme's blend backgrounds (pi-pigment
       // supplies them — the runtime surface). USER sources render
       // VERBATIM: the author's colors are never enforced, the same
       // boundary the explicit-name path applies (AA is for our built-in
       // themes only).
       const tokenTheme =
         ours.kind === "bundled"
-          ? enforceThemeColors(loaded, aaCheckBackgrounds(palette), !palette.isLight)
+          ? enforceThemeColors(loaded, aaCheckBackgrounds(scheme), !scheme.isLight)
           : loaded;
       if (hasPatches(patches)) {
         return applySemanticPatches(tokenTheme, patches, `ours:${theme?.name ?? ""}`);
@@ -301,7 +301,7 @@ async function resolveAuto(
     // through to the derived path — degraded, never broken.
   }
   const key = themeCacheKey(theme);
-  return theme ? buildPiSyntaxTheme(theme, palette, key, patches) : null;
+  return theme ? buildPiSyntaxTheme(theme, scheme, key, patches) : null;
 }
 
 /**
@@ -337,17 +337,17 @@ export function hasPatches(patches: SemanticColors): boolean {
  * name + background identity.
  *
  * @param file - The loaded selection (single or pair half).
- * @param palette - The current palette (effective backgrounds).
+ * @param scheme - The current scheme (effective backgrounds).
  * @returns The enforced theme (object), the unchanged bundled id (already
  *   AA-clean — avoids materializing the object), or the user file verbatim.
  */
 async function enforceLoadedFile(
   file: LoadedThemeFile,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
 ): Promise<ShikiThemeInput> {
   if (!file.bundled) return file.theme; // user file: verbatim
   const variant = file.name as BundledTheme;
-  const bgKey = paletteBgKey(palette);
+  const bgKey = schemeBgKey(scheme);
   let perVariant = enforcedCache.get(variant);
   if (!perVariant) {
     // Bounded like its siblings (highlightCache 192, matcherMemo 64):
@@ -361,7 +361,7 @@ async function enforceLoadedFile(
 
   const theme = await loadBundledTheme(variant);
   if (!theme) return file.theme; // load failure: the virtual file's object
-  const enforced = enforceThemeColors(theme, aaCheckBackgrounds(palette), !palette.isLight);
+  const enforced = enforceThemeColors(theme, aaCheckBackgrounds(scheme), !scheme.isLight);
   const result = enforced === theme ? variant : enforced;
   perVariant.set(bgKey, result);
   return result;

@@ -39,7 +39,7 @@ describe("find result rendering", () => {
         content: [
           {
             type: "text",
-            text: "src/render/tool-ls.ts\nsrc/theme/palette.ts\ndocs/adr/\ncomponents/\nREADME.md\nbinary\n",
+            text: "src/render/tool-ls.ts\nsrc/theme/scheme.ts\ndocs/adr/\ncomponents/\nREADME.md\nbinary\n",
           },
         ],
         isError: false,
@@ -60,7 +60,7 @@ describe("find result rendering", () => {
     }
     expect(plain(text)).toContain("docs/adr/");
     expect(plain(text)).toContain("components/");
-    // Code files: the fgCode tint (buildRenderTheme carries the palette).
+    // Code files: the fgCode tint (buildRenderTheme carries the scheme).
     expect(plain(text)).toContain("src/render/tool-ls.ts");
     expect(text).toContain("\x1b[38;2;");
     // Non-code file: toolOutput color, no crash.

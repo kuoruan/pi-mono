@@ -14,7 +14,7 @@ import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import { inertText, measurePlain } from "#src/core/ansi.ts";
 import { linesOf } from "#src/core/lines.ts";
-import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
+import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
 import {
@@ -70,10 +70,10 @@ export interface CallHeaderOpts {
    * The call's outcome: error → the theme's error bg; pending (still
    * streaming) → no custom bg (the default shell's pending Box bg shows
    * through — no success tint leaks onto an undecided frame); success →
-   * the palette's base tint.
+   * the scheme's base tint.
    */
   status: CallState;
-  /** The frame's derived view (palette + pi theme). */
+  /** The frame's derived view (scheme + pi theme). */
   view: RenderView;
   /** The render context (expand state + invalidate). */
   ctx: RenderContext<object>;
@@ -97,14 +97,14 @@ export interface CallHeaderOpts {
  * @param opts - The header's inputs (label/path/suffix/theme + outcome).
  */
 export function setCallHeader(text: CustomBgText & PreviewTextHost, opts: CallHeaderOpts): void {
-  const { palette, piTheme: theme } = opts.view;
+  const { scheme, theme } = opts.view;
   if (opts.status === "error") {
-    setToolErrorBg(text, theme, palette);
+    setToolErrorBg(text, theme, scheme);
   } else if (opts.status === "pending") {
     // Streaming: transparent — the content Box's pending bg owns the row.
     clearToolHeaderBg(text);
   } else {
-    setToolSuccessBg(text, theme, palette);
+    setToolSuccessBg(text, theme, scheme);
   }
   const body = formatToolFrameHeaderText(
     {
@@ -139,18 +139,18 @@ export function setCallHeader(text: CustomBgText & PreviewTextHost, opts: CallHe
  *
  * @param text - The Text component to style.
  * @param theme - The active pi theme (falls back to the tool-box background).
- * @param palette - The resolved palette (the fallback background).
+ * @param scheme - The resolved scheme (the fallback background).
  */
 export function setToolErrorBg(
   text: CustomBgText,
   theme: PaletteTheme,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
 ): void {
-  let background = palette.bgBase;
+  let background = scheme.bgBase;
   try {
     // A theme without an error background may THROW or return
     // undefined/empty — either way the regular tool background serves.
-    background = theme.getBgAnsi("toolErrorBg") || palette.bgBase;
+    background = theme.getBgAnsi("toolErrorBg") || scheme.bgBase;
   } catch {
     // Use the regular tool background when the theme has no error background.
   }

@@ -12,7 +12,7 @@
  *   user-theme channel's conversion opts OUT (enforceAa: false — author colors verbatim, the
  *   enforcement boundary: colors YOU set render verbatim); the bundled ships are
  *   pi-pigment-supplied and keep the sweep.
- * - Runtime AA: token colors are enforced at render time by enforceThemeColors against the palette's
+ * - Runtime AA: token colors are enforced at render time by enforceThemeColors against the scheme's
  *   blend backgrounds (the tint ladders). The nine syntax colors in the FILE serve pi's own
  *   markdown code rendering — same source, different precision than the full tokenColors the diff
  *   pipeline loads.

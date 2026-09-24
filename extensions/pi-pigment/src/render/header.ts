@@ -14,7 +14,7 @@ import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 import { inertText } from "#src/core/ansi.ts";
 import { SEQ_RESET } from "#src/core/escapes.ts";
 import { linesOf } from "#src/core/lines.ts";
-import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
+import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
 
 import { injectBg } from "./inject-bg.ts";
 
@@ -77,37 +77,37 @@ export function formatToolHeaderPath(
 }
 
 /**
- * `+N -M` summary chip with the palette's diff colors.
+ * `+N -M` summary chip with the scheme's diff colors.
  *
- * Chips close with the BARE reset (core/ansi SEQ_RESET), never palette.rowReset:
+ * Chips close with the BARE reset (core/ansi SEQ_RESET), never scheme.rowReset:
  * the header row's background is INJECTED by the frame's customBgFn (injectBg
  * re-opens its baseBg after every reset), not painted by the chip itself. A
- * rowReset close would re-open the palette's bgBase AFTER the injected one and
+ * rowReset close would re-open the scheme's bgBase AFTER the injected one and
  * overpaint the row tail — the mechanism that kept a stale canvas behind the
  * chips across theme switches. The chip owns its foreground only; the
  * background is the row's.
  *
  * @param a - Added line count.
  * @param d - Removed line count.
- * @param palette - The palette snapshot (current by default).
+ * @param scheme - The scheme snapshot (current by default).
  * @returns The styled summary.
  */
-export function summarize(a: number, d: number, palette: DiffPalette): string {
+export function summarize(a: number, d: number, scheme: ResolvedTheme): string {
   const p: string[] = [];
-  if (a > 0) p.push(`${palette.fgAdded}+${a}${SEQ_RESET}`);
-  if (d > 0) p.push(`${palette.fgRemoved}-${d}${SEQ_RESET}`);
-  return p.length ? p.join(" ") : `${palette.fgDim}no changes${SEQ_RESET}`;
+  if (a > 0) p.push(`${scheme.fgAdded}+${a}${SEQ_RESET}`);
+  if (d > 0) p.push(`${scheme.fgRemoved}-${d}${SEQ_RESET}`);
+  return p.length ? p.join(" ") : `${scheme.fgDim}no changes${SEQ_RESET}`;
 }
 
 /**
  * Indent every line of a rendered body with the tool-box background.
  *
  * @param rendered - The rendered diff body.
- * @param palette - The resolved palette (background indent).
+ * @param scheme - The resolved scheme (background indent).
  * @returns The padded body.
  */
-export function padDiffBody(rendered: string, palette: DiffPalette): string {
-  const leftPad = `${palette.bgBase}${palette.rowReset}`;
+export function padDiffBody(rendered: string, scheme: ResolvedTheme): string {
+  const leftPad = `${scheme.bgBase}${scheme.rowReset}`;
   return linesOf(rendered)
     .map((line) => `${leftPad}${line}`)
     .join("\n");
@@ -188,18 +188,18 @@ export interface CustomBgText {
  *
  * @param text - The Text component to style.
  * @param theme - The active pi theme (the success slot source).
- * @param palette - The resolved palette (the fallback background).
+ * @param scheme - The resolved scheme (the fallback background).
  */
 export function setToolSuccessBg(
   text: CustomBgText,
   theme: PaletteTheme,
-  palette: DiffPalette,
+  scheme: ResolvedTheme,
 ): void {
-  let background = palette.bgBase;
+  let background = scheme.bgBase;
   try {
     // A theme without a success background may THROW or return
     // undefined/empty — either way the derived canvas serves.
-    background = theme.getBgAnsi("toolSuccessBg") || palette.bgBase;
+    background = theme.getBgAnsi("toolSuccessBg") || scheme.bgBase;
   } catch {
     // Use the derived canvas when the theme has no success background.
   }

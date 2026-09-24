@@ -31,7 +31,7 @@ import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
  */
 export async function renderSplit(options: DiffViewOptions): Promise<string> {
   const { diff, language, maxLines, width, view, indicator, seed } = options;
-  const palette = view.palette;
+  const scheme = view.scheme;
   if (!diff.lines.length) return "";
 
   const { rows, visible, leftSource, rightSource } = splitWindow(diff.lines, maxLines);
@@ -67,7 +67,7 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
   // through the same column.
   const indicatorGlyph = borderBar(indicator);
   const gutter = gutterWidth(numberWidth, indicatorGlyph);
-  const seam = indicatorGlyph ? "" : `${palette.bgBase} ${palette.rowReset}`;
+  const seam = indicatorGlyph ? "" : `${scheme.bgBase} ${scheme.rowReset}`;
   const seamWidth = seam ? 1 : 0;
   const half = Math.floor((renderWidth - seamWidth) / 2);
   const codeWidth = Math.max(12, half - gutter);
@@ -91,8 +91,8 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
   // when one half wraps further): a background-filled placeholder keeps the
   // other half's geometry — without it, right-half content starts at column
   // 0 and the two-column layout collapses.
-  const blankGutter = `${palette.bgBase}${" ".repeat(gutter)}${palette.rowReset}`;
-  const blankBody = `${palette.bgBase}${" ".repeat(codeWidth)}${palette.rowReset}`;
+  const blankGutter = `${scheme.bgBase}${" ".repeat(gutter)}${scheme.rowReset}`;
+  const blankBody = `${scheme.bgBase}${" ".repeat(codeWidth)}${scheme.rowReset}`;
 
   // Render one side of a row: gutter, continuation background, and the
   // wrapped body rows. An absent side renders nothing (its slots fill
@@ -111,18 +111,18 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
     // left is a del/ctx/sep line — whose number is oldNum — and right an
     // add/ctx line — whose number is newNum; no type dispatch needed).
     const number = side === "left" ? line.oldNum : line.newNum;
-    const frame = diffRowFrame({ type, number, numberWidth, palette, indicatorGlyph });
+    const frame = diffRowFrame({ type, number, numberWidth, scheme, indicatorGlyph });
     const body =
       ranges && ranges.length > 0
         ? injectBg(highlight, {
             ranges,
             baseBg: frame.codeBg,
-            highlightBg: type === "del" ? palette.bgRemovedWord : palette.bgAddedWord,
-            palette,
+            highlightBg: type === "del" ? scheme.bgRemovedWord : scheme.bgAddedWord,
+            scheme,
           })
         : type === "ctx"
-          ? `${palette.bgBase}${SEQ_DIM}${highlight}`
-          : injectBg(highlight, { baseBg: frame.codeBg, palette });
+          ? `${scheme.bgBase}${SEQ_DIM}${highlight}`
+          : injectBg(highlight, { baseBg: frame.codeBg, scheme });
     return {
       gutter: frame.gutter,
       continuation: frame.continuation,
@@ -130,7 +130,7 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
         width: codeWidth,
         maxRows: adaptiveWrapRows(renderWidth),
         fillBg: frame.codeBg,
-        palette,
+        scheme,
       }),
     };
   };
@@ -146,12 +146,12 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
         // the tool box background differs from the terminal's default.
         // fitAnsi's truncation re-open re-establishes background+fgDim.
         output.push(
-          `${palette.bgBase}${palette.fgDim}${" ".repeat(gutter)}${fitAnsi(
+          `${scheme.bgBase}${scheme.fgDim}${" ".repeat(gutter)}${fitAnsi(
             label,
             rowWidth - gutter,
-            `${palette.rowReset}${palette.bgBase}${palette.fgDim}`,
-            palette.fgDim,
-          )}${palette.rowReset}`,
+            `${scheme.rowReset}${scheme.bgBase}${scheme.fgDim}`,
+            scheme.fgDim,
+          )}${scheme.rowReset}`,
         );
       }
       continue;
@@ -200,7 +200,7 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
     // window covers fewer logical lines than unified's at the same
     // maxLines. Same unit, not the same number.
     const hiddenLines = rows.slice(visible.length).reduce((sum, row) => sum + row.hiddenLines, 0);
-    output.push(hiddenLinesTail(hiddenLines, palette));
+    output.push(hiddenLinesTail(hiddenLines, scheme));
   }
   return output.join("\n");
 }

@@ -6,7 +6,7 @@
  * tool-output (the window authority) and text-task (the swap protocol),
  * importing from both — neither imports it back, so no cycle.
  */
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 
 import type { PreviewTextHost } from "./text-task.ts";
 import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
@@ -32,7 +32,7 @@ export interface OutputAssemblyInput {
   budget: number;
   /** The memoized derivation (key stamps read it). */
   derived: DerivedOutput;
-  /** The palette identity (a theme switch re-renders). */
+  /** The scheme identity (a theme switch re-renders). */
   paletteIdentity: string;
   /** The raw Took reading (undefined → no footer; the key reads tookMs ?? 0). */
   tookMs?: number;

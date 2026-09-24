@@ -11,7 +11,7 @@ import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
+import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
@@ -135,7 +135,7 @@ export function createGrepWrapper(
     // the header owns its gap without a deep import the package map
     // forbids.
     renderCall: ({ text, view, ctx, renderArgs }) => {
-      const { piTheme: theme } = view;
+      const { theme } = view;
       const args = argsOf<GrepToolInput>(renderArgs);
       renderHeaderLine({
         text,
@@ -148,7 +148,7 @@ export function createGrepWrapper(
       return text;
     },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
-      const { palette, piTheme: theme } = view;
+      const { scheme, theme } = view;
       // Inert at intake (ADR 0004): the grep result carries raw file
       // bytes, and EVERY downstream surface — the placeholder's first
       // frame, the fallback, the plain rendering, the highlighted swap —
@@ -159,7 +159,7 @@ export function createGrepWrapper(
       const derived = derive(result);
       const { output, lines } = derived;
       // The pattern/flags ride the styled closure (the swap key's stamps
-      // cover the content, palette, footer, expand and streaming states —
+      // cover the content, scheme, footer, expand and streaming states —
       // the args are settled per the SDK contract, so they need no stamp).
       const callArgs = argsOf<GrepToolInput>(ctx.args);
       const pattern = callArgs.pattern ?? "";
@@ -175,7 +175,7 @@ export function createGrepWrapper(
         isEmpty: !output.trim(),
         budget: COLLAPSED_LINES.grep,
         derived,
-        paletteIdentity: palette.identity,
+        paletteIdentity: scheme.identity,
         tookMs,
         expanded: options.expanded,
         streaming: pending,
@@ -257,8 +257,8 @@ export interface RenderHitLineOptions {
   flags: MatchFlags;
   /** The pi theme. */
   theme: PaletteTheme;
-  /** The palette. */
-  palette: DiffPalette;
+  /** The scheme. */
+  scheme: ResolvedTheme;
 }
 
 /**
@@ -269,13 +269,13 @@ export interface RenderHitLineOptions {
  * @returns The rendered line.
  */
 export function renderHitLine(options: RenderHitLineOptions): string {
-  const { hit, content, pattern, flags, theme, palette } = options;
+  const { hit, content, pattern, flags, theme, scheme } = options;
   const emphasis = accentEmphasis(theme);
   // The content's base fg: hit lines read as tool output, context lines
   // dim (the highlight paths get this for free — every token span carries
   // its own fg; plain-text lines must open it explicitly, and the
   // emphasis wrap must re-open it after each match's RESET).
-  const baseFg = hit.isContext ? palette.fgDim : theme.getFgAnsi("toolOutput");
+  const baseFg = hit.isContext ? scheme.fgDim : theme.getFgAnsi("toolOutput");
   // Settled rows sit on the toolSuccessBg canvas (see baseBg).
   const baseBg = theme.getBgAnsi("toolSuccessBg");
   const emphasized = pattern
@@ -283,8 +283,8 @@ export function renderHitLine(options: RenderHitLineOptions): string {
     : content;
   // Hit prefixes render muted: getFgAnsi (the escape alone — fg() with empty
   // text is a visual no-op, open+reset cancel out). Context prefixes dim.
-  const prefixStyle = hit.isContext ? palette.fgDim : theme.getFgAnsi("muted");
-  // Toolbox output: channel-scoped closes only — palette.rowReset would
+  const prefixStyle = hit.isContext ? scheme.fgDim : theme.getFgAnsi("muted");
+  // Toolbox output: channel-scoped closes only — scheme.rowReset would
   // re-open the diff canvas (a diff-row concept), and a full RESET would
   // kill pi's line-level frame canvas and expose the terminal default
   // behind the row tail (the tool-ls rule).
@@ -299,7 +299,7 @@ interface RenderHighlightedOptions {
   pattern: string;
   /** The grep flags (literal / ignoreCase). */
   flags: MatchFlags;
-  /** The frame's view (the highlight entry; palette/theme ride along). */
+  /** The frame's view (the highlight entry; scheme/theme ride along). */
   view: RenderView;
 }
 
@@ -314,7 +314,7 @@ interface RenderHighlightedOptions {
  */
 async function renderHighlighted(options: RenderHighlightedOptions): Promise<string> {
   const { lines, pattern, flags, view } = options;
-  const { palette, piTheme: theme } = view;
+  const { scheme, theme } = view;
   // Parse pass: every line classified; the file's language resolved once.
   const langByFile = new Map<string, BundledLanguage | undefined>();
   const parsed = lines.map((line) => {
@@ -347,7 +347,7 @@ async function renderHighlighted(options: RenderHighlightedOptions): Promise<str
         pattern,
         flags,
         theme,
-        palette,
+        scheme,
       });
       i++;
       continue;
@@ -375,7 +375,7 @@ async function renderHighlighted(options: RenderHighlightedOptions): Promise<str
           pattern,
           flags,
           theme,
-          palette,
+          scheme,
         });
       }
     }

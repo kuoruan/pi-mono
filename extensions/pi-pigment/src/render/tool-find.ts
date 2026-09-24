@@ -12,7 +12,7 @@ import type { FindToolInput, ToolDefinition } from "@earendil-works/pi-coding-ag
 import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
+import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
 import { assembleOutputBody } from "./output-assembly.ts";
@@ -51,8 +51,8 @@ interface StyleFindPathOptions {
   path: string;
   /** The pi theme (dim/accent/toolOutput fg, success canvas bg). */
   theme: Pick<PaletteTheme, "fg" | "bold" | "getBgAnsi">;
-  /** The resolved palette (type colors). */
-  palette: Pick<DiffPalette, "fgCode">;
+  /** The resolved scheme (type colors). */
+  scheme: Pick<ResolvedTheme, "fgCode">;
   /** The glob's anchor run ("" emphasizes nothing). */
   anchor: string;
   /** The emphasis spec (bold + accent fg). */
@@ -67,7 +67,7 @@ interface StyleFindPathOptions {
  * @returns The styled line.
  */
 function styleFindPath(options: StyleFindPathOptions): string {
-  const { path, theme, palette, anchor, emphasis } = options;
+  const { path, theme, scheme, anchor, emphasis } = options;
   const slash = path.lastIndexOf("/");
   const dirname = slash === -1 ? "" : path.slice(0, slash + 1);
   const basename = slash === -1 ? path : path.slice(slash + 1);
@@ -107,7 +107,7 @@ function styleFindPath(options: StyleFindPathOptions): string {
     // RESET would kill pi's line-level frame canvas and expose the terminal
     // default behind the row tail.
     return (
-      theme.fg("dim", inertText(dirname)) + palette.fgCode + styledBase(basename) + SEQ_FG_DEFAULT
+      theme.fg("dim", inertText(dirname)) + scheme.fgCode + styledBase(basename) + SEQ_FG_DEFAULT
     );
   }
   return theme.fg("dim", inertText(dirname)) + theme.fg("toolOutput", styledBase(basename));
@@ -128,7 +128,7 @@ export function createFindWrapper(
   return createToolWrapper(origFind, services, {
     renderShell: "default",
     renderCall: ({ text, view, ctx, renderArgs }) => {
-      const { piTheme: theme } = view;
+      const { theme } = view;
       const args = argsOf<FindToolInput>(renderArgs);
       renderHeaderLine({
         text,
@@ -141,7 +141,7 @@ export function createFindWrapper(
       return text;
     },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
-      const { palette, piTheme: theme } = view;
+      const { scheme, theme } = view;
       // Inert at intake (ADR 0004): the result carries raw paths. The
       // derivation is memoized on the result object's identity (one
       // lookup per trigger frame for a stable result).
@@ -160,7 +160,7 @@ export function createFindWrapper(
         isEmpty: all.length === 0,
         budget: COLLAPSED_LINES.find,
         derived,
-        paletteIdentity: palette.identity,
+        paletteIdentity: scheme.identity,
         tookMs,
         expanded: options.expanded,
         notice: derived.notice,
@@ -173,7 +173,7 @@ export function createFindWrapper(
             if (line === "No files found matching pattern") {
               return theme.fg("muted", line);
             }
-            return styleFindPath({ path: line, theme, palette, anchor, emphasis: emphasisSpec });
+            return styleFindPath({ path: line, theme, scheme, anchor, emphasis: emphasisSpec });
           });
           return joinBodyTail(styled.join("\n"), tail, hidden);
         },

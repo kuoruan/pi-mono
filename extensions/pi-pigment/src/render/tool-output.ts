@@ -17,7 +17,7 @@ import { keyText } from "@earendil-works/pi-coding-agent";
 import { inertText } from "#src/core/ansi.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { linesOf } from "#src/core/lines.ts";
-import type { PaletteTheme } from "#src/theme/palette.ts";
+import type { PaletteTheme } from "#src/theme/scheme.ts";
 
 import type { ExecutionTimingState } from "./tool-services.ts";
 
@@ -179,7 +179,7 @@ export interface OutputTaskKeyOptions {
   prefix: string;
   /** The derived output identity. */
   derived: DerivedOutput;
-  /** The palette/theme identity part. */
+  /** The scheme/theme identity part. */
   identity: string;
   /** The elapsed milliseconds. */
   elapsedMs: number;
@@ -195,7 +195,7 @@ export interface OutputTaskKeyOptions {
 
 /**
  * The width-independent swap key grep/find/ls share: content identity
- * (length + fingerprint), palette identity (a theme switch re-renders),
+ * (length + fingerprint), scheme identity (a theme switch re-renders),
  * footer state (the streaming-partial→final Took delta), the expand mode,
  * and optionally the streaming stamp (the settle re-render for highlighted
  * tools). A resize must NOT re-render these tools (no width-dependent

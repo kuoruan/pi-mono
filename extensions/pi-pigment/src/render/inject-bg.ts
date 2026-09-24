@@ -7,7 +7,7 @@
 import { codePointCount, forEachCell, isPlainAscii } from "#src/core/ansi.ts";
 import { SEQ_ESC } from "#src/core/escapes.ts";
 import { isResetLikeSequence, reinjectSgr } from "#src/core/sgr.ts";
-import type { DiffPalette } from "#src/theme/palette.ts";
+import type { ResolvedTheme } from "#src/theme/scheme.ts";
 
 import type { CharRange } from "./word-diff.ts";
 
@@ -23,11 +23,11 @@ export interface InjectBgOptions {
   /** Background escape for the ranges (baseBg when omitted). */
   highlightBg?: string;
   /**
-   * The diff palette: its rowReset closes the row (diff rows). Omitted
+   * The diff scheme: its rowReset closes the row (diff rows). Omitted
    * for CUSTOM rows — the baseBg continues the row's tail, so the frame
    * padding never borrows the diff canvas (the green stripe bug).
    */
-  palette?: DiffPalette;
+  scheme?: ResolvedTheme;
 }
 
 /**
@@ -40,10 +40,10 @@ export interface InjectBgOptions {
  * @returns The line with backgrounds composited in.
  */
 export function injectBg(ansiLine: string, options: InjectBgOptions): string {
-  const { ranges, baseBg, highlightBg, palette } = options;
+  const { ranges, baseBg, highlightBg, scheme } = options;
   const rangeList = ranges ?? EMPTY_RANGES;
   const emphasisBg = highlightBg ?? baseBg;
-  const rowEnd = palette?.rowReset ?? baseBg;
+  const rowEnd = scheme?.rowReset ?? baseBg;
   // One SEQ_ESC probe decides every later branch: memchr-fast, stops at the
   // first SEQ_ESC on styled lines (no full-line regex scan wasted on them).
   const escIndex = ansiLine.indexOf(SEQ_ESC);

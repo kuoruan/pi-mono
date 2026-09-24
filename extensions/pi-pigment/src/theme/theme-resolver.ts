@@ -18,7 +18,7 @@ import type { Issue } from "#src/core/issue.ts";
 import type { SessionEnv } from "#src/core/session-env.ts";
 
 import { isBundledThemeName } from "./bundled-intake.ts";
-import { type DiffRoots, type DiffRootsSpec } from "./palette.ts";
+import { type DiffRoots, type DiffRootsSpec } from "./scheme.ts";
 import type { SemanticColors } from "./syntax-theme.ts";
 import {
   type LoadedThemeFile,
@@ -68,7 +68,7 @@ export type ThemeSelection =
 export interface ThemeResolution {
   /** The selection for highlight's render-time resolution. */
   selection: ThemeSelection;
-  /** The diff-roots spec for the palette. */
+  /** The diff-roots spec for the scheme. */
   rootsSpec: DiffRootsSpec | undefined;
   /** Issues to stderr at session_start. */
   issues: Issue[];
@@ -285,7 +285,7 @@ async function resolveVariant(
  * The user-config roots spec (ADR 0006): ONLY the object form's explicit
  * diff keys — top-level shared, per-variant per-polarity. Everything a
  * theme would have contributed moved to the converter at generation time
- * (the registered pi theme's slots); the palette reads those slots.
+ * (the registered pi theme's slots); the scheme reads those slots.
  *
  * @param value - The validated theme object.
  * @returns The roots spec, or undefined when no diff keys are set.
