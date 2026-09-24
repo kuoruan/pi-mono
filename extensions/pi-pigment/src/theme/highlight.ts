@@ -91,13 +91,42 @@ function themeIdentity(theme: ShikiThemeInput): string {
  * The seam's highlight input (session.ts): the session binds the
  * theme; a block carries only its own content.
  */
-export interface HighlightBlock {
+export interface CodeBlock {
   /** The code block. */
   code: string;
   /** The Shiki language (undefined skips highlighting). */
   language: BundledLanguage | undefined;
   /** Optional pre-slice file text (grammar-state seeding). */
   seed?: string;
+}
+
+/**
+ * A code slice's file context, for grammar-state seeding (vue/html
+ * embedded grammars). The text is caller-supplied; nothing here reads
+ * the disk.
+ */
+export interface CodeSliceContext {
+  /** The file's full text. */
+  text: string;
+  /** 1-based line where the slice begins in `text`; the seed is the text before it. */
+  startLine: number;
+}
+
+/**
+ * The file-sourced highlight input: the code plus where it came from.
+ * Detection and seeding happen inside — the consumer never touches a
+ * language id or a grammar stack.
+ */
+export interface FileCodeBlock {
+  /** The code to highlight (a slice or a whole file). */
+  code: string;
+  /** The file the code came from — drives language detection (no I/O). */
+  filePath: string;
+  /**
+   * The slice's file context. Omit for whole files — top-level code
+   * needs no seed.
+   */
+  context?: CodeSliceContext;
 }
 
 /**
@@ -119,7 +148,7 @@ export interface HighlightBlock {
  * @returns The highlighted (or fallback) lines.
  */
 export async function hlBlockResolved(
-  block: HighlightBlock,
+  block: CodeBlock,
   theme: ShikiThemeInput | null,
 ): Promise<string[]> {
   const { code, language } = block;

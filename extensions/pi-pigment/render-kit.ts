@@ -6,7 +6,8 @@
  *
  * Exports come straight from the defining modules (no pass-through layer):
  * the kit itself from `src/render/kit.ts` (its `publishRenderKit()` feeds
- * the publication channel), the session seam from `src/render/session.ts`.
+ * the publication channel), the session seam from `src/render/session.ts`,
+ * and the highlight/theme/config vocabulary they are typed against.
  */
 
 /** The package version — the version module reads package.json once. */
@@ -27,3 +28,8 @@ export {
   type RenderView,
   type RenderSessionInputs,
 } from "./src/render/session.ts";
+export type { CodeBlock, CodeSliceContext, FileCodeBlock } from "./src/theme/highlight.ts";
+export { detectLanguage } from "./src/theme/language.ts";
+export type { BundledLanguage } from "./src/theme/shiki-core.ts";
+export type { ResolvedTheme, RenderTheme, ThemeBgSlot } from "./src/theme/scheme.ts";
+export type { ToolName } from "./src/config/config-schema.ts";

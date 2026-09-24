@@ -415,3 +415,38 @@ describe("the recommended pairs (the slash grammar)", () => {
     expect(await view.highlight(TS)).toEqual(CODE.split("\n"));
   });
 });
+
+describe("resolveCodeBlock", () => {
+  it("detects the language from the path", async () => {
+    const { resolveCodeBlock } = await import("#src/theme/language.ts");
+    expect(resolveCodeBlock({ code: CODE, filePath: "a.ts" })).toEqual({
+      code: CODE,
+      language: "typescript",
+      seed: undefined,
+    });
+  });
+
+  it("leaves unknown extensions unstyled", async () => {
+    const { resolveCodeBlock } = await import("#src/theme/language.ts");
+    expect(resolveCodeBlock({ code: CODE, filePath: "a.zzzunknown" }).language).toBeUndefined();
+  });
+
+  it("seeds a mid-file slice from the context", async () => {
+    const { resolveCodeBlock } = await import("#src/theme/language.ts");
+    const text =
+      "<template><div>\n<span>x</span>\n</div></template>\n<script>const a = 1;</script>\n";
+    const block = resolveCodeBlock({
+      code: "<span>x</span>\n",
+      filePath: "a.vue",
+      context: { text, startLine: 2 },
+    });
+    expect(block.language).toBe("vue");
+    expect(block.seed).toBe("<template><div>");
+  });
+
+  it("skips the seed for whole files", async () => {
+    const { resolveCodeBlock } = await import("#src/theme/language.ts");
+    const block = resolveCodeBlock({ code: CODE, filePath: "a.ts" });
+    expect(block.seed).toBeUndefined();
+  });
+});

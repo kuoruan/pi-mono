@@ -21,7 +21,8 @@ import type { PigmentConfig } from "#src/config/config-schema.ts";
 import { createBoundedMap } from "#src/core/bounded-map.ts";
 import { defaultIssueSink, type IssueSink } from "#src/core/issue.ts";
 import type { SessionEnv } from "#src/core/session-env.ts";
-import { hlBlockResolved, type HighlightBlock } from "#src/theme/highlight.ts";
+import { hlBlockResolved, type CodeBlock, type FileCodeBlock } from "#src/theme/highlight.ts";
+import { resolveCodeBlock } from "#src/theme/language.ts";
 import {
   deriveResolvedTheme,
   polarityWarning,
@@ -61,8 +62,13 @@ export interface RenderView {
    * Null when the selection resolves to no theme (unstyled).
    */
   activeTheme(): Promise<ShikiThemeInput | null>;
-  /** Highlight a code block through this session's resolution. */
-  highlight(block: HighlightBlock): Promise<string[]>;
+  /**
+   * Highlight a code block through this session's resolution. Two spellings:
+   * `{ code, language }` when the caller knows the language, `{ code,
+   * filePath, context? }` when it knows the file — detection and seeding
+   * happen inside (no I/O; the context text is caller-supplied).
+   */
+  highlight(block: CodeBlock | FileCodeBlock): Promise<string[]>;
 }
 
 /** A session's render seam: the immutable inputs plus the frame binder. */
@@ -114,11 +120,13 @@ export function createRenderSession(inputs: RenderSessionInputs): RenderSession 
       const scheme = deriveFor(theme);
       const resolve = (): Promise<ShikiThemeInput | null> =>
         resolveActiveThemeMemoized(themeMemo, inputs, scheme, theme);
+      const highlight = async (block: CodeBlock | FileCodeBlock): Promise<string[]> =>
+        hlBlockResolved("filePath" in block ? resolveCodeBlock(block) : block, await resolve());
       return {
         scheme,
         theme,
         activeTheme: resolve,
-        highlight: async (block: HighlightBlock) => hlBlockResolved(block, await resolve()),
+        highlight,
       };
     },
   };

@@ -10,6 +10,8 @@
 import { getLanguageFromPath } from "@earendil-works/pi-coding-agent";
 import { bundledLanguages, bundledLanguagesAlias } from "shiki";
 
+import type { CodeBlock, FileCodeBlock } from "./highlight.ts";
+import { seedFromText } from "./seed.ts";
 import type { BundledLanguage } from "./shiki-core.ts";
 
 /**
@@ -47,4 +49,23 @@ export function detectLanguage(filePath: string): BundledLanguage | undefined {
   if (!ext) return undefined;
   if (LANGUAGE_KEYS.has(ext)) return ext as BundledLanguage;
   return EXTRA_EXT_LANG[ext];
+}
+
+/**
+ * Resolve a file-sourced block to the language-keyed block the
+ * highlighter consumes: detect the language from the path, seed from
+ * the context when present. Never reads the disk: an embedded-grammar
+ * slice without context renders unseeded (possibly partially uncolored)
+ * rather than paying for I/O here — pass `context` when color accuracy
+ * matters.
+ *
+ * @param block - The file-sourced block.
+ * @returns The highlight input (unknown language → undefined language → unstyled).
+ */
+export function resolveCodeBlock(block: FileCodeBlock): CodeBlock {
+  const language = detectLanguage(block.filePath);
+  const seed = block.context
+    ? seedFromText(block.context.text, language)?.(block.context.startLine)
+    : undefined;
+  return { code: block.code, language, seed };
 }

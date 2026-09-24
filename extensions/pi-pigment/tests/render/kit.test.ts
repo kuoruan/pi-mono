@@ -128,6 +128,7 @@ describe("channel B: the globalThis publication", () => {
         "RENDER_KIT_PROTOCOL_VERSION",
         "createRenderKit",
         "createRenderSession",
+        "detectLanguage",
         "publishRenderKit",
       ].toSorted(),
     );
