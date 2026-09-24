@@ -124,6 +124,36 @@ describe("grep/find/ls header ellipsis", () => {
   }
 });
 
+describe("header trailing blank follows call state", () => {
+  it("re-arms the task on pending→error so the separator blank lands", async () => {
+    const tools = await registerTools();
+    const edit = toolOf(tools, "edit");
+    const { ctx } = makeRenderCtx();
+    ctx.args = { path: "/project/app.ts", edits: [] };
+    // Streaming: the pending header owns no trailing blank.
+    ctx.isPartial = true;
+    const component = edit.renderCall!(
+      ctx.args,
+      buildRenderTheme(),
+      ctx,
+    ) as unknown as DrivenTaskComponent;
+    component.render(120);
+    await vi.waitFor(() => {
+      if (!plain(component.text.text).includes("← edit")) throw new Error("waiting");
+    });
+    expect(plain(component.text.text).endsWith("\n")).toBe(false);
+    // Settled on the same host: the task must re-arm for the blank.
+    ctx.isPartial = false;
+    ctx.isError = true;
+    ctx.lastComponent = component as never;
+    edit.renderCall!(ctx.args, buildRenderTheme(), ctx);
+    component.render(120);
+    await vi.waitFor(() => {
+      if (!plain(component.text.text).endsWith("\n")) throw new Error("waiting");
+    });
+  });
+});
+
 describe("write/edit header ellipsis (stats chips pinned)", () => {
   it("edit keeps the +N -M chip outside the ellipsis budget", async () => {
     const tools = await registerTools();

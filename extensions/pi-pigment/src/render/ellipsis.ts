@@ -176,7 +176,10 @@ export function renderHeaderLine(parts: HeaderParts): void {
     text,
     definePreviewTask({
       prefix,
-      stamps: [body, suffix, ctx.expanded ? 1 : 0, palette.identity],
+      // The trailing blank follows the call state (pending headers own
+      // none) — without it a pending→error transition keeps the
+      // blank-less frame and glues the header to the body below.
+      stamps: [body, suffix, ctx.expanded ? 1 : 0, palette.identity, newline],
       widthAware: true,
       placeholder: fit(termW()),
       fallback: full,
