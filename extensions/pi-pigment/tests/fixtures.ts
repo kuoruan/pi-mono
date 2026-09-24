@@ -164,6 +164,7 @@ export function buildFakeTheme(overrides?: FakeThemeOverrides): PaletteTheme {
   const bg: Record<string, string> = {
     toolSuccessBg: overrides?.successBg ?? "\x1b[48;2;30;30;40m",
     toolErrorBg: overrides?.errorBg ?? "\x1b[48;2;40;30;30m",
+    searchMatchBg: "\x1b[48;2;80;60;20m",
   };
   return {
     name: overrides?.name,

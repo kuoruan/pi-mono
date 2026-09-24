@@ -125,16 +125,16 @@ export interface PaletteTheme {
   fg(name: ThemeColor, text: string): string;
   /** The named color's foreground escape, or an empty string. */
   getFgAnsi(name: ThemeColor): string;
-  /** One of the two background slots the palette reads. */
+  /** One of the background slots the palette reads. */
   getBgAnsi(name: PaletteBgColor): string;
-  /** Wrap text in one of the two background slots' escape. */
+  /** Wrap text in one of the background slots' escape. */
   bg(name: PaletteBgColor, text: string): string;
   /** Wrap text in bold. */
   bold(text: string): string;
 }
 
-/** The theme bg slots the palette reads (canvas + identity). */
-const THEME_BG_KEYS = ["toolSuccessBg", "toolErrorBg"] as const;
+/** The theme bg slots the palette reads. */
+const THEME_BG_KEYS = ["toolSuccessBg", "toolErrorBg", "searchMatchBg"] as const;
 
 /** The theme bg slots the palette and headers read (SDK `ThemeBg` subset). */
 export type PaletteBgColor = (typeof THEME_BG_KEYS)[number];

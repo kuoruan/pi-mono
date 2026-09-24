@@ -9,6 +9,7 @@
 
 import { createBoundedMap } from "#src/core/bounded-map.ts";
 import {
+  SEQ_BG_DEFAULT,
   SEQ_BOLD,
   SEQ_BOLD_OFF,
   SEQ_ESC,
@@ -16,6 +17,7 @@ import {
   SEQ_RESET,
   SEQ_RESET_BARE,
 } from "#src/core/escapes.ts";
+import type { PaletteTheme } from "#src/theme/palette.ts";
 
 /** How the caller wants the pattern matched (grep/find flags). */
 export interface MatchFlags {
@@ -64,23 +66,32 @@ function matcherFor(pattern: string, flags: MatchFlags): PatternMatcher {
   return resolved;
 }
 
-/** The emphasis convention's color half: the theme's accent foreground. */
+/**
+ * The emphasis convention's color: the theme's accent foreground plus
+ * the match-block background (pi's own searchMatchBg slot — the same
+ * surface the TUI's search uses, so a match reads as a match everywhere).
+ * SEQ_BOLD lives inside emphasize; callers pass this spec — one
+ * derivation beside the wrap that consumes it, no per-wrapper copies
+ * of the rule or its rationale. bg "" (tests/fallbacks) means fg-only.
+ */
 export interface EmphasisSpec {
   /** The accent fg escape emphasize applies over each match. */
   fg: string;
+  /** The match-block bg escape ("" = no background). */
+  bg: string;
 }
 
 /**
- * The emphasis convention's color half: the theme's accent foreground.
- * SEQ_BOLD (the other half) lives inside emphasize; callers pass this spec —
- * one derivation beside the wrap that consumes it, no per-wrapper copies
- * of the rule or its rationale.
+ * The emphasis colors: the theme's accent foreground plus the
+ * match-block background (pi's own searchMatchBg slot — the same
+ * surface the TUI's search uses, so a match reads as a match
+ * everywhere). SEQ_BOLD lives inside emphasize.
  *
  * @param theme - The pi theme.
  * @returns The emphasis spec emphasize takes.
  */
-export function accentEmphasis(theme: { getFgAnsi(name: string): string }): EmphasisSpec {
-  return { fg: theme.getFgAnsi("accent") };
+export function accentEmphasis(theme: Pick<PaletteTheme, "getFgAnsi" | "getBgAnsi">): EmphasisSpec {
+  return { fg: theme.getFgAnsi("accent"), bg: theme.getBgAnsi("searchMatchBg") };
 }
 
 /** The emphasize inputs. */
@@ -95,6 +106,13 @@ export interface EmphasizeOptions {
   emphasis: EmphasisSpec;
   /** The base fg re-opened after each match's close ("" = plain). */
   baseFg?: string;
+  /**
+   * The line canvas bg re-opened after each match's close: pi wraps
+   * every frame row in the outcome bg (toolSuccessBg on hits), so a
+   * 49m close would punch a hole to the terminal default from the
+   * match onward. "" (no canvas) falls back to the bg default.
+   */
+  baseBg?: string;
 }
 
 /**
@@ -105,7 +123,7 @@ export interface EmphasizeOptions {
  * @returns The line with every match emphasized.
  */
 export function emphasize(options: EmphasizeOptions): string {
-  const { content, pattern, flags, emphasis, baseFg = "" } = options;
+  const { content, pattern, flags, emphasis, baseFg = "", baseBg = "" } = options;
   if (!pattern) return content;
   const spans = content.split(SGR_SPLIT);
 
@@ -121,11 +139,17 @@ export function emphasize(options: EmphasizeOptions): string {
   // channels, so the remainder must re-open the span it was in; plain-text
   // callers pass their base fg so the text after a match keeps it (highlighted
   // callers leave it empty: their spans carry their own re-opens).
+  // The bg close mirrors it: the span's own, else the line canvas
+  // (baseBg), else the default — never a bare 49m over a canvas.
   let spanFg = baseFg;
-  // The fg escape spans a match sits in replaces the emphasis fg without a
-  // separate close (fg escapes overwrite); without one, close to the default.
+  // The effective bg under the cursor (rare in token spans, tracked
+  // all the same so the close below re-opens the right canvas).
+  let spanBg = "";
+  // fg/bg escapes overwrite their own channel: no separate close needed
+  // for the open side. The match close re-opens the span's own, else the
+  // line canvas, else the default (never a bare 49m over a canvas).
   const wrap = (hit: string) =>
-    `${SEQ_BOLD}${emphasis.fg}${hit}${SEQ_BOLD_OFF}${spanFg || SEQ_FG_DEFAULT}`;
+    `${SEQ_BOLD}${emphasis.fg}${emphasis.bg}${hit}${SEQ_BOLD_OFF}${spanFg || SEQ_FG_DEFAULT}${spanBg || baseBg || SEQ_BG_DEFAULT}`;
 
   // Matcher per grep/find semantics (memoized — see matcherFor).
   const { regex, needle } = matcherFor(pattern, flags);
@@ -133,13 +157,15 @@ export function emphasize(options: EmphasizeOptions): string {
   return spans
     .map((span) => {
       if (span.startsWith(SEQ_ESC)) {
-        // Track the span's effective fg: a reset clears it, an fg escape
-        // (possibly inside a compound sequence) re-opens it, anything else
-        // (bg-only, attributes) leaves the current fg standing.
+        // Track the span's effective fg AND bg: a reset clears both, an
+        // fg/bg escape (possibly inside a compound sequence) re-opens
+        // its channel, anything else leaves the currents standing.
         if (span === SEQ_RESET || span === SEQ_RESET_BARE) {
           spanFg = "";
-        } else if (FG_ONLY.test(span)) {
-          spanFg = span;
+          spanBg = "";
+        } else {
+          if (FG_ONLY.test(span)) spanFg = span;
+          if (BG_ONLY.test(span)) spanBg = span;
         }
         return span; // escape span: untouched
       }
@@ -179,6 +205,12 @@ export function emphasize(options: EmphasizeOptions): string {
 // eslint-disable-next-line no-control-regex -- intentionally matches SEQ_ESC
 const FG_ONLY = new RegExp(
   `${SEQ_ESC}\\[3[0-9](?:;[0-9]+)*m|${SEQ_ESC}\\[38;5;\\d+m|${SEQ_ESC}\\[38;2;\\d+;\\d+;\\d+m`,
+);
+
+/** An SGR span that sets a background color (same shapes, 4x/48 halves). */
+// eslint-disable-next-line no-control-regex -- intentionally matches SEQ_ESC
+const BG_ONLY = new RegExp(
+  `${SEQ_ESC}\\[4[0-9](?:;[0-9]+)*m|${SEQ_ESC}\\[48;5;\\d+m|${SEQ_ESC}\\[48;2;\\d+;\\d+;\\d+m`,
 );
 
 /**

@@ -125,7 +125,7 @@ The box canvas is NOT a root: the tool frame's three backgrounds are the pi them
 
 **Pattern emphasis**: The SGR-span-aware rewriter that brightens pattern occurrences inside already-highlighted grep hit lines and find basenames (never splitting an escape sequence, re-opening the span's fg after each hit), plus the ReDoS gate (`riskyPattern`) that declines to compile quantified-group/backreference patterns — a frozen TUI is worse than an unemphasized line.
 
-- The emphasis signal is BOLD + the theme's accent (the ripgrep/GNU grep convention — bold survives even where the accent overlaps a token color; `accentEmphasis` derives the spec).
+- The emphasis signal is BOLD + the theme's accent over the searchMatchBg block (the ripgrep/GNU grep convention — bold survives even where the accent overlaps a token color; `accentEmphasis` derives the spec; the match close re-opens the toolSuccessBg canvas).
 - A generic text primitive in pattern-emphasis; the grep and find wrappers are its clients.
 
 _Avoid_: emphasis via the palette's fgCode (the code-file type color — invisible when they coincide), per-line emphasis (grammar state must flow — see Grep block merge).

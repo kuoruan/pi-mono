@@ -276,7 +276,11 @@ export function renderHitLine(options: RenderHitLineOptions): string {
   // its own fg; plain-text lines must open it explicitly, and the
   // emphasis wrap must re-open it after each match's RESET).
   const baseFg = hit.isContext ? palette.fgDim : theme.getFgAnsi("toolOutput");
-  const emphasized = pattern ? emphasize({ content, pattern, flags, emphasis, baseFg }) : content;
+  // Settled rows sit on the toolSuccessBg canvas (see baseBg).
+  const baseBg = theme.getBgAnsi("toolSuccessBg");
+  const emphasized = pattern
+    ? emphasize({ content, pattern, flags, emphasis, baseFg, baseBg })
+    : content;
   // Hit prefixes render muted: getFgAnsi (the escape alone — fg() with empty
   // text is a visual no-op, open+reset cancel out). Context prefixes dim.
   const prefixStyle = hit.isContext ? palette.fgDim : theme.getFgAnsi("muted");

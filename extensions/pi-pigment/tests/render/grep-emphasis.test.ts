@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { SEQ_BOLD, SEQ_BOLD_OFF, SEQ_FG_DEFAULT, SEQ_RESET } from "#src/core/escapes.ts";
+import {
+  SEQ_BG_DEFAULT,
+  SEQ_BOLD,
+  SEQ_BOLD_OFF,
+  SEQ_FG_DEFAULT,
+  SEQ_RESET,
+} from "#src/core/escapes.ts";
 import { emphasize, riskyPattern } from "#src/render/pattern-emphasis.ts";
 import { parseHitLine, renderHitLine } from "#src/render/tool-grep.ts";
 import { FALLBACK_PALETTE } from "#src/theme/palette.ts";
@@ -8,7 +14,8 @@ import { buildRenderTheme, viewFor } from "#test/fixtures.ts";
 
 const STR_FG = "\x1b[38;2;220;220;170m"; // a syntax-string color
 /** The emphasis spec callers pass: bold + an independent accent fg. */
-const EMPHASIS = { fg: "\x1b[38;2;255;170;0m" };
+const MATCH_BG = "\x1b[48;2;80;60;20m"; // pi's searchMatchBg surface
+const EMPHASIS = { fg: "\x1b[38;2;255;170;0m", bg: MATCH_BG };
 
 describe("riskyPattern (ReDoS gate)", () => {
   it("flags quantified groups that can match one text multiple ways", () => {
@@ -115,7 +122,7 @@ describe("emphasize (grep hit emphasis)", () => {
     // — visible even where the accent overlaps a token color); the
     // content's own trailing SEQ_RESET passes through untouched.
     expect(out).toBe(
-      `${STR_FG}${SEQ_BOLD}${EMPHASIS.fg}abc${SEQ_BOLD_OFF}${STR_FG}${SEQ_BOLD}${EMPHASIS.fg}abc${SEQ_BOLD_OFF}${STR_FG}${SEQ_RESET}`,
+      `${STR_FG}${SEQ_BOLD}${EMPHASIS.fg}${MATCH_BG}abc${SEQ_BOLD_OFF}${STR_FG}${SEQ_BG_DEFAULT}${SEQ_BOLD}${EMPHASIS.fg}${MATCH_BG}abc${SEQ_BOLD_OFF}${STR_FG}${SEQ_BG_DEFAULT}${SEQ_RESET}`,
     );
   });
 
@@ -129,8 +136,31 @@ describe("emphasize (grep hit emphasis)", () => {
     // No span fg active (plain content): each hit closes bold, then the
     // fg default — never a full reset (the frame canvas must survive).
     expect(out).toBe(
-      `${SEQ_BOLD}${EMPHASIS.fg}Find${SEQ_BOLD_OFF}${SEQ_FG_DEFAULT} ${SEQ_BOLD}${EMPHASIS.fg}find${SEQ_BOLD_OFF}${SEQ_FG_DEFAULT} ${SEQ_BOLD}${EMPHASIS.fg}FIND${SEQ_BOLD_OFF}${SEQ_FG_DEFAULT}`,
+      `${SEQ_BOLD}${EMPHASIS.fg}${MATCH_BG}Find${SEQ_BOLD_OFF}${SEQ_FG_DEFAULT}${SEQ_BG_DEFAULT} ${SEQ_BOLD}${EMPHASIS.fg}${MATCH_BG}find${SEQ_BOLD_OFF}${SEQ_FG_DEFAULT}${SEQ_BG_DEFAULT} ${SEQ_BOLD}${EMPHASIS.fg}${MATCH_BG}FIND${SEQ_BOLD_OFF}${SEQ_FG_DEFAULT}${SEQ_BG_DEFAULT}`,
     );
+  });
+});
+
+describe("renderHitLine match block (searchMatchBg)", () => {
+  it("paints the matched run with the search-match background", () => {
+    const theme = buildRenderTheme();
+    const out = renderHitLine({
+      hit: { prefix: "src/app.ts:12:", content: "const find = 1;", isContext: false },
+      content: "const find = 1;",
+      pattern: "find",
+      flags: { literal: true, ignoreCase: false },
+      theme,
+      palette: FALLBACK_PALETTE,
+    });
+    // The matched run carries pi's search-match surface; the close
+    // re-opens the line canvas (toolSuccessBg) — a bare 49m would punch
+    // a hole to the terminal default from the match onward.
+    expect(out).toContain(`${theme.getBgAnsi("searchMatchBg")}find`);
+    expect(out).toContain(`find${SEQ_BOLD_OFF}`);
+    expect(out).toContain(
+      `${SEQ_BOLD_OFF}${theme.getFgAnsi("toolOutput")}${theme.getBgAnsi("toolSuccessBg")}`,
+    );
+    expect(out).not.toContain(SEQ_BG_DEFAULT);
   });
 });
 
@@ -139,6 +169,7 @@ describe("renderHitLine prefix coloring", () => {
   const theme = {
     fg: () => "",
     getFgAnsi: (name: string) => (name === "muted" ? MUTED : ""),
+    getBgAnsi: (name: string) => (name === "searchMatchBg" ? MATCH_BG : ""),
   } as never;
 
   it('hit prefixes open the muted escape (fg(name, "") is a visual no-op)', () => {
@@ -178,10 +209,11 @@ describe("renderHitLine prefix coloring", () => {
     expect(out).toBe("abcdef");
   });
 
-  it("emits channel-scoped closes only — no full reset, no background escapes", () => {
-    // The wrap must never kill pi's line-level frame canvas: a full SEQ_RESET
-    // or an inline bg escape would expose the terminal default background
-    // from the match onward (the tool-ls channel-scoped rule).
+  it("emits channel-scoped closes only — no full reset, bg always paired", () => {
+    // The wrap must never kill pi's line-level frame canvas: no full
+    // SEQ_RESET mid-line (the tool-ls channel-scoped rule). The bg open
+    // is the match block itself — every open must pair with its 49m
+    // close, so no 48; escape leaks past the match.
     const content = `${STR_FG}Find find FIND`;
     const out = emphasize({
       content,
@@ -190,10 +222,13 @@ describe("renderHitLine prefix coloring", () => {
       emphasis: EMPHASIS,
       baseFg: STR_FG,
     });
-    // eslint-disable-next-line no-control-regex -- matches the escape classes the wrap must not emit
+    // eslint-disable-next-line no-control-regex -- matches the escape class the wrap must not emit
     expect(out).not.toMatch(/\x1b\[0m/);
-    // eslint-disable-next-line no-control-regex -- matches the background escapes the wrap must not emit
-    expect(out).not.toMatch(/\x1b\[4[89]/);
     expect(out).toContain(SEQ_BOLD_OFF);
+    // Every bg open pairs with its close: count opens == closes.
+    const opens = out.split(MATCH_BG).length - 1;
+    const closes = out.split(SEQ_BG_DEFAULT).length - 1;
+    expect(opens).toBe(3);
+    expect(closes).toBe(opens);
   });
 });

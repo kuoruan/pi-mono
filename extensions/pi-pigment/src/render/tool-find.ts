@@ -49,8 +49,8 @@ function formatFindCall(args: Partial<FindToolInput>, theme: PaletteTheme): stri
 interface StyleFindPathOptions {
   /** The result path. */
   path: string;
-  /** The pi theme (dim/accent/toolOutput fg). */
-  theme: Pick<PaletteTheme, "fg" | "bold">;
+  /** The pi theme (dim/accent/toolOutput fg, success canvas bg). */
+  theme: Pick<PaletteTheme, "fg" | "bold" | "getBgAnsi">;
   /** The resolved palette (type colors). */
   palette: Pick<DiffPalette, "fgCode">;
   /** The glob's anchor run ("" emphasizes nothing). */
@@ -81,6 +81,7 @@ function styleFindPath(options: StyleFindPathOptions): string {
           pattern: anchor,
           flags: { literal: true, ignoreCase: true },
           emphasis,
+          baseBg: theme.getBgAnsi("toolSuccessBg"),
         })
       : inertText(content);
   // Directories: fd marks them with a trailing slash, so the basename
