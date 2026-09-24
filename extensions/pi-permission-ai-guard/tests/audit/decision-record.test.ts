@@ -286,11 +286,11 @@ describe("DecisionRecord — per-gate shape", () => {
         verdict: { kind: "defer" },
         latencyMs: 250,
         deferKind: "model-defer",
-        authorizationAnchor: "run the failing test",
+        anchorText: "run the failing test",
       },
       "ctxh1",
     );
-    expect(anchored.authorizationAnchor).toBe("run the failing test");
+    expect(anchored.anchorText).toBe("run the failing test");
     const bare = DecisionRecord.model(
       base,
       "typesafe/jev-1.13",
@@ -298,7 +298,7 @@ describe("DecisionRecord — per-gate shape", () => {
       { verdict: { kind: "allow" }, latencyMs: 250 },
       "ctxh1",
     );
-    expect(bare.authorizationAnchor).toBe(null);
+    expect(bare.anchorText).toBe(null);
   });
 
   it("model omits reason for allow and defer-without-explanation verdicts", () => {

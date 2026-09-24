@@ -77,8 +77,8 @@ export interface ReviewOutcome {
    * no text — see {@link ReviewOutcomeDiagnostic}.
    */
   diagnostic?: ReviewOutcomeDiagnostic;
-  /** The authorization anchor the intent check judged against (audit-only). */
-  authorizationAnchor?: string;
+  /** The latest trusted user message the intent check judged against (audit-only). */
+  anchorText?: string;
 }
 
 /**
