@@ -207,6 +207,7 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
     const services: ToolServices = {
       shortPath: (p: string) => shortPath(cwd, p),
       indicatorStyle: config.indicatorStyle,
+      headerEllipsis: config.headerEllipsis,
       textFactory: Text,
       render: session,
     };

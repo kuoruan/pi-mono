@@ -4,6 +4,8 @@ Configuration is exactly two layers of one file: global `~/.pi/agent/extensions/
 
 > **Revision (ADR 0006)**: the zero-config default grew a second limb — theme selection itself is now zero-config (the bundled `pigment-*` themes register through the package `themes/` directory; picking one in `/settings` is pi's own native flow, not pi-pigment configuration). `syntaxTheme` narrowed to the token override layer. The surface stays three keys.
 >
+> **Revision (ADR 0008)**: `headerEllipsis` joined as the fourth key (long call headers collapse to one row with a middle ellipsis; off means always full). The surface stays four keys.
+>
 > **Revision (value grammar)**: `syntaxTheme` string values now follow pi's own theme-setting grammar — a single theme name or an explicit `"light/dark"` slash pair. The curated family shorthand (`"github"` → its halves) and the implicit `-light/-dark` file-pair discovery were removed in favor of the explicit pair (`"github-light/github-dark"`); the families' curation survives as a recommended-pairs table in config.md. The AA boundary unified: Shiki-bundled names enforce (matching `auto`'s precise pipeline), user files render verbatim. Conversion no longer retires a source from the token channel.
 
 ## The rendering color contract

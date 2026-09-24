@@ -111,6 +111,7 @@ export async function createRenderKit(options: RenderKitOptions): Promise<Render
   const services: ToolServices = {
     shortPath: (p: string) => shortPath(cwd, p),
     indicatorStyle: indicatorStyle ?? config.indicatorStyle,
+    headerEllipsis: config.headerEllipsis,
     textFactory: Text,
     render: session,
   };

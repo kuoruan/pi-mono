@@ -18,7 +18,12 @@
  */
 import { beforeAll, test } from "vitest";
 
-import { buildRenderTheme, makeRenderCtx, registerTools } from "#test/fixtures.ts";
+import {
+  buildRenderTheme,
+  makeRenderCtx,
+  registerTools,
+  type TextComponent,
+} from "#test/fixtures.ts";
 
 // One module-level sink absorbs every measured return value (DCE guard).
 let sink = 0;
@@ -59,7 +64,7 @@ test("settled grep renderResult per trigger frame", async ({ bench }) => {
       },
       theme,
       ctx,
-    ) as { text: { text: string } };
+    ) as TextComponent;
     sink += component.text.text.length;
   }).run();
 });

@@ -31,6 +31,7 @@ import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
+import { renderHeaderLine } from "./ellipsis.ts";
 import { shellBadgeText, shellExitBadgeOf } from "./error-frame.ts";
 import { astInjectRegions, fallbackHeredocRegions } from "./heredoc-inject.ts";
 import type { RenderView } from "./session.ts";
@@ -103,16 +104,28 @@ export function createShellWrapper(
         ctx.state.commandHighlightFor === cacheKey
           ? (ctx.state.commandHighlight as string | undefined)
           : undefined;
+      // Header ellipsis (ADR 0008): the body and the status suffix split
+      // BEFORE fitting — the suffix is pinned outside the budget.
+      const setHeader = (body: string): void => {
+        renderHeaderLine({
+          text,
+          prefix: "sh",
+          view,
+          ctx,
+          services,
+          body,
+          suffix: statusSuffix,
+          newline: "",
+        });
+      };
       if (cached !== undefined) {
-        text.setText(`${profile.prompt} ${cached}${statusSuffix}`);
+        setHeader(`${profile.prompt} ${cached}`);
         return text;
       }
 
       // Plain display now; the highlighted form swaps in via invalidate.
       const safeCommand = inertText(command);
-      text.setText(
-        theme.fg("toolTitle", theme.bold(`${profile.prompt} ${safeCommand}`)) + statusSuffix,
-      );
+      setHeader(theme.fg("toolTitle", theme.bold(`${profile.prompt} ${safeCommand}`)));
 
       // Highlight once the args settle (streaming frames stay plain — the
       // command is still growing; highlighting churn would flicker).

@@ -184,10 +184,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as {
-      previewTask?: { render: (width: number) => Promise<string> };
-      text: { text: string };
-    };
+    ) as unknown as TextComponent & TaskCarrier;
 
     // Sync phase: the async preview task is scheduled on the component.
     expect(component.previewTask).toBeDefined();
@@ -210,7 +207,7 @@ describe("rendering pipeline", () => {
     const filePath = join(tempDir, "fresh.ts");
     const { ctx } = makeRenderCtx();
     // kind "new" derives its content from the call args at render time.
-    (ctx as unknown as { args: unknown }).args = {
+    ctx.args = {
       path: filePath,
       content: "const value = 1;\n",
     };
@@ -222,10 +219,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as {
-      previewTask?: { render: (width: number) => Promise<string> };
-      text: { text: string };
-    };
+    ) as unknown as TextComponent & TaskCarrier;
     const rendered = await component.previewTask!.render(120);
     // The gutter row-resets onto the canvas (30;30;40); the code area
     // must then open on the add-row bg (bgAdded = canvas ⊕
@@ -244,17 +238,15 @@ describe("rendering pipeline", () => {
 
     const filePath = join(tempDir, "fresh-memo.ts");
     const { ctx } = makeRenderCtx();
-    (ctx as unknown as { args: unknown }).args = {
+    ctx.args = {
       path: filePath,
       content: "const a = 1;\n",
     };
     const result = { isError: false, details: { kind: "new", filePath } } as never;
     write.renderResult(result, { expanded: true, isPartial: false }, buildRenderTheme(), ctx);
-    const state = (
-      ctx as unknown as {
-        state: { newFileStats?: { content: string; lineCount: number; fingerprint: number } };
-      }
-    ).state;
+    const state = ctx.state as {
+      newFileStats?: { content: string; lineCount: number; fingerprint: number };
+    };
     const first = state.newFileStats;
     expect(first).toBeDefined();
     expect(first!.lineCount).toBe(1);
@@ -263,7 +255,7 @@ describe("rendering pipeline", () => {
     write.renderResult(result, { expanded: true, isPartial: false }, buildRenderTheme(), ctx);
     expect(state.newFileStats).toBe(first);
     // A fresh args parse (new reference) re-derives the stats.
-    (ctx as unknown as { args: unknown }).args = {
+    ctx.args = {
       path: filePath,
       content: "const a = 1;\nconst b = 2;\n",
     };
@@ -297,10 +289,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as {
-      previewTask?: { render: (width: number) => Promise<string> };
-      text: { text: string };
-    };
+    ) as unknown as TextComponent & TaskCarrier;
 
     expect(component.previewTask).toBeDefined();
     const rendered = await component.previewTask!.render(120);
@@ -412,10 +401,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as {
-      previewTask?: { render: (width: number) => Promise<string> };
-      text: { text: string };
-    };
+    ) as unknown as TextComponent & TaskCarrier;
 
     expect(component.previewTask).toBeDefined();
     const rendered = await component.previewTask!.render(120);
@@ -444,10 +430,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as {
-      previewTask?: unknown;
-      text: { text: string };
-    };
+    ) as unknown as TextComponent & TaskCarrier;
 
     expect(component.previewTask).toBeUndefined();
     expect(component.text.text).toContain("Successfully replaced");

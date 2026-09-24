@@ -16,6 +16,7 @@ import { inertText, measurePlain } from "#src/core/ansi.ts";
 import { linesOf } from "#src/core/lines.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 
+import { renderHeaderLine } from "./ellipsis.ts";
 import {
   clearToolHeaderBg,
   formatToolFrameHeaderText,
@@ -25,8 +26,10 @@ import {
 } from "./header.ts";
 import { injectBg } from "./inject-bg.ts";
 import { borderBar } from "./row-frame.ts";
+import type { RenderView } from "./session.ts";
+import type { PreviewTextHost } from "./text-task.ts";
 import { collapseTail, expandKeyHint, tookFooter, type StateColor } from "./tool-output.ts";
-import type { CallState, ShellExitBadge } from "./tool-services.ts";
+import type { CallState, RenderContext, ShellExitBadge, ToolServices } from "./tool-services.ts";
 
 /**
  * The error-frame body's collapsed line budget — the same affordance the
@@ -51,14 +54,12 @@ const ERROR_PREVIEW_LINES = 10;
  */
 export const ERROR_FRAME_DEFAULT_WIDTH = 120;
 
-/** The call-header row setter's inputs (the inline object form grew). */
+/** The call-header row setter's inputs (frame composition + the task's frame). */
 export interface CallHeaderOpts {
   /** The tool label (arrow-prefixed when wrapping). */
   label: string;
   /** The file path (shortened via pathShortener). */
   filePath: string;
-  /** The pi theme. */
-  theme: PaletteTheme;
   /** The header's tail suffix (stats chips). */
   suffix: string;
   /** The path-shortening function. */
@@ -72,8 +73,14 @@ export interface CallHeaderOpts {
    * the palette's base tint.
    */
   status: CallState;
-  /** The resolved palette. */
-  palette: DiffPalette;
+  /** The frame's derived view (palette + pi theme). */
+  view: RenderView;
+  /** The render context (expand state + invalidate). */
+  ctx: RenderContext<object>;
+  /** The injected services (the ellipsis switch). */
+  services: ToolServices;
+  /** The task key prefix (per tool). */
+  prefix: string;
 }
 
 /**
@@ -89,32 +96,42 @@ export interface CallHeaderOpts {
  * @param text - The call header's Text component.
  * @param opts - The header's inputs (label/path/suffix/theme + outcome).
  */
-export function setCallHeader(text: CustomBgText, opts: CallHeaderOpts): void {
+export function setCallHeader(text: CustomBgText & PreviewTextHost, opts: CallHeaderOpts): void {
+  const { palette, piTheme: theme } = opts.view;
   if (opts.status === "error") {
-    setToolErrorBg(text, opts.theme, opts.palette);
+    setToolErrorBg(text, theme, palette);
   } else if (opts.status === "pending") {
     // Streaming: transparent — the content Box's pending bg owns the row.
     clearToolHeaderBg(text);
   } else {
-    setToolSuccessBg(text, opts.theme, opts.palette);
+    setToolSuccessBg(text, theme, palette);
   }
-  text.setText(
-    formatToolFrameHeaderText(
-      {
-        label: opts.label,
-        filePath: opts.filePath,
-        theme: opts.theme,
-        suffix: opts.suffix,
-        topPad: 0,
-        // The separator blank belongs to frames with a BODY below; a
-        // pending frame has none — its own blank would stack on the
-        // default shell's bottom padding (the two-blank gap).
-        bottomPad: opts.status === "pending" ? 0 : 1,
-      },
-      opts.pathShortener,
-      opts.cwd,
-    ),
+  const body = formatToolFrameHeaderText(
+    {
+      label: opts.label,
+      filePath: opts.filePath,
+      theme,
+      topPad: 0,
+      bottomPad: 0,
+    },
+    opts.pathShortener,
+    opts.cwd,
   );
+  // Suffix split BEFORE fitting (ADR 0008): the stats chips are pinned
+  // outside the ellipsis budget. The trailing separator blank rides the
+  // newline (pending frames own no trailing blank — their own blank
+  // would stack on the default shell's bottom padding). renderHeaderLine
+  // owns the text (setText or the width task) — no write here.
+  renderHeaderLine({
+    text,
+    prefix: opts.prefix,
+    view: opts.view,
+    ctx: opts.ctx,
+    services: opts.services,
+    body,
+    suffix: opts.suffix,
+    newline: opts.status === "pending" ? "" : "\n",
+  });
 }
 
 /**
@@ -308,6 +325,41 @@ export interface ErrorFrameInput {
 }
 
 /**
+ * The error frame's header row: three shapes by ownership. A shell
+ * failure whose tail parses to NO badge keeps the frame's own name
+ * header (the degraded-but-named case); a recognized shell status
+ * renders body-only under the call header, so the gapless shell header
+ * gets one separator blank here; every other tool's call header already
+ * trails its own blank — nothing.
+ *
+ * @param name - The tool's name.
+ * @param isShell - Whether the frame is a shell tool's.
+ * @param badge - The parsed shell exit badge (undefined for non-shell).
+ * @param theme - The pi theme.
+ * @param pathShortener - The header path's shortening contract.
+ * @returns The header text (may be "").
+ */
+function errorHeaderOf(
+  name: string,
+  isShell: boolean,
+  badge: ShellExitBadge | undefined,
+  theme: PaletteTheme,
+  pathShortener: (p: string) => string,
+): string {
+  if (!isShell) return "";
+  if (badge !== undefined) return "\n";
+  return `${formatToolFrameHeaderText(
+    {
+      meta: theme.fg("error", theme.bold(formatToolHeaderName(name))),
+      theme,
+      topPad: 0,
+      bottomPad: 1,
+    },
+    pathShortener,
+  )}\n`;
+}
+
+/**
  * A failed call's error frame — the body the result slot renders under
  * the (still-visible) call header.
  *
@@ -332,19 +384,7 @@ export function formatToolErrorResult(input: ErrorFrameInput): string {
   // Body-only unless the shell status is unrecognized (ownership above).
   const isShell = name === "bash" || name === "powershell";
   const badge = isShell ? shellExitBadgeOf(message) : undefined;
-  const header =
-    isShell && badge === undefined
-      ? `${formatToolFrameHeaderText(
-          {
-            meta: theme.fg("error", theme.bold(formatToolHeaderName(name))),
-            theme,
-            topPad: 0,
-            bottomPad: 1,
-          },
-          pathShortener,
-        )}\n`
-      : // Body-only frame: one separator blank above the body.
-        "\n";
+  const header = errorHeaderOf(name, isShell, badge, theme, pathShortener);
   // The row prefix: the bar glyph + one space in bar mode; EMPTY in
   // none mode — the frame Box's own padding is the single leading space
   // the row keeps (collapsing the column here means no second space

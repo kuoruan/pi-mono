@@ -18,6 +18,12 @@ const INDICATOR_STYLE_VALUES = ["bar", "none"] as const;
 /** Left-edge change-indicator style. */
 export type IndicatorStyle = (typeof INDICATOR_STYLE_VALUES)[number];
 
+/** The valid headerEllipsis config values. */
+const HEADER_ELLIPSIS_VALUES = ["on", "off"] as const;
+
+/** Call-header ellipsis switch (header-scoped; the body is untouched). */
+export type HeaderEllipsis = (typeof HEADER_ELLIPSIS_VALUES)[number];
+
 /** Semantic syntax color patches: only listed keys deviate (opaque #rrggbb only). */
 const semanticColorsSchema = z.partialRecord(
   z.enum(SEMANTIC_KEYS),
@@ -145,6 +151,8 @@ export const configSchema = z
     disabledTools: z.array(z.enum(TOOL_NAMES)).default([]),
     /** Left-edge change indicator: the bar marker, or none. */
     indicatorStyle: z.enum(INDICATOR_STYLE_VALUES).default("bar"),
+    /** Long call headers collapse to one row with a middle ellipsis; off means always full. */
+    headerEllipsis: z.enum(HEADER_ELLIPSIS_VALUES).default("on"),
     /** The syntax theme selection: a name string or an inline theme object. */
     syntaxTheme: syntaxThemeSchema.default("auto"),
   })

@@ -180,7 +180,7 @@ export function buildFakeTheme(overrides?: FakeThemeOverrides): PaletteTheme {
  *
  * @returns The component double.
  */
-export function makeTextComponent() {
+export function makeTextComponent(): TextDouble {
   const state = { text: "" as string };
   return {
     text: state,
@@ -203,9 +203,29 @@ export function makeTextComponent() {
 /**
  * The mock Text component's shape — the test seam every inline
  * `as { text: { text: string } }` / `as { previewTask?: … }` cast
- * replicates. Typed from the factory's return (same-source, zero drift).
+ * replicates. Named (not inferred): the factory annotates it, the
+ * aliases Pick from it — one source, zero drift.
  */
-export type TextDouble = ReturnType<typeof makeTextComponent>;
+export interface TextDouble {
+  /** The mutable text slot (shared reference — setText writes through). */
+  text: { text: string };
+  /** Replace the text slot's content. */
+  setText: (s: string) => void;
+  /** Synchronous frame (the task path upgrades it async). */
+  render: (width: number) => string[];
+  /** Asks the TUI to redraw (no-op in the harness). */
+  invalidate: () => void;
+  /** The attached preview task, if any. */
+  previewTask: PreviewTask | undefined;
+  /** The in-flight task's key (the stale-guard suites supersede it). */
+  previewRenderedKey: string | undefined;
+  /** The attach guard's identity stamp. */
+  previewIdentity: string | undefined;
+  /** The row background painter. */
+  customBgFn: ((line: string) => string) | undefined;
+  /** Assign the row background painter. */
+  setCustomBgFn: (fn?: (line: string) => string) => void;
+}
 
 /**
  * A render context for renderCall/renderResult drivers. Generic over the
@@ -225,6 +245,7 @@ export function makeRenderCtx<TState extends object = Record<string, unknown>>()
     args: undefined,
     toolCallId: "test-call",
     state: {} as TState,
+    expanded: false,
     invalidate: () => {
       invalidated.count++;
     },
@@ -259,9 +280,13 @@ export function seedTiming(ctx: RenderContext<object>, ms = 12): void {
 /**
  * A preview-task component driven by tests: the swap protocol's render
  * entry plus the text slot (grep/find/ls results). A TextDouble slice —
- * hand-written copies drift; Pick-on-TextDouble cannot.
+ * hand-written copies drift; Pick-on-TextDouble cannot. `previewRenderedKey`
+ * rides along: the stale-guard suites supersede it mid-flight.
  */
-export type DrivenTaskComponent = Pick<TextDouble, "render" | "text" | "previewIdentity">;
+export type DrivenTaskComponent = Pick<
+  TextDouble,
+  "render" | "text" | "previewIdentity" | "previewRenderedKey"
+>;
 
 /**
  * A component carrying an attached preview task (write/edit results) —
@@ -269,6 +294,15 @@ export type DrivenTaskComponent = Pick<TextDouble, "render" | "text" | "previewI
  * hand-written copies drift; Pick-on-TextDouble cannot.
  */
 export type TaskCarrier = Pick<TextDouble, "previewTask">;
+
+/**
+ * A shell wrapper narrowed to its renderCall entry (createShellWrapper's
+ * SDK-typed surface takes unknown-typed args/theme/ctx in tests).
+ */
+export interface RenderCallCarrier {
+  /** Invoke the wrapper's renderCall with test-shaped inputs. */
+  renderCall: (args: unknown, theme: unknown, ctx: unknown) => TextComponent & TaskCarrier;
+}
 
 /** A plain text-bearing component (call headers, sync renders). */
 export type TextComponent = Pick<TextDouble, "text">;

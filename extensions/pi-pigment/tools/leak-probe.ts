@@ -33,7 +33,7 @@ import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
 import { ensureCore } from "#src/theme/shiki-core.ts";
 import type { MaterializedTheme } from "#src/theme/syntax-theme.ts";
 
-import { createRenderSession } from "../render-kit.ts";
+import { createRenderSession, type RenderSessionInputs } from "../render-kit.ts";
 
 const SESSIONS = Number(process.argv[2] ?? 1200);
 const THEME_CONTENTS = Number(process.argv[3] ?? 40);
@@ -117,7 +117,7 @@ console.error = () => {
  * @returns The highlighted lines.
  */
 async function sessionWith(
-  selection: Parameters<typeof createRenderSession>[0]["selection"],
+  selection: RenderSessionInputs["selection"],
   code = CODE,
 ): Promise<string[]> {
   const session = createRenderSession({

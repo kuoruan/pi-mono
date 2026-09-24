@@ -8,7 +8,7 @@ A Pi extension that provides themes and renders tool output — the Shiki bundle
 
 **Config layer**: One of the two file dimensions: global (`~/.pi/agent/extensions/pigment/config.jsonc`) or project (`<cwd>/.pi/extensions/pigment/config.jsonc`). _Avoid_: level, location.
 
-**Effective config**: The deep-merged, zod-validated result of both layers (project overrides global), re-resolved at every session_start (startup, reload, fork, resume). The entire configuration surface: `disabledTools`, `indicatorStyle`, and `syntaxTheme` (a string or a theme patch object). _Avoid_: settings (reserved for pi's own settings).
+**Effective config**: The deep-merged, zod-validated result of both layers (project overrides global), re-resolved at every session_start (startup, reload, fork, resume). The entire configuration surface: `disabledTools`, `indicatorStyle`, `headerEllipsis`, and `syntaxTheme` (a string or a theme patch object). _Avoid_: settings (reserved for pi's own settings).
 
 **Config issue**: A malformed file or schema violation recorded during loading. Cosmetic config fails safe: invalid layers are skipped with recorded issues, never crash the renderer.
 

@@ -6,47 +6,41 @@
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import type { IndicatorStyle } from "#src/config/config-schema.ts";
+import type { HeaderEllipsis, IndicatorStyle } from "#src/config/config-schema.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
+import type { PaletteTheme } from "#src/theme/palette.ts";
 
+import { shortHome } from "./paths.ts";
 import type { RenderSession } from "./session.ts";
 import type { TextComponentFactory } from "./text-task.ts";
 
 /**
  * The SDK's render context for the default generics (the render slot of
- * `ToolDefinition`); `TState` is the wrapper's own render state: the TUI
- * initializes it as `{}` and the wrapper's fields populate lazily, so
- * every state field is optional by contract.
+ * `ToolDefinition` — the SDK's `ToolRenderContext` under another name:
+ * it lives too deep for the package's exports map, so this alias reads
+ * it off the exported definition); `TState` is the wrapper's own render
+ * state: the TUI initializes it as `{}` and the wrapper's fields
+ * populate lazily, so every state field is optional by contract.
  */
 type SdkRenderContext = Parameters<NonNullable<ToolDefinition["renderResult"]>>[3];
 
 /**
  * The render context the TUI passes to renderCall/renderResult — the
  * SDK's shape, narrowed: `args` stays `unknown` at the boundary and
- * `state` is the wrapper's own `TState`. The compile-time canary below
- * fails when upstream adds a context field, so carrying it is a decision.
+ * `state` is the wrapper's own `TState`. `expanded` is carried (the
+ * header ellipsis's ctrl+o switch reads it in renderCall). The
+ * compile-time canary in upstream-contracts.test.ts fails when upstream
+ * adds a context field, so carrying it is a decision.
  */
 export interface RenderContext<TState extends object = Record<string, unknown>> extends Omit<
   SdkRenderContext,
-  "args" | "expanded" | "showImages" | "state"
+  "args" | "showImages" | "state"
 > {
   /** Current tool call arguments (unknown at the boundary). */
   args: unknown;
   /** Shared renderer state for this tool row (the wrapper's own shape). */
   state: TState;
 }
-
-// Upstream adding a render-context field stops the build here until the
-// projection above decides to carry it (same canary pattern as
-// upstream-contracts.test.ts).
-// eslint-disable-next-line no-unused-vars -- the type check IS the usage
-const CONTEXT_FIELDS_ACCOUNTED_FOR: Exclude<keyof SdkRenderContext, keyof RenderContext> extends
-  | "args"
-  | "expanded"
-  | "showImages"
-  | "state"
-  ? true
-  : false = true;
 
 /**
  * Read a render slot's arguments as a partial tool input — the one cast
@@ -58,6 +52,48 @@ const CONTEXT_FIELDS_ACCOUNTED_FOR: Exclude<keyof SdkRenderContext, keyof Render
  */
 export function argsOf<T extends object>(args: unknown): Partial<T> {
   return (args ?? {}) as Partial<T>;
+}
+
+/**
+ * Read a call-header arg the SDK's way (its render-utils `str`, copied —
+ * the package map forbids the deep import): a string stays, nullish
+ * becomes "" (present-but-empty), anything else is invalid (null).
+ *
+ * @param value - The raw arg value (may be partial while streaming).
+ * @returns The string, "", or null when invalid.
+ */
+export function argStr(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  return null;
+}
+
+/**
+ * Read a header's path arg the three search tools' way: invalid stays
+ * null (the caller paints `[invalid arg]`), otherwise the `~`-shortened
+ * display path (absent means the tool's root, `"."`). One home for the
+ * `argStr` + `shortHome` fetch grep/find/ls trilocated — NOT the
+ * injected `shortPath` (that one is cwd-relative; header paths are
+ * tilde-only by shape pin).
+ *
+ * @param pathArg - The raw `path` arg value.
+ * @returns The display path, or null when invalid.
+ */
+export function headerPath(pathArg: unknown): string | null {
+  const raw = argStr(pathArg);
+  return raw === null ? null : shortHome(raw || ".");
+}
+
+/**
+ * The SDK's `invalidArgText` (copied — same package-map reason): the
+ * error-colored `[invalid arg]` chip, one home for the three search
+ * tools' byte-parity claim.
+ *
+ * @param theme - The pi theme.
+ * @returns The styled chip.
+ */
+export function invalidArg(theme: PaletteTheme): string {
+  return theme.fg("error", "[invalid arg]");
 }
 
 /**
@@ -250,6 +286,8 @@ export interface ToolServices {
   shortPath: (p: string) => string;
   /** Configured left-edge change-indicator style. */
   indicatorStyle: IndicatorStyle;
+  /** Call-header ellipsis switch (header-scoped). */
+  headerEllipsis: HeaderEllipsis;
   /** The pi-tui Text class (for fresh components). */
   textFactory: TextComponentFactory;
   /**

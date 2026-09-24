@@ -90,9 +90,9 @@ describe("edit error frame shape", () => {
     // presence — the call header above still shows the bare "← edit",
     // so the error frame must NOT add a second "← edit" row.
     expect(rows.filter((r) => /^\s*(← )?edit\b/.test(r))).toEqual([]);
-    // Body-only: the frame opens with the separator blank, then the bar
-    // rows over the message.
-    expect(rows[0]).toBe("");
+    // Body-only: the call header's trailing blank is the separator — the
+    // body opens on the bar row.
+    expect(rows[0]).not.toBe("");
     expect(rows.some((r) => r.startsWith("▌ Validation failed"))).toBe(true);
   });
 
@@ -318,10 +318,10 @@ describe("edit error frame shape", () => {
     // start).
     const headerRows = rows.filter((r) => /^\s*(← )?edit\b/.test(r));
     expect(headerRows).toEqual([]);
-    // Body-only: the frame's first row is the separator blank; the bar
-    // rows over the message follow (bar flush at column 0, content one
-    // space after).
-    expect(rows[0]).toBe("");
+    // Body-only: the call header's own trailing blank is the separator —
+    // the body starts on the bar row (bar flush at column 0, content
+    // one space after), not a second blank.
+    expect(rows[0]).not.toBe("");
     expect(rows.some((r) => r.startsWith("▌ Could not find the exact text"))).toBe(true);
   });
 
@@ -392,8 +392,8 @@ describe("write error frame shape", () => {
     // message text itself may mention "write" — the header shape is
     // `name path…`, a row LEADING with the name).
     expect(rows.filter((r) => /^\s*(← )?(write|create)\b/.test(r))).toEqual([]);
-    // Body-only: the frame opens with the separator blank.
-    expect(rows[0]).toBe("");
+    // Body-only: the call header's trailing blank is the separator.
+    expect(rows[0]).not.toBe("");
     expect(rows.some((r) => r.startsWith("▌ Failed to write file"))).toBe(true);
   });
 
@@ -726,7 +726,7 @@ describe("grep error frame shape", () => {
     const rows = rowsOf(component);
     // Body alone: no row names the tool (the call header already did).
     expect(rows.filter((r) => /\bgrep\b/.test(r) && !r.startsWith("▌"))).toEqual([]);
-    expect(rows[0]).toBe("");
+    expect(rows[0]).not.toBe("");
     expect(rows).toContain("▌ grep failed: bad regex");
   });
 });
@@ -750,7 +750,7 @@ describe("find error frame shape", () => {
     );
     const rows = rowsOf(component);
     expect(rows.filter((r) => /\bfind\b/.test(r) && !r.startsWith("▌"))).toEqual([]);
-    expect(rows[0]).toBe("");
+    expect(rows[0]).not.toBe("");
     expect(rows).toContain("▌ find failed");
   });
 });
@@ -774,7 +774,7 @@ describe("ls error frame shape", () => {
     );
     const rows = rowsOf(component);
     expect(rows.filter((r) => /^\s*ls\b/.test(r))).toEqual([]);
-    expect(rows[0]).toBe("");
+    expect(rows[0]).not.toBe("");
     expect(rows).toContain("▌ ls failed");
   });
 });
@@ -831,8 +831,9 @@ describe("error frame bar follows indicatorStyle", () => {
     // the indicator column collapses entirely — the frame's Box padding
     // is the single leading space the row shows in the terminal.
     expect(rows.some((r) => r.includes("▌"))).toBe(false);
-    // Body-only still opens with the separator blank (no header above it).
-    expect(rows[0]).toBe("");
+    // The call header's trailing blank is the separator — the body opens
+    // on the message row.
+    expect(rows[0]).not.toBe("");
     expect(rows).toContain("Could not find the exact text");
   });
 

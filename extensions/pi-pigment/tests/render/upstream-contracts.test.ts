@@ -276,7 +276,7 @@ describe("bash tool options (pi's own shell settings)", () => {
 type SdkRenderContext = Parameters<NonNullable<ToolDefinition["renderResult"]>>[3];
 
 /** The SDK context fields `RenderContext` deliberately does not carry. */
-type ProjectedContextFields = "args" | "expanded" | "showImages" | "state";
+type ProjectedContextFields = "args" | "showImages" | "state";
 
 /**
  * Compile-time canary, same pattern as ALL_BASH_OPTIONS_ACCOUNTED_FOR: an
@@ -311,6 +311,7 @@ describe("bash onError: the native timing interval", () => {
       {
         shortPath: (p: string) => p,
         indicatorStyle: "bar",
+        headerEllipsis: "on",
         textFactory: Text,
         render: makeRenderSession(),
       },

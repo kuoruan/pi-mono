@@ -106,6 +106,7 @@ function driveRender(
     args,
     toolCallId: "hist-compat",
     state: {},
+    expanded: false,
     invalidate: () => {},
     isError: false,
     argsComplete: true,

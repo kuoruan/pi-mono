@@ -31,6 +31,7 @@ import { createGrepWrapper } from "#src/render/tool-grep.ts";
 import type { ToolServices } from "#src/render/tool-services.ts";
 import {
   buildFakeTheme,
+  type DrivenTaskComponent,
   makeRenderCtx,
   makeTextComponent,
   plain,
@@ -84,10 +85,12 @@ async function renderResultText(
 ): Promise<string> {
   const { ctx, invalidated } = makeRenderCtx<Record<string, unknown>>();
   ctx.args = { pattern: "done" };
-  const component = tool.renderResult(result, { expanded: true, isPartial: false }, theme, ctx) as {
-    render(w: number): string[];
-    text: { text: string };
-  };
+  const component = tool.renderResult(
+    result,
+    { expanded: true, isPartial: false },
+    theme,
+    ctx,
+  ) as DrivenTaskComponent;
   component.render(120);
   await waitFor(() => (invalidated.count > 0 ? true : undefined));
   return component.text.text;

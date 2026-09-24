@@ -266,12 +266,14 @@ export function createWriteWrapper(
       setCallHeader(text, {
         label,
         filePath: fp,
-        theme,
         suffix,
         pathShortener: shortPath,
         cwd: ctx.cwd,
         status: callStateOf(ctx),
-        palette,
+        view,
+        ctx,
+        services,
+        prefix: "wh",
       });
       return text;
     },

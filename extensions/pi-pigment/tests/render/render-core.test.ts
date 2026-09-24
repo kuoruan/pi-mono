@@ -297,15 +297,15 @@ describe("header helpers", () => {
     // above the frame already shows `← edit path` — a second header row
     // is the double-header bug).
     expect(rows.filter((r) => /^\s*(← )?edit\b/.test(r))).toEqual([]);
-    // Body-only: the frame opens with the separator blank (the pad the
-    // old standalone header's bottomPad used to leave).
-    expect(rows[0]).toBe("");
+    // Body-only: the call header's trailing blank is the separator — the
+    // frame opens on the bar row.
+    expect(rows[0]).not.toBe("");
     // The body's single row carries the bar and the message (the fake
     // theme's fg wraps segments in [name] brackets — plain cannot strip
     // those, so match on the meaningful content, not exact equality).
-    expect(rows.length).toBe(2);
-    expect(rows[1]).toContain("▌ ");
-    expect(rows[1]).toContain("Could not find the exact text");
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toContain("▌ ");
+    expect(rows[0]).toContain("Could not find the exact text");
   });
 
   it("setToolErrorBg uses the theme's error background with a palette fallback", () => {

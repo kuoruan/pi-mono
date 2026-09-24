@@ -27,7 +27,12 @@ beforeEach(() => {
 describe("loadPigmentConfig", () => {
   it("returns schema defaults when no config file exists", () => {
     const { config, issues } = loadPigmentConfig(env());
-    expect(config).toEqual({ disabledTools: [], indicatorStyle: "bar", syntaxTheme: "auto" });
+    expect(config).toEqual({
+      disabledTools: [],
+      indicatorStyle: "bar",
+      headerEllipsis: "on",
+      syntaxTheme: "auto",
+    });
     expect(issues).toEqual([]);
   });
 
@@ -98,7 +103,12 @@ describe("loadPigmentConfig", () => {
   it("falls back the whole config only for non-syntaxTheme failures", () => {
     writeFile(GLOBAL_PATH, JSON.stringify({ indicatorStyle: "bogus", syntaxTheme: "catppuccin" }));
     const { config, issues } = loadPigmentConfig(env());
-    expect(config).toEqual({ disabledTools: [], indicatorStyle: "bar", syntaxTheme: "auto" });
+    expect(config).toEqual({
+      disabledTools: [],
+      indicatorStyle: "bar",
+      headerEllipsis: "on",
+      syntaxTheme: "auto",
+    });
     expect(issues.map((issue) => issue.message).join("\n")).toMatch(/indicatorStyle/);
   });
 
@@ -147,7 +157,12 @@ describe("loadPigmentConfig", () => {
     // The schema is strict: unknown keys surface as issues (a mistyped
     // key silently doing nothing is worse), and the merge itself must not
     // throw — the valid keys still apply.
-    expect(config).toEqual({ disabledTools: [], indicatorStyle: "bar", syntaxTheme: "auto" });
+    expect(config).toEqual({
+      disabledTools: [],
+      indicatorStyle: "bar",
+      headerEllipsis: "on",
+      syntaxTheme: "auto",
+    });
     expect(issues.length).toBe(1);
     expect(issues[0]?.message).toMatch(/nested/);
   });
@@ -182,7 +197,12 @@ describe("loadPigmentConfig", () => {
     writeFile(GLOBAL_PATH, "{ not json");
     writeFile(PROJECT_PATH, "{ also not json");
     const { config, issues } = loadPigmentConfig(env());
-    expect(config).toEqual({ disabledTools: [], indicatorStyle: "bar", syntaxTheme: "auto" });
+    expect(config).toEqual({
+      disabledTools: [],
+      indicatorStyle: "bar",
+      headerEllipsis: "on",
+      syntaxTheme: "auto",
+    });
     expect(issues).toHaveLength(2);
     expect(issues.map((i) => i.message).join("\n")).toMatch(/global/);
     expect(issues.map((i) => i.message).join("\n")).toMatch(/project/);
@@ -191,7 +211,12 @@ describe("loadPigmentConfig", () => {
   it("records an issue when the root is not an object", () => {
     writeFile(GLOBAL_PATH, '["not", "an", "object"]');
     const { config, issues } = loadPigmentConfig(env());
-    expect(config).toEqual({ disabledTools: [], indicatorStyle: "bar", syntaxTheme: "auto" });
+    expect(config).toEqual({
+      disabledTools: [],
+      indicatorStyle: "bar",
+      headerEllipsis: "on",
+      syntaxTheme: "auto",
+    });
     expect(issues).toHaveLength(1);
   });
 
@@ -199,7 +224,12 @@ describe("loadPigmentConfig", () => {
     writeFile(GLOBAL_PATH, JSON.stringify({ indicatorStyle: "classic", disabledTools: ["bash"] }));
     const { config, issues } = loadPigmentConfig(env());
     // Unknown enum value and unknown tool are rejected: defaults apply.
-    expect(config).toEqual({ disabledTools: [], indicatorStyle: "bar", syntaxTheme: "auto" });
+    expect(config).toEqual({
+      disabledTools: [],
+      indicatorStyle: "bar",
+      headerEllipsis: "on",
+      syntaxTheme: "auto",
+    });
     expect(issues.length).toBeGreaterThanOrEqual(1);
     expect(issues.some((issue) => issue.message.includes("indicatorStyle"))).toBe(true);
   });
@@ -207,7 +237,12 @@ describe("loadPigmentConfig", () => {
   it("an invalid global layer alone keeps defaults", () => {
     writeFile(GLOBAL_PATH, "{ oops");
     const { config, issues } = loadPigmentConfig(env());
-    expect(config).toEqual({ disabledTools: [], indicatorStyle: "bar", syntaxTheme: "auto" });
+    expect(config).toEqual({
+      disabledTools: [],
+      indicatorStyle: "bar",
+      headerEllipsis: "on",
+      syntaxTheme: "auto",
+    });
     expect(issues).toHaveLength(1);
   });
 });

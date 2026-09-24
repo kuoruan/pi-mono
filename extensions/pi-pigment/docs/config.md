@@ -26,6 +26,12 @@ There is nothing else to configure — no environment variables, no pi `settings
   // "none" — no marker.
   "indicatorStyle": "bar",
 
+  // Long call headers collapse to one row with a middle ellipsis (…);
+  // the status suffix (· ✓ / · ✗) is pinned and never truncated.
+  // "on" (default) — ellipsis, ctrl+o toggles full.
+  // "off" — always full (header only; the body collapse is untouched).
+  "headerEllipsis": "on",
+
   // Syntax TOKEN override (ADR 0006). "auto" (default) follows the active
   // pi theme: pigment-* themes map to their Shiki sources (full tokenColors
   // precision); other themes derive from their syntax* colors. An explicit

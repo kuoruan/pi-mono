@@ -168,11 +168,11 @@ describe("limit notices (the SDK's structured details)", () => {
     await waitFor(() => (plain(limited.text.text).includes("src/a.ts") ? true : undefined));
     const text = plain(limited.text.text);
     const lines = text.split("\n");
-    // lines[0] is the header gap; the paths are body rows; the notice is
-    // the footer's last line — no `a.ts/` styling bleed, and no
-    // notice-shaped path row.
-    expect(lines[1]).toContain("src/a.ts");
-    expect(lines[2]).toContain("src/b.ts");
+    // The paths are body rows from line 0; the
+    // notice is the footer's last line — no `a.ts/` styling bleed, and
+    // no notice-shaped path row.
+    expect(lines[0]).toContain("src/a.ts");
+    expect(lines[1]).toContain("src/b.ts");
     expect(lines[lines.length - 1]).toBe(
       "[1000 results limit reached. Use limit=2000 for more, or refine pattern]",
     );

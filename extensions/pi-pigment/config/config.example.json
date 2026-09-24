@@ -1,6 +1,7 @@
 {
   "disabledTools": [],
   "indicatorStyle": "bar",
+  "headerEllipsis": "on",
   "syntaxTheme": {
     "base": "auto",
     "diff": {

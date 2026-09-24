@@ -14,19 +14,36 @@ import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/language.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 
+import { renderHeaderLine } from "./ellipsis.ts";
+import { assembleOutputBody } from "./output-assembly.ts";
 import { accentEmphasis, emphasize, type EmphasisSpec } from "./pattern-emphasis.ts";
-import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
 import { createToolWrapper } from "./tool-factory.ts";
-import {
-  COLLAPSED_LINES,
-  collapsedView,
-  HEADER_GAP,
-  joinBodyTail,
-  outputMemoOf,
-  outputTaskKey,
-  renderPlainOutput,
-} from "./tool-output.ts";
-import { argsOf, type ToolServices } from "./tool-services.ts";
+import { COLLAPSED_LINES, joinBodyTail, outputMemoOf } from "./tool-output.ts";
+import { argsOf, argStr, headerPath, invalidArg, type ToolServices } from "./tool-services.ts";
+
+/**
+ * The find call header: the SDK's formatFindCall, byte for byte
+ * (toolTitle name, accent pattern, toolOutput path + limit).
+ *
+ * @param args - The settled find args.
+ * @param theme - The pi theme.
+ * @returns The header row (no trailing gap — the caller owns it).
+ */
+function formatFindCall(args: Partial<FindToolInput>, theme: PaletteTheme): string {
+  const pattern = argStr(args?.pattern);
+  const path = headerPath(args?.path);
+  const limit = args?.limit;
+  const invalid = invalidArg(theme);
+  let text =
+    theme.fg("toolTitle", theme.bold("find")) +
+    " " +
+    (pattern === null ? invalid : theme.fg("accent", pattern || "")) +
+    theme.fg("toolOutput", ` in ${path === null ? invalid : path}`);
+  if (limit !== undefined) {
+    text += theme.fg("toolOutput", ` (limit ${limit})`);
+  }
+  return text;
+}
 
 /** The styleFindPath inputs. */
 interface StyleFindPathOptions {
@@ -106,11 +123,22 @@ export function createFindWrapper(
   origFind: ToolDefinition,
   services: ToolServices,
 ): ToolDefinition {
-  // The call header keeps the SDK's own shape (pattern + path + limit —
-  // no renderCall override); renderResult reads the settled glob from
-  // ctx.args (present every frame, live and restored alike).
+  // The call header is ours (mirrors the SDK's shape).
   return createToolWrapper(origFind, services, {
     renderShell: "default",
+    renderCall: ({ text, view, ctx, renderArgs }) => {
+      const { piTheme: theme } = view;
+      const args = argsOf<FindToolInput>(renderArgs);
+      renderHeaderLine({
+        text,
+        prefix: "fh",
+        view,
+        ctx,
+        services,
+        body: formatFindCall(args, theme),
+      });
+      return text;
+    },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
       const { palette, piTheme: theme } = view;
       // Inert at intake (ADR 0004): the result carries raw paths. The
@@ -119,84 +147,36 @@ export function createFindWrapper(
       const derive = outputMemoOf(ctx.state);
       const derived = derive(result);
       const { entries: all } = derived;
-      if (all.length === 0) return renderEmpty(text); // nothing to show — clear any stale task
-      // The styling runs in the async preview task (the grep shape): a
-      // trigger frame (partial, expand, invalidate) only checks the key;
-      // the per-line work (anchor emphasis, type coloring) happens off
-      // the frame, once per changed render.
+      // The glob anchor rides the styled closure (settled per the SDK
+      // contract — no key stamp needed).
       const callArgs = argsOf<FindToolInput>(ctx.args);
       const anchor = globAnchor(callArgs.pattern ?? "");
       const emphasisSpec = accentEmphasis(theme);
-      const elapsed = tookMs ?? 0;
-      // One computed key serves BOTH roles — find has no width-dependent
-      // layout (same as grep): the width never joins the key.
-      const taskKey = outputTaskKey({
+      return assembleOutputBody({
+        text,
         prefix: "f",
-        derived,
-        identity: palette.identity,
-        elapsedMs: elapsed,
-        expanded: options.expanded,
-      });
-      // The settled-frame early return (grep's shape): an unchanged
-      // identity means the attach guard below would discard the
-      // collapsedView/renderPlainOutput work this frame is about to do.
-      if (text.previewIdentity === taskKey && text.previewTask) return text;
-
-      // The dim plain form is the placeholder AND the fallback — already
-      // collapsed to the window (grep's shape): a large result set must
-      // not flash the full listing before the styled render swaps in, nor
-      // show it permanently when the task fails.
-      const {
-        shown: shownEntries,
-        tail: plainTail,
-        hidden,
-      } = collapsedView(all, {
+        lines: all,
+        isEmpty: all.length === 0,
         budget: COLLAPSED_LINES.find,
-        expanded: options.expanded,
+        derived,
+        paletteIdentity: palette.identity,
         tookMs,
+        expanded: options.expanded,
         notice: derived.notice,
         theme,
+        ctx,
+        renderStyled: (lines, tail, hidden) => {
+          // Every shown line is a path or the SDK's empty-result sentinel
+          // — the limit notice was lifted into the footer (DerivedOutput).
+          const styled = lines.map((line) => {
+            if (line === "No files found matching pattern") {
+              return theme.fg("muted", line);
+            }
+            return styleFindPath({ path: line, theme, palette, anchor, emphasis: emphasisSpec });
+          });
+          return joinBodyTail(styled.join("\n"), tail, hidden);
+        },
       });
-      const plain = joinBodyTail(
-        `${HEADER_GAP}${renderPlainOutput(shownEntries, theme)}`,
-        plainTail,
-        hidden,
-      );
-      attachPreviewTask(
-        text,
-        definePreviewTask({
-          identity: taskKey,
-          // Find has no width-dependent layout (same as grep): the width
-          // never joins the key.
-          widthAware: false,
-          placeholder: plain,
-          fallback: plain,
-          invalidate: ctx.invalidate,
-          render: async () => {
-            const {
-              shown: lines,
-              tail,
-              hidden: swapHidden,
-            } = collapsedView(all, {
-              budget: COLLAPSED_LINES.find,
-              expanded: options.expanded,
-              tookMs,
-              notice: derived.notice,
-              theme,
-            });
-            // Every shown line is a path or the SDK's empty-result sentinel
-            // — the limit notice was lifted into the footer (DerivedOutput).
-            const styled = lines.map((line) => {
-              if (line === "No files found matching pattern") {
-                return theme.fg("muted", line);
-              }
-              return styleFindPath({ path: line, theme, palette, anchor, emphasis: emphasisSpec });
-            });
-            return joinBodyTail(`${HEADER_GAP}${styled.join("\n")}`, tail, swapHidden);
-          },
-        }),
-      );
-      return text;
     },
   });
 }

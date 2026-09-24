@@ -14,20 +14,44 @@ import { detectLanguage } from "#src/theme/language.ts";
 import type { DiffPalette, PaletteTheme } from "#src/theme/palette.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
+import { renderHeaderLine } from "./ellipsis.ts";
+import { assembleOutputBody } from "./output-assembly.ts";
 import { accentEmphasis, emphasize, type MatchFlags } from "./pattern-emphasis.ts";
 import type { RenderView } from "./session.ts";
-import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
 import { createToolWrapper } from "./tool-factory.ts";
+import { COLLAPSED_LINES, joinBodyTail, outputMemoOf, renderPlainOutput } from "./tool-output.ts";
 import {
-  COLLAPSED_LINES,
-  collapsedView,
-  HEADER_GAP,
-  joinBodyTail,
-  outputMemoOf,
-  outputTaskKey,
-  renderPlainOutput,
-} from "./tool-output.ts";
-import { argsOf, resultStreaming, type ToolServices } from "./tool-services.ts";
+  argsOf,
+  argStr,
+  headerPath,
+  invalidArg,
+  resultStreaming,
+  type ToolServices,
+} from "./tool-services.ts";
+
+/**
+ * The grep call header: the SDK's formatGrepCall, byte for byte
+ * (toolTitle name, accent /pattern/, toolOutput path/glob/limit).
+ *
+ * @param args - The settled grep args.
+ * @param theme - The pi theme.
+ * @returns The header row (no trailing gap — the caller owns it).
+ */
+function formatGrepCall(args: Partial<GrepToolInput>, theme: PaletteTheme): string {
+  const pattern = argStr(args?.pattern);
+  const path = headerPath(args?.path);
+  const glob = argStr(args?.glob);
+  const limit = args?.limit;
+  const invalid = invalidArg(theme);
+  let text =
+    theme.fg("toolTitle", theme.bold("grep")) +
+    " " +
+    (pattern === null ? invalid : theme.fg("accent", `/${pattern || ""}/`)) +
+    theme.fg("toolOutput", ` in ${path === null ? invalid : path}`);
+  if (glob) text += theme.fg("toolOutput", ` (${glob})`);
+  if (limit !== undefined) text += theme.fg("toolOutput", ` limit ${limit}`);
+  return text;
+}
 
 /** A parsed hit line: the file/line prefix vs the content. */
 interface HitLine {
@@ -105,6 +129,24 @@ export function createGrepWrapper(
   // args are present every frame, live and restored alike).
   return createToolWrapper(origGrep, services, {
     renderShell: "default",
+    // The call header is ours now (mirrors the SDK's formatGrepCall —
+    // pattern / path / glob / limit); the SDK's render-utils helpers (str,
+    // shortenPath, invalidArgText) are three lines each, copied here so
+    // the header owns its gap without a deep import the package map
+    // forbids.
+    renderCall: ({ text, view, ctx, renderArgs }) => {
+      const { piTheme: theme } = view;
+      const args = argsOf<GrepToolInput>(renderArgs);
+      renderHeaderLine({
+        text,
+        prefix: "gh",
+        view,
+        ctx,
+        services,
+        body: formatGrepCall(args, theme),
+      });
+      return text;
+    },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
       const { palette, piTheme: theme } = view;
       // Inert at intake (ADR 0004): the grep result carries raw file
@@ -116,94 +158,44 @@ export function createGrepWrapper(
       const derive = outputMemoOf(ctx.state);
       const derived = derive(result);
       const { output, lines } = derived;
-      if (!output.trim()) return renderEmpty(text); // nothing to show — clear any stale task
-
-      // The swap key carries everything the render closure reads that can
-      // change between frames: the content (length + fingerprint — a
-      // same-length content delta still re-renders), the palette identity
-      // (a mid-session theme switch re-derives emphasis colors), the
-      // footer state (the last streaming partial and the final frame can
-      // share content exactly — only the Took footer differs, so the
-      // measured duration is part of the key), and the expand state.
-      const elapsed = tookMs ?? 0;
-      // One computed key serves BOTH roles: the width-neutral identity
-      // (the attach guard) and the render-loop cache key — grep's output
-      // has no width-dependent layout, so the width never joins the key
-      // (a resize reuses the render). The streaming stamp flows through
-      // outputTaskKey (the key authority) — pending frames render plain,
-      // and the settled frame's identity differs from every partial's.
-      const pending = resultStreaming(ctx);
-      const taskKey = outputTaskKey({
-        prefix: "g",
-        derived,
-        identity: palette.identity,
-        elapsedMs: elapsed,
-        expanded: options.expanded,
-        streaming: pending,
-      });
-      // The settled-frame early return: an UNCHANGED identity means the
-      // attach guard below would discard every collapsedView/
-      // renderPlainOutput/join result this frame is about to build —
-      // skip the build entirely. The attach guard stays (the protocol's
-      // own authority); this is the body-level shortcut. Positioned after
-      // the empty guard, before any placeholder work.
-      if (text.previewIdentity === taskKey && text.previewTask) return text;
-
-      // Render-side collapse (the agent's context keeps the full output):
-      // the shared collapsedView owns the budget, hidden-count, and the
-      // affordance+Took tail composition.
-      const {
-        shown: shownLines,
-        tail,
-        hidden,
-      } = collapsedView(lines, {
-        budget: COLLAPSED_LINES.grep,
-        expanded: options.expanded,
-        tookMs,
-        notice: derived.notice,
-        theme,
-      });
-
-      // The shared async-swap protocol (attachPreviewTask): the dim plain
-      // rendering is the placeholder AND the fallback; the highlighted
-      // form swaps in when ready.
+      // The pattern/flags ride the styled closure (the swap key's stamps
+      // cover the content, palette, footer, expand and streaming states —
+      // the args are settled per the SDK contract, so they need no stamp).
       const callArgs = argsOf<GrepToolInput>(ctx.args);
       const pattern = callArgs.pattern ?? "";
       const flags = {
         literal: callArgs.literal === true,
         ignoreCase: callArgs.ignoreCase === true,
       };
-      const plain = joinBodyTail(
-        `${HEADER_GAP}${renderPlainOutput(shownLines, theme)}`,
-        tail,
-        hidden,
-      );
-      attachPreviewTask(
+      const pending = resultStreaming(ctx);
+      return assembleOutputBody({
         text,
-        definePreviewTask({
-          identity: taskKey,
-          // Grep's output has no width-dependent layout: the width never
-          // joins the key (a resize reuses the render).
-          widthAware: false,
-          placeholder: plain,
-          fallback: plain,
-          invalidate: ctx.invalidate,
-          // Streaming frames skip highlighting entirely (the plain form is
-          // the placeholder AND the frame); the settled frame re-renders
-          // once through renderHighlighted and populates the cache.
-          render: async () => {
-            if (pending) return plain;
-            const highlighted = await renderHighlighted({
-              lines: shownLines,
-              pattern,
-              flags,
-              view,
-            });
-            return joinBodyTail(`${HEADER_GAP}${highlighted}`, tail, hidden);
-          },
-        }),
-      );
-      return text;
+        prefix: "g",
+        lines,
+        isEmpty: !output.trim(),
+        budget: COLLAPSED_LINES.grep,
+        derived,
+        paletteIdentity: palette.identity,
+        tookMs,
+        expanded: options.expanded,
+        streaming: pending,
+        notice: derived.notice,
+        theme,
+        ctx,
+        // Streaming frames skip highlighting entirely (the plain form is
+        // the placeholder AND the frame); the settled frame re-renders
+        // once through renderHighlighted and populates the cache.
+        renderStyled: async (shownLines, tail, hidden) => {
+          if (pending) return joinBodyTail(renderPlainOutput(shownLines, theme), tail, hidden);
+          const highlighted = await renderHighlighted({
+            lines: shownLines,
+            pattern,
+            flags,
+            view,
+          });
+          return joinBodyTail(highlighted, tail, hidden);
+        },
+      });
     },
   });
 }

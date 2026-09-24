@@ -25,6 +25,12 @@
       "default": "bar",
       "description": "Left-edge change indicator in diff rows: the bar marker, or none."
     },
+    "headerEllipsis": {
+      "type": "string",
+      "enum": ["on", "off"],
+      "default": "on",
+      "description": "Long call headers collapse to one row with a middle ellipsis; off means always full (header only)."
+    },
     "syntaxTheme": {
       "description": "The syntax TOKEN override layer (ADR 0006). \"auto\" (default) follows the active pi theme: a pigment-* theme (registered by pi-pigment) maps back to its Shiki source for full-precision token colors; any other theme derives from its nine syntax* colors. An explicit value overrides ONLY the token colors — the chrome/canvas/diff roots always belong to the pi theme. Values follow pi's theme-setting grammar: a single theme name (a Shiki-bundled theme like \"vitesse-dark\", or a themes/ file stem — Shiki names are AA-fitted to the canvas, your files render verbatim), or an explicit \"light/dark\" pair (\"github-light/github-dark\" — the first half renders on light pi themes, the second on dark, following the terminal when the pi theme is an automatic pair). An object patches a base with semantic colors.",
       "oneOf": [

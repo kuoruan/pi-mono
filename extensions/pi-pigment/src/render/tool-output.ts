@@ -29,23 +29,12 @@ import type { ExecutionTimingState } from "./tool-services.ts";
 export const COLLAPSED_LINES = { grep: 15, find: 20, ls: 20, write: 10 } as const;
 
 /**
- * The header gap: one blank line between the call header and the result
- * body (the native bash renderer's leading `\\n` — bash.js paints its
- * output body with a leading newline). It lives on the BODY side by
- * necessity, not by design: the SDK's Text component exposes setText
- * but no read-back, so the wrapper cannot append the gap to the native
- * header it doesn't own — the body leads with the gap instead. One
- * constant so the three wrappers (grep/find/ls) can't drift.
- */
-export const HEADER_GAP = "\n";
-
-/**
  * Join a body to its tail: the expand hint hugs the body (it is the
  * window's own chrome — "more below"), while a notice/Took-led tail is a
  * footnote and breathes below a blank line. The caller passes hidden
  * (the window's own count — > 0 means the tail leads with the hint).
  *
- * @param body - The rendered body (already carrying HEADER_GAP).
+ * @param body - The rendered body (the header owns the gap above it).
  * @param tail - The collapsedView tail ("" when nothing follows).
  * @param hidden - The window's hidden count.
  * @returns The joined block.

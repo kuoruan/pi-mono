@@ -17,6 +17,7 @@ import {
   plain,
   registerTools,
   resetPigmentForTest,
+  type DrivenTaskComponent,
   type RegisteredTool,
   type TaskCarrier,
   type TextComponent,
@@ -745,11 +746,7 @@ describe("grep renderResult highlight swap", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as {
-      text: { text: string };
-      render: (width: number) => string[];
-      previewRenderedKey?: string;
-    };
+    ) as DrivenTaskComponent;
     // A render frame drives the swap protocol: the placeholder (dim/plain
     // form) lands synchronously inside render(width), the highlight swaps
     // in async — same choreography as the TUI's render loop.
@@ -778,11 +775,7 @@ describe("grep renderResult highlight swap", () => {
       { expanded: true, isPartial: false },
       coloredTheme,
       staleCtx,
-    ) as {
-      text: { text: string };
-      render: (width: number) => string[];
-      previewRenderedKey?: string;
-    };
+    ) as DrivenTaskComponent;
     stale.render(120); // records task A's key, lands the placeholder
     stale.previewRenderedKey = "g:superseded"; // A is mid-flight; its key is gone
     await new Promise((resolve) => setTimeout(resolve, 300)); // A completes

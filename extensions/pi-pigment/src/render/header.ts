@@ -132,7 +132,7 @@ export interface ToolFrameHeaderOpts {
 }
 
 /** The theme-less pass-through (meta callers render already-styled text). */
-const PASSTHROUGH_THEME = {
+const PASSTHROUGH_THEME: Pick<PaletteTheme, "fg" | "bold"> = {
   fg: (_name: string, text: string) => text,
   bold: (text: string) => text,
 };

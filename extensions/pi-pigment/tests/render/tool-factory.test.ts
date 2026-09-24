@@ -16,6 +16,7 @@ import {
   makeTextComponent,
   plain,
   seedTiming,
+  type DrivenTaskComponent,
   type TextComponent,
   type TextDouble,
   viewFor,
@@ -92,6 +93,7 @@ const services = {
   cwd: "/project",
   shortPath: (p: string) => p,
   indicatorStyle: "bar" as const,
+  headerEllipsis: "on" as const,
   render: makeRenderSession(),
   textFactory: class {
     text: { text: string };
@@ -295,10 +297,7 @@ describe("renderResult error frame", () => {
     const baselineInvalidations = invalidated.count;
     const rendered = plain((component as TextDouble).text.text);
     expect(rendered).toMatch(/Took \d+/);
-    const host = component as {
-      text: { text: string };
-      previewIdentity?: string;
-    };
+    const host = component as DrivenTaskComponent;
     expect(host.previewIdentity).toBeDefined();
     // A re-run of the same error (the TUI's updateDisplay re-render) loses
     // nothing: the first settled frame fixed endedAt, so the duration — and

@@ -16,6 +16,7 @@ import {
   seedTiming,
   toolOf,
   type DrivenTaskComponent,
+  type TextComponent,
   viewFor,
   waitFor,
 } from "#test/fixtures.ts";
@@ -32,10 +33,7 @@ import {
  * @param probe - A substring the settled output contains.
  * @returns The settled plain text.
  */
-async function settledText(
-  component: { render: (width: number) => string[]; text: { text: string } },
-  probe: string,
-): Promise<string> {
+async function settledText(component: DrivenTaskComponent, probe: string): Promise<string> {
   component.render(120);
   await waitFor(() => (plain(component.text.text).includes(probe) ? true : undefined));
   return plain(component.text.text);
@@ -159,6 +157,47 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     },
   );
 
+  it("find's call header ends with a blank line", async () => {
+    const tools = await registerTools();
+    const find = tools.find((t) => t.name === "find");
+    if (!find?.renderCall) throw new Error("find not registered");
+    const { ctx } = makeRenderCtx();
+    const header = find.renderCall(
+      { pattern: "*.ts", path: tempDir },
+      buildRenderTheme(),
+      ctx,
+    ) as TextComponent;
+    const raw = plain(header.text.text);
+    expect(raw.endsWith("\n")).toBe(true);
+    expect(raw).toContain("find");
+  });
+
+  it("ls's call header ends with a blank line", async () => {
+    const tools = await registerTools();
+    const ls = tools.find((t) => t.name === "ls");
+    if (!ls?.renderCall) throw new Error("ls not registered");
+    const { ctx } = makeRenderCtx();
+    const header = ls.renderCall({ path: tempDir }, buildRenderTheme(), ctx) as TextComponent;
+    const raw = plain(header.text.text);
+    expect(raw.endsWith("\n")).toBe(true);
+    expect(raw).toContain("ls");
+  });
+
+  it("grep's call header ends with a blank line", async () => {
+    const tools = await registerTools();
+    const grep = tools.find((t) => t.name === "grep");
+    if (!grep?.renderCall) throw new Error("grep not registered");
+    const { ctx } = makeRenderCtx();
+    const header = grep.renderCall(
+      { pattern: "value", path: tempDir },
+      buildRenderTheme(),
+      ctx,
+    ) as TextComponent;
+    const raw = plain(header.text.text);
+    expect(raw.endsWith("\n")).toBe(true);
+    expect(raw).toContain("grep");
+  });
+
   it("grep renders hits with the file:line prefix (placeholder frame; the swap lands async)", async () => {
     writeFileSync(join(tempDir, "app.ts"), "const value = 42;\n");
     const tools = await registerTools();
@@ -178,7 +217,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     // content) lands synchronously; the async highlight swaps in later.
     component.render(120);
     const text = plain(component.text.text);
-    expect(text.startsWith("\n")).toBe(true);
+    expect(text.startsWith("\n")).toBe(false);
     expect(text).toContain("app.ts:1:");
     expect(text).toContain("const value = 42;");
   });
@@ -262,9 +301,9 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     ) as DrivenTaskComponent;
     const text = await settledText(component, "app.ts");
     const lines = text.split("\n");
-    // lines[0] is the header gap (native bash's leading blank line).
-    expect(lines[1]).toContain("app.ts");
-    expect(lines[2]).toContain("notes.txt");
+    // lines[0] is the first tree row.
+    expect(lines[0]).toContain("app.ts");
+    expect(lines[1]).toContain("notes.txt");
     expect(lines[lines.length - 1]).toBe("[500 entries limit reached. Use limit=1000 for more]");
     // The notice is a footer row — exactly one of them, and no tree
     // connector ever prefixes it (the pre-fix bug: `└── [500 entries…]`).
@@ -454,7 +493,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
       ctx,
     ) as DrivenTaskComponent;
     const collapsedText = await settledText(collapsed, "├── ");
-    expect(collapsedText.startsWith("\n")).toBe(true);
+    expect(collapsedText.startsWith("\n")).toBe(false);
     expect(collapsedText).toContain("├── ");
     expect(collapsedText).toContain("more lines, ctrl+o to expand");
     expect(collapsedText).toMatch(/Took \d+\.\ds/);
@@ -491,10 +530,9 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
       ctx,
     ) as DrivenTaskComponent;
     const text = await settledText(component, "g0.ts");
-    // The body breathes below the call header (native bash's leading gap);
-    // the body hugs the expand hint (one window) — the tail's own segments
-    // breathe below it.
-    expect(text.startsWith("\n")).toBe(true);
+    // The body hugs the expand hint (one window) — the tail's own segments breathe
+    // below it.
+    expect(text.startsWith("\n")).toBe(false);
     expect(text).toMatch(/g\d+\.ts\n\.\.\. \(\d+ more lines/);
   });
 

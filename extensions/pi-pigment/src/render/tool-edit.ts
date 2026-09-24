@@ -133,12 +133,14 @@ export function createEditWrapper(
       setCallHeader(text, {
         label: "edit",
         filePath: fp,
-        theme,
         suffix: stats,
         pathShortener: shortPath,
         cwd: ctx.cwd,
         status: callStateOf(ctx),
-        palette,
+        view,
+        ctx,
+        services,
+        prefix: "eh",
       });
       return text;
     },

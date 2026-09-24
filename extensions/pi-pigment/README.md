@@ -2,7 +2,7 @@
 
 **Pigment for your pi.**
 
-pi-pigment repaints what pi prints. Diffs get word-level change emphasis, shell commands render in their own grammar, grep hits are highlighted in the hit file's language, and file listings color each entry by type. Every color comes from the pi theme you're already wearing, so the rendering follows whatever palette you run. Nothing to configure by default; three keys if you want to bend it.
+pi-pigment repaints what pi prints. Diffs get word-level change emphasis, shell commands render in their own grammar, grep hits are highlighted in the hit file's language, and file listings color each entry by type. Every color comes from the pi theme you're already wearing, so the rendering follows whatever palette you run. Nothing to configure by default; four keys if you want to bend it.
 
 ## What it renders
 
@@ -59,7 +59,7 @@ Optional, one file, two layers (project overrides global):
 | Global  | `~/.pi/agent/extensions/pigment/config.jsonc`   |
 | Project | `<project>/.pi/extensions/pigment/config.jsonc` |
 
-The entire surface is three keys:
+The entire surface is four keys:
 
 ```jsonc
 {
@@ -67,6 +67,8 @@ The entire surface is three keys:
   "disabledTools": [],
   // Left-edge change indicator: "bar" or "none".
   "indicatorStyle": "bar",
+  // Long call headers: "on" (ellipsis, default) or "off" (always full).
+  "headerEllipsis": "on",
   // Token override (default "auto" follows the pi theme): a theme name,
   // a "light/dark" pair (pi's grammar), or an inline object — see
   // config.md.
