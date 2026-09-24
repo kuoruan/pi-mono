@@ -21,7 +21,7 @@ import {
 import type { PreviewTask } from "#src/render/text-task.ts";
 import type { RenderContext } from "#src/render/tool-services.ts";
 import { clearHighlightCacheForTest } from "#src/theme/highlight.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 import type { ThemeSelection } from "#src/theme/theme-resolver.ts";
 
 /**
@@ -111,7 +111,7 @@ export function makeRenderSession(inputs: Partial<RenderSessionInputs> = {}): Re
  * @returns The frame view.
  */
 export function viewFor(
-  theme: PaletteTheme = buildFakeTheme(),
+  theme: RenderTheme = buildFakeTheme(),
   inputs: Partial<RenderSessionInputs> = {},
 ): RenderView {
   return makeRenderSession(inputs).forTheme(theme);
@@ -133,9 +133,9 @@ export interface FakeThemeOverrides {
  * Build a fake pi theme with a truecolor getFgAnsi/getBgAnsi surface.
  *
  * @param overrides - Per-color overrides for the theme.
- * @returns A PaletteTheme-satisfying fake.
+ * @returns A RenderTheme-satisfying fake.
  */
-export function buildFakeTheme(overrides?: FakeThemeOverrides): PaletteTheme {
+export function buildFakeTheme(overrides?: FakeThemeOverrides): RenderTheme {
   const fg: Record<string, string> = {
     toolTitle: "\x1b[38;2;138;180;255m",
     accent: "\x1b[38;2;138;180;255m",
@@ -316,7 +316,7 @@ export type TextComponent = Pick<TextDouble, "text">;
  *   without an ExtensionContext (the wrappers never read it; it flows to the SDK origin verbatim),
  *   so a full SDK ctx would force every call site to fabricate one.
  * - `renderCall`/`renderResult` accept `result`/`args` as `unknown` (heterogeneous per-tool payloads)
- *   but their THEME is the PaletteTheme the wrappers actually render against, their OPTIONS the
+ *   but their THEME is the RenderTheme the wrappers actually render against, their OPTIONS the
  *   SDK's own ToolRenderResultOptions (the literal shape every call site passes), their ctx the
  *   fixture's RenderContext, and their return the TextDouble the mock produces. Everything else —
  *   name, label, renderShell, parameters, prepareArguments, the schema members — carries the SDK's
@@ -335,11 +335,11 @@ export type RegisteredTool = Omit<
     onUpdate: unknown,
     ctx?: unknown,
   ) => Promise<AgentToolResult<unknown>>;
-  renderCall?: (args: unknown, theme: PaletteTheme, ctx: RenderContext<object>) => TextDouble;
+  renderCall?: (args: unknown, theme: RenderTheme, ctx: RenderContext<object>) => TextDouble;
   renderResult?: (
     result: unknown,
     options: ToolRenderResultOptions,
-    theme: PaletteTheme,
+    theme: RenderTheme,
     ctx: RenderContext<object>,
   ) => TextDouble;
 };
@@ -509,7 +509,7 @@ async function driveSession(
  *
  * @returns The snapshot-stable fake theme.
  */
-export function buildRenderTheme(): PaletteTheme {
+export function buildRenderTheme(): RenderTheme {
   return {
     fg: (_name: string, text: string) => text,
     bold: (text: string) => text,

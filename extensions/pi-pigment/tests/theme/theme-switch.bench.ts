@@ -39,7 +39,7 @@ import { beforeAll, test } from "vitest";
 
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
 import { clearHighlightCacheForTest } from "#src/theme/highlight.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 import { ensureCore, renderTokenLinesAnsi } from "#src/theme/shiki-core.ts";
 import { buildFakeTheme, viewFor } from "#test/fixtures.ts";
 
@@ -84,7 +84,7 @@ const blocks = Array.from({ length: BLOCKS }, (_, i) => ({ code: block(i) }));
  * @param tint - The keyword color's red channel.
  * @returns The scheme-theme surface.
  */
-function tinted(name: string, tint: number): PaletteTheme {
+function tinted(name: string, tint: number): RenderTheme {
   const base = buildFakeTheme({ name, syntaxColors: true });
   return {
     ...base,

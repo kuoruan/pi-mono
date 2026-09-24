@@ -18,7 +18,7 @@ import type {
 import type { Component } from "@earendil-works/pi-tui";
 
 import { inertText } from "#src/core/ansi.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 
 import { ERROR_FRAME_DEFAULT_WIDTH, formatToolErrorResult, setToolErrorBg } from "./error-frame.ts";
 import { clearToolHeaderBg, resultLine } from "./header.ts";
@@ -68,7 +68,7 @@ export type RenderResultBody<TState extends object> = (args: {
   origRenderResult: (
     result: AgentToolResult<unknown>,
     options: ToolRenderResultOptions,
-    theme: PaletteTheme,
+    theme: RenderTheme,
     ctx: RenderContext<TState>,
   ) => Component;
 }) => Component;
@@ -134,7 +134,7 @@ export interface WrapperSpec<TState extends object> {
  */
 export function renderPlainTextFallback(
   text: PreviewTextHost,
-  theme: PaletteTheme,
+  theme: RenderTheme,
   result: AgentToolResult<unknown>,
 ): Component {
   // Clear BOTH the task and its identity stamp — a later task with the

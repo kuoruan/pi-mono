@@ -17,7 +17,7 @@ import { keyText } from "@earendil-works/pi-coding-agent";
 import { inertText } from "#src/core/ansi.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { linesOf } from "#src/core/lines.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 
 import type { ExecutionTimingState } from "./tool-services.ts";
 
@@ -57,7 +57,7 @@ export function joinBodyTail(body: string, tail: string, hidden: number): string
  * @param expandHint - The rendered expand-key hint ("" in the cap regime).
  * @returns The styled tail line, or "" when nothing is hidden.
  */
-export function collapseTail(hidden: number, theme: PaletteTheme, expandHint: string): string {
+export function collapseTail(hidden: number, theme: RenderTheme, expandHint: string): string {
   if (hidden <= 0) return "";
   return expandHint
     ? theme.fg("muted", `... (${hidden} more lines, `) + expandHint + theme.fg("muted", ")")
@@ -269,7 +269,7 @@ export function outputMemoOf(cell: OutputMemoCell): OutputDerive {
  * @param theme - The active pi theme.
  * @returns The styled text.
  */
-export function renderPlainOutput(lines: readonly string[], theme: PaletteTheme): string {
+export function renderPlainOutput(lines: readonly string[], theme: RenderTheme): string {
   if (!lines.length) return "";
   return lines.map((line) => theme.fg("toolOutput", line)).join("\n");
 }
@@ -312,7 +312,7 @@ export function firstTextOf(result: object): string {
  * @param theme - The pi theme (colors the hint).
  * @returns The styled hint.
  */
-export function expandKeyHint(theme: PaletteTheme): string {
+export function expandKeyHint(theme: RenderTheme): string {
   // pi's own keyHint composition, byte-identically (keybinding-hints.js:
   // fg("dim", keyText(id)) + fg("muted", " " + description)) — pinned by
   // upstream-contracts. The render-time theme instance replaces pi's
@@ -344,7 +344,7 @@ export type StateColor = "muted" | "success" | "error" | "warning";
  *   should one ever be painted (pi's own stay untouched today).
  * @returns The styled footer line, or "" when unmeasured.
  */
-export function tookFooter(ms: number | undefined, theme: PaletteTheme, color: StateColor): string {
+export function tookFooter(ms: number | undefined, theme: RenderTheme, color: StateColor): string {
   if (ms === undefined) return "";
   return theme.fg(color, `Took ${(ms / 1000).toFixed(1)}s`);
 }
@@ -407,7 +407,7 @@ export interface ViewOptions {
   /** The SDK's limit notice (DerivedOutput.notice) — painted as the warning footer line. */
   notice?: string;
   /** The pi theme (muted fg). */
-  theme: PaletteTheme;
+  theme: RenderTheme;
 }
 
 /** The collapsed window: the shown slice, the tail block, and the hidden count. */

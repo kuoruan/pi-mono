@@ -14,7 +14,7 @@ import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 import { inertText } from "#src/core/ansi.ts";
 import { SEQ_RESET } from "#src/core/escapes.ts";
 import { linesOf } from "#src/core/lines.ts";
-import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
+import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 
 import { injectBg } from "./inject-bg.ts";
 
@@ -58,7 +58,7 @@ export function formatToolHeaderName(name: string): string {
  * @returns The styled path.
  */
 export function formatToolHeaderPath(
-  theme: Pick<PaletteTheme, "fg">,
+  theme: Pick<RenderTheme, "fg">,
   filePath: string,
   pathShortener: (p: string) => string,
   cwd?: string,
@@ -126,13 +126,13 @@ export interface ToolFrameHeaderOpts {
   /** File path for the label variant (shortened via pathShortener). */
   filePath?: string;
   /** Theme for the label variant; the meta variant renders pre-styled text. */
-  theme?: PaletteTheme;
+  theme?: RenderTheme;
   /** Pre-styled meta line; books the label/path form and renders as-is. */
   meta?: string;
 }
 
 /** The theme-less pass-through (meta callers render already-styled text). */
-const PASSTHROUGH_THEME: Pick<PaletteTheme, "fg" | "bold"> = {
+const PASSTHROUGH_THEME: Pick<RenderTheme, "fg" | "bold"> = {
   fg: (_name: string, text: string) => text,
   bold: (text: string) => text,
 };
@@ -192,7 +192,7 @@ export interface CustomBgText {
  */
 export function setToolSuccessBg(
   text: CustomBgText,
-  theme: PaletteTheme,
+  theme: RenderTheme,
   scheme: ResolvedTheme,
 ): void {
   let background = scheme.bgBase;

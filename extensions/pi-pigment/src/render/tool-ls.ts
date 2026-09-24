@@ -13,7 +13,7 @@ import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
 import { assembleOutputBody } from "./output-assembly.ts";
@@ -35,7 +35,7 @@ const ELBOW = "└── ";
  * @param cwd - The session working directory (the file link's base).
  * @returns The header row (no trailing gap — the caller owns it).
  */
-function formatLsCall(args: Partial<LsToolInput>, theme: PaletteTheme, cwd?: string): string {
+function formatLsCall(args: Partial<LsToolInput>, theme: RenderTheme, cwd?: string): string {
   const limit = args?.limit;
   const raw = argStr(args?.path);
   // Invalid → the error chip; otherwise the accent display path,

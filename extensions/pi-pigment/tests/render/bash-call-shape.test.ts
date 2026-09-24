@@ -26,7 +26,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ShellState } from "#src/render/tool-services.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
@@ -91,7 +91,7 @@ describe("bash call header shape (renderCall)", () => {
     const aCall = bash.renderCall({ command: "false" }, themeA, ctx);
     expect(plain(aCall.text.text)).toBe("$ false · ✗ exit 1");
     const base = buildFakeTheme();
-    const themeB: PaletteTheme = {
+    const themeB: RenderTheme = {
       ...base,
       fg: (name, text) => (name === "error" ? `<${text}>` : base.fg(name, text)),
     };

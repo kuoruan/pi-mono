@@ -6,7 +6,7 @@
  * tool-output (the window authority) and text-task (the swap protocol),
  * importing from both — neither imports it back, so no cycle.
  */
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 
 import type { PreviewTextHost } from "./text-task.ts";
 import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
@@ -43,7 +43,7 @@ export interface OutputAssemblyInput {
   /** The limit notice (the SDK's warning about the whole output). */
   notice?: string;
   /** The pi theme. */
-  theme: PaletteTheme;
+  theme: RenderTheme;
   /** The render context (invalidate flows into the task). */
   ctx: { invalidate: () => void };
   /** The styled swap: shown lines + tail + hidden → the settled body. */

@@ -13,7 +13,7 @@ import { createBoundedMap, type BoundedMap } from "#src/core/bounded-map.ts";
 import type { SessionEnv } from "#src/core/session-env.ts";
 
 import { loadBundledTheme } from "./bundled-intake.ts";
-import { themeCacheKey, type ResolvedTheme, type PaletteTheme } from "./scheme.ts";
+import { themeCacheKey, type ResolvedTheme, type RenderTheme } from "./scheme.ts";
 import {
   aaCheckBackgrounds,
   applySemanticPatches,
@@ -82,7 +82,7 @@ function fingerprintOf(target: ThemeSelection): string {
 function activeThemeIdentity(
   inputs: ThemeResolveInputs,
   scheme: ResolvedTheme,
-  theme: PaletteTheme | undefined,
+  theme: RenderTheme | undefined,
 ): string {
   // The background key carries ALL four blend backgrounds — the same key
   // enforceLoadedFile caches on — so identity and enforcement can never
@@ -153,7 +153,7 @@ export async function resolveActiveThemeMemoized(
   memo: ActiveThemeMemo,
   inputs: ThemeResolveInputs,
   scheme: ResolvedTheme,
-  theme: PaletteTheme | undefined,
+  theme: RenderTheme | undefined,
 ): Promise<ShikiThemeInput | null> {
   const identity = activeThemeIdentity(inputs, scheme, theme);
   const memoized = memo.get(identity);
@@ -176,7 +176,7 @@ export async function resolveActiveThemeMemoized(
 async function resolveSelection(
   inputs: ThemeResolveInputs,
   scheme: ResolvedTheme,
-  theme: PaletteTheme | undefined,
+  theme: RenderTheme | undefined,
 ): Promise<ShikiThemeInput | null> {
   const target = inputs.selection;
   if (target.kind === "auto") return resolveAuto(inputs, scheme, theme, {});
@@ -269,7 +269,7 @@ async function resolveSelection(
 async function resolveAuto(
   inputs: ThemeResolveInputs,
   scheme: ResolvedTheme,
-  theme: PaletteTheme | undefined,
+  theme: RenderTheme | undefined,
   patches: SemanticColors,
 ): Promise<ShikiThemeInput | null> {
   const ours = registeredSourceOf(theme?.name, inputs.convertedThemes);

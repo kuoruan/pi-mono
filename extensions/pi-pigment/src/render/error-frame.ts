@@ -14,7 +14,7 @@ import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
 import { inertText, measurePlain } from "#src/core/ansi.ts";
 import { linesOf } from "#src/core/lines.ts";
-import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
+import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
 import {
@@ -143,7 +143,7 @@ export function setCallHeader(text: CustomBgText & PreviewTextHost, opts: CallHe
  */
 export function setToolErrorBg(
   text: CustomBgText,
-  theme: PaletteTheme,
+  theme: RenderTheme,
   scheme: ResolvedTheme,
 ): void {
   let background = scheme.bgBase;
@@ -287,7 +287,7 @@ const BENIGN_EXIT_COMMANDS = new Set([
  */
 export function shellBadgeText(
   badge: ShellExitBadge,
-  theme: PaletteTheme,
+  theme: RenderTheme,
   command?: string,
 ): string {
   return theme.fg(shellBadgeColorOf(badge, command), theme.bold(shellBadgeLabel(badge)));
@@ -303,7 +303,7 @@ export interface ErrorFrameInput {
   /** The failure message (rendered inert first). */
   message: string;
   /** The pi theme. */
-  theme: PaletteTheme;
+  theme: RenderTheme;
   /** The path shortener (the header path's shortening contract). */
   pathShortener: (p: string) => string;
   /** Whether ctrl+o expanded the window (full message). */
@@ -343,7 +343,7 @@ function errorHeaderOf(
   name: string,
   isShell: boolean,
   badge: ShellExitBadge | undefined,
-  theme: PaletteTheme,
+  theme: RenderTheme,
   pathShortener: (p: string) => string,
 ): string {
   if (!isShell) return "";

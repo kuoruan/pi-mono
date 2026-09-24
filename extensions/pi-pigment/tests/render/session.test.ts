@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRenderSession, type RenderSessionInputs } from "#src/render/session.ts";
-import { deriveResolvedTheme, type PaletteTheme } from "#src/theme/scheme.ts";
+import { deriveResolvedTheme, type RenderTheme } from "#src/theme/scheme.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
 import { collectConvertedThemes } from "#src/theme/user-themes.ts";
 import { buildFakeTheme, makeRenderSession, viewFor } from "#test/fixtures.ts";
@@ -28,7 +28,7 @@ const ENV = { cwd: "/identity-project", agentDir: "/identity-project/agent" };
  * @param name - Optional theme name (the ours-detection input).
  * @returns The fake theme.
  */
-function darkTheme(name?: string): PaletteTheme {
+function darkTheme(name?: string): RenderTheme {
   return buildFakeTheme({ syntaxColors: true, name });
 }
 
@@ -51,7 +51,7 @@ describe("the scheme seam", () => {
   });
 
   it("an unreadable theme lands on the fallback scheme", () => {
-    expect(viewFor({} as PaletteTheme).scheme).toEqual(
+    expect(viewFor({} as RenderTheme).scheme).toEqual(
       deriveResolvedTheme(undefined, undefined).scheme,
     );
   });

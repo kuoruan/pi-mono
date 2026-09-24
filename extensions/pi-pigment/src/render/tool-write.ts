@@ -19,7 +19,7 @@ import { type ParsedDiff, parseDiff } from "#src/core/diff.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { countLines, linesOf } from "#src/core/lines.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
+import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 import { seedFromText } from "#src/theme/seed.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
@@ -145,11 +145,7 @@ function newFileBody(options: NewFileBodyOptions): string {
  * @param scheme - The resolved scheme.
  * @returns The styled summary segment, or "" when nothing landed yet.
  */
-function writeSummarySegment(
-  state: WriteState,
-  theme: PaletteTheme,
-  scheme: ResolvedTheme,
-): string {
+function writeSummarySegment(state: WriteState, theme: RenderTheme, scheme: ResolvedTheme): string {
   if (state.noChange) return theme.fg("success", "✓ no changes");
   // The line count lives in the stats memo (the bridge field the header
   // used to read died with it — the memo is set by the SAME renderResult,

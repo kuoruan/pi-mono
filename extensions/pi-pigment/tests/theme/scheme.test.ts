@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deriveResolvedTheme,
   FALLBACK_THEME,
-  type PaletteTheme,
+  type RenderTheme,
   themeCacheKey,
 } from "#src/theme/scheme.ts";
 import {
@@ -32,7 +32,7 @@ describe("themeCacheKey", () => {
 
   it("keys a theme-less context deterministically", () => {
     expect(themeCacheKey(undefined)).toBe("no-theme");
-    expect(themeCacheKey({} as PaletteTheme)).toBe("no-theme");
+    expect(themeCacheKey({} as RenderTheme)).toBe("no-theme");
   });
 
   it("re-keys when the theme swaps BEHIND one object identity (pi's proxy shape)", () => {
@@ -230,7 +230,7 @@ describe("diff root overrides", () => {
   });
 
   it("falls back to the fixed grays when the theme lacks dim/muted", () => {
-    const theme: PaletteTheme = {
+    const theme: RenderTheme = {
       fg: () => "",
       getFgAnsi: (name) => (name === "toolDiffAdded" ? "\x1b[38;2;80;220;120m" : ""),
       getBgAnsi: () => "\x1b[48;2;30;30;40m",

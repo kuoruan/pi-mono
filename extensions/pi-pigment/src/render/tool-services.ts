@@ -8,7 +8,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import type { HeaderEllipsis, IndicatorStyle } from "#src/config/config-schema.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 
 import { shortHome } from "./paths.ts";
 import type { RenderSession } from "./session.ts";
@@ -92,7 +92,7 @@ export function headerPath(pathArg: unknown): string | null {
  * @param theme - The pi theme.
  * @returns The styled chip.
  */
-export function invalidArg(theme: PaletteTheme): string {
+export function invalidArg(theme: RenderTheme): string {
   return theme.fg("error", "[invalid arg]");
 }
 

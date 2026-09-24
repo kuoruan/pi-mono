@@ -11,7 +11,7 @@ import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
+import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
@@ -37,7 +37,7 @@ import {
  * @param theme - The pi theme.
  * @returns The header row (no trailing gap — the caller owns it).
  */
-function formatGrepCall(args: Partial<GrepToolInput>, theme: PaletteTheme): string {
+function formatGrepCall(args: Partial<GrepToolInput>, theme: RenderTheme): string {
   const pattern = argStr(args?.pattern);
   const path = headerPath(args?.path);
   const glob = argStr(args?.glob);
@@ -256,7 +256,7 @@ export interface RenderHitLineOptions {
   /** The grep flags (literal / ignoreCase). */
   flags: MatchFlags;
   /** The pi theme. */
-  theme: PaletteTheme;
+  theme: RenderTheme;
   /** The scheme. */
   scheme: ResolvedTheme;
 }

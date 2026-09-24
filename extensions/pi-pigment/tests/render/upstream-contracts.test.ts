@@ -31,7 +31,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createShellWrapper } from "#src/render/shell-tool.ts";
 import { expandKeyHint } from "#src/render/tool-output.ts";
 import type { RenderContext } from "#src/render/tool-services.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 import {
   buildRenderTheme,
   makeRenderCtx,
@@ -62,7 +62,7 @@ beforeAll(() => {
  * drifting when pi restyles its own affordance.
  */
 /** The SDK's cross-module theme global, read directly (keyHint's own seam). */
-type GlobalThisWithTheme = typeof globalThis & Record<symbol, PaletteTheme | undefined>;
+type GlobalThisWithTheme = typeof globalThis & Record<symbol, RenderTheme | undefined>;
 
 /** The shared ambient-theme key (theme.js's Symbol.for). */
 const AMBIENT_THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");

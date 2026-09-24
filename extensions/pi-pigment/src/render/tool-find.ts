@@ -12,7 +12,7 @@ import type { FindToolInput, ToolDefinition } from "@earendil-works/pi-coding-ag
 import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
+import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
 import { assembleOutputBody } from "./output-assembly.ts";
@@ -29,7 +29,7 @@ import { argsOf, argStr, headerPath, invalidArg, type ToolServices } from "./too
  * @param theme - The pi theme.
  * @returns The header row (no trailing gap — the caller owns it).
  */
-function formatFindCall(args: Partial<FindToolInput>, theme: PaletteTheme): string {
+function formatFindCall(args: Partial<FindToolInput>, theme: RenderTheme): string {
   const pattern = argStr(args?.pattern);
   const path = headerPath(args?.path);
   const limit = args?.limit;
@@ -50,7 +50,7 @@ interface StyleFindPathOptions {
   /** The result path. */
   path: string;
   /** The pi theme (dim/accent/toolOutput fg, success canvas bg). */
-  theme: Pick<PaletteTheme, "fg" | "bold" | "getBgAnsi">;
+  theme: Pick<RenderTheme, "fg" | "bold" | "getBgAnsi">;
   /** The resolved scheme (type colors). */
   scheme: Pick<ResolvedTheme, "fgCode">;
   /** The glob's anchor run ("" emphasizes nothing). */

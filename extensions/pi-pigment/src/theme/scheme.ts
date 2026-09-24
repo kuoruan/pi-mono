@@ -116,9 +116,9 @@ export interface DiffRootsSpec {
  * Every method is REQUIRED: the SDK's Theme class provides them all —
  * optionality here was over-defensiveness that let fixtures drift from
  * the real contract (and forced `?? ""` fallbacks at every read site).
- * The single shared shape; header.ts re-exports it as PaletteTheme.
+ * The single shared shape; header.ts re-exports it as RenderTheme.
  */
-export interface PaletteTheme {
+export interface RenderTheme {
   /** The theme's registered name (ours-detection reads it; undefined on fakes). */
   readonly name?: string;
   /** Wrap text in the named color's foreground escape. */
@@ -126,9 +126,9 @@ export interface PaletteTheme {
   /** The named color's foreground escape, or an empty string. */
   getFgAnsi(name: ThemeColor): string;
   /** One of the background slots the scheme reads. */
-  getBgAnsi(name: PaletteBgColor): string;
+  getBgAnsi(name: ThemeBgSlot): string;
   /** Wrap text in one of the background slots' escape. */
-  bg(name: PaletteBgColor, text: string): string;
+  bg(name: ThemeBgSlot, text: string): string;
   /** Wrap text in bold. */
   bold(text: string): string;
 }
@@ -137,7 +137,7 @@ export interface PaletteTheme {
 const THEME_BG_KEYS = ["toolSuccessBg", "toolErrorBg", "searchMatchBg"] as const;
 
 /** The theme bg slots the scheme and headers read (SDK `ThemeBg` subset). */
-export type PaletteBgColor = (typeof THEME_BG_KEYS)[number];
+export type ThemeBgSlot = (typeof THEME_BG_KEYS)[number];
 
 /**
  * The resolved scheme snapshot — every ANSI value the renderers consume.
@@ -283,7 +283,7 @@ interface ThemeKeyMemo {
  * @param theme - The theme to key.
  * @returns A string unique to the theme's rendered diff colors.
  */
-export function themeCacheKey(theme?: PaletteTheme): string {
+export function themeCacheKey(theme?: RenderTheme): string {
   if (!theme?.fg) return "no-theme";
   const prev = themeKeyMemo.get(theme);
   // One pass reads every slot; the comparison rides on the same pass, so
@@ -311,7 +311,7 @@ export function themeCacheKey(theme?: PaletteTheme): string {
 }
 
 /** Content-verified memo for themeCacheKey (stable proxy key, content-checked value). */
-const themeKeyMemo = new WeakMap<PaletteTheme, ThemeKeyMemo>();
+const themeKeyMemo = new WeakMap<RenderTheme, ThemeKeyMemo>();
 
 // ---------------------------------------------------------------------------
 // Derivation (pure)
@@ -371,7 +371,7 @@ function mergeRoots(a: DiffRoots | undefined, b: DiffRoots | undefined): DiffRoo
  * @returns The snapshot and its polarity audit.
  */
 export function deriveResolvedTheme(
-  theme: PaletteTheme | undefined,
+  theme: RenderTheme | undefined,
   rootsSpec: DiffRootsSpec | undefined,
 ): DerivedScheme {
   if (!theme?.getFgAnsi) return { scheme: FALLBACK_THEME, polarityOffenders: [] };
@@ -401,7 +401,7 @@ export function polarityWarning(offenders: ReadonlyArray<PolarityOffense>): stri
  * @param theme - The pi theme.
  * @returns True when the theme's own surface is light.
  */
-function deriveIsLight(theme: PaletteTheme): boolean {
+function deriveIsLight(theme: RenderTheme): boolean {
   try {
     const parsed = parseAnsiRgb(theme.getBgAnsi("toolSuccessBg"));
     return parsed ? isLightRgb(parsed) : false;
@@ -436,7 +436,7 @@ function opaqueRootRgb(hex: string): RgbColor | null {
  */
 function polarityOffenders(
   roots: DiffRoots,
-  theme: PaletteTheme,
+  theme: RenderTheme,
   isLight: boolean,
 ): Array<`${DiffSide}.tint`> {
   const offenders: Array<`${DiffSide}.tint`> = [];
@@ -493,7 +493,7 @@ interface DerivedScheme {
  * @returns The derived scheme and its polarity audit.
  */
 function deriveScheme(
-  theme: PaletteTheme,
+  theme: RenderTheme,
   roots: DiffRoots,
   isLight: boolean,
   identity: string,

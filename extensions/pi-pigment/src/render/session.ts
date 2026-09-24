@@ -28,7 +28,7 @@ import {
   themeCacheKey,
   type ResolvedTheme,
   type DiffRootsSpec,
-  type PaletteTheme,
+  type RenderTheme,
 } from "#src/theme/scheme.ts";
 import type { ShikiThemeInput } from "#src/theme/syntax-theme.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
@@ -54,7 +54,7 @@ export interface RenderView {
   /** The frame's color scheme (WCAG-enforced, root-derived). */
   readonly scheme: ResolvedTheme;
   /** The pi theme this view is bound to (the chrome colors' source). */
-  readonly theme: PaletteTheme;
+  readonly theme: RenderTheme;
   /**
    * The resolved token theme for this frame's polarity — the observation
    * point the golden-name / AA assertions (and non-tool renderers) read.
@@ -68,7 +68,7 @@ export interface RenderView {
 /** A session's render seam: the immutable inputs plus the frame binder. */
 export interface RenderSession {
   /** This frame's derived view for the given pi theme. */
-  forTheme(theme: PaletteTheme): RenderView;
+  forTheme(theme: RenderTheme): RenderView;
 }
 
 /**
@@ -96,7 +96,7 @@ export function createRenderSession(inputs: RenderSessionInputs): RenderSession 
    * @param theme - The frame's pi theme.
    * @returns The resolved scheme.
    */
-  const deriveFor = (theme: PaletteTheme): ResolvedTheme => {
+  const deriveFor = (theme: RenderTheme): ResolvedTheme => {
     const key = themeCacheKey(theme);
     const cached = schemeMemo.get(key);
     if (cached) return cached;
@@ -110,7 +110,7 @@ export function createRenderSession(inputs: RenderSessionInputs): RenderSession 
   };
 
   return {
-    forTheme(theme: PaletteTheme): RenderView {
+    forTheme(theme: RenderTheme): RenderView {
       const scheme = deriveFor(theme);
       const resolve = (): Promise<ShikiThemeInput | null> =>
         resolveActiveThemeMemoized(themeMemo, inputs, scheme, theme);

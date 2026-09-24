@@ -17,7 +17,7 @@ import {
   SEQ_RESET,
   SEQ_RESET_BARE,
 } from "#src/core/escapes.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 
 /** How the caller wants the pattern matched (grep/find flags). */
 export interface MatchFlags {
@@ -90,7 +90,7 @@ export interface EmphasisSpec {
  * @param theme - The pi theme.
  * @returns The emphasis spec emphasize takes.
  */
-export function accentEmphasis(theme: Pick<PaletteTheme, "getFgAnsi" | "getBgAnsi">): EmphasisSpec {
+export function accentEmphasis(theme: Pick<RenderTheme, "getFgAnsi" | "getBgAnsi">): EmphasisSpec {
   return { fg: theme.getFgAnsi("accent"), bg: theme.getBgAnsi("searchMatchBg") };
 }
 

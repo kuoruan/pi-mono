@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isBenignExit, shellBadgeText, shellExitBadgeOf } from "#src/render/error-frame.ts";
 import type { PreviewTextHost } from "#src/render/text-task.ts";
 import type { ShellState } from "#src/render/tool-services.ts";
-import type { PaletteTheme } from "#src/theme/scheme.ts";
+import type { RenderTheme } from "#src/theme/scheme.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
@@ -233,7 +233,7 @@ describe("edit error frame shape", () => {
     // A 256-color success slot: the scheme cannot parse it and would
     // derive a neutral canvas — the header must still paint the slot the
     // TUI's frame Box paints, so the row matches the frame.
-    const theme: PaletteTheme = {
+    const theme: RenderTheme = {
       bold: (text) => text,
       fg: (_name, text) => text,
       getFgAnsi: () => "",
@@ -653,7 +653,7 @@ describe("shell exit badge parse (the upstream status lines)", () => {
 
     // The code-less kinds warn (the single kind→color home); plain exits error.
     const base = buildFakeTheme();
-    const warningMarked: PaletteTheme = {
+    const warningMarked: RenderTheme = {
       ...base,
       fg: (name, text) => (name === "warning" ? `«${text}»` : base.fg(name, text)),
     };

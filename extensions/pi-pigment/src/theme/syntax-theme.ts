@@ -23,7 +23,7 @@ import type { BundledTheme, ThemeRegistration } from "shiki";
 import { contrastRatio, parseAnsiRgb, parseHexColor, rgbToHex } from "#src/core/color.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 
-import type { ResolvedTheme, PaletteTheme } from "./scheme.ts";
+import type { ResolvedTheme, RenderTheme } from "./scheme.ts";
 
 /** WCAG AA contrast ratio for normal-size text. */
 const WCAG_AA = 4.5;
@@ -168,7 +168,7 @@ function rgbOfHsl(h: number, s: number, l: number): RgbColor {
  * @param name - The pi theme's `syntax*` color slot.
  * @returns The parsed RGB, or null.
  */
-function readSyntaxColor(theme: PaletteTheme, name: PiSyntaxColor): RgbColor | null {
+function readSyntaxColor(theme: RenderTheme, name: PiSyntaxColor): RgbColor | null {
   try {
     return parseAnsiRgb(theme.getFgAnsi(name));
   } catch {
@@ -236,7 +236,7 @@ function canvasBgHex(scheme: ResolvedTheme): string {
  * @returns The TextMate theme, or null when the theme lacks syntax colors.
  */
 export function buildPiSyntaxTheme(
-  theme: PaletteTheme,
+  theme: RenderTheme,
   scheme: ResolvedTheme,
   themeKey: string,
   userColors?: SemanticColors,

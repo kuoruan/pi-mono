@@ -20,7 +20,7 @@ import type {
 import { parsePatchFiles } from "#src/core/diff.ts";
 import { linesOf } from "#src/core/lines.ts";
 import { detectLanguage } from "#src/theme/language.ts";
-import type { ResolvedTheme, PaletteTheme } from "#src/theme/scheme.ts";
+import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 import { seedFromLines } from "#src/theme/seed.ts";
 
 import { setCallHeader } from "./error-frame.ts";
@@ -45,7 +45,7 @@ const MAX_PREVIEW_LINES = 60;
  * @param theme - The active pi theme.
  * @returns The styled suffix, or "".
  */
-function diffLineCountLabel(diffLineCount: unknown, theme: PaletteTheme): string {
+function diffLineCountLabel(diffLineCount: unknown, theme: RenderTheme): string {
   if (typeof diffLineCount !== "number") return "";
   return ` ${theme.fg("muted", `(${diffLineCount} diff lines)`)}`;
 }
@@ -58,7 +58,7 @@ function diffLineCountLabel(diffLineCount: unknown, theme: PaletteTheme): string
  * @param theme - The active pi theme.
  * @returns The styled label.
  */
-function editEditsCountLabel(edits: number, diffLines: number, theme: PaletteTheme): string {
+function editEditsCountLabel(edits: number, diffLines: number, theme: RenderTheme): string {
   const n = edits === 1 ? "1 edit" : `${edits} edits`;
   return `${n}${diffLineCountLabel(diffLines, theme)}`;
 }
@@ -73,7 +73,7 @@ function editEditsCountLabel(edits: number, diffLines: number, theme: PaletteThe
  * @param scheme - The resolved scheme (summarize colors).
  * @returns The styled suffix, or "" when no stats exist.
  */
-function editCallStatsSuffix(state: EditState, theme: PaletteTheme, scheme: ResolvedTheme): string {
+function editCallStatsSuffix(state: EditState, theme: RenderTheme, scheme: ResolvedTheme): string {
   if (state.editCount === undefined || state.diffLines === undefined) return "";
   const count = editEditsCountLabel(state.editCount, state.diffLines, theme);
   return resultLine(
