@@ -1,3 +1,4 @@
+import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -15,11 +16,11 @@ function transcript(): StrippedTranscript {
     trustedIntent: ["clean up temp files"],
     toolCalls: [],
     strippedCount: 0,
-  } as StrippedTranscript;
+  };
 }
 
-function noLog() {
-  return { review: () => {}, debug: () => {} } as never;
+function noLog(): AuthorizerLog {
+  return { review: () => {}, debug: () => {} };
 }
 
 function deps(client: TypesafeClientLike): JevEngineDeps {
@@ -50,7 +51,7 @@ describe("createJevEngine", () => {
     const client: TypesafeClientLike = {
       systemOne: async () => ({
         model: "jev-test",
-        answers: answers() as unknown as TypesafeSystemOneResponse["answers"],
+        answers: answers() as TypesafeSystemOneResponse["answers"],
         usage: { input_tokens: 0, output_tokens: 0 },
       }),
     };
@@ -81,7 +82,7 @@ describe("createJevEngine", () => {
             confidence: 0.9,
             probabilities: {},
           },
-        }) as unknown as TypesafeSystemOneResponse["answers"],
+        }) as TypesafeSystemOneResponse["answers"],
         usage: { input_tokens: 0, output_tokens: 0 },
       }),
     };
@@ -115,7 +116,7 @@ describe("createJevEngine", () => {
         ask: buildAskContext(makeDetails({ value: "ls" }), "/project"),
         target: "ls",
       },
-      log: { review: () => {}, debug } as never,
+      log: { review: () => {}, debug },
       requestId: "r3",
     });
     expect(isMachineryFailure(result)).toBe(false);

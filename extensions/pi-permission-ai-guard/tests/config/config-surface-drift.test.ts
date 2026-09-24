@@ -94,7 +94,7 @@ describe("config surface drift", () => {
       fileURLToPath(import.meta.resolve("#src/config/mode-table.ts")),
       "utf-8",
     );
-    const description = schemaJson.properties.mode.description as string;
+    const description = schemaJson.properties.mode.description;
     const stale = "you decide everything";
     // Short enough to sit on one line of the zod comment block (the twins
     // have different line-wrapping; only the phrase itself must not drift).

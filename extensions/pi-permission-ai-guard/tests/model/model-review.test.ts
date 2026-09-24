@@ -17,7 +17,7 @@ const baseConfig = configSchema.parse({
   timeoutMs: 15000,
 });
 
-const fakeModel = { provider: "test", id: "test-model" } as unknown as Model<any>;
+const fakeModel = { provider: "test", id: "test-model" } as Model<any>;
 
 /**
  * Build a ModelCallContext with defaults from baseConfig.
@@ -245,7 +245,7 @@ describe("reviewModel", () => {
     const log = {
       review: () => {},
       debug: (event: string, data: Record<string, unknown>) => debugCalls.push({ event, data }),
-    } as never;
+    };
     const ctx = makeContext(errorCompleteSimple, { log, requestId: "req-42" });
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
@@ -261,7 +261,7 @@ describe("reviewModel", () => {
     const log = {
       review: () => {},
       debug: (event: string, data: Record<string, unknown>) => debugCalls.push({ event, data }),
-    } as never;
+    };
     const ctx = makeContext(nonErrorCompleteSimple, { log });
     const result = await reviewModel(ctx, "test", "test", 15000);
     expect(result.verdict).toEqual({ kind: "defer" });
@@ -321,9 +321,9 @@ describe("createModelCall", () => {
   it("delegates to registry.complete with model, context, and options", async () => {
     const reply = { ok: true } as unknown as AssistantMessage;
     const complete = vi.fn<() => Promise<AssistantMessage>>(async () => reply);
-    const registry = { complete } as unknown as never;
+    const registry = { complete } as never;
     const run = createModelCall(() => registry);
-    const model = { provider: "test" } as unknown as Model<any>;
+    const model = { provider: "test" } as Model<any>;
     const context = {} as Context;
     const options = { maxTokens: 1 } as never;
     await expect(run(model, context, options)).resolves.toBe(reply);
@@ -333,7 +333,7 @@ describe("createModelCall", () => {
 
   it("throws when registry is undefined", async () => {
     const run = createModelCall(() => undefined);
-    const model = { provider: "test" } as unknown as Model<any>;
+    const model = { provider: "test" } as Model<any>;
     await expect(run(model, {} as Context)).rejects.toThrow(/registry/i);
   });
 });

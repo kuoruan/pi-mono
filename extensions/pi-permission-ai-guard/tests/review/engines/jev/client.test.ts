@@ -21,7 +21,7 @@ function transcript(overrides: Partial<StrippedTranscript> = {}): StrippedTransc
     toolCalls: [],
     strippedCount: 0,
     ...overrides,
-  } as StrippedTranscript;
+  };
 }
 
 describe("buildJevRequest", () => {

@@ -172,17 +172,6 @@ function settingEntry(mode: string | null, parentId: string | null = null, id = 
 }
 
 /**
- * Construct the extension without firing session_start — the base for
- * lifecycle tests that assert on construction state or drive events by
- * hand. `setupExtension` (below) builds on this and fires session_start.
- *
- * @param service - The permissions service to install (the standard
- *   fakeService by default; `null` for the no-service state).
- * @param deps - Extra createAiGuardExtension deps (loadConfig, saveConfig).
- * @returns The mock pi, the stub pipeline's captured calls, and its
- *   createPipeline (for "not called" assertions).
- */
-/**
  * A schema-valid baseline config for the wiring tests. The real config
  * layer reads the machine's agent dir, so the wiring tests inject a
  * baseline config instead of calling it — lifecycle timing assertions
@@ -194,6 +183,17 @@ function makeBaselineConfig(): AiGuardConfig {
   return configSchema.parse({ provider: "test", model: "test" });
 }
 
+/**
+ * Construct the extension without firing session_start — the base for
+ * lifecycle tests that assert on construction state or drive events by
+ * hand. `setupExtension` (below) builds on this and fires session_start.
+ *
+ * @param service - The permissions service to install (the standard
+ *   fakeService by default; `null` for the no-service state).
+ * @param deps - Extra createAiGuardExtension deps (loadConfig, saveConfig).
+ * @returns The mock pi, the stub pipeline's captured calls, and its
+ *   createPipeline (for "not called" assertions).
+ */
 function installExtension(
   service: unknown = { registerAuthorizer: mocks.registerAuthorizer },
   deps: Record<string, unknown> = {},

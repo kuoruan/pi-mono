@@ -1,4 +1,4 @@
-import type { PermissionCheckResult, PermissionState } from "@gotgenes/pi-permission-system";
+import type { PermissionCheckResult } from "@gotgenes/pi-permission-system";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -23,7 +23,7 @@ const allGates: Array<{ name: string; record: DecisionRecordEntry }> = [
   {
     name: "policyDecided",
     record: DecisionRecord.policyDecided(base, {
-      state: "allow" as PermissionState,
+      state: "allow",
       origin: ORIGIN,
       matchedPattern: "ls *",
     }),

@@ -4,6 +4,7 @@
  * misses, context sensitivity), plus the review follow-ups they gate.
  */
 
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import { BREAKER_DENY_REASON } from "#src/audit/decision-record.ts";
@@ -227,7 +228,7 @@ describe("createReviewPipeline — verdict cache", () => {
     const log = {
       review: () => {},
       debug: (event: string, data: Record<string, unknown>) => debugCalls.push({ event, data }),
-    } as never;
+    };
     const breaker = new CircuitBreaker();
     const cache = new VerdictCache();
     const authorize = createReviewPipeline(
@@ -258,7 +259,7 @@ describe("createReviewPipeline — verdict cache", () => {
     const log = {
       review: () => {},
       debug: (event: string, data: Record<string, unknown>) => debugCalls.push({ event, data }),
-    } as never;
+    };
     // cache disabled → always disabled miss
     const authorize = createReviewPipeline(makePipeline());
     await authorize(makeDetails({ value: "ls -la" }), makeQuery("ask"), log);
@@ -298,7 +299,7 @@ describe("createReviewPipeline — verdict cache", () => {
     const sessionEntries: unknown[] = [];
     const sessionManager = {
       getSessionId: () => "s1",
-      buildContextEntries: () => sessionEntries as never,
+      buildContextEntries: () => sessionEntries as SessionEntry[],
     };
     const authorize = createReviewPipeline(
       makePipeline({

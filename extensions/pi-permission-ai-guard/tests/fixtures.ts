@@ -48,7 +48,7 @@ export function payload(
     },
     evidence,
     annotations,
-  } as PromptPayload;
+  };
 }
 
 /**

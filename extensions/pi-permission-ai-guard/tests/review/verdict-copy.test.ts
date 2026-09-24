@@ -1,13 +1,8 @@
 /**
- * Verdict-mode direct tests: the full mode × verdict mapping table and
- * the human-facing message constructors. The mapping lives in one module;
- * this table pins it densely — a semantic change to any cell is a
- * one-line failure here, before it reaches the pipeline's wiring tests.
- *
- * The ladder (strictest first): hard-tier denies (riskLevel
- * high|critical, or missing) are terminal in EVERY mode. Soft denies
- * (low|medium) and the model's own uncertainty map per mode; machinery
- * failures never map to allow.
+ * Verdict-copy direct tests: the human-facing message constructors
+ * (escalationMessage, machineryDenyReason, withAgentInstruction). The
+ * mode x verdict mapping table itself lives in verdict-rule.test.ts;
+ * this file pins only the copy those cells render.
  */
 
 import { describe, expect, it } from "vitest";

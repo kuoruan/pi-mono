@@ -859,7 +859,7 @@ function repeatedEntries(target: string, n: number, contextHash = "ctxh1") {
     surface: "bash",
     target,
     contextHash,
-    verdict: "allow",
+    verdict: "allow" as const,
   }));
 }
 

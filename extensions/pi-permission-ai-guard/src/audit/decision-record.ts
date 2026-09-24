@@ -25,7 +25,7 @@ import type {
 } from "@gotgenes/pi-permission-system";
 
 import type { BreakerVerdict } from "#src/config/config-schema.ts";
-import type { ReviewOutcome } from "#src/model/model-verdict.ts";
+import type { ReviewOutcome, VerdictKind } from "#src/model/model-verdict.ts";
 import {
   PRE_CALL_MACHINERY_KINDS,
   type PreCallMachineryKind,
@@ -61,7 +61,13 @@ export interface DecisionRecordEntry extends DecisionBase {
   /** Whether the model was called for this decision. */
   modelCalled: boolean;
   /** The verdict kind (allow / deny / defer). */
-  verdict: AuthorizerVerdict["kind"];
+  verdict: VerdictKind;
+  /** The verdict kind the link emitted when the mode mapped it (set by mapped()). */
+  emittedVerdict?: VerdictKind;
+  /** The effective mode that triggered the mapping. */
+  mode?: string;
+  /** The human-readable reason emitted when the mode mapping introduced one. */
+  emittedReason?: string;
   /** Gate-specific fields (policyState, modelId, latencyMs, etc.). */
   [k: string]: unknown;
 }
@@ -395,7 +401,7 @@ export const DecisionRecord = {
 export function mapped(
   record: DecisionRecordEntry,
   mode: string,
-  emittedKind: AuthorizerVerdict["kind"],
+  emittedKind: VerdictKind,
   emittedReason?: string,
 ): DecisionRecordEntry {
   // The emitted reason rides along so the audit trail shows what the agent

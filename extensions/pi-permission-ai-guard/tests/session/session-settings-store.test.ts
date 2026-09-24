@@ -4,6 +4,7 @@
  * suppression, invalid-value tolerance) — no extension scaffolding.
  */
 
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -20,7 +21,7 @@ import {
  * @returns A reader handing back exactly those entries.
  */
 function readerOf(entries: unknown[]): SessionBranchReader {
-  return { getBranch: () => entries as never[] };
+  return { getBranch: () => entries as SessionEntry[] };
 }
 
 /**

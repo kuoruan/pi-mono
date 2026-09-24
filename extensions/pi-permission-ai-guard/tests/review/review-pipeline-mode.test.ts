@@ -541,7 +541,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     expect(verdict).toEqual({ kind: "defer" });
     expect(notifications).toEqual([["reviewer asks — reads a research file outside CWD", "info"]]);
     // The audit record keeps the model's lean.
-    const record = reviewCalls.at(-1)!.data as Record<string, unknown>;
+    const record = reviewCalls.at(-1)!.data;
     expect(record.verdict).toBe("defer");
     expect(record.lean).toBe("allow");
     expect(record.emittedVerdict).toBeUndefined();
@@ -580,7 +580,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     // (the reviewer never said deny — it leaned allow).
     expect(notifications).toEqual([]);
     // The audit record keeps the model's lean alongside the mapping.
-    const record = reviewCalls.at(-1)!.data as Record<string, unknown>;
+    const record = reviewCalls.at(-1)!.data;
     expect(record.verdict).toBe("defer");
     expect(record.lean).toBe("allow");
     expect(record.emittedVerdict).toBe("allow");
@@ -640,7 +640,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     const log = {
       review: () => {},
       debug: (event: string, data: Record<string, unknown>) => debugCalls.push({ event, data }),
-    } as never;
+    };
     const authorize = createReviewPipeline(
       makePipeline({
         engine: makeEngine({
@@ -654,8 +654,8 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
 });
 
 /**
- * The breaker's escape valve must also fire for a BROKEN reviewer: auto
- * mode's machinery failures count as deny-equivalents, so a consistent
+ * The breaker's escape valve must also fire for a BROKEN reviewer:
+ * machinery failures count as deny-equivalents, so a consistent
  * machinery failure (e.g. unresolved auth) trips the breaker and the
  * configured `verdict: "defer"` wins.
  */

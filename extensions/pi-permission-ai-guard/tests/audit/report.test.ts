@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LogEntry } from "#src/audit/decision-log-reader.ts";
 import { buildReportCandidates, templateBashTarget } from "#src/audit/report.ts";
+import type { VerdictKind } from "#src/model/model-verdict.ts";
 
 /**
  * A model-gate record fixture.
@@ -21,8 +22,8 @@ function model(opts: {
   surface?: string;
   target?: string;
   contextHash?: string;
-  verdict?: string;
-  emittedVerdict?: string;
+  verdict?: VerdictKind;
+  emittedVerdict?: VerdictKind;
 }): LogEntry {
   return {
     event: "ai_guard.decision",

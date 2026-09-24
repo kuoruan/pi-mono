@@ -64,7 +64,7 @@ export function makeFakeCompleteSimple(
 export function makeSessionManagerWith(entries: unknown[]) {
   return {
     getSessionId: () => "s1",
-    buildContextEntries: () => entries as unknown as SessionEntry[],
+    buildContextEntries: () => entries as SessionEntry[],
   };
 }
 
@@ -75,7 +75,7 @@ export function makeSessionManagerWith(entries: unknown[]) {
  * @returns A `PermissionQuery` stub.
  */
 export function makeQuery(state: PermissionCheckResult["state"]): PermissionQuery {
-  const result = { state } as unknown as PermissionCheckResult;
+  const result = { state } as PermissionCheckResult;
   return {
     checkPermission: () => result,
     getToolPermission: () => state,
@@ -93,7 +93,7 @@ export function makeRecordingQuery(state: PermissionCheckResult["state"]): {
   calls: { surface: string; value: string | undefined; agentName?: string }[];
 } {
   const calls: { surface: string; value: string | undefined; agentName?: string }[] = [];
-  const result = { state } as unknown as PermissionCheckResult;
+  const result = { state } as PermissionCheckResult;
   const query: PermissionQuery = {
     checkPermission: (surface, value, agentName) => {
       calls.push({ surface, value, agentName });
@@ -104,9 +104,9 @@ export function makeRecordingQuery(state: PermissionCheckResult["state"]): {
   return { query, calls };
 }
 
-export const fakeModel = { provider: "test", id: "test-model" } as unknown as Model<Api>;
+export const fakeModel = { provider: "test", id: "test-model" } as Model<Api>;
 
-export const noLog = { review: () => {}, debug: () => {} } as never;
+export const noLog = { review: () => {}, debug: () => {} };
 
 /** A recorded log emission. */
 export interface RecordedLog {

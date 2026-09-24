@@ -32,7 +32,7 @@ import {
 
 describe("createReviewPipeline — guard clauses", () => {
   // Surface matching and target extraction are tested directly in
-  // ask.test.ts (pure function, no model stack needed).
+  // request-ask.test.ts (pure function, no model stack needed).
 
   it("defers without a model call when policy already allows", async () => {
     let modelCalled = false;
@@ -266,7 +266,7 @@ describe("createReviewPipeline — verdicts", () => {
     const log = {
       review: () => {},
       debug: (e: string) => debugCalls.push({ event: e }),
-    } as never;
+    };
     const authorize = createReviewPipeline(
       makePipeline({ engine: makeEngine({ modelCall: makeFakeCompleteSimple([]) }) }),
     );
@@ -323,7 +323,7 @@ describe("createReviewPipeline — verdicts", () => {
     const log = {
       review: () => {},
       debug: (event: string, data: Record<string, unknown>) => debugCalls.push({ event, data }),
-    } as never;
+    };
     const longText = "x".repeat(600);
     const authorize = createReviewPipeline(
       makePipeline({
@@ -483,7 +483,7 @@ describe("createReviewPipeline — deny history (the /ai-guard denied panel's da
 
 describe("createReviewPipeline — transcript stripping", () => {
   // Target extraction (matchValues/value/command/path/target/toolName/skillName)
-  // is tested directly in ask.test.ts as a pure function.
+  // is tested directly in request-ask.test.ts as a pure function.
 
   it("strips transcript from session manager", async () => {
     const entries = [

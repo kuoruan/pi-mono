@@ -17,6 +17,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
+  type ParseErrorCode,
   type ParseError,
   applyEdits,
   modify,
@@ -82,8 +83,8 @@ export interface SaveConfigResult {
 
 /** A failed parse of a layer file, classified for each side's own verdict. */
 type LayerParseFailure =
-  | { kind: "parse"; code: ParseError["error"]; offset: number }
-  | { kind: "root" };
+  | { kind: "parse"; code: ParseErrorCode; offset: number }
+  | { kind: "root"; code?: never; offset?: never };
 
 /** Candidate config file names, in discovery order (`.jsonc` preferred). */
 const CONFIG_FILE_NAMES = ["config.jsonc", "config.json"] as const;
@@ -139,8 +140,8 @@ interface LayerFile {
 
 /** A layer file read: parsed object, or a tagged failure to surface upstream. */
 type ReadLayerResult =
-  | { ok: true; value: Record<string, unknown> }
-  | { ok: false; failure: LayerParseFailure };
+  | { ok: true; value: Record<string, unknown>; failure?: never }
+  | { ok: false; failure: LayerParseFailure; value?: never };
 
 /**
  * Locate the layer's config file. Discovery order: `config.jsonc` first,

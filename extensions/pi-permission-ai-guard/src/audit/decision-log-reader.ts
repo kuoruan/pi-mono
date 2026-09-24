@@ -21,6 +21,7 @@
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
+import type { VerdictKind } from "#src/model/model-verdict.ts";
 import { isObjectRecord } from "#src/utils.ts";
 
 /**
@@ -35,9 +36,9 @@ export interface LogEntry {
   /** The decision gate (model, cache-hit, circuit-breaker, …). */
   gate?: string;
   /** The model's judgment (allow / deny / defer). */
-  verdict?: string;
+  verdict?: VerdictKind;
   /** The verdict the link emitted when the mode changed it (deny escalations, softened denies). */
-  emittedVerdict?: string;
+  emittedVerdict?: VerdictKind;
   /** The reviewer's lean on a defer. */
   lean?: string | null;
   /** The tool surface. */
