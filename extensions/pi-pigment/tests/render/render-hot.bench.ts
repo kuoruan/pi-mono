@@ -28,7 +28,7 @@ import { wrapAnsi } from "#src/render/wrap.ts";
 import {
   cjkLine,
   diffBody,
-  diffPalette,
+  benchScheme,
   plainLine,
   styledLine,
   styledWidth,
@@ -51,7 +51,7 @@ const _styledLine = styledLine;
 const _plainLine = plainLine;
 const _cjkLine = cjkLine;
 const _diffBody = diffBody;
-const _diffPalette = diffPalette;
+const _scheme = benchScheme;
 const _wordOldLine = wordOldLine;
 const _wordNewLine = wordNewLine;
 
@@ -78,7 +78,7 @@ test("wrapAnsi (fits-width fast path)", async ({ bench }) => {
       width: 160,
       maxRows: 4,
       fillBg: "",
-      scheme: _diffPalette,
+      scheme: _scheme,
     }).length;
   }).run();
 });
@@ -86,13 +86,13 @@ test("wrapAnsi (fits-width fast path)", async ({ bench }) => {
 test("wrapAnsi (styled fits-width)", async ({ bench }) => {
   // The common diff case: a styled line that fits needs no breaks — the
   // walk tracks spans only, and the row emits as one slice.
-  const styled = `${_diffPalette.fgDim}const alpha = compute(items, 42, beta);${_diffPalette.rowReset}`;
+  const styled = `${_scheme.fgDim}const alpha = compute(items, 42, beta);${_scheme.rowReset}`;
   await bench("styled line at width 160 (span walk, single-slice emit)", () => {
     sink += _wrapAnsi(styled, {
       width: 160,
       maxRows: 3,
-      fillBg: _diffPalette.bgBase,
-      scheme: _diffPalette,
+      fillBg: _scheme.bgBase,
+      scheme: _scheme,
     }).length;
   }).run();
 });
@@ -102,8 +102,8 @@ test("wrapAnsi (real wrap)", async ({ bench }) => {
     sink += _wrapAnsi(_styledLine.repeat(4), {
       width: 40,
       maxRows: 4,
-      fillBg: _diffPalette.bgBase,
-      scheme: _diffPalette,
+      fillBg: _scheme.bgBase,
+      scheme: _scheme,
     }).length;
   }).run();
 });
@@ -113,8 +113,8 @@ test("wrapAnsi (CJK double-width squeeze)", async ({ bench }) => {
     sink += _wrapAnsi(_cjkLine, {
       width: 20,
       maxRows: 6,
-      fillBg: _diffPalette.bgBase,
-      scheme: _diffPalette,
+      fillBg: _scheme.bgBase,
+      scheme: _scheme,
     }).length;
   }).run();
 });
@@ -124,8 +124,8 @@ test("wrapAnsi (overflow truncation)", async ({ bench }) => {
     sink += _wrapAnsi(_diffBody, {
       width: 60,
       maxRows: 3,
-      fillBg: _diffPalette.bgBase,
-      scheme: _diffPalette,
+      fillBg: _scheme.bgBase,
+      scheme: _scheme,
     }).length;
   }).run();
 });
@@ -138,7 +138,7 @@ test("wrapAnsi (plain body, one wrap per line)", async ({ bench }) => {
         width: 60,
         maxRows: 3,
         fillBg: "",
-        scheme: _diffPalette,
+        scheme: _scheme,
       }).length;
     }
   }).run();
@@ -150,7 +150,7 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
       type: "del",
       number: 12,
       numberWidth: 3,
-      scheme: _diffPalette,
+      scheme: _scheme,
       indicatorGlyph: "│",
     }).gutter.length;
   }).run();
@@ -159,7 +159,7 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
       type: "add",
       number: 9,
       numberWidth: 3,
-      scheme: _diffPalette,
+      scheme: _scheme,
       indicatorGlyph: "│",
     }).gutter.length;
   }).run();
@@ -168,7 +168,7 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
       type: "ctx",
       number: null,
       numberWidth: 2,
-      scheme: _diffPalette,
+      scheme: _scheme,
       indicatorGlyph: "",
     }).gutter.length;
   }).run();
@@ -176,21 +176,21 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
 
 test("injectBg (the bg layer under every highlighted line)", async ({ bench }) => {
   await bench("styled line, no ranges (plain highlight)", () => {
-    sink += _injectBg(_styledLine, { baseBg: _diffPalette.bgBase, scheme: _diffPalette }).length;
+    sink += _injectBg(_styledLine, { baseBg: _scheme.bgBase, scheme: _scheme }).length;
   }).run();
   await bench("styled line with 2 emphasis ranges (word-diff paint)", () => {
     sink += _injectBg(_styledLine, {
-      baseBg: _diffPalette.bgBase,
-      highlightBg: _diffPalette.bgAddedWord,
+      baseBg: _scheme.bgBase,
+      highlightBg: _scheme.bgAddedWord,
       ranges: [
         [2, 12],
         [16, 26],
       ],
-      scheme: _diffPalette,
+      scheme: _scheme,
     }).length;
   }).run();
   await bench("plain line, no escapes (no-op scan)", () => {
-    sink += _injectBg(_plainLine, { baseBg: _diffPalette.bgBase, scheme: _diffPalette }).length;
+    sink += _injectBg(_plainLine, { baseBg: _scheme.bgBase, scheme: _scheme }).length;
   }).run();
 });
 
@@ -199,7 +199,7 @@ test("word-diff pair (the fallback/unhighlighted analysis)", async ({ bench }) =
     sink += _wordDiffAnalysis(_wordOldLine, _wordNewLine).similarity;
   }).run();
   await bench("plainWordDiff (jsdiff + paint)", () => {
-    const result = _plainWordDiff(_wordOldLine, _wordNewLine, _diffPalette);
+    const result = _plainWordDiff(_wordOldLine, _wordNewLine, _scheme);
     sink += result.old.length + result.new.length;
   }).run();
   // The pre-optimization baseline the one-pass sequence replaced: analyze
@@ -209,7 +209,7 @@ test("word-diff pair (the fallback/unhighlighted analysis)", async ({ bench }) =
     const analysis = _wordDiffAnalysis(_wordOldLine, _wordNewLine);
     sink += analysis.similarity;
     if (_shouldEmphasize(analysis)) {
-      const painted = _plainWordDiff(_wordOldLine, _wordNewLine, _diffPalette);
+      const painted = _plainWordDiff(_wordOldLine, _wordNewLine, _scheme);
       sink += painted.old.length + painted.new.length;
     }
   }).run();
@@ -224,7 +224,7 @@ test("unified plain path per pair (the over-budget fallback sequence)", async ({
     const analysis = _wordDiffAnalysis(_wordOldLine, _wordNewLine);
     sink += analysis.similarity;
     if (_shouldEmphasize(analysis)) {
-      const painted = _paintWordDiff(analysis.parts, _diffPalette);
+      const painted = _paintWordDiff(analysis.parts, _scheme);
       sink += painted.old.length + painted.new.length;
     }
   }).run();
@@ -263,8 +263,8 @@ test("wrapAnsi (mixed diff body)", async ({ bench }) => {
       sum += _wrapAnsi(line, {
         width: 56,
         maxRows: 2,
-        fillBg: _diffPalette.bgBase,
-        scheme: _diffPalette,
+        fillBg: _scheme.bgBase,
+        scheme: _scheme,
       }).length;
     }
     sink += sum;

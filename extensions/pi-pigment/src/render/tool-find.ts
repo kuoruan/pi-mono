@@ -160,7 +160,7 @@ export function createFindWrapper(
         isEmpty: all.length === 0,
         budget: COLLAPSED_LINES.find,
         derived,
-        paletteIdentity: scheme.identity,
+        schemeIdentity: scheme.identity,
         tookMs,
         expanded: options.expanded,
         notice: derived.notice,

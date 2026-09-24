@@ -63,11 +63,11 @@ _Avoid_: setActiveTools to force-activate dormant tools (extending the agent's t
 
 **Word-level emphasis**: Brighter backgrounds injected at changed character ranges of paired add/del lines, on top of the line-level diff background.
 
-### Palette
+### Scheme
 
 **Color math**: src/core/color.ts — the pure color conversions (ANSI-color decode, hex parse/render, alpha compositing, RGB blend) and WCAG measures (luminance, contrast) that every scheme and syntax-theme derivation flows through. No SGR escape production here — ansi.ts owns the escape layer; this module maps colors to colors or numbers (TinyColor-backed; ADR 0001's colord rejection note). _Avoid_: color math in ansi.ts (escape production and color math are separate concerns — the split keeps each to one home).
 
-**Scheme**: The set of diff background/foreground ANSI variables — one snapshot per frame, derived by the pure `deriveResolvedTheme(theme, roots)` and memoized per theme content on the session's `RenderSession` (see `session.ts`). The resolved snapshot is an EXPLICIT render input: the factory binds it per frame via `services.render.forTheme(theme)`, and wrappers pass `view.palette` down through the views, layout primitives, and header painters — nobody re-derives or reads ambient state mid-render. _Avoid_: ambient palette reads.
+**Scheme**: The set of diff background/foreground ANSI variables — one snapshot per frame, derived by the pure `deriveResolvedTheme(theme, roots)` and memoized per theme content on the session's `RenderSession` (see `session.ts`). The resolved snapshot is an EXPLICIT render input: the factory binds it per frame via `services.render.forTheme(theme)`, and wrappers pass `view.scheme` down through the views, layout primitives, and header painters — nobody re-derives or reads ambient state mid-render. _Avoid_: ambient palette reads.
 
 **Auto-derive**: The scheme derivation path: add/context surfaces blend `toolDiffAdded` foreground into `toolSuccessBg`; removed surfaces use `toolDiffRemoved`/`toolErrorBg`. Runs when the pi theme or the effective diff roots change; no presets, no environment variables. _Avoid_: theme config (the scheme is only configurable through diff roots).
 
@@ -77,7 +77,7 @@ _Avoid_: setActiveTools to force-activate dormant tools (extending the agent's t
 - "Auto" follows the active pi theme through the detection chain: a generated theme maps to its Shiki source (full tokenColors precision); any other theme derives from its own nine syntax colors (an unresolvable derivation renders unhighlighted — no substitute fallback).
 - An explicit value overrides ONLY token colors — chrome, canvas, and diff roots belong to the pi theme.
 
-Three homes: the file channel (discovery, parsing, the virtual bundled file) lives in theme-file; session-time selection strategy lives in theme-resolver; render-time interpretation (detection chain, polarity gating, patches-continue-on-auto) lives in theme-selection. _Avoid_: diff theme (reserved for the palette).
+Three homes: the file channel (discovery, parsing, the virtual bundled file) lives in theme-file; session-time selection strategy lives in theme-resolver; render-time interpretation (detection chain, polarity gating, patches-continue-on-auto) lives in theme-selection. _Avoid_: diff theme (reserved for the scheme).
 
 **Theme pair**: An explicit "light/dark" slash pair ("github-light/github-dark"): the half matching the pi theme's polarity renders. Shiki-bundled names are AA-enforced against the blend backgrounds (matching auto's precise pipeline); user files render verbatim. The former curated families survive as config.md's recommended-pairs table. _Avoid_: family, preset.
 

@@ -80,7 +80,7 @@ export const cjkMarkLine = "  // 中文注释与一点组合标记\u0301";
 export const diffBody = Array.from({ length: 150 }, (_, i) => `${plainLine} // ${i}`).join("\n");
 
 /** The full diff scheme (the same escape shapes the derivation emits). */
-export const diffPalette: ResolvedTheme = {
+export const benchScheme: ResolvedTheme = {
   bgBase: "\x1b[48;2;30;30;40m",
   rowReset: "\x1b[0m",
   bgRemoved: "\x1b[48;2;53;30;34m",

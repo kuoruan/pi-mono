@@ -147,12 +147,12 @@ export default function myNotes(pi: ExtensionAPI) {
   pi.registerMessageRenderer("my-note", (message, _options, theme) => {
     const view = session?.forTheme(theme);
     if (!view) return undefined; // no session yet: pi's default rendering
-    return renderNote(message.text, view.palette); // your renderer
+    return renderNote(message.text, view.scheme); // your renderer
   });
 }
 ```
 
-A `RenderView` carries `palette` (the derived diff/background colors), `piTheme` (the active theme object), `highlight({ code, language, seed? })` (Shiki highlighting themed by THIS session), and `activeTheme()` (which token theme the session resolved — useful for diagnostics).
+A `RenderView` carries `scheme` (the derived diff/background colors), `theme` (the active theme object), `highlight({ code, language, seed? })` (Shiki highlighting themed by THIS session), and `activeTheme()` (which token theme the session resolved — useful for diagnostics).
 
 ### What `decorate` touches
 

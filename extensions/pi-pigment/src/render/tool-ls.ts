@@ -93,7 +93,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
         isEmpty: entries.length === 0,
         budget: COLLAPSED_LINES.ls,
         derived,
-        paletteIdentity: scheme.identity,
+        schemeIdentity: scheme.identity,
         tookMs,
         expanded: options.expanded,
         notice: derived.notice,

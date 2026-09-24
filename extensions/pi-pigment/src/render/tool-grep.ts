@@ -175,7 +175,7 @@ export function createGrepWrapper(
         isEmpty: !output.trim(),
         budget: COLLAPSED_LINES.grep,
         derived,
-        paletteIdentity: scheme.identity,
+        schemeIdentity: scheme.identity,
         tookMs,
         expanded: options.expanded,
         streaming: pending,

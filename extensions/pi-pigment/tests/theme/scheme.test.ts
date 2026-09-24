@@ -64,20 +64,20 @@ describe("themeCacheKey", () => {
     };
     const session = makeRenderSession();
     const firstKey = themeCacheKey(proxyLike);
-    const firstPalette = session.forTheme(proxyLike).scheme;
+    const firstScheme = session.forTheme(proxyLike).scheme;
     // The proxy object never changes; the instance behind it does.
     slots.toolDiffAdded = "\x1b[38;2;1;2;3m";
     slots.toolSuccessBg = "\x1b[48;2;250;250;250m";
     expect(themeCacheKey(proxyLike)).not.toBe(firstKey);
     const second = session.forTheme(proxyLike).scheme;
-    expect(second).not.toBe(firstPalette);
+    expect(second).not.toBe(firstScheme);
     expect(second.bgBase).toBe("\x1b[48;2;250;250;250m");
     expect(second.fgAdded).toBe("\x1b[38;2;1;2;3m");
   });
 });
 
 describe("deriveResolvedTheme", () => {
-  it("returns the fallback palette for a theme-less context", () => {
+  it("returns the fallback scheme for a theme-less context", () => {
     expect(deriveResolvedTheme(undefined, undefined).scheme).toBe(FALLBACK_THEME);
   });
 
@@ -120,7 +120,7 @@ describe("deriveResolvedTheme", () => {
     ).toBe(false);
   });
 
-  it("re-derives the whole palette when the theme changes", () => {
+  it("re-derives the whole scheme when the theme changes", () => {
     const session = makeRenderSession();
     const first = session.forTheme(fakeTheme()).scheme;
     const second = session.forTheme(
@@ -144,7 +144,7 @@ describe("deriveResolvedTheme", () => {
   });
 });
 
-describe("session palette refresh (one value per theme content)", () => {
+describe("session scheme refresh (one value per theme content)", () => {
   it("a session follows the theme content across frames, never a stale snapshot", () => {
     const dark = fakeTheme();
     const light = fakeTheme({ successBg: "\x1b[48;2;250;250;250m" });

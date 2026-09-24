@@ -33,7 +33,7 @@ export interface OutputAssemblyInput {
   /** The memoized derivation (key stamps read it). */
   derived: DerivedOutput;
   /** The scheme identity (a theme switch re-renders). */
-  paletteIdentity: string;
+  schemeIdentity: string;
   /** The raw Took reading (undefined → no footer; the key reads tookMs ?? 0). */
   tookMs?: number;
   /** The expanded state (window regime + key stamp). */
@@ -69,7 +69,7 @@ export function assembleOutputBody(input: OutputAssemblyInput): PreviewTextHost 
     isEmpty,
     budget,
     derived,
-    paletteIdentity,
+    schemeIdentity,
     expanded,
     streaming,
     notice,
@@ -82,7 +82,7 @@ export function assembleOutputBody(input: OutputAssemblyInput): PreviewTextHost 
   const taskKey = outputTaskKey({
     prefix,
     derived,
-    identity: paletteIdentity,
+    identity: schemeIdentity,
     elapsedMs: tookMs ?? 0,
     expanded,
     streaming,

@@ -14,7 +14,7 @@
  * the theme or the effective roots change and returns the current snapshot.
  * Header backgrounds and diff-body backgrounds read the same snapshot, so
  * they can never diverge. The module's only I/O is the one-shot polarity
- * warning inside resolve — derivation itself is pure (derivePalette takes
+ * warning inside resolve — derivation itself is pure (deriveScheme takes
  * the theme, the effective roots, and the polarity; returns the scheme
  * plus its polarity audit), and all mutable state lives in one explicit
  * state object.
@@ -276,8 +276,8 @@ interface ThemeKeyMemo {
  * walk reads all slots as raw ANSI (getFgAnsi/getBgAnsi — the values, no
  * wrapper strings) and compares them against the memo's parts; an identical
  * read returns the stored key with zero string building, any drift rebuilds.
- * Because the comparison covers EVERY slot derivePalette reads, drift cannot
- * hide. Every slot derivePalette reads must sit in the reads (a dim-only
+ * Because the comparison covers EVERY slot deriveScheme reads, drift cannot
+ * hide. Every slot deriveScheme reads must sit in the reads (a dim-only
  * reload that missed the key kept the old scheme snapshot once before).
  *
  * @param theme - The theme to key.
@@ -373,12 +373,12 @@ function mergeRoots(a: DiffRoots | undefined, b: DiffRoots | undefined): DiffRoo
 export function deriveResolvedTheme(
   theme: PaletteTheme | undefined,
   rootsSpec: DiffRootsSpec | undefined,
-): DerivedPalette {
+): DerivedScheme {
   if (!theme?.getFgAnsi) return { scheme: FALLBACK_THEME, polarityOffenders: [] };
   const isLight = deriveIsLight(theme);
   const roots = effectiveRoots(rootsSpec, isLight);
   const identity = [themeCacheKey(theme), rootsKey(rootsSpec)].join("\0");
-  return derivePalette(theme, roots, isLight, identity);
+  return deriveScheme(theme, roots, isLight, identity);
 }
 
 /**
@@ -468,7 +468,7 @@ function polarityOffenders(
 type PolarityOffense = "background" | `${DiffSide}.tint`;
 
 /** The pure derivation result: the scheme plus its polarity audit. */
-interface DerivedPalette {
+interface DerivedScheme {
   /** The derived scheme. */
   scheme: ResolvedTheme;
   /** Background-root overrides contradicting the theme's polarity (ADR 0002). */
@@ -492,12 +492,12 @@ interface DerivedPalette {
  * @param identity - The cache identity of the inputs (carried on the snapshot).
  * @returns The derived scheme and its polarity audit.
  */
-function derivePalette(
+function deriveScheme(
   theme: PaletteTheme,
   roots: DiffRoots,
   isLight: boolean,
   identity: string,
-): DerivedPalette {
+): DerivedScheme {
   // Polarity reads the pi theme's OWN background — never the override.
   const offenders = polarityOffenders(roots, theme, isLight);
 
