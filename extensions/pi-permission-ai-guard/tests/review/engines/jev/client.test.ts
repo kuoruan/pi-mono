@@ -35,6 +35,10 @@ describe("buildJevRequest", () => {
     ]);
     expect(req.questions.danger_category.type).toBe("choice");
     expect(req.questions.risk.type).toBe("score");
+    expect(req.questions.intent_match.criteria).toMatchObject({
+      true: expect.any(String),
+      false: expect.any(String),
+    });
   });
 
   it("puts the anchor, earlier context, and command in state", () => {
