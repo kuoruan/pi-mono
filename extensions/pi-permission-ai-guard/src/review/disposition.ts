@@ -28,6 +28,7 @@ import { DECISION_EVENT } from "#src/audit/events.ts";
 import type { Mode } from "#src/config/config-schema.ts";
 import type { RiskLevel } from "#src/model/model-verdict.ts";
 import type { NotifyFn } from "#src/notice.ts";
+import { isBoundedDelegationSurface } from "#src/review/request/ask.ts";
 
 import { type CircuitBreaker } from "./circuit-breaker.ts";
 import type { PreCallMachineryKind } from "./machinery-kinds.ts";
@@ -102,6 +103,8 @@ export interface VerdictReleaseContext {
   noticeShown: boolean;
   /** The pipeline's notify (every notice the mapping owes). */
   notify: NotifyFn;
+  /** Whether to announce emitted allows; ambient notifyLevel still applies. */
+  notifyApprovals: boolean;
 }
 
 /**
@@ -157,6 +160,22 @@ export function releaseVerdictGate(
     noticeShown: ctx.noticeShown,
   });
   if (decision.notice) ctx.notify(decision.notice.message, decision.notice.level);
+  // Only this gate emits reviewer-backed allows (fresh or cached). The host
+  // caps path/external-directory allows to defer, so those are not approvals.
+  // Never echo the target: commands may contain secrets or control text.
+  if (
+    ctx.notifyApprovals &&
+    emitted.kind === "allow" &&
+    record.surface &&
+    !isBoundedDelegationSurface(record.surface)
+  ) {
+    ctx.notify(
+      original.kind === "allow"
+        ? "reviewer approved this request"
+        : "mode auto-approved this request",
+      "info",
+    );
+  }
   const released: VerdictRelease = {
     record: decision.annotate
       ? mapped(record, ctx.mode, emitted.kind, decision.emittedReason)

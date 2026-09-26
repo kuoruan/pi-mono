@@ -53,6 +53,11 @@
       "default": "info",
       "description": "The minimum ambient (review-loop) notification level that still notifies the operator; 'off' silences all ambient notices. Command feedback (the /ai-guard surface) is never gated. With denials having no host dialog, 'off' or 'warning' means model denies (and clarifications, at 'warning') reach only the agent and the audit log."
     },
+    "notifyApprovals": {
+      "type": "boolean",
+      "default": false,
+      "description": "Opt in to info-level notices when AI Guard emits an allow (fresh or cached). Mapped allows say mode auto-approved; path and external_directory families are excluded because the host caps their allows to defer. Subject to notifyLevel; commands and targets are never shown."
+    },
     "circuitBreaker": {
       "type": "object",
       "properties": {

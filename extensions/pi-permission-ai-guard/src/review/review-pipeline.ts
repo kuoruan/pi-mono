@@ -293,7 +293,12 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // pass.
       const emitted = applyVerdictMode(mode, lookup.verdict, undefined, lookup.riskLevel);
       const released = releaseVerdictGate(
-        { mode, noticeShown: noticeState.shown, notify: deps.notify },
+        {
+          mode,
+          noticeShown: noticeState.shown,
+          notify: deps.notify,
+          notifyApprovals: config.notifyApprovals,
+        },
         DecisionRecord.cacheHit(base, lookup.verdict),
         lookup.verdict,
         emitted,
@@ -392,7 +397,12 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       reviewOutcome.riskLevel,
     );
     const released = releaseVerdictGate(
-      { mode, noticeShown: noticeState.shown, notify: deps.notify },
+      {
+        mode,
+        noticeShown: noticeState.shown,
+        notify: deps.notify,
+        notifyApprovals: config.notifyApprovals,
+      },
       DecisionRecord.model(
         base,
         modelId,

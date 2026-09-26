@@ -359,6 +359,28 @@ describe("SessionLifecycle — notify level gate", () => {
     }
   });
 
+  it("shows opted-in approval notices only at the info threshold", () => {
+    for (const threshold of ["info", "warning", "error", "off"] as const) {
+      const { lifecycle, calls } = makeLifecycle();
+      const notify = vi.fn<() => void>();
+      lifecycle.onSessionStart(
+        makeSeed({
+          ctx: makeCtx(notify) as never,
+          config: configSchema.parse({
+            provider: "test",
+            model: "test",
+            notifyApprovals: true,
+            notifyLevel: threshold,
+          }),
+        }),
+      );
+      calls[0]!.notify!("reviewer approved this request", "info");
+      expect(notify, `approval at ${threshold}`).toHaveBeenCalledTimes(
+        threshold === "info" ? 1 : 0,
+      );
+    }
+  });
+
   it("a session override read per-call beats the config value", () => {
     const { lifecycle, calls } = makeLifecycle();
     const notify = vi.fn<() => void>();

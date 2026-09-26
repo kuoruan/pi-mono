@@ -63,6 +63,7 @@ describe("modeWarnings", () => {
     typesafe: { intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.5 },
     cache: { maxEntries: 128 },
     notifyLevel: "info" as const,
+    notifyApprovals: false,
   };
 
   it("warns on the two extremes combined with a breaker forced to defer", () => {
