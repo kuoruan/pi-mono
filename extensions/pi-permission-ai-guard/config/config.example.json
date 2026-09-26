@@ -8,6 +8,7 @@
   "instructions": null,
   "mode": "default",
   "notifyLevel": "info",
+  "notifyApprovals": false,
   "circuitBreaker": {
     "consecutive": 3,
     "total": 20,

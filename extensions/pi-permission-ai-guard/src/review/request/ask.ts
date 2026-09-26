@@ -259,6 +259,16 @@ function surfaceFamilyOf(surface: string): string {
 }
 
 /**
+ * Host caps allows on these surfaces to defer; do not announce an approval.
+ *
+ * @param surface - The requested surface (bare or directional).
+ * @returns Whether the host caps this surface's allows to defer.
+ */
+export function isBoundedDelegationSurface(surface: string): boolean {
+  return DIRECTIONAL_SURFACE_FAMILIES.has(surfaceFamilyOf(surface));
+}
+
+/**
  * Check whether `surface` matches the configured surfaces list.
  * Supports glob-style patterns where `*` matches any character sequence:
  *

@@ -158,10 +158,14 @@ const configBaseSchema = z.object({
   mode: z.enum(MODE_VALUES).default("default"),
 
   // Ambient (review-loop) notification threshold. Levels mirror the TUI's
-  // notify levels plus `off`; `error` currently has no ambient occupant
-  // (ambient traffic is info/warning only) — the rung exists so the
-  // threshold chain never skips a level. Command feedback is NOT gated.
+  // notify levels plus `off`; the total-tier breaker trip uses `error`.
+  // Command feedback is NOT gated.
   notifyLevel: z.enum(NOTIFY_LEVEL_VALUES).default("info"),
+
+  // Opt-in info notices for emitted allows (fresh model and cache hits).
+  // Bounded path-family allows are capped to defer by the chain owner and
+  // must never be described as approvals.
+  notifyApprovals: z.boolean().default(false),
 
   // Circuit breaker (session-level, fail-safe). `consecutive` is recoverable
   // (resets on trip so the model gets another chance); `total` is a hard

@@ -488,6 +488,7 @@ describe("createAiGuardExtension lifecycle", () => {
         typesafe: { intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.5 },
         mode: "default" as const,
         notifyLevel: "info" as const,
+        notifyApprovals: false,
       },
       issues: [],
     }));
