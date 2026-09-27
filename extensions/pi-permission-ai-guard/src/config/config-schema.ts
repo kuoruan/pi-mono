@@ -75,6 +75,15 @@ export const typesafeProviderSchema = z
 
 export type TypesafeProvider = z.infer<typeof typesafeProviderSchema>;
 
+/** One registry-resolved chat-model fallback (credentials remain in Pi's model registry). */
+export const llmFallbackSchema = z
+  .object({
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    timeoutMs: z.number().int().min(1).max(300_000).optional(),
+  })
+  .strict();
+
 /** One explicitly configured System One fallback (no implicit reuse of primary credentials). */
 export const typesafeFallbackSchema = z
   .object({
@@ -212,7 +221,9 @@ export const configSchema = z
   .union([
     configBaseSchema.extend({
       provider: z.string().min(1),
-      fallbacks: z.never().optional(),
+      // This lane resolves each alternate model through Pi's registry; no
+      // System One credentials or URLs are accepted in chat-model mode.
+      fallbacks: z.array(llmFallbackSchema).max(5).default([]),
       instructions: z.string().min(1).nullable().default(null),
     }),
     configBaseSchema.extend({

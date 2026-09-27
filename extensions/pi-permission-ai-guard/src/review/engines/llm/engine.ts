@@ -7,6 +7,7 @@
  */
 import type { Api, Model } from "@earendil-works/pi-ai";
 
+import { FALLBACK_EVENT } from "#src/audit/events.ts";
 import type { RegistryConfig } from "#src/config/config-schema.ts";
 import {
   type ModelCallFn,
@@ -52,48 +53,89 @@ async function resolveAuth(
 export function createLlmEngine(deps: LlmEngineDeps): ReviewerEngine {
   const { config } = deps;
   const systemPrompt = buildReviewSystemPrompt(config.instructions);
-  const modelId = `${config.provider}/${config.model}`;
+  const endpoints = [
+    { provider: config.provider, model: config.model, timeoutMs: config.timeoutMs },
+    ...config.fallbacks.map((entry) => ({
+      provider: entry.provider,
+      model: entry.model,
+      timeoutMs: entry.timeoutMs ?? config.timeoutMs,
+    })),
+  ];
 
   return {
     async review(ctx: EngineCallContext): Promise<EngineReviewResult | EngineMachineryFailure> {
-      let model: Model<Api> | undefined;
-      try {
-        model = deps.registry.find(config.provider, config.model);
-      } catch {
-        model = undefined;
-      }
-      if (!model) {
+      let totalLatencyMs = 0;
+      for (const [index, endpoint] of endpoints.entries()) {
+        const modelId = `${endpoint.provider}/${endpoint.model}${index ? ` (fallback ${index})` : ""}`;
+        let model: Model<Api> | undefined;
+        try {
+          model = deps.registry.find(endpoint.provider, endpoint.model);
+        } catch {
+          model = undefined;
+        }
+        if (!model) {
+          if (index + 1 < endpoints.length) {
+            ctx.log.review(FALLBACK_EVENT, {
+              requestId: ctx.requestId,
+              failedEndpoint: index,
+              nextEndpoint: index + 1,
+              modelId,
+              reason: "model-unresolved",
+            });
+            continue;
+          }
+          return {
+            ok: false,
+            kind: PRE_CALL_MACHINERY_KINDS.modelUnresolved,
+            modelId,
+            detail: modelId,
+          };
+        }
+        const auth = await resolveAuth(deps.registry, model);
+        if (!auth.ok) {
+          // Auth or access failures are not availability errors: never use a
+          // backup to bypass a provider's refusal.
+          return {
+            ok: false,
+            kind: PRE_CALL_MACHINERY_KINDS.authFailed,
+            modelId,
+            detail: auth.error,
+          };
+        }
+        const outcome: ReviewOutcome = await reviewModel(
+          {
+            model,
+            modelCall: deps.modelCall,
+            auth: { apiKey: auth.apiKey, headers: auth.headers },
+            reasoning: config.reasoning,
+            maxTokens: config.maxTokens,
+            log: ctx.log,
+            requestId: ctx.requestId,
+          },
+          systemPrompt,
+          buildReviewPrompt(ctx.transcript, ctx.request),
+          endpoint.timeoutMs,
+          endpoints.length > 1 ? 0 : 1,
+        );
+        totalLatencyMs += outcome.latencyMs;
+        if (outcome.availabilityReason && index + 1 < endpoints.length) {
+          ctx.log.review(FALLBACK_EVENT, {
+            requestId: ctx.requestId,
+            failedEndpoint: index,
+            nextEndpoint: index + 1,
+            modelId,
+            reason: outcome.availabilityReason,
+          });
+          continue;
+        }
         return {
-          ok: false,
-          kind: PRE_CALL_MACHINERY_KINDS.modelUnresolved,
+          outcome: { ...outcome, latencyMs: totalLatencyMs },
           modelId,
-          detail: modelId,
+          ...(index ? { cacheable: false } : {}),
         };
       }
-      const auth = await resolveAuth(deps.registry, model);
-      if (!auth.ok) {
-        return {
-          ok: false,
-          kind: PRE_CALL_MACHINERY_KINDS.authFailed,
-          modelId,
-          detail: auth.error,
-        };
-      }
-      const outcome: ReviewOutcome = await reviewModel(
-        {
-          model,
-          modelCall: deps.modelCall,
-          auth: { apiKey: auth.apiKey, headers: auth.headers },
-          reasoning: config.reasoning,
-          maxTokens: config.maxTokens,
-          log: ctx.log,
-          requestId: ctx.requestId,
-        },
-        systemPrompt,
-        buildReviewPrompt(ctx.transcript, ctx.request),
-        config.timeoutMs,
-      );
-      return { outcome, modelId };
+      // The primary model is always present, so the loop always returns.
+      throw new Error("unreachable: no LLM endpoints");
     },
   };
 }

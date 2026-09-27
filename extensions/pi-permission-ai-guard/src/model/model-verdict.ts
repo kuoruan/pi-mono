@@ -56,6 +56,8 @@ export interface ReviewOutcome {
   verdict: AuthorizerVerdict;
   /** Classified defer reason (timeout / empty-reply / no-json / model-defer / etc.). */
   deferKind?: ModelCallDeferKind;
+  /** Safe availability failure category for ordered LLM failover; never an error body. */
+  availabilityReason?: string;
   /** Model explanation for a defer verdict, retained for audit logging. */
   deferReason?: string;
   /**

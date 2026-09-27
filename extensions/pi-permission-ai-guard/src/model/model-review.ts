@@ -26,6 +26,7 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AuditCorrelation } from "#src/audit/decision-record.ts";
 import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT } from "#src/audit/events.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
+import { availabilityReason } from "#src/review/engines/llm/availability.ts";
 import {
   classifyAbortish,
   errorMessage,
@@ -69,7 +70,13 @@ export type ModelRegistryLike = Pick<ModelRegistry, "find" | "getApiKeyAndHeader
  */
 type CallResult =
   | { ok: true; reply: AssistantMessage; deferKind?: never; latencyMs: number }
-  | { ok: false; reply?: never; deferKind: ModelCallDeferKind; latencyMs: number };
+  | {
+      ok: false;
+      reply?: never;
+      deferKind: ModelCallDeferKind;
+      latencyMs: number;
+      availabilityReason?: string;
+    };
 
 /**
  * Resolved auth fields needed to make a model call. Extracted from
@@ -207,7 +214,12 @@ async function executeCall(
   } catch (e) {
     const deferKind: ModelCallDeferKind = classifyAbortish(e) ?? "call-failed";
     emitCallFailure(ctx, deferKind, e);
-    return { ok: false, deferKind, latencyMs: Date.now() - startedAt };
+    return {
+      ok: false,
+      deferKind,
+      latencyMs: Date.now() - startedAt,
+      availabilityReason: availabilityReason(e),
+    };
   }
 }
 
@@ -219,6 +231,8 @@ async function executeCall(
  * @param systemPrompt - The system prompt for the review call.
  * @param userPrompt - The user prompt containing the permission request.
  * @param timeoutMs - Per-call timeout in milliseconds.
+ * @param providerRetries - Preserve the legacy single-model retry unless an alternate is
+ *   configured.
  * @returns A `ReviewOutcome` with the parsed verdict, or a defer outcome on failure.
  */
 export async function reviewModel(
@@ -226,12 +240,20 @@ export async function reviewModel(
   systemPrompt: string,
   userPrompt: string,
   timeoutMs: number,
+  providerRetries = 1,
 ): Promise<ReviewOutcome> {
   // Attempt 1: provider-level retries enabled (maxRetries: 1 in pi-ai —
   // its classifier, backoff, and retry-after handling apply; the signal
   // spans them, so timeoutMs is the total budget). Up to 2 HTTP requests
   // live inside this one executeCall.
-  const result = await executeCall(ctx, systemPrompt, userPrompt, timeoutMs, ctx.maxTokens, 1);
+  const result = await executeCall(
+    ctx,
+    systemPrompt,
+    userPrompt,
+    timeoutMs,
+    ctx.maxTokens,
+    providerRetries,
+  );
   if (!result.ok) {
     // Provider errors do NOT re-fire here — pi-ai's retry budget is
     // already spent inside executeCall; this loop only owns the
@@ -239,6 +261,7 @@ export async function reviewModel(
     return {
       verdict: { kind: "defer" },
       deferKind: result.deferKind,
+      availabilityReason: result.availabilityReason,
       latencyMs: result.latencyMs,
     };
   }
@@ -265,7 +288,13 @@ export async function reviewModel(
 
   // Parse the verdict from the model's text reply as JSON.
   let text = contentText(result.reply.content, "");
-  if (!text.trim() && result.latencyMs < timeoutMs / 2) {
+  // A provider error is not model silence. With backups configured, don't
+  // repeat an auth/policy refusal before checking whether failover is safe.
+  if (
+    !text.trim() &&
+    result.latencyMs < timeoutMs / 2 &&
+    (providerRetries > 0 || !["error", "aborted"].includes(result.reply.stopReason))
+  ) {
     // The first attempt's empty diagnostic goes to the debug stream here:
     // the retry replaces the reply, and without this line the first
     // stopReason/contentTypes would be lost (the review stream keeps the
@@ -281,6 +310,11 @@ export async function reviewModel(
         reply: second.reply,
         latencyMs: result.latencyMs + second.latencyMs,
       };
+      // A failed stream can carry partial JSON. Its stop reason, not the
+      // fragment's contents, determines whether it supplied a verdict.
+      if (["error", "aborted"].includes(second.reply.stopReason)) {
+        return classifyEmptyReply(ctx, base, 2);
+      }
       if (secondText.trim()) {
         return { ...parseTextFallback(secondText, base.latencyMs), attempts: 2 };
       }
@@ -292,9 +326,15 @@ export async function reviewModel(
     return {
       verdict: { kind: "defer" },
       deferKind: second.deferKind,
+      availabilityReason: second.availabilityReason,
       latencyMs: result.latencyMs + second.latencyMs,
       attempts: 2,
     };
+  }
+  // A failed provider can return partial text resembling a valid verdict.
+  // Never treat it as an authorization when the transport said "error".
+  if (["error", "aborted"].includes(result.reply.stopReason)) {
+    return classifyEmptyReply(ctx, result);
   }
   if (text.trim()) {
     return parseTextFallback(text, result.latencyMs);
@@ -391,6 +431,12 @@ function classifyEmptyReply(
   return {
     verdict: { kind: "defer" },
     deferKind,
+    availabilityReason:
+      stopReason === "aborted"
+        ? "timeout"
+        : stopReason === "error"
+          ? availabilityReason(result.reply.errorMessage)
+          : undefined,
     latencyMs: result.latencyMs,
     ...(attempts === undefined ? {} : { attempts }),
     // Ride the outcome into the decision record: the review log itself
