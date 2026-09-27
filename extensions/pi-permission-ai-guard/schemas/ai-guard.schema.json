@@ -23,6 +23,30 @@
       "type": "string",
       "minLength": 1
     },
+    "fallbacks": {
+      "type": "array",
+      "maxItems": 5,
+      "description": "Jev-only: ordered backup System One endpoints (defaults to none). Try the next endpoint only if the previous one fails; never retry a valid decision. Each backup needs its own URL, key and model.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "object",
+            "properties": {
+              "type": { "const": "typesafe" },
+              "baseUrl": { "type": "string", "format": "uri" },
+              "apiKey": { "type": "string", "minLength": 1 }
+            },
+            "required": ["type", "baseUrl", "apiKey"],
+            "additionalProperties": false
+          },
+          "model": { "type": "string", "minLength": 1 },
+          "timeoutMs": { "type": "integer", "exclusiveMinimum": 0, "maximum": 300000 }
+        },
+        "required": ["provider", "model"],
+        "additionalProperties": false
+      }
+    },
     "reasoning": {
       "type": "string",
       "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
@@ -169,12 +193,18 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 300000,
-          "description": "SDK timeout per attempt (timeouts fail outright — only 408/429/5xx retry). Falls back to top-level timeoutMs when omitted."
+          "description": "SDK timeout per attempt (one attempt per endpoint when fallbacks are configured). Falls back to top-level timeoutMs when omitted."
         }
       },
       "additionalProperties": false
     }
   },
   "required": ["provider", "model"],
+  "allOf": [
+    {
+      "if": { "properties": { "provider": { "type": "string" } }, "required": ["provider"] },
+      "then": { "not": { "required": ["fallbacks"] } }
+    }
+  ],
   "additionalProperties": false
 }

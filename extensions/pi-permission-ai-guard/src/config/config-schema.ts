@@ -75,6 +75,18 @@ export const typesafeProviderSchema = z
 
 export type TypesafeProvider = z.infer<typeof typesafeProviderSchema>;
 
+/** One explicitly configured System One fallback (no implicit reuse of primary credentials). */
+export const typesafeFallbackSchema = z
+  .object({
+    provider: typesafeProviderSchema.extend({
+      baseUrl: z.string().url(),
+      apiKey: z.string().min(1),
+    }),
+    model: z.string().min(1),
+    timeoutMs: z.number().int().min(1).max(300_000).optional(),
+  })
+  .strict();
+
 /** A Jev instruction overlay value: string, JSON object, or array (SDK EntryType). */
 const jevInstructionValueSchema = z.union([
   z.string().min(1),
@@ -134,9 +146,8 @@ const configBaseSchema = z.object({
       intentThreshold: z.number().min(0).max(1).default(0.5),
       riskThreshold: z.number().min(0).max(1).default(0.5),
       confidenceThreshold: z.number().min(0).max(1).default(0.5),
-      // SDK timeout per attempt (retries cover 408/429/5xx only —
-      // a timeout fails the call outright). Falls back to top-level
-      // timeoutMs when omitted.
+      // SDK timeout per attempt; with fallbacks, each endpoint is tried
+      // once. Falls back to top-level timeoutMs when omitted.
       timeoutMs: z.number().int().min(1).max(300_000).optional(),
     })
     .default({ intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.5 }),
@@ -197,10 +208,14 @@ export const configSchema = z
   .union([
     configBaseSchema.extend({
       provider: z.string().min(1),
+      fallbacks: z.never().optional(),
       instructions: z.string().min(1).nullable().default(null),
     }),
     configBaseSchema.extend({
       provider: typesafeProviderSchema,
+      // Ordered, explicitly authenticated System One endpoints. An empty list
+      // preserves the original single-client behavior.
+      fallbacks: z.array(typesafeFallbackSchema).max(5).default([]),
       instructions: z
         .union([z.string().min(1), jevInstructionsSchema])
         .nullable()

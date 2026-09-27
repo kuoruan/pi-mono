@@ -39,7 +39,12 @@ import type {
   PromptPermissionDetails,
 } from "@gotgenes/pi-permission-system";
 
-import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
+import {
+  type AiGuardConfig,
+  type RegistryConfig,
+  configSchema,
+  hasTypesafeProvider,
+} from "#src/config/config-schema.ts";
 import { type ModelRegistryLike, createModelCall } from "#src/model/model-review.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
 import { createJevEngine } from "#src/review/engines/jev/index.ts";
@@ -304,7 +309,7 @@ function buildHarness(
           .result(),
     };
     return createLlmEngine({
-      config: config as typeof config & { provider: string; instructions: string | null },
+      config: config as RegistryConfig,
       registry,
       modelCall: createModelCall(() => registry),
     });
@@ -315,16 +320,11 @@ function buildHarness(
     review: (event, details) => events.push({ event, details }),
     debug: (event, details) => events.push({ event, details }),
   };
-  const provider = config.provider;
   const authorize = createReviewPipeline({
     config,
     // Jev path: the engine owns the SDK call — no registry, model, or
     // provider instance involved. LLM path: unchanged fake registry.
-    // The typeof guard narrows `provider` inline for each engine's deps type.
-    engine:
-      typeof provider === "object" && provider !== null
-        ? createJevEngine({ config: { ...config, provider } })
-        : llmEngine(),
+    engine: hasTypesafeProvider(config) ? createJevEngine({ config }) : llmEngine(),
     sessionManager: tc.sessionManager ?? emptySession(),
     cwd: process.cwd(),
     circuitBreaker: new CircuitBreaker(),

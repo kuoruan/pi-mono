@@ -32,6 +32,8 @@ export interface EngineReviewResult {
   outcome: ReviewOutcome;
   /** Audit identity, e.g. "cpa/lite" or "typesafe/jev-1.13". */
   modelId: string;
+  /** False for fallback verdicts: retry the primary on the next ask. */
+  cacheable?: boolean;
 }
 
 /** A reviewer backend: ask in, ReviewOutcome out. */
