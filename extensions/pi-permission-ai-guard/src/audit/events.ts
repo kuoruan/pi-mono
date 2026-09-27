@@ -13,4 +13,6 @@ export const CACHE_LOOKUP_EVENT = "ai_guard.cache_lookup";
 
 export const MODEL_CALL_ERROR_EVENT = "ai_guard.model_call_error";
 
+export const FALLBACK_EVENT = "ai_guard.fallback";
+
 export const COVERAGE_EVENT = "ai_guard.coverage";

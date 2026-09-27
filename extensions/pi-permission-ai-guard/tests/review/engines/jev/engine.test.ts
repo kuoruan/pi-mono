@@ -28,6 +28,7 @@ function deps(client: TypesafeClientLike): JevEngineDeps {
     config: {
       provider: { type: "typesafe" as const },
       model: "jev-1.13",
+      fallbacks: [],
       typesafe: { intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.6 },
       timeoutMs: 15000,
       instructions: null,

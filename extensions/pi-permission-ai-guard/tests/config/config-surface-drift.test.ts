@@ -69,12 +69,21 @@ function jsonDefaults(
 }
 
 describe("config surface drift", () => {
-  it("JSON-schema defaults match the zod schema's materialized defaults", () => {
-    const zodSide = flatLeafPaths(configSchema.parse({ provider: "x", model: "x" }));
-    // Required fields carry no default; everything else is the default set.
-    delete zodSide.provider;
-    delete zodSide.model;
-    expect(zodSide).toEqual(jsonDefaults(schemaJson));
+  it("JSON-schema defaults match both zod config variants", () => {
+    for (const provider of ["x", { type: "typesafe" }] as const) {
+      const zodSide = flatLeafPaths(configSchema.parse({ provider, model: "x" }));
+      // Required fields carry no default; everything else is the default set.
+      for (const key of Object.keys(zodSide)) {
+        if (key === "model" || key === "provider" || key.startsWith("provider.")) {
+          delete zodSide[key];
+        }
+      }
+      // Jev's empty default is conditional; JSON Schema does not apply it
+      // globally because that would invalidate configs with a string provider.
+      expect(zodSide.fallbacks).toEqual(typeof provider === "string" ? undefined : []);
+      delete zodSide.fallbacks;
+      expect(zodSide).toEqual(jsonDefaults(schemaJson));
+    }
   });
 
   it("JSON-schema enums match the zod enums", () => {

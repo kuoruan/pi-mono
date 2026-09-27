@@ -48,7 +48,7 @@ export type TypesafeSystemOneResponse = SystemOneResult<JevQuestions>;
 export interface TypesafeClientLike {
   systemOne(
     request: SystemOneRequest<JevQuestions>,
-    options?: Pick<RequestOptions, "timeout" | "signal">,
+    options?: Pick<RequestOptions, "timeout" | "signal" | "retry">,
   ): Promise<TypesafeSystemOneResponse>;
 }
 

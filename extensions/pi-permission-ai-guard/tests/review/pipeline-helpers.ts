@@ -16,7 +16,11 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { PermissionCheckResult, PermissionQuery } from "@gotgenes/pi-permission-system";
 import { expect } from "vitest";
 
-import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
+import {
+  type AiGuardConfig,
+  type RegistryConfig,
+  configSchema,
+} from "#src/config/config-schema.ts";
 import type { ModelCallFn, ModelRegistryLike } from "#src/model/model-review.ts";
 import type { NotifyFn } from "#src/notice.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
@@ -222,7 +226,7 @@ export const makeEngine = (
 ): ReviewerEngine =>
   createLlmEngine({
     // Fixture configs are LLM-shaped (string provider); the narrow proves it.
-    config: baseConfig as typeof baseConfig & { provider: string; instructions: string | null },
+    config: baseConfig as RegistryConfig,
     registry: opts.registry ?? defaultRegistry(),
     modelCall:
       opts.modelCall ?? makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),
