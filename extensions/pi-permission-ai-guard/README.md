@@ -28,7 +28,7 @@ The reviewer runs a short, cheap decision on each ask and defers at the first mi
 
 Fail-safe by construction: a missing model, invalid config, model timeout, unparseable reply, or an unsure verdict — any unexpected error path — resolves to `defer`, and the ask falls through to the normal permission prompt.
 
-For LLM reviewers, upstream failures retry once per mechanism within `timeoutMs`: provider errors retry in pi-ai's provider layer, and an empty reply may retry at the review layer. Jev uses the TypeSafe SDK's retry policy when no backups are configured; see [backup endpoints](#backup-system-one-endpoints) for what changes when they are.
+With no backups, LLM reviewers retry provider failures once inside `timeoutMs`; an empty reply may also retry at the review layer. Jev uses the TypeSafe SDK's retry policy. With backups, provider retries are replaced by [ordered backup reviewers](#backup-chat-models) or [backup System One endpoints](#backup-system-one-endpoints), respectively.
 
 ## Transcript stripping
 
@@ -98,13 +98,13 @@ Chain facts that shape how this link behaves:
 | `provider`       | string\|object                                                          | required                                  | Model provider id (e.g. `anthropic`), or `{type:"typesafe", baseUrl?, apiKey?}` for the Jev reviewer (unset fields fall back to `TYPESAFE_BASE_URL` / `TYPESAFE_API_KEY`)                                                   |
 | `model`          | string                                                                  | required                                  | Model id (e.g. `claude-haiku-4-5`; Jev: `jev-1.13`)                                                                                                                                                                         |
 | `reasoning`      | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"off"`                                   | Thinking level (pi-ai `ModelThinkingLevel`); `off` = disabled. Ignored in Jev mode                                                                                                                                          |
-| `timeoutMs`      | integer                                                                 | `15000`                                   | Model-call timeout (ms). Jev mode: per-attempt fallback; `typesafe.timeoutMs` overrides per attempt                                                                                                                         |
+| `timeoutMs`      | integer                                                                 | `15000`                                   | Per-reviewer timeout (ms); backups may override it. Jev: `typesafe.timeoutMs` overrides primary                                                                                                                             |
 | `maxTokens`      | integer                                                                 | `4096`                                    | Reviewer reply budget; thinking blocks count against it on reasoning upstreams. Ignored in Jev mode                                                                                                                         |
 | `transcript`     | object                                                                  | see below                                 | Transcript stripping config (see below)                                                                                                                                                                                     |
 | `surfaces`       | string[]                                                                | `["bash","mcp","skill"]`                  | Surfaces to review; glob patterns (`*`, `ns:*`, `*:bar`); `!` excludes. Path-family granularity: `path` = whole family, `path_*` = proven-direction access only, `path_read` = one direction, `!path` = family-wide exclude |
 | `instructions`   | string\|object\|null                                                    | `null`                                    | Custom safety rules. LLM mode: replaces defaults. Jev mode: string = shared background; object = `{background?, questions?}` overlay (ids: `danger_category`, `intent_match`, `risk`); null = built-in                      |
 | `typesafe`       | object                                                                  | see below                                 | Jev behavior thresholds (object providers only)                                                                                                                                                                             |
-| `fallbacks`      | array                                                                   | `[]` (Jev only)                           | Ordered System One backup endpoints, each with its own `provider`, `model`, and optional `timeoutMs`                                                                                                                        |
+| `fallbacks`      | array                                                                   | `[]`                                      | Ordered backup reviewers, each with `provider`, `model`, and optional `timeoutMs`; entries must use same lane as primary                                                                                                    |
 | `mode`           | `"strict"\|"default"\|"lenient"\|"permissive"`                          | `"default"`                               | Leniency ladder for non-allow verdicts (see below)                                                                                                                                                                          |
 | `notifyLevel`    | `"info"\|"warning"\|"error"\|"off"`                                     | `"info"`                                  | Ambient-notify threshold — the minimum review-loop notify level that still notifies; command feedback is never gated                                                                                                        |
 | `circuitBreaker` | object                                                                  | `{consecutive:3,total:20,verdict:"deny"}` | Circuit breaker config (see below)                                                                                                                                                                                          |
@@ -119,6 +119,24 @@ Caps for the stripped transcript (see the stripping table above). Defaults follo
 | `maxUserMessages`  | `5`     | Max trusted-intent entries (most recent) |
 | `maxToolCalls`     | `10`    | Max tool calls (most recent)             |
 | `maxCharsPerEntry` | `1000`  | Truncate each entry to this many chars   |
+
+### Backup chat models
+
+Free models may hit usage limits or disappear without notice. In chat-model mode, `fallbacks` names other models already available in Pi's model registry:
+
+```json
+{
+  "provider": "opencode-free",
+  "model": "<free-model-id>",
+  "fallbacks": [{ "provider": "anthropic", "model": "claude-haiku-4-5", "timeoutMs": 5000 }]
+}
+```
+
+Each backup uses its own registered provider credentials; this config does not accept API keys or base URLs for chat-model entries. AI Guard tries backups in order when a model disappears from the registry or its provider clearly reports quota/payment limits, an unavailable model (HTTP 404/410), a timeout, network failure, or server error. Ambiguous errors ask you rather than triggering failover. It **does not** seek a second opinion on an allow, deny, uncertain verdict, malformed reply, authentication failure, or access refusal. Auth failure on any backup stops the chain rather than bypassing that provider. When all models fail, the existing mode rules apply; nothing gets automatically approved by an outage. An explicitly configured backup's allow is trusted even in `strict` mode.
+
+With backups, each model gets one provider attempt rather than the normal provider retry; an empty successful reply may still retry within that model's timeout. `timeoutMs` applies to each model unless its entry overrides it: total worst-case wait is the sum of endpoint timeouts, not one global budget. Backup verdicts are not cached, so the primary is retried on the next ask. Failover transitions appear as `ai_guard.fallback` review records without URLs, credentials, or provider error text. Every contacted model receives the permission request (including command text and target paths) plus stripped conversation context: choose providers you trust with that data and account for their costs.
+
+`fallbacks` also works for Jev, but **lanes never mix**: chat models back up chat models; System One endpoints back up System One endpoints. Configure a Jev primary with the object-form provider below.
 
 ### Jev reviewer (`typesafe`)
 
@@ -284,7 +302,7 @@ Each reviewer-relevant decision writes an `ai_guard.decision` record to pi-permi
 | `riskLevel`   | Model-assessed risk (`low`/`medium`/`high`/`critical`), or `null`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `contextHash` | Trusted-intent context fingerprint (same value as the verdict-cache key's context hash) — distinguishes same-context repetitions from cross-context ones                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
-When a Jev endpoint fails and another endpoint is available, `ai_guard.fallback` writes a separate review-stream record for the transition (`failedEndpoint`, `nextEndpoint`, `modelId`, `reason`). Endpoint positions are one-based; the record omits URLs, API keys, and provider error bodies. Each transition is logged alongside the final `ai_guard.decision` record.
+When a Jev endpoint or chat-model provider fails and another endpoint is available, `ai_guard.fallback` writes a separate review-stream record for the transition (`failedEndpoint`, `nextEndpoint`, `modelId`, `reason`). Endpoint positions are zero-based (primary = 0); the record omits URLs, API keys, and provider error bodies. Each transition is logged alongside the final `ai_guard.decision` record.
 
 Supplementary debug records (written via `log.debug`, gated by the upstream log level):
 

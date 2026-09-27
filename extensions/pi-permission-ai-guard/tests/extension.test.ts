@@ -477,6 +477,7 @@ describe("createAiGuardExtension lifecycle", () => {
       config: {
         provider: "test",
         model: "test",
+        fallbacks: [],
         surfaces: ["bash"],
         transcript: { maxUserMessages: 5, maxToolCalls: 10, maxCharsPerEntry: 1000 },
         circuitBreaker: { consecutive: 3, total: 20, verdict: "deny" as const },

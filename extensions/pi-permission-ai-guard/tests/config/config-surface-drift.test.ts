@@ -78,9 +78,9 @@ describe("config surface drift", () => {
           delete zodSide[key];
         }
       }
-      // Jev's empty default is conditional; JSON Schema does not apply it
-      // globally because that would invalidate configs with a string provider.
-      expect(zodSide.fallbacks).toEqual(typeof provider === "string" ? undefined : []);
+      // Both lanes default to no backups. JSON Schema leaves the default
+      // unmaterialized so conditional item types remain valid in editors.
+      expect(zodSide.fallbacks).toEqual([]);
       delete zodSide.fallbacks;
       expect(zodSide).toEqual(jsonDefaults(schemaJson));
     }

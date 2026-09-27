@@ -54,6 +54,7 @@ describe("modeWarnings", () => {
   const base = {
     provider: "p",
     model: "m",
+    fallbacks: [],
     reasoning: "off" as const,
     timeoutMs: 15000,
     maxTokens: 4096,
