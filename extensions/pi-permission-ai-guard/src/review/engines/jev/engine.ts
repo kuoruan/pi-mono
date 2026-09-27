@@ -48,9 +48,9 @@ function fallbackReason(error: unknown): string | undefined {
   if (error instanceof APIUserAbortError) return undefined;
   if (error instanceof APIError) {
     const status = error.status;
-    // An auth, policy, missing-model, or invalid-request error needs an
-    // operator's attention; a backup must not bypass a provider's refusal.
-    if ([402, 408, 429].includes(status) || status >= 500) {
+    // Auth/policy refusals and malformed requests need an operator. A 404/410
+    // may mean a free model vanished, so try the explicitly trusted backup.
+    if ([402, 404, 408, 410, 429].includes(status) || status >= 500) {
       return `http-${status}`;
     }
     return undefined;
