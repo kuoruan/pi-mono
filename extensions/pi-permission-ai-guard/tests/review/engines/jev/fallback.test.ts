@@ -176,6 +176,21 @@ describe("Jev System One fallback", () => {
     expect(events.map((e) => e.details?.reason)).toEqual(["http-503", "connection"]);
   });
 
+  it.each([404, 410])("tries backup when a free model disappears (HTTP %i)", async (status) => {
+    const { events, log } = recordingLog();
+    const engine = createJevEngine({
+      config: config(),
+      client: throwingClient(httpError(status)),
+      fallbackClients: [safeClient],
+    });
+    const result = await engine.review(reviewContext(log));
+    expect(isMachineryFailure(result)).toBe(false);
+    if (isMachineryFailure(result)) return;
+    expect(result.outcome.verdict.kind).toBe("allow");
+    expect(result.cacheable).toBe(false);
+    expect(events[0]?.details?.reason).toBe(`http-${status}`);
+  });
+
   it("does not seek a second opinion on a valid danger verdict or uncertainty", async () => {
     let calls = 0;
     const backup: TypesafeClientLike = {
@@ -215,7 +230,6 @@ describe("Jev System One fallback", () => {
       httpError(400),
       httpError(401),
       httpError(403),
-      httpError(404),
       httpError(422),
       new Error("unexpected parsing bug"),
     ]) {
