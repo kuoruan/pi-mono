@@ -70,3 +70,15 @@ export function applyOverlay(
   if (typeof entry === "string") return { question: entry, context: overlay };
   return { ...entry, context: mergeContext(entry.context, overlay) };
 }
+
+/**
+ * Normalize the lane instructions into the overlay object the question
+ * builder consumes: a shorthand string becomes the shared background,
+ * null/undefined becomes the empty overlay.
+ *
+ * @param instructions - The background/overlay input.
+ * @returns The overlay object (never null).
+ */
+export function normalizeOverlay(instructions: JevInstructionsInput): JevOverlay {
+  return typeof instructions === "string" ? { background: instructions } : (instructions ?? {});
+}

@@ -89,7 +89,6 @@ export function createLlmAdapter(deps: LlmAdapterDeps): LaneAdapter {
           ok: false,
           kind: PRE_CALL_MACHINERY_KINDS.modelUnresolved,
           modelId,
-          detail: modelId,
         };
         return {
           kind: "retryable",

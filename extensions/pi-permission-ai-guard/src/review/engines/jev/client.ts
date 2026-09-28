@@ -16,7 +16,12 @@ import type { ReviewRequestContext } from "#src/review/request/review-request.ts
 import type { StrippedTranscript } from "#src/review/request/transcript-stripper.ts";
 import { normalizeAndRedactText } from "#src/utils.ts";
 
-import { applyOverlay, type JevInstructionsInput, type JevQuestionEntry } from "./instructions.ts";
+import {
+  applyOverlay,
+  normalizeOverlay,
+  type JevInstructionsInput,
+  type JevQuestionEntry,
+} from "./instructions.ts";
 import { DANGER_CRITERIA, RISK_RUBRIC } from "./questions.ts";
 
 /** Direct TypeSafe connection (both fields optional — unset falls back to env/SDK defaults). */
@@ -130,8 +135,7 @@ export function buildJevRequest(
   // Three layers, applied in order: the built-in reviewer role, the
   // user's shared background, then the question's own override (each
   // layer adds rather than replacing).
-  const overlay =
-    typeof instructions === "string" ? { background: instructions } : (instructions ?? {});
+  const overlay = normalizeOverlay(instructions);
   const perQuestion = overlay.questions ?? {};
   const bg = overlay.background;
 

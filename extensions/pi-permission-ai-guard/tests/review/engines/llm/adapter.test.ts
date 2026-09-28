@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest";
 
 import { configSchema } from "#src/config/config-schema.ts";
 import type { ModelCallFn } from "#src/model/model-review.ts";
+import { availabilityReason } from "#src/model/model-verdict.ts";
 import { createLlmAdapter } from "#src/review/engines/llm/adapter.ts";
-import { availabilityReason } from "#src/review/engines/llm/availability.ts";
 import type { AttemptSpec, PoolEndpoint } from "#src/review/pool.ts";
 import { buildAskContext } from "#src/review/request/ask.ts";
 import { makeDetails } from "#test/fixtures.ts";

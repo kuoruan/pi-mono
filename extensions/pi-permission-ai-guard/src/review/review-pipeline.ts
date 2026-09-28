@@ -340,7 +340,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         : DecisionRecord.authFailed(
             base,
             engineResult.modelId,
-            normalizeAndRedactText(engineResult.detail),
+            normalizeAndRedactText(engineResult.detail ?? ""),
           );
       return releaseMachineryGate(
         mode,

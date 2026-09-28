@@ -57,8 +57,12 @@ export interface EngineMachineryFailure {
   kind: EngineMachineryKind;
   /** Audit identity of the engine that failed (e.g. "cpa/lite"). */
   modelId: string;
-  /** Sanitized detail for the audit record (auth error text). */
-  detail: string;
+  /**
+   * Sanitized detail for the audit record — the auth error text.
+   * `auth-failed` always carries one; `model-unresolved` has none
+   * (its audit identity is `modelId` alone).
+   */
+  detail?: string;
 }
 
 /**
