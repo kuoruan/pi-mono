@@ -1,9 +1,13 @@
+import { dirname, join as joinPath } from "node:path";
+
+import { getReadmePath } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
 import { createReadWrapper } from "#src/render/tool-read.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
+  type RenderCallCarrier,
   type RenderResultCarrier,
   makeRenderCtx,
   makeRenderSession,
@@ -11,6 +15,7 @@ import {
   resetPigmentForTest,
   viewFor,
   makeServices,
+  type TextDouble,
 } from "#test/fixtures.ts";
 
 function readCallText(args: unknown, expanded: boolean): string {
@@ -27,9 +32,11 @@ function readCallText(args: unknown, expanded: boolean): string {
   const { ctx } = makeRenderCtx();
   ctx.args = args;
   ctx.expanded = expanded;
-  const component = (
-    tool.renderCall as unknown as (a: unknown, t: unknown, c: unknown) => { text: { text: string } }
-  )(args, buildRenderTheme(), ctx);
+  const component = (tool.renderCall as unknown as RenderCallCarrier["renderCall"])(
+    args,
+    buildRenderTheme(),
+    ctx,
+  );
   return plain(component.text.text);
 }
 
@@ -42,12 +49,118 @@ describe("read call header", () => {
     expect(readCallText({ path: "src/a.ts", offset: 10, limit: 20 }, true)).toContain(":10-29");
   });
 
+  it("pins the range in the suffix so truncation never eats it", async () => {
+    resetPigmentForTest();
+    const tool = createReadWrapper(
+      { name: "read" } as never,
+      makeServices({ headerEllipsis: "on" }),
+    );
+    const { ctx } = makeRenderCtx();
+    const command = { path: `src/${"deep-".repeat(30)}a.ts`, offset: 10, limit: 20 };
+    ctx.args = command;
+    ctx.expanded = false;
+    const component = (tool.renderCall as unknown as RenderCallCarrier["renderCall"])(
+      command,
+      buildRenderTheme(),
+      ctx,
+    ) as TextDouble;
+    component.render(40);
+    await vi.waitFor(() => {
+      if (!plain(component.text.text).includes(":10-29")) throw new Error("waiting");
+    });
+    // The path truncates but the range survives (the suffix never
+    // enters the ellipsis budget).
+    expect(plain(component.text.text)).toContain("…");
+    expect(plain(component.text.text)).toContain(":10-29");
+  });
+
   it("collapses SKILL.md to a skill label", () => {
-    expect(readCallText({ path: "/x/foo/SKILL.md" }, false)).toContain("[skill]");
+    const header = readCallText({ path: "/x/foo/SKILL.md" }, false);
+    expect(header).toContain("✦ foo");
+    expect(header).toContain("skill");
+  });
+
+  it("marks pi-docs origins so SDK paths never pose as project files", () => {
+    // The pi package root (getReadmePath): a docs/ path under it
+    // collapses with the [pi] origin mark.
+    const header = readCallText(
+      { path: joinPath(dirname(getReadmePath()), "docs/config.md") },
+      false,
+    );
+    expect(header).toContain("[pi]");
+    expect(header).toContain("config.md");
   });
 
   it("collapses AGENTS.md to a resource label", () => {
     expect(readCallText({ path: "/x/AGENTS.md" }, false)).toContain("read resource");
+  });
+
+  it("collapses SKILL.md case-insensitively", () => {
+    expect(readCallText({ path: "/x/foo/SKILL.MD" }, false)).toContain("✦ foo");
+  });
+
+  it("collapses lockfiles to a generated label", () => {
+    const header = readCallText({ path: "/x/pnpm-lock.yaml" }, false);
+    expect(header).toContain("read generated");
+    expect(header).toContain("pnpm-lock.yaml");
+  });
+
+  it("flags secret-bearing files in the suffix", () => {
+    const header = readCallText({ path: "/x/.env" }, false);
+    expect(header).toContain("⚠ sensitive");
+    expect(readCallText({ path: "/x/app.ts" }, false)).not.toContain("sensitive");
+  });
+
+  it("masks dotenv values in the body, keeping key names", async () => {
+    resetPigmentForTest();
+    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const { ctx } = makeRenderCtx();
+    ctx.args = { path: "/x/.env" };
+    ctx.expanded = true;
+    const result = {
+      content: [
+        { type: "text", text: "API_KEY=sk-live-abc123\nGITHUB_TOKEN=abc\nEMPTY=\n# comment=yes\n" },
+      ],
+    };
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
+      result,
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    component.render(120);
+    await vi.waitFor(() => {
+      if (!plain(component.text.text).includes("API_KEY")) throw new Error("waiting");
+    });
+    const body = plain(component.text.text);
+    expect(body).toContain("API_KEY=sk****");
+    expect(body).not.toContain("sk-live-abc123");
+    // Short values collapse fully; empties and comments pass through.
+    expect(body).toContain("GITHUB_TOKEN=****");
+    expect(body).toContain("EMPTY=");
+    expect(body).toContain("# comment=yes");
+  });
+
+  it("leaves non-secret bodies byte-identical", async () => {
+    resetPigmentForTest();
+    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const { ctx } = makeRenderCtx();
+    ctx.args = { path: "/x/app.ts" };
+    ctx.expanded = true;
+    const raw = "const a = 1;\nurl = http://x;\n";
+    const result = { content: [{ type: "text", text: raw }] };
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
+      result,
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    component.render(120);
+    await vi.waitFor(() => {
+      if (!plain(component.text.text).includes("const a")) throw new Error("waiting");
+    });
+    expect(plain(component.text.text)).toContain("const a = 1;");
+    expect(plain(component.text.text)).toContain("url = http://x;");
   });
 });
 

@@ -101,7 +101,7 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
     if (content.length <= width) {
       return [content + fillBg + " ".repeat(width - content.length) + scheme.rowReset];
     }
-    return wrapPlainAscii(content, width, maxRows, fillBg, scheme);
+    return wrapPlainAscii(content, options);
   }
   // Non-plain content (escapes, CJK): a measure-only walk decides the fits
   // case up front — a fitting line takes one allocation-free walk plus one
@@ -209,19 +209,11 @@ export function wrapAnsi(content: string, options: WrapAnsiOptions): string[] {
  * `width` columns.
  *
  * @param content - Printable ASCII (isPlainAscii held) longer than width.
- * @param width - Target column width (> 0).
- * @param maxRows - Row budget.
- * @param fillBg - Background escape for each row's padding.
- * @param scheme - The resolved scheme (rowReset + fgDim for the marker).
+ * @param options - The wrap inputs (width + budget + pad + scheme).
  * @returns The wrapped rows.
  */
-function wrapPlainAscii(
-  content: string,
-  width: number,
-  maxRows: number,
-  fillBg: string,
-  scheme: ResolvedTheme,
-): string[] {
+function wrapPlainAscii(content: string, options: WrapAnsiOptions): string[] {
+  const { width, maxRows, fillBg, scheme } = options;
   const rows: string[] = [];
   let start = 0;
   // `end` is clamped to start + room, so the pads below are never negative.

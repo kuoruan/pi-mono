@@ -27,7 +27,7 @@ import {
 import { injectBg } from "./inject-bg.ts";
 import { borderBar } from "./row-frame.ts";
 import type { RenderView } from "./session.ts";
-import { shellBadgeColorOf, shellExitBadgeOf, type ShellExitBadge } from "./shell-status.ts";
+import { shellBadgeColorOf, shellExitBadgeOf } from "./shell-status.ts";
 import type { PreviewTextHost } from "./text-task.ts";
 import { collapseTail, expandKeyHint, tookFooter } from "./tool-output.ts";
 import type { CallState, RenderContext, ToolServices } from "./tool-services.ts";
@@ -189,6 +189,18 @@ export interface ErrorFrameInput {
   width: number;
 }
 
+/** The error header's inputs: identity + message + chrome (the badge derives inside). */
+interface ErrorHeaderInput {
+  /** The tool's name (badge parsing only for bash/powershell). */
+  name: string;
+  /** The failure message (the shell badge parses it). */
+  message: string;
+  /** The pi theme. */
+  theme: RenderTheme;
+  /** The header path's shortening contract. */
+  pathShortener: (p: string) => string;
+}
+
 /**
  * The error frame's header row: three shapes by ownership. A shell
  * failure whose tail parses to NO badge keeps the frame's own name
@@ -197,22 +209,14 @@ export interface ErrorFrameInput {
  * gets one separator blank here; every other tool's call header already
  * trails its own blank — nothing.
  *
- * @param name - The tool's name.
- * @param isShell - Whether the frame is a shell tool's.
- * @param badge - The parsed shell exit badge (undefined for non-shell).
- * @param theme - The pi theme.
- * @param pathShortener - The header path's shortening contract.
+ * @param input - Identity + message + chrome (isShell/badge derive inside).
  * @returns The header text (may be "").
  */
-function errorHeaderOf(
-  name: string,
-  isShell: boolean,
-  badge: ShellExitBadge | undefined,
-  theme: RenderTheme,
-  pathShortener: (p: string) => string,
-): string {
+function errorHeaderOf(input: ErrorHeaderInput): string {
+  const { name, message, theme, pathShortener } = input;
+  const isShell = name === "bash" || name === "powershell";
   if (!isShell) return "";
-  if (badge !== undefined) return "\n";
+  if (shellExitBadgeOf(message) !== undefined) return "\n";
   return `${formatToolFrameHeaderText(
     {
       meta: theme.fg("error", theme.bold(formatToolHeaderName(name))),
@@ -247,9 +251,9 @@ function errorHeaderOf(
 export function formatToolErrorResult(input: ErrorFrameInput): string {
   const { name, message, theme, pathShortener, expanded, indicatorStyle, tookMs, width } = input;
   // Body-only unless the shell status is unrecognized (ownership above).
+  const header = errorHeaderOf({ name, message, theme, pathShortener });
   const isShell = name === "bash" || name === "powershell";
   const badge = isShell ? shellExitBadgeOf(message) : undefined;
-  const header = errorHeaderOf(name, isShell, badge, theme, pathShortener);
   // The row prefix: the bar glyph + one space in bar mode; EMPTY in
   // none mode — the frame Box's own padding is the single leading space
   // the row keeps (collapsing the column here means no second space

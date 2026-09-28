@@ -17,6 +17,10 @@
  * theme identity — see highlight.ts).
  */
 
+import { dirname } from "node:path";
+
+import { getReadmePath } from "@earendil-works/pi-coding-agent";
+
 import type { PigmentConfig } from "#src/config/config-schema.ts";
 import { createBoundedMap } from "#src/core/bounded-map.ts";
 import { defaultIssueSink, type IssueSink } from "#src/core/issue.ts";
@@ -57,6 +61,12 @@ export interface RenderView {
   /** The pi theme this view is bound to (the chrome colors' source). */
   readonly theme: RenderTheme;
   /**
+   * The pi install root (the package dir owning README/docs/examples).
+   * Resolved once per session — the root never moves within a session,
+   * and per-frame filesystem walks would tax every classified header.
+   */
+  readonly piRoot: string;
+  /**
    * The resolved token theme for this frame's polarity — the observation
    * point the golden-name / AA assertions (and non-tool renderers) read.
    * Null when the selection resolves to no theme (unstyled).
@@ -87,11 +97,15 @@ export interface RenderSession {
  */
 export function createRenderSession(inputs: RenderSessionInputs): RenderSession {
   // The per-session instance state: the active-theme memo, the scheme
-  // memo, and the one-shot polarity-warning flag — nothing here is
-  // reachable from another session instance.
+  // memo, the install root, and the one-shot polarity-warning flag —
+  // nothing here is reachable from another session instance.
   const themeMemo: ActiveThemeMemo = createBoundedMap(8);
   const schemeMemo = createBoundedMap<string, ResolvedTheme>(8);
   let warned = false;
+  // The pi install root, resolved once (getReadmePath walks up with
+  // sync existsSync per call — per-frame walks would tax every
+  // classified header).
+  let piRootMemo: string | undefined;
 
   /**
    * Derive this frame's scheme, reporting the polarity contradiction at
@@ -125,6 +139,7 @@ export function createRenderSession(inputs: RenderSessionInputs): RenderSession 
       return {
         scheme,
         theme,
+        piRoot: (piRootMemo ??= dirname(getReadmePath())),
         activeTheme: resolve,
         highlight,
       };

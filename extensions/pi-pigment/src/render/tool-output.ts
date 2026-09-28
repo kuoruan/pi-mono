@@ -481,9 +481,7 @@ export type StateColor = "muted" | "success" | "error" | "warning";
  *
  * @param ms - The measured duration in milliseconds.
  * @param theme - The pi theme.
- * @param color - The state color. "muted" has no production caller left
- *   — it is the reserved slot for coloring a native Elapsed footer
- *   should one ever be painted (pi's own stay untouched today).
+ * @param color - The state color.
  * @returns The styled footer line, or "" when unmeasured.
  */
 export function tookFooter(ms: number | undefined, theme: RenderTheme, color: StateColor): string {

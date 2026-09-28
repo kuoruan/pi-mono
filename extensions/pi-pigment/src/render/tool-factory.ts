@@ -81,9 +81,26 @@ export interface HeaderLineSpec<TState extends object> {
    * The styled header body (the byte-parity format*Call formatter). The
    * render args stay unknown at the boundary — the wrapper knows its
    * input shape (argsOf); the ctx carries what ls (cwd) and read
-   * (cwd + expanded) read into their formatters.
+   * (cwd + expanded) read into their formatters; the view carries the
+   * session's piRoot for read's docs classification.
    */
-  formatCallBody: (renderArgs: unknown, theme: RenderTheme, ctx: RenderContext<TState>) => string;
+  formatCallBody: (
+    renderArgs: unknown,
+    theme: RenderTheme,
+    ctx: RenderContext<TState>,
+    view: RenderView,
+  ) => string;
+  /**
+   * The pinned status suffix (state that survives truncation — the
+   * ellipsis budget never eats it). Undefined = no suffix. Read pins
+   * its `:offset-limit` range here; the other headers carry none.
+   */
+  formatSuffix?: (
+    renderArgs: unknown,
+    theme: RenderTheme,
+    ctx: RenderContext<TState>,
+    view: RenderView,
+  ) => string;
 }
 
 /** A renderCall implementation the factory calls. */
@@ -234,7 +251,8 @@ export function createToolWrapper<TState extends object = Record<string, unknown
           view,
           ctx,
           services,
-          body: spec.renderHeader.formatCallBody(args, view.theme, ctx),
+          body: spec.renderHeader.formatCallBody(args, view.theme, ctx, view),
+          suffix: spec.renderHeader.formatSuffix?.(args, view.theme, ctx, view) ?? "",
         });
         return text;
       }
