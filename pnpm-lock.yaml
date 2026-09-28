@@ -67,8 +67,8 @@ importers:
         specifier: ^0.87.1
         version: 0.87.1
       '@gotgenes/pi-permission-system':
-        specifier: ^33.0.8
-        version: 33.0.8(@earendil-works/pi-coding-agent@0.87.1(supports-color@7.2.0)(ws@8.21.3)(zod@4.6.5))(@earendil-works/pi-tui@0.87.1)
+        specifier: ^35.0.1
+        version: 35.0.1(@earendil-works/pi-coding-agent@0.87.1(supports-color@7.2.0)(ws@8.21.3)(zod@4.6.5))(@earendil-works/pi-tui@0.87.1)
       '@tsconfig/node22':
         specifier: 'catalog:'
         version: 22.0.6
@@ -500,8 +500,8 @@ packages:
       '@modelcontextprotocol/sdk':
         optional: true
 
-  '@gotgenes/pi-permission-system@33.0.8':
-    resolution: {integrity: sha512-YMVxojIazo5C4KQ+thUHb+GWtT5lPFFBoIY/R6p3agrNabbiE4cARkCbHXcK9DLBBx8AzQ95V7u4vJF+WPq/5g==}
+  '@gotgenes/pi-permission-system@35.0.1':
+    resolution: {integrity: sha512-AcmpoHqAXYHz01xdroJVo4/7AU68NWJ+ecIlbguFyfkX4NZwDudhgY1pq+sjAd4mo9Iig/j0fIqlFSkV2OH7MQ==}
     engines: {node: '>=22'}
     peerDependencies:
       '@earendil-works/pi-coding-agent': '>=0.79.0'
@@ -2545,7 +2545,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@gotgenes/pi-permission-system@33.0.8(@earendil-works/pi-coding-agent@0.87.1(supports-color@7.2.0)(ws@8.21.3)(zod@4.6.5))(@earendil-works/pi-tui@0.87.1)':
+  '@gotgenes/pi-permission-system@35.0.1(@earendil-works/pi-coding-agent@0.87.1(supports-color@7.2.0)(ws@8.21.3)(zod@4.6.5))(@earendil-works/pi-tui@0.87.1)':
     dependencies:
       '@earendil-works/pi-coding-agent': 0.87.1(supports-color@7.2.0)(ws@8.21.3)(zod@4.6.5)
       '@earendil-works/pi-tui': 0.87.1
