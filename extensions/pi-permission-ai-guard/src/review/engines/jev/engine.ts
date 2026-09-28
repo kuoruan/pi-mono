@@ -50,6 +50,8 @@ function fallbackReason(error: unknown): string | undefined {
     const status = error.status;
     // Auth/policy refusals and malformed requests need an operator. A 404/410
     // may mean a free model vanished, so try the explicitly trusted backup.
+    // 409 is deliberately excluded: the SDK's own retry policy never covered
+    // it, so a conflict surfaces to the operator instead of switching vendors.
     if ([402, 404, 408, 410, 429].includes(status) || status >= 500) {
       return `http-${status}`;
     }
@@ -78,6 +80,9 @@ export function createJevEngine(deps: JevEngineDeps): ReviewerEngine {
     { model: config.model, timeoutMs: typesafe.timeoutMs ?? config.timeoutMs, client: primary },
     ...config.fallbacks.map((entry, index) => ({
       model: entry.model,
+      // Backups stand in for the primary, so they take the top-level timeout —
+      // primary-only tuning must not leak onto an unrelated
+      // (possibly third-party) endpoint.
       timeoutMs: entry.timeoutMs ?? config.timeoutMs,
       client: deps.fallbackClients?.[index] ?? createTypesafeClient(entry.provider),
     })),
