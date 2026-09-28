@@ -26,8 +26,8 @@ import {
 } from "./header.ts";
 import { injectBg } from "./inject-bg.ts";
 import { borderBar } from "./row-frame.ts";
-import type { RenderView } from "./session.ts";
-import { shellBadgeColorOf, shellExitBadgeOf } from "./shell-status.ts";
+import type { FrameView } from "./session.ts";
+import { isShellTool, shellBadgeColorOf, shellExitBadgeOf } from "./shell-status.ts";
 import type { PreviewTextHost } from "./text-task.ts";
 import { collapseTail, expandKeyHint, tookFooter } from "./tool-output.ts";
 import type { CallState, RenderContext, ToolServices } from "./tool-services.ts";
@@ -75,7 +75,7 @@ export interface CallHeaderOpts {
    */
   status: CallState;
   /** The frame's derived view (scheme + pi theme). */
-  view: RenderView;
+  view: FrameView;
   /** The render context (expand state + invalidate). */
   ctx: RenderContext<object>;
   /** The injected services (the ellipsis switch). */
@@ -214,8 +214,7 @@ interface ErrorHeaderInput {
  */
 function errorHeaderOf(input: ErrorHeaderInput): string {
   const { name, message, theme, pathShortener } = input;
-  const isShell = name === "bash" || name === "powershell";
-  if (!isShell) return "";
+  if (!isShellTool(name)) return "";
   if (shellExitBadgeOf(message) !== undefined) return "\n";
   return `${formatToolFrameHeaderText(
     {
@@ -252,8 +251,7 @@ export function formatToolErrorResult(input: ErrorFrameInput): string {
   const { name, message, theme, pathShortener, expanded, indicatorStyle, tookMs, width } = input;
   // Body-only unless the shell status is unrecognized (ownership above).
   const header = errorHeaderOf({ name, message, theme, pathShortener });
-  const isShell = name === "bash" || name === "powershell";
-  const badge = isShell ? shellExitBadgeOf(message) : undefined;
+  const badge = isShellTool(name) ? shellExitBadgeOf(message) : undefined;
   // The row prefix: the bar glyph + one space in bar mode; EMPTY in
   // none mode — the frame Box's own padding is the single leading space
   // the row keeps (collapsing the column here means no second space

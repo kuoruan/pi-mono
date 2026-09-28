@@ -21,7 +21,7 @@ import type {
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@earendil-works/pi-coding-agent";
 import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 
-import { inertText } from "#src/core/ansi.ts";
+import { expandTabs, inertText } from "#src/core/ansi.ts";
 import { linesOf } from "#src/core/lines.ts";
 import { detectLanguage } from "#src/theme/language.ts";
 import type { RenderTheme, ResolvedTheme } from "#src/theme/scheme.ts";
@@ -79,7 +79,9 @@ function isSensitiveRead(raw: string, cwd: string): boolean {
 /**
  * The secret surfacing for one read: the verdict plus the masked text.
  * One call judges once and masks once — the suffix banner and the
- * body mask share this verdict, never classify twice per frame.
+ * body mask share this verdict within one assembly (the header and the
+ * body each assemble separately, so each frame judges at most twice —
+ * once per slot — never per line).
  */
 interface SecretSurfacing {
   /** True for secret-bearing basenames. */
@@ -315,7 +317,10 @@ function formatReadCall(input: ReadHeaderInput): string {
   if (!expanded && raw !== null) {
     const compact = classifyCompactRead({ raw, cwd, piRoot });
     if (compact?.kind === "skill") {
-      return theme.fg("accent", theme.bold(`✦ ${compact.label}`)) + theme.fg("muted", " skill");
+      // Inert like the path display (F2): the label is a basename slice
+      // of the model-supplied path.
+      const label = inertText(compact.label);
+      return theme.fg("accent", theme.bold(`✦ ${label}`)) + theme.fg("muted", " skill");
     }
     if (compact) {
       // The pi-docs origin mark: SDK-space paths collapse exactly like
@@ -325,10 +330,9 @@ function formatReadCall(input: ReadHeaderInput): string {
       // breadcrumb (muted dir + accent base) behind the mark; resource
       // labels stay a single accent span.
       const origin = compact.kind === "docs" ? theme.fg("muted", "[pi] ") : "";
+      const clean = inertText(compact.label);
       const label =
-        compact.kind === "docs"
-          ? formatDocsLabel(compact.label, theme)
-          : theme.fg("accent", compact.label);
+        compact.kind === "docs" ? formatDocsLabel(clean, theme) : theme.fg("accent", clean);
       return `${theme.fg("toolTitle", theme.bold(`read ${compact.kind}`))} ` + origin + label;
     }
   }
@@ -413,7 +417,10 @@ export function createReadWrapper(
       const raw = argStr(args?.path) ?? "";
       // Secret-bearing files mask dotenv values before highlight (the
       // gutter/line-count stay aligned — masking is same-line-count).
-      const masked = surfaceSecrets(raw, ctx.cwd, output).masked;
+      // Tabs expand before highlight/wrap (write parity): Shiki keeps
+      // tabs inside tokens and the wrapper measures a tab as one column,
+      // while pi-tui renders it as three spaces.
+      const masked = expandTabs(surfaceSecrets(raw, ctx.cwd, output).masked);
       // under the header — "did I read the right file" at a glance
       // (compact skill/docs labels included — the label names it, the
       // preview proves it). No seed, no notice, no Took: a preview is
@@ -425,7 +432,7 @@ export function createReadWrapper(
           text,
           prefix: "r",
           lines: previewLines,
-          isEmpty: previewLines.length === 0,
+          isEmpty: masked === "",
           derived: {
             output: masked,
             lines: previewLines,
@@ -476,7 +483,7 @@ export function createReadWrapper(
         text,
         prefix: "r",
         lines: contentLines,
-        isEmpty: contentLines.length === 0,
+        isEmpty: masked === "",
         derived: {
           output: masked,
           lines: contentLines,

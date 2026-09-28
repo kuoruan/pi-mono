@@ -1,6 +1,6 @@
 /**
  * Shiki syntax highlighting — the highlight LRU cache, language detection,
- * and the highlight entries (`RenderView.highlight`, `hlBlockResolved`;
+ * and the highlight entries (`FrameView.highlight`, `hlBlockResolved`;
  * ADR 0001/0002). Render-time theme interpretation lives in
  * theme-selection.ts.
  */

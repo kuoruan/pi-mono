@@ -23,7 +23,7 @@ import type { RenderTheme } from "#src/theme/scheme.ts";
 import { renderHeaderLine } from "./ellipsis.ts";
 import { ERROR_FRAME_DEFAULT_WIDTH, formatToolErrorResult, setToolErrorBg } from "./error-frame.ts";
 import { clearToolHeaderBg, resultLine } from "./header.ts";
-import type { RenderView } from "./session.ts";
+import type { FrameView } from "./session.ts";
 import {
   attachPreviewTask,
   clearPreviewTask,
@@ -47,7 +47,7 @@ import {
 export type RenderResultBody<TState extends object> = (args: {
   text: PreviewTextHost;
   /** The frame's derived view: `scheme` + `theme`, and `highlight` (the session seam). */
-  view: RenderView;
+  view: FrameView;
   ctx: RenderContext<TState>;
   /** The raw SDK result (details carry the execute-side payload). */
   result: AgentToolResult<unknown>;
@@ -88,7 +88,7 @@ export interface HeaderLineSpec<TState extends object> {
     renderArgs: unknown,
     theme: RenderTheme,
     ctx: RenderContext<TState>,
-    view: RenderView,
+    view: FrameView,
   ) => string;
   /**
    * The pinned status suffix (state that survives truncation — the
@@ -99,7 +99,7 @@ export interface HeaderLineSpec<TState extends object> {
     renderArgs: unknown,
     theme: RenderTheme,
     ctx: RenderContext<TState>,
-    view: RenderView,
+    view: FrameView,
   ) => string;
 }
 
@@ -107,7 +107,7 @@ export interface HeaderLineSpec<TState extends object> {
 export type RenderCallBody<TState extends object> = (args: {
   text: PreviewTextHost;
   /** The frame's derived view: `scheme` + `theme`, and `highlight` (the session seam). */
-  view: RenderView;
+  view: FrameView;
   ctx: RenderContext<TState>;
   /** The raw render args (may be partial while streaming). */
   renderArgs: unknown;

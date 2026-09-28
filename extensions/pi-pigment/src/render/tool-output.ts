@@ -15,6 +15,7 @@ import type {
 import { keyText } from "@earendil-works/pi-coding-agent";
 
 import { inertText } from "#src/core/ansi.ts";
+import { KEY_SEP } from "#src/core/escapes.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";
 import { linesOf } from "#src/core/lines.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
@@ -146,7 +147,7 @@ function limitNoticeOf(output: string, details: unknown): string {
  * ":"-joined stamps collide (Unix paths may contain colons, Windows drive
  * letters always do), and NUL cannot appear in any stamp we pass. Serves
  * BOTH the width-neutral identity (the attach guard's input stamp) and
- * the width-appended render key (`taskKeyOf(...) + "\u0000" + width`).
+ * the width-appended render key (`taskKeyOf(...) + KEY_SEP + width`).
  * Its callers are the named key builders below (plus outputTaskKey and
  * the derived PreviewIdentity shape) — a stamp list is spelled in one
  * place; wrapper call sites never join raw.
@@ -156,7 +157,7 @@ function limitNoticeOf(output: string, details: unknown): string {
  * @returns The joined key.
  */
 export function taskKeyOf(prefix: string, stamps: Array<string | number>): string {
-  return `${prefix}\u0000${stamps.join("\u0000")}`;
+  return `${prefix}${KEY_SEP}${stamps.join(KEY_SEP)}`;
 }
 
 /**

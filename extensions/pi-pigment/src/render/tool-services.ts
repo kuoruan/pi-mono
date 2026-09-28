@@ -11,12 +11,13 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 
 import type { HeaderEllipsis, IndicatorStyle } from "#src/config/config-schema.ts";
+import { inertText } from "#src/core/ansi.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
 import type { SeedTextMemo } from "#src/theme/seed.ts";
 
 import { expandHome, shortHome } from "./paths.ts";
-import type { RenderSession } from "./session.ts";
+import type { FrameSession } from "./session.ts";
 import type { ShellExitBadge } from "./shell-status.ts";
 import type { TextComponentFactory } from "./text-task.ts";
 
@@ -87,7 +88,11 @@ export function argStr(value: unknown): string | null {
  */
 export function headerPath(pathArg: unknown): string | null {
   const raw = argStr(pathArg);
-  return raw === null ? null : shortHome(raw || ".");
+  // Inert at the header seam (ADR 0004): the path arg is model output —
+  // raw ESC/OSC here would ride pigment's own OSC 8 link out to the
+  // terminal (clipboard writes, repositioning). Shortening/hyperlinking
+  // below only ever see the inert form.
+  return raw === null ? null : shortHome(inertText(raw) || ".");
 }
 
 /**
@@ -106,8 +111,10 @@ export function invalidArg(theme: RenderTheme): string {
  * The accent display path, hyperlinked from the RAW arg when the terminal
  * allows it (the SDK's linkPath shape — resolving the shortened "~/x"
  * would land under <cwd>/~/x). The invalid chip when the arg is not a
- * string. One home for the ls/read header parity claim (find/grep paint
- * the path plain — their SDK originals carry no link).
+ * string. The ls header's link home (find/grep paint
+ * the path plain — their SDK originals carry no link; read paints its
+ * own three-segment path via headerPathSegments, expanding `~` to the
+ * real home for the link target).
  *
  * @param raw - The stringified `path` arg (argStr's output: string, "", or null when invalid).
  * @param theme - The pi theme.
@@ -296,5 +303,5 @@ export interface ToolServices {
    * highlighting). The factory binds it per frame (`forTheme(theme)`);
    * nothing else in the render pipeline reads session state.
    */
-  render: RenderSession;
+  render: FrameSession;
 }

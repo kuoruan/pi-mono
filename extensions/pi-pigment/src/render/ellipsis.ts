@@ -8,7 +8,7 @@
 import { forEachCell, measurePlain } from "#src/core/ansi.ts";
 import { SEQ_BOLD_OFF, SEQ_ESC, SEQ_FG_DEFAULT, SEQ_RESET_BARE } from "#src/core/escapes.ts";
 
-import type { RenderView } from "./session.ts";
+import type { FrameView } from "./session.ts";
 import { termW } from "./term.ts";
 import type { PreviewTextHost } from "./text-task.ts";
 import { attachPreviewTask, clearPreviewTask, definePreviewTask } from "./text-task.ts";
@@ -135,7 +135,7 @@ export interface HeaderParts {
   /** The task key prefix (per tool). */
   prefix: string;
   /** The frame's derived view (scheme + pi theme). */
-  view: RenderView;
+  view: FrameView;
   /** The render context (expand state + invalidate). */
   ctx: RenderContext<object>;
   /** The injected services (the ellipsis switch). */

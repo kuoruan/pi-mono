@@ -12,6 +12,13 @@
 /** The ESC control character every ANSI escape sequence starts with. */
 export const SEQ_ESC = "\u001b";
 
+/**
+ * The NUL key separator: preview/task/cache keys join stamps with NUL —
+ * colons collide (Unix paths may contain them, Windows drive letters
+ * always do), and NUL cannot appear in any stamp we pass.
+ */
+export const KEY_SEP = "\u0000";
+
 /** The BEL terminator closing an OSC sequence. */
 export const SEQ_BEL = "\u0007";
 

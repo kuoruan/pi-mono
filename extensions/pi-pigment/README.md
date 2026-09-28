@@ -6,15 +6,16 @@ pi-pigment repaints what pi prints. Diffs get word-level change emphasis, shell 
 
 ## What it renders
 
-| Tool         | Rendering                                                                                                                                                                                                 |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `write`      | Diff with word-level change emphasis: split when balanced and the terminal is wide, unified (stacked) otherwise; new files render as a syntax-highlighted preview                                         |
-| `edit`       | Split (side-by-side) diff, auto-falling back to unified on narrow terminals or wrap-heavy hunks                                                                                                           |
-| `bash`       | The command itself renders in shell grammar (strings, flags, operators); the output keeps pi's native display: timing, preview windows, truncation footers (the native muted Elapsed/Took stay uncolored) |
-| `grep`       | Hit lines highlighted in the hit file's language with the matched pattern emphasized; `file:line:` prefixes stay muted                                                                                    |
-| `ls`         | Entries colored by type (directories accent + bold, code files tinted) in a tree listing with `├──`/`└──` connectors                                                                                      |
-| `find`       | Result paths colored by type: dim directory prefix, type-colored basename (accent dirs, tinted code files, warning-tinted limit notices)                                                                  |
-| `powershell` | The Windows shell twin: command colored in PowerShell grammar with the `PS>` prompt; output keeps pi's native display (Windows-only execution; native Elapsed/Took stay muted)                            |
+| Tool         | Rendering                                                                                                                                                                                                      |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `write`      | Diff with word-level change emphasis: split when balanced and the terminal is wide, unified (stacked) otherwise; new files render as a syntax-highlighted preview                                              |
+| `edit`       | Split (side-by-side) diff, auto-falling back to unified on narrow terminals or wrap-heavy hunks                                                                                                                |
+| `bash`       | The command itself renders in shell grammar (strings, flags, operators); the output keeps pi's native display: timing, preview windows, truncation footers (the native muted Elapsed/Took stay uncolored)      |
+| `grep`       | Hit lines highlighted in the hit file's language with the matched pattern emphasized; `file:line:` prefixes stay muted                                                                                         |
+| `ls`         | Entries colored by type (directories accent + bold, code files tinted) in a tree listing with `├──`/`└──` connectors                                                                                           |
+| `find`       | Result paths colored by type: dim directory prefix, type-colored basename (accent dirs, tinted code files, warning-tinted limit notices)                                                                       |
+| `powershell` | The Windows shell twin: command colored in PowerShell grammar with the `PS>` prompt; output keeps pi's native display (Windows-only execution; native Elapsed/Took stay muted)                                 |
+| `read`       | Path with dim directory + accent basename and a pinned `:offset-limit` range; SKILL.md/docs/lockfiles collapse to labels; secret-bearing files wear a `⚠ sensitive` flag with dotenv values masked in the body |
 
 Details worth knowing:
 
@@ -29,6 +30,7 @@ Details worth knowing:
   - anything else derives from its own nine `syntax*` colors, WCAG-AA-adjusted for the render backgrounds
   - an explicit `syntaxTheme` override paints tokens only; the canvas always belongs to the pi theme
 - Collapsed search output: grep/find/ls bodies collapse past the native renderers' own budgets (15/20/20 lines) with a `ctrl+o`-to-expand tail carrying the measured execution time in the success color — a tail footer only exists on a settled, successful call (an error renders the error frame instead, its own `Took` colored by the failure kind)
+- Secret masking is dotenv-shaped: only `KEY=value` assignment lines mask (values collapse to a prefix + `****`, key names stay readable); PEM/JSON bodies and non-assignment lines stay verbatim — the `⚠ sensitive` banner is the signal, the mask is best-effort, never a redaction guarantee
 - Large-input fallback: highlighting skips past 80,000 characters per block; the diff structure still renders
 - Strict edit safety: execution always delegates verbatim to the SDK tools (matching, uniqueness, overlap checks, mutation queues, aborts, BOM, and EOL preservation); only the rendering is replaced
 

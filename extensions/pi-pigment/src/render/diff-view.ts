@@ -14,7 +14,7 @@ import { MAX_HL_CHARS } from "#src/theme/highlight.ts";
 import type { ResolvedTheme } from "#src/theme/scheme.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
-import type { RenderView } from "./session.ts";
+import type { FrameView } from "./session.ts";
 
 /** The inputs both diff views share (split and unified take one frame). */
 export interface DiffViewOptions {
@@ -31,7 +31,7 @@ export interface DiffViewOptions {
    * frames and word emphasis, `highlight` for the code blocks. One input
    * — the scheme and the highlighter can never diverge.
    */
-  view: RenderView;
+  view: FrameView;
   /**
    * Left-edge change indicator style (config: indicatorStyle) — the
    * caller's configured style, always explicit (no default: the config

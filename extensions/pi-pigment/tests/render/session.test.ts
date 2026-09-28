@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createRenderSession, type RenderSessionInputs } from "#src/render/session.ts";
+import type { RenderSessionInputs } from "#src/render/session.ts";
 import { deriveResolvedTheme, type RenderTheme } from "#src/theme/scheme.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
 import { collectConvertedThemes } from "#src/theme/user-themes.ts";
@@ -40,7 +40,7 @@ describe("the scheme seam", () => {
   it("forTheme returns exactly the pure derivation (no hidden singleton state)", () => {
     const theme = darkTheme("external-theme");
     const roots = { topLevel: { added: { text: "#7ee787" } } };
-    const view = createRenderSession({
+    const view = makeRenderSession({
       diffRoots: roots,
       selection: { kind: "auto" },
       themeEnv: ENV,
@@ -66,7 +66,7 @@ describe("the scheme seam", () => {
       themeEnv: ENV,
       convertedThemes: [],
     };
-    const session = createRenderSession(inputs);
+    const session = makeRenderSession(inputs);
     session.forTheme(darkTheme());
     session.forTheme(darkTheme());
     expect(error).toHaveBeenCalledTimes(1);
@@ -75,7 +75,7 @@ describe("the scheme seam", () => {
         "WCAG enforcement assumes a consistent palette.",
     );
     // A second session reports its own (the flag is per session, not module).
-    createRenderSession(inputs).forTheme(darkTheme());
+    makeRenderSession(inputs).forTheme(darkTheme());
     expect(error).toHaveBeenCalledTimes(2);
     error.mockRestore();
   });
@@ -99,7 +99,7 @@ describe("the active-theme observation point", () => {
 
   it("an explicit bundled selection resolves to that theme (golden-name home)", async () => {
     const { selection } = await resolveSyntaxThemeSelection("vitesse-dark", ENV);
-    const view = createRenderSession({
+    const view = makeRenderSession({
       diffRoots: undefined,
       selection,
       themeEnv: ENV,
@@ -158,13 +158,13 @@ describe("identity completeness (two sessions, one process)", () => {
     const envA = { cwd: dirA, agentDir: join(dirA, "agent") };
     const envB = { cwd: dirB, agentDir: join(dirB, "agent") };
     // Two sessions, SAME pi theme name, built back to back in one process.
-    const sessionA = createRenderSession({
+    const sessionA = makeRenderSession({
       diffRoots: undefined,
       selection: { kind: "auto" },
       themeEnv: envA,
       convertedThemes: collectConvertedThemes(envA),
     });
-    const sessionB = createRenderSession({
+    const sessionB = makeRenderSession({
       diffRoots: undefined,
       selection: { kind: "auto" },
       themeEnv: envB,
@@ -188,13 +188,13 @@ describe("identity completeness (two sessions, one process)", () => {
   it("sessions with different selections stay independent", async () => {
     const theme = darkTheme("external-theme");
     const env = { cwd: "/selection-project", agentDir: "/selection-project/agent" };
-    const derived = createRenderSession({
+    const derived = makeRenderSession({
       diffRoots: undefined,
       selection: { kind: "auto" },
       themeEnv: env,
       convertedThemes: [],
     }).forTheme(theme);
-    const patched = createRenderSession({
+    const patched = makeRenderSession({
       diffRoots: undefined,
       selection: {
         kind: "object",

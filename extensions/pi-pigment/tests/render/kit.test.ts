@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 
 import packageJson from "#root/package.json" with { type: "json" };
 import { VERSION as PUBLIC_VERSION } from "#root/render-kit.ts";
+import type { RenderView as FacadeView } from "#root/render-kit.ts";
 import { VERSION } from "#src/package-json.ts";
 import {
   createRenderKit,
@@ -32,6 +33,7 @@ import {
   buildFakeTheme,
   type DrivenTaskComponent,
   makeRenderCtx,
+  makeRenderSession,
   makeTextComponent,
   plain,
   viewFor,
@@ -145,6 +147,19 @@ describe("channel B: the globalThis publication", () => {
     expect(facade.createRenderKit).toBe(createRenderKit);
     expect(facade.VERSION).toBe(VERSION);
   });
+
+  it("borrows only scheme + highlight (the chrome stays inside)", async () => {
+    const kit = await kitFor();
+    // Type-level narrow face: exactly the two borrowed keys (the runtime
+    // object still carries the chrome — structural covariance hides by
+    // type, not by stripping; FrameView extends RenderView pins
+    // narrow ⊆ full at compile time).
+    type BorrowedKeys = keyof FacadeView;
+    const keys: readonly BorrowedKeys[] = ["highlight", "scheme"];
+    expect(keys.toSorted()).toEqual(["highlight", "scheme"]);
+    const view: FacadeView = kit.session.forTheme(buildFakeTheme());
+    expect(typeof view.highlight).toBe("function");
+  });
 });
 
 describe("channel A: decorate", () => {
@@ -209,9 +224,10 @@ describe("channel A: decorate", () => {
         return { content: [], isError: false, details: undefined };
       },
     });
-    // The extension's own assembly path: the same factory, the same
-    // session, the same services shape.
-    const services = makeServices({ render: kit.session });
+    // The extension's own assembly path: the same factory over a full
+    // internal session (kit.session is the NARROW borrowed face — it
+    // cannot assemble wrappers).
+    const services = makeServices({ render: makeRenderSession() });
     const own = createGrepWrapper(mine, services);
     const result = {
       content: [{ type: "text", text: "src.ts:1:done" }],

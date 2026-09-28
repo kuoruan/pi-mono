@@ -54,10 +54,28 @@ export interface RenderSessionInputs extends ThemeResolveInputs {
   diffRoots: DiffRootsSpec | undefined;
 }
 
-/** One frame's derived view: bound to the pi theme the frame renders with. */
+/**
+ * The borrowed frame: the third-party composition point (scheme +
+ * highlight — everything a foreign renderer needs to paint code).
+ * The chrome source (`theme`), the install root (`piRoot`), and the
+ * token-theme observation point (`activeTheme`) stay on the internal
+ * frame — `FrameView extends RenderView` pins narrow ⊆ full, so the
+ * public face can only grow deliberately.
+ */
 export interface RenderView {
   /** The frame's color scheme (WCAG-enforced, root-derived). */
   readonly scheme: ResolvedTheme;
+  /**
+   * Highlight a code block through this session's resolution. Two spellings:
+   * `{ code, language }` when the caller knows the language, `{ code,
+   * filePath, context? }` when it knows the file — detection and seeding
+   * happen inside (no I/O; the context text is caller-supplied).
+   */
+  highlight(block: CodeBlock | FileCodeBlock): Promise<string[]>;
+}
+
+/** One frame's derived view: the borrowed face plus the internal chrome. */
+export interface FrameView extends RenderView {
   /** The pi theme this view is bound to (the chrome colors' source). */
   readonly theme: RenderTheme;
   /**
@@ -72,30 +90,33 @@ export interface RenderView {
    * Null when the selection resolves to no theme (unstyled).
    */
   activeTheme(): Promise<ShikiThemeInput | null>;
-  /**
-   * Highlight a code block through this session's resolution. Two spellings:
-   * `{ code, language }` when the caller knows the language, `{ code,
-   * filePath, context? }` when it knows the file — detection and seeding
-   * happen inside (no I/O; the context text is caller-supplied).
-   */
-  highlight(block: CodeBlock | FileCodeBlock): Promise<string[]>;
 }
 
 /** A session's render seam: the immutable inputs plus the frame binder. */
 export interface RenderSession {
-  /** This frame's derived view for the given pi theme. */
+  /** This frame's borrowed view for the given pi theme. */
   forTheme(theme: RenderTheme): RenderView;
 }
 
+/** A session's internal seam: binds the full frame (chrome included). */
+export interface FrameSession {
+  /** This frame's derived view for the given pi theme. */
+  forTheme(theme: RenderTheme): FrameView;
+}
+
 /**
- * Build a render session from explicit inputs — pure, no I/O. Every memo
- * inside keys on the identity of these inputs, so a new session is exactly
- * a new value (no invalidation protocol exists or is needed).
+ * Build the session's internal frame (chrome included) from explicit
+ * inputs — pure, no I/O. Every memo inside keys on the identity of these
+ * inputs, so a new session is exactly a new value (no invalidation
+ * protocol exists or is needed).
  *
  * @param inputs - The session's render inputs.
- * @returns The session seam.
+ * @returns The internal session seam.
+ * @internal - the extension's own assembly (ToolServices) and the test
+ * fixtures. Third parties take {@link createRenderSession} (narrow) or
+ * `kit.session`.
  */
-export function createRenderSession(inputs: RenderSessionInputs): RenderSession {
+export function createFrameSession(inputs: RenderSessionInputs): FrameSession {
   // The per-session instance state: the active-theme memo, the scheme
   // memo, the install root, and the one-shot polarity-warning flag —
   // nothing here is reachable from another session instance.
@@ -130,7 +151,7 @@ export function createRenderSession(inputs: RenderSessionInputs): RenderSession 
   };
 
   return {
-    forTheme(theme: RenderTheme): RenderView {
+    forTheme(theme: RenderTheme): FrameView {
       const scheme = deriveFor(theme);
       const resolve = (): Promise<ShikiThemeInput | null> =>
         resolveActiveThemeMemoized(themeMemo, inputs, scheme, theme);
@@ -163,13 +184,25 @@ export async function autoRenderSession(
   env: SessionEnv,
   config: PigmentConfig,
   reportIssue: IssueSink = defaultIssueSink,
-): Promise<RenderSession> {
+): Promise<FrameSession> {
   const resolution = await resolveSyntaxThemeSelection(config.syntaxTheme, env);
   for (const issue of resolution.issues) reportIssue(issue.message);
-  return createRenderSession({
+  return createFrameSession({
     diffRoots: resolution.rootsSpec,
     selection: resolution.selection,
     themeEnv: env,
     convertedThemes: collectConvertedThemes(env),
   });
+}
+
+/**
+ * Build a render session from explicit inputs — the borrowed factory
+ * (pure, no I/O). The same value as the internal frame, narrowed to the
+ * borrowed face by covariance: no adapter, no copy.
+ *
+ * @param inputs - The session's render inputs.
+ * @returns The borrowed session seam.
+ */
+export function createRenderSession(inputs: RenderSessionInputs): RenderSession {
+  return createFrameSession(inputs);
 }

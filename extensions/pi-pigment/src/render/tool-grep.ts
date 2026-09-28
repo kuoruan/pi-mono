@@ -16,7 +16,7 @@ import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { assembleOutputBody } from "./output-assembly.ts";
 import { accentEmphasis, emphasize, type MatchFlags } from "./pattern-emphasis.ts";
-import type { RenderView } from "./session.ts";
+import type { FrameView } from "./session.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import { COLLAPSED_LINES, joinBodyTail, outputMemoOf, renderPlainOutput } from "./tool-output.ts";
 import {
@@ -289,7 +289,7 @@ interface RenderHighlightedOptions {
   /** The grep flags (literal / ignoreCase). */
   flags: MatchFlags;
   /** The frame's view (the highlight entry; scheme/theme ride along). */
-  view: RenderView;
+  view: FrameView;
 }
 
 /**

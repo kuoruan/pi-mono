@@ -8,6 +8,7 @@
 import type { Component } from "@earendil-works/pi-tui";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
+import { KEY_SEP } from "#src/core/escapes.ts";
 import { lastHunkNewStart } from "#src/theme/seed.ts";
 
 import { type DiffViewOptions } from "./diff-view.ts";
@@ -221,7 +222,7 @@ export function definePreviewTask(spec: DefinePreviewTaskSpec): PreviewTask {
     placeholder: spec.placeholder,
     fallback: spec.fallback,
     invalidate: spec.invalidate,
-    key: spec.widthAware ? (width: number) => `${identity}\u0000${width}` : () => identity,
+    key: spec.widthAware ? (width: number) => `${identity}${KEY_SEP}${width}` : () => identity,
     render: spec.render,
   };
 }

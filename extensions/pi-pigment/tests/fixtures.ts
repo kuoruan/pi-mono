@@ -14,9 +14,9 @@ import { Text } from "@earendil-works/pi-tui";
 
 import { createPigmentExtension } from "#src/extension.ts";
 import {
-  createRenderSession,
-  type RenderSession,
-  type RenderView,
+  createFrameSession,
+  type FrameSession,
+  type FrameView,
   type RenderSessionInputs,
 } from "#src/render/session.ts";
 import type { PreviewTask, PreviewTextHost } from "#src/render/text-task.ts";
@@ -93,8 +93,8 @@ const DEFAULT_TEST_ENV = {
  * @param inputs - Partial overrides (undefined fields take the defaults).
  * @returns A session the wrapper suites can drive renders through.
  */
-export function makeRenderSession(inputs: Partial<RenderSessionInputs> = {}): RenderSession {
-  return createRenderSession({
+export function makeRenderSession(inputs: Partial<RenderSessionInputs> = {}): FrameSession {
+  return createFrameSession({
     diffRoots: undefined,
     selection: { kind: "auto" } satisfies ThemeSelection,
     themeEnv: DEFAULT_TEST_ENV,
@@ -104,7 +104,7 @@ export function makeRenderSession(inputs: Partial<RenderSessionInputs> = {}): Re
 }
 
 /**
- * A RenderView bound to a fake theme — the theme/render suites' entry to
+ * A FrameView bound to a fake theme — the theme/render suites' entry to
  * the session seam.
  *
  * @param theme - The pi theme (defaults to the fake).
@@ -114,7 +114,7 @@ export function makeRenderSession(inputs: Partial<RenderSessionInputs> = {}): Re
 export function viewFor(
   theme: RenderTheme = buildFakeTheme(),
   inputs: Partial<RenderSessionInputs> = {},
-): RenderView {
+): FrameView {
   return makeRenderSession(inputs).forTheme(theme);
 }
 

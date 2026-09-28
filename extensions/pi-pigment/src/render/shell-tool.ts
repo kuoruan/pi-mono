@@ -28,12 +28,12 @@
 import type { BashToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import { inertText } from "#src/core/ansi.ts";
-import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
+import { KEY_SEP, SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
 import { astInjectRegions, fallbackHeredocRegions } from "./heredoc-inject.ts";
-import type { RenderView } from "./session.ts";
+import type { FrameView } from "./session.ts";
 import { shellBadgeText, shellExitBadgeOf } from "./shell-status.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import {
@@ -55,7 +55,7 @@ export interface ShellToolProfile {
    * powershell has no equivalent grammar — passes null). Null means
    * the command highlights purely in the shell grammar.
    */
-  inject: ((command: string, view: RenderView) => Promise<string>) | null;
+  inject: ((command: string, view: FrameView) => Promise<string>) | null;
 }
 
 /** The bash profile: shellscript grammar, $ prompt, the AST injection. */
@@ -128,7 +128,7 @@ export function createShellWrapper(
       // AND theme identity — a mid-session theme switch re-highlights
       // instead of serving the old theme's colors; arg-streaming frames
       // re-render cheaply until args complete.
-      const cacheKey = `${scheme.identity}\u0000${command}`;
+      const cacheKey = `${scheme.identity}${KEY_SEP}${command}`;
       const cached =
         ctx.state.commandHighlightFor === cacheKey
           ? (ctx.state.commandHighlight as string | undefined)
@@ -212,7 +212,7 @@ export function createShellWrapper(
 async function renderShellCommand(
   command: string,
   profile: ShellToolProfile,
-  view: RenderView,
+  view: FrameView,
 ): Promise<string> {
   const regions = profile.inject ? await profile.inject(command, view) : null;
   if (regions !== null) return regions;
@@ -229,10 +229,10 @@ async function renderShellCommand(
  *
  * @param command - The inert command text.
  * @param view - The frame view (the session's highlight entry).
- * @returns The rendered command, or null when even the fallback fails
- *   (never — the scanner always yields segments).
+ * @returns The rendered command (the scanner always yields segments —
+ * the fallback cannot fail).
  */
-async function bashInjectRender(command: string, view: RenderView): Promise<string> {
+async function bashInjectRender(command: string, view: FrameView): Promise<string> {
   // One region model, two producers: the AST path when the parse holds,
   // the line scanner when it throws (garbage input, or the upstream
   // control-flow+heredoc bug). Both emit InjectRegion[] in source order —

@@ -45,6 +45,15 @@ describe("read call header", () => {
     expect(readCallText({ path: "src/a.ts" }, true)).toContain("src/a.ts");
   });
 
+  it("inerts escape sequences in the path arg (no OSC through the header)", () => {
+    // A hostile path: raw ESC/OSC would ride pigment's own hyperlink out.
+    const evil = "src/\x1b]0;pwned\x07a.ts";
+    const text = readCallText({ path: evil }, true);
+    expect(text).not.toContain("\x1b]0;");
+    expect(text).not.toContain("\x07");
+    expect(text).toContain("src/");
+  });
+
   it("appends the line range", () => {
     expect(readCallText({ path: "src/a.ts", offset: 10, limit: 20 }, true)).toContain(":10-29");
   });
@@ -141,6 +150,35 @@ describe("read call header", () => {
     expect(body).toContain("# comment=yes");
   });
 
+  it("masks export-prefixed and quoted dotenv values, leaves JSON bodies alone", async () => {
+    resetPigmentForTest();
+    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const { ctx } = makeRenderCtx();
+    ctx.args = { path: "/x/.env" };
+    ctx.expanded = true;
+    const result = {
+      content: [
+        { type: "text", text: 'export FOO=barbar\nQUOTED="secret-value"\n{"key": "raw"}\n' },
+      ],
+    };
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
+      result,
+      { expanded: true, isPartial: false },
+      buildFakeTheme(),
+      ctx,
+    );
+    component.render(120);
+    await vi.waitFor(() => {
+      if (!plain(component.text.text).includes("FOO")) throw new Error("waiting");
+    });
+    const body = plain(component.text.text);
+    // export prefix + quoted values mask (quotes ride the head/value split).
+    expect(body).not.toContain("barbar");
+    expect(body).not.toContain("secret-value");
+    // JSON object lines are not dotenv assignments — banner-only by design.
+    expect(body).toContain('"key"');
+  });
+
   it("leaves non-secret bodies byte-identical", async () => {
     resetPigmentForTest();
     const tool = createReadWrapper({ name: "read" } as never, makeServices());
@@ -161,6 +199,48 @@ describe("read call header", () => {
     });
     expect(plain(component.text.text)).toContain("const a = 1;");
     expect(plain(component.text.text)).toContain("url = http://x;");
+  });
+
+  it("expands tabs before highlight (pi-tui renders a tab as three spaces)", async () => {
+    resetPigmentForTest();
+    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const { ctx } = makeRenderCtx();
+    ctx.args = { path: "/x/Makefile" };
+    ctx.expanded = true;
+    const result = { content: [{ type: "text", text: "target:\n\tcmd\n" }] };
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
+      result,
+      { expanded: true, isPartial: false },
+      buildFakeTheme(),
+      ctx,
+    );
+    component.render(120);
+    await vi.waitFor(() => {
+      if (!plain(component.text.text).includes("target:")) throw new Error("waiting");
+    });
+    const body = plain(component.text.text);
+    expect(body).toContain("   cmd");
+    expect(body).not.toContain("\t");
+  });
+
+  it("renders an empty file as an empty body (no orphan gutter)", async () => {
+    resetPigmentForTest();
+    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const { ctx } = makeRenderCtx();
+    ctx.args = { path: "/x/empty.ts" };
+    ctx.expanded = true;
+    const result = { content: [{ type: "text", text: "" }] };
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
+      result,
+      { expanded: true, isPartial: false },
+      buildFakeTheme(),
+      ctx,
+    );
+    component.render(120);
+    // The empty body renders empty (renderEmpty — no preview task, no
+    // orphan gutter line).
+    expect(component.previewTask).toBeUndefined();
+    expect(plain(component.text.text)).toBe("");
   });
 });
 

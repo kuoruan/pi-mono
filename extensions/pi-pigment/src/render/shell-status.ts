@@ -51,6 +51,17 @@ const TERMINATED_SUFFIX = "Command terminated without an exit code";
  *   (a non-shell error, or an upstream message-format change — the frame
  *   then renders without a badge, degraded never broken).
  */
+/**
+ * Whether the tool is a shell tool (badge parsing applies). One home —
+ * the taxonomy owns the membership, not each call site.
+ *
+ * @param name - The tool's name.
+ * @returns True for bash/powershell.
+ */
+export function isShellTool(name: string): boolean {
+  return name === "bash" || name === "powershell";
+}
+
 export function shellExitBadgeOf(message: string): ShellExitBadge | undefined {
   const exit = message.match(EXIT_CODE_RE);
   if (exit) {

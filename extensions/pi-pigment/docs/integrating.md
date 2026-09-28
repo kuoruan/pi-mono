@@ -125,7 +125,7 @@ export default function myNotes(pi: ExtensionAPI) {
 }
 ```
 
-A `RenderView` carries `scheme` (derived colors), `theme` (the active theme object), `highlight(...)` (Shiki highlighting themed by THIS session), and `activeTheme()` (the resolved token theme — diagnostics).
+A `RenderView` carries `scheme` (derived colors) and `highlight(...)` (Shiki highlighting themed by THIS session) — the whole borrowed face, nothing else.
 
 `highlight` takes two spellings — `{ code, language }` when you know the language, `{ code, filePath, context? }` when you know the file (detection and seeding inside; no I/O, the context text is caller-supplied, the seed is the text before the slice):
 
