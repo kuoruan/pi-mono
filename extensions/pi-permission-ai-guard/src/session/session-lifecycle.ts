@@ -55,13 +55,12 @@
 import { type Authorizer, getPermissionsService } from "@gotgenes/pi-permission-system";
 
 import { type LoadConfigResult } from "#src/config/config-layer.ts";
-import { hasTypesafeProvider, LINK_NAME } from "#src/config/config-schema.ts";
+import { LINK_NAME } from "#src/config/config-schema.ts";
 import { effectiveOverride, type SessionOverrides } from "#src/config/session-overrides.ts";
 import { type ModelCallFn, type ModelRegistryLike } from "#src/model/model-review.ts";
 import { NOTIFY_PREFIX, warn, type NotifyLevel } from "#src/notice.ts";
+import { buildReviewerPool } from "#src/review/build-pool.ts";
 import { type BreakerTier, CircuitBreaker } from "#src/review/circuit-breaker.ts";
-import { createJevEngine } from "#src/review/engines/jev/index.ts";
-import { createLlmEngine } from "#src/review/engines/llm/index.ts";
 import type { SessionManagerLike } from "#src/review/request/transcript-stripper.ts";
 import { type DenyRecord, type ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
 import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
@@ -406,21 +405,15 @@ export class SessionLifecycle {
       return;
     }
     try {
-      // Engine selection: the single place the provider shape fans out.
-      // string = registry reference (LLM engine); object = direct
-      // connection (Jev engine — TypeSafe SDK, no registry involved).
-      // The config union's members carry the pairing, so the typeof
-      // branch narrows straight to each engine's config type.
-      // An unresolvable engine throws here → caught below → fail-safe
+      // Pool assembly: the single place the config fans out into the
+      // ordered endpoint list (primary + fallbacks, any lane mix). An
+      // unresolvable endpoint throws here → caught below → fail-safe
       // session start (no auto-review), never a per-ask surprise.
       const config = session.config;
-      const engine: ReviewerEngine = hasTypesafeProvider(config)
-        ? createJevEngine({ config })
-        : createLlmEngine({
-            config,
-            registry: session.registry,
-            modelCall: this.#deps.modelCall,
-          });
+      const engine: ReviewerEngine = buildReviewerPool(config, {
+        registry: session.registry,
+        modelCall: this.#deps.modelCall,
+      });
       const deps: ReviewPipelineDeps = {
         config,
         engine,

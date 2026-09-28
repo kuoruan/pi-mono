@@ -8,8 +8,9 @@
  * into a ReviewOutcome": model resolution, auth, prompt/question building,
  * the call itself, and outcome parsing.
  *
- * Adapters: `createLlmEngine` (the pi ModelRegistry path) and
- * `createJevEngine` (the TypeSafe System One path).
+ * Adapter: `createReviewerPool` (one ordered failover loop over
+ * heterogeneous endpoints; per-lane adapters translate backend failures
+ * into the pool's three-state disposition).
  */
 
 import type { AuditCorrelation } from "#src/audit/decision-record.ts";

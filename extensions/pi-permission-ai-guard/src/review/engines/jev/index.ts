@@ -10,4 +10,4 @@
  * is internal; tests import the deep modules directly.
  */
 
-export { createJevEngine } from "./engine.ts";
+export { createJevAdapter } from "./adapter.ts";

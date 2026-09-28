@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { configSchema, hasTypesafeProvider } from "#src/config/config-schema.ts";
-import { createLlmEngine } from "#src/review/engines/llm/engine.ts";
+import { buildReviewerPool } from "#src/review/build-pool.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { makeDetails } from "#test/fixtures.ts";
 
@@ -50,8 +50,7 @@ describe("fallback verdict cache", () => {
       cache: { maxEntries: 8 },
     });
     if (hasTypesafeProvider(config)) throw new Error("expected LLM config");
-    const engine = createLlmEngine({
-      config,
+    const engine = buildReviewerPool(config, {
       registry: defaultRegistry({
         find: (provider, model) => ({ ...fakeModel, provider, id: model }) as never,
       }),

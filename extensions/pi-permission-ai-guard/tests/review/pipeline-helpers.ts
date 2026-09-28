@@ -16,15 +16,11 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { PermissionCheckResult, PermissionQuery } from "@gotgenes/pi-permission-system";
 import { expect } from "vitest";
 
-import {
-  type AiGuardConfig,
-  type RegistryConfig,
-  configSchema,
-} from "#src/config/config-schema.ts";
+import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
 import type { ModelCallFn, ModelRegistryLike } from "#src/model/model-review.ts";
 import type { NotifyFn } from "#src/notice.ts";
+import { buildReviewerPool } from "#src/review/build-pool.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
-import { createLlmEngine } from "#src/review/engines/llm/index.ts";
 import type { ReviewPipelineDeps, createReviewPipeline } from "#src/review/review-pipeline.ts";
 import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
@@ -216,17 +212,15 @@ export const defaultRegistry = (
 });
 
 /**
- * Default LLM engine: registry + modelCall wrapped behind the engine seam.
+ * Default pooled engine: registry + modelCall wrapped behind the engine seam.
  *
  * @param opts - Optional `modelCall`/`registry` overrides for fixtures.
- * @returns An LLM reviewer engine.
+ * @returns A pooled reviewer engine (single LLM endpoint, no fallbacks).
  */
 export const makeEngine = (
   opts: { modelCall?: ModelCallFn; registry?: ModelRegistryLike } = {},
 ): ReviewerEngine =>
-  createLlmEngine({
-    // Fixture configs are LLM-shaped (string provider); the narrow proves it.
-    config: baseConfig as RegistryConfig,
+  buildReviewerPool(baseConfig, {
     registry: opts.registry ?? defaultRegistry(),
     modelCall:
       opts.modelCall ?? makeFakeCompleteSimple([{ type: "text", text: '{"verdict":"allow"}' }]),

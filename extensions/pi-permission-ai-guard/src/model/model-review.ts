@@ -26,6 +26,7 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AuditCorrelation } from "#src/audit/decision-record.ts";
 import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT } from "#src/audit/events.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
+import type { AvailabilityReason } from "#src/model/model-verdict.ts";
 import { availabilityReason } from "#src/review/engines/llm/availability.ts";
 import {
   classifyAbortish,
@@ -75,7 +76,7 @@ type CallResult =
       reply?: never;
       deferKind: ModelCallDeferKind;
       latencyMs: number;
-      availabilityReason?: string;
+      availabilityReason?: AvailabilityReason;
     };
 
 /**

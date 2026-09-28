@@ -96,6 +96,15 @@ export const typesafeFallbackSchema = z
   })
   .strict();
 
+/**
+ * One backup reviewer in either lane: a registry model (string provider)
+ * or an explicitly authenticated System One endpoint (object provider).
+ * The provider shape discriminates — no same-lane constraint.
+ */
+export const fallbackItemSchema = z.union([llmFallbackSchema, typesafeFallbackSchema]);
+
+export type FallbackItem = z.infer<typeof fallbackItemSchema>;
+
 /** A Jev instruction overlay value: string, JSON object, or array (SDK EntryType). */
 const jevInstructionValueSchema = z.union([
   z.string().min(1),
@@ -148,6 +157,12 @@ const configBaseSchema = z.object({
   // - "!pattern": exclude a pattern (takes priority over inclusions)
   // Empty array = review nothing. Excludes-only (no includes) = review nothing.
   surfaces: z.array(z.string().min(1)).default(["bash", "mcp", "skill"]),
+
+  // Ordered backup reviewers in any lane: registry models (resolved
+  // through Pi's registry) or System One endpoints (explicitly
+  // authenticated). The provider shape discriminates per item — no
+  // same-lane constraint. An empty list preserves single-model behavior.
+  fallbacks: fallbackItemSchema.array().max(5).default([]),
 
   // Jev behavior thresholds (object providers only).
   typesafe: z
@@ -221,16 +236,10 @@ export const configSchema = z
   .union([
     configBaseSchema.extend({
       provider: z.string().min(1),
-      // This lane resolves each alternate model through Pi's registry; no
-      // System One credentials or URLs are accepted in chat-model mode.
-      fallbacks: z.array(llmFallbackSchema).max(5).default([]),
       instructions: z.string().min(1).nullable().default(null),
     }),
     configBaseSchema.extend({
       provider: typesafeProviderSchema,
-      // Ordered, explicitly authenticated System One endpoints. An empty list
-      // preserves the original single-client behavior.
-      fallbacks: z.array(typesafeFallbackSchema).max(5).default([]),
       instructions: z
         .union([z.string().min(1), jevInstructionsSchema])
         .nullable()

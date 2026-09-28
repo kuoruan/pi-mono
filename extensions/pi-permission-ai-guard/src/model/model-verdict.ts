@@ -3,6 +3,34 @@ import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import { isObjectRecord, normalizeAndRedactText, safeStringify } from "#src/utils.ts";
 
+/**
+ * Safe availability-failure category for ordered failover; never an
+ * error body. Adapters report one of these when the backend could not
+ * serve the request; the pool advances to the next endpoint on it.
+ */
+export type AvailabilityReason =
+  | "quota"
+  | "timeout"
+  | "connection"
+  | "model-unresolved"
+  | `http-${number}`;
+
+/** HTTP statuses that switch backends (failover, not same-backend retry). */
+const SWITCHABLE_STATUS: ReadonlySet<number> = new Set([402, 404, 408, 409, 410, 425, 429]);
+
+/**
+ * Classify a numeric HTTP status by the shared switchable table.
+ *
+ * @param status - The HTTP status (or unknown value).
+ * @returns The `http-xxx` reason when the status switches, else undefined.
+ */
+export function switchableStatusReason(status: unknown): AvailabilityReason | undefined {
+  return typeof status === "number" &&
+    (SWITCHABLE_STATUS.has(status) || (status >= 500 && status < 600))
+    ? `http-${status}`
+    : undefined;
+}
+
 /** Why a model call deferred (for logging/debugging). */
 export type ModelCallDeferKind =
   | "empty-reply"
@@ -56,8 +84,8 @@ export interface ReviewOutcome {
   verdict: AuthorizerVerdict;
   /** Classified defer reason (timeout / empty-reply / no-json / model-defer / etc.). */
   deferKind?: ModelCallDeferKind;
-  /** Safe availability failure category for ordered LLM failover; never an error body. */
-  availabilityReason?: string;
+  /** Safe availability failure category for ordered failover; never an error body. */
+  availabilityReason?: AvailabilityReason;
   /** Model explanation for a defer verdict, retained for audit logging. */
   deferReason?: string;
   /**

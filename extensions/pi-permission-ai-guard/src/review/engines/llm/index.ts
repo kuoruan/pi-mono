@@ -1,3 +1,3 @@
-/** LLM reviewer: the pi ModelRegistry backend behind the ReviewerEngine seam. */
+/** LLM lane adapter: one registry-model attempt behind the pool's three-state seam. */
 
-export { createLlmEngine } from "./engine.ts";
+export { createLlmAdapter } from "./adapter.ts";

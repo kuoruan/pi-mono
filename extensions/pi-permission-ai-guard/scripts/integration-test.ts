@@ -39,16 +39,10 @@ import type {
   PromptPermissionDetails,
 } from "@gotgenes/pi-permission-system";
 
-import {
-  type AiGuardConfig,
-  type RegistryConfig,
-  configSchema,
-  hasTypesafeProvider,
-} from "#src/config/config-schema.ts";
+import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
 import { type ModelRegistryLike, createModelCall } from "#src/model/model-review.ts";
+import { buildReviewerPool } from "#src/review/build-pool.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
-import { createJevEngine } from "#src/review/engines/jev/index.ts";
-import { createLlmEngine } from "#src/review/engines/llm/index.ts";
 import type { SessionManagerLike } from "#src/review/request/transcript-stripper.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
 import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
@@ -291,25 +285,37 @@ function buildHarness(
   authorize: ReturnType<typeof createReviewPipeline>;
   log: AuthorizerLog & { events: LogEvent[] };
 } {
-  // The fake registry only exists on the LLM path (Jev never touches it) —
-  // built lazily inside the branch so its non-null inputs stay non-null.
-  const llmEngine = (): ReviewerEngine => {
-    if (model === null || providerInstance === null) {
-      throw new Error("LLM harness requires a model and provider instance");
-    }
-    const registry: ModelRegistryLike = {
-      find: () => model,
-      getApiKeyAndHeaders: async () => ({ ok: true, apiKey }),
-      // Integration harness: stand in for the agent's registry by delegating
-      // to the real provider (dev-only; pi-ai >= 0.86 brands the provider input).
-      complete: (m, context, options) =>
-        // The harness only runs the anthropic/openai providers, both Simple.
-        providerInstance
-          .streamSimple(m, normalizeContext(context), options as SimpleStreamOptions | undefined)
-          .result(),
-    };
-    return createLlmEngine({
-      config: config as RegistryConfig,
+  // A registry with no models: LLM endpoints resolve to model-unresolved
+  // (failover/defer as configured); Jev endpoints never touch it.
+  const nullRegistry: ModelRegistryLike = {
+    find: () => undefined,
+    getApiKeyAndHeaders: async () => ({ ok: false as const, error: "no registry" }),
+    complete: async () => {
+      throw new Error("no registry");
+    },
+  };
+  // The fake registry only serves LLM endpoints (Jev never touches it) —
+  // null on the pure-Jev path. Pool assembly dispatches per endpoint lane.
+  const poolEngine = (): ReviewerEngine => {
+    const registry: ModelRegistryLike =
+      model === null || providerInstance === null
+        ? nullRegistry
+        : {
+            find: () => model,
+            getApiKeyAndHeaders: async () => ({ ok: true, apiKey }),
+            // Integration harness: stand in for the agent's registry by delegating
+            // to the real provider (dev-only; pi-ai >= 0.86 brands the provider input).
+            complete: (m, context, options) =>
+              // The harness only runs the anthropic/openai providers, both Simple.
+              providerInstance
+                .streamSimple(
+                  m,
+                  normalizeContext(context),
+                  options as SimpleStreamOptions | undefined,
+                )
+                .result(),
+          };
+    return buildReviewerPool(config, {
       registry,
       modelCall: createModelCall(() => registry),
     });
@@ -322,9 +328,9 @@ function buildHarness(
   };
   const authorize = createReviewPipeline({
     config,
-    // Jev path: the engine owns the SDK call — no registry, model, or
-    // provider instance involved. LLM path: unchanged fake registry.
-    engine: hasTypesafeProvider(config) ? createJevEngine({ config }) : llmEngine(),
+    // Pool assembly fans out per endpoint lane: the Jev lane owns its SDK
+    // call (no registry involved), the LLM lane uses the fake registry.
+    engine: poolEngine(),
     sessionManager: tc.sessionManager ?? emptySession(),
     cwd: process.cwd(),
     circuitBreaker: new CircuitBreaker(),

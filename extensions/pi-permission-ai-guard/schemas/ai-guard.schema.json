@@ -26,7 +26,7 @@
     "fallbacks": {
       "type": "array",
       "maxItems": 5,
-      "description": "Ordered backup reviewers (defaults to none). Chat models use Pi registry provider/model ids; Jev uses separate System One connection credentials. Backup entries must match the primary lane.",
+      "description": "Ordered backup reviewers in any lane (defaults to none). Chat-model entries use Pi registry provider/model ids; System One entries carry their own URL, key and model.",
       "items": {
         "oneOf": [
           {
@@ -219,20 +219,5 @@
     }
   },
   "required": ["provider", "model"],
-  "allOf": [
-    {
-      "if": { "properties": { "provider": { "type": "string" } }, "required": ["provider"] },
-      "then": {
-        "properties": {
-          "fallbacks": { "items": { "properties": { "provider": { "type": "string" } } } }
-        }
-      },
-      "else": {
-        "properties": {
-          "fallbacks": { "items": { "properties": { "provider": { "type": "object" } } } }
-        }
-      }
-    }
-  ],
   "additionalProperties": false
 }
