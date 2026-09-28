@@ -1,5 +1,17 @@
 # pi-pigment
 
+## 0.3.0
+
+### Minor Changes
+
+- 57cb277: Polish read headers: plain paths dim the directory and accent the basename, the line range pins to the row so truncation never eats it, lockfiles collapse to a generated label, and secret-bearing files (`.env`, keys, credentials) wear a sensitive flag with their values masked in the body.
+- 56bc647: Take over the read tool: the call header mirrors the SDK shape (compact skill/docs labels, path plus warning line-range suffix) on pigment's header line, and the expanded body paints the slice through the session's Shiki highlight (file-sourced spelling, with offset-slice seeding from a memoized disk read) plus the SDK truncation notice and Took footer; collapsed frames stay empty and image results pass through untouched.
+
+### Patch Changes
+
+- c77a9d2: Harden the borrowed render surface: third-party extensions now see only the scheme plus highlighting, and hostile escape sequences in file paths can no longer reach the terminal through headers.
+- 1c08fbf: Internal render cleanup with no visible change: settled frames release their resources through one hook, the shell failure badge lives in one module, and per-shell differences are declared in one place. Test fixtures gain shared helpers so suites stop repeating the same shapes.
+
 ## 0.2.3
 
 ### Patch Changes

@@ -1,5 +1,16 @@
 # pi-permission-ai-guard
 
+## 0.11.0
+
+### Minor Changes
+
+- 86024d0: Let `fallbacks` mix chat-model and System One reviewers in any order behind one ordered failover loop. Valid decisions stay final, auth failures never switch vendors, and backup verdicts are never cached.
+- 57219ce: Show an optional notice when AI Guard approves a permission request, so you can tell it approved the request without exposing the command. Enable it with `notifyApprovals: true` and `notifyLevel: "info"`.
+
+### Patch Changes
+
+- cba5754: Consolidate reviewer internals with no behaviour change: one availability classifier beside its type, instructions shaping in one module, and no redundant `detail` on model-unresolved debug records.
+
 ## 0.10.1
 
 ### Patch Changes
