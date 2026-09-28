@@ -6,7 +6,7 @@ catalog:
   "@types/node": ^22.20.4
   memfs: ^4.79.0
   typescript: ^7.0.2
-  vitest: ^5.0.1
+  vitest: ^5.0.2
 
 minimumReleaseAge: 10
 
