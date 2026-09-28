@@ -429,7 +429,7 @@ describe("attachDiffPreview (the tool wrappers' defaults)", () => {
     // pinned against diffPreviewKey, the builder setDiffPreviewTask uses.
     const view = viewFor(buildFakeTheme());
     const { ctx } = makeRenderCtx(); // settled: argsComplete, not partial
-    const settled = makeTextComponent() as unknown as PreviewTextHost;
+    const settled = makeTextComponent();
     attach(settled, ctx, "bar", view);
     expect(settled.previewIdentity).toBe(
       diffPreviewKey({
@@ -442,7 +442,7 @@ describe("attachDiffPreview (the tool wrappers' defaults)", () => {
     );
     ctx.isPartial = true;
     ctx.argsComplete = false;
-    const pending = makeTextComponent() as unknown as PreviewTextHost;
+    const pending = makeTextComponent();
     attach(pending, ctx, "bar", view);
     expect(pending.previewIdentity).toBe(
       diffPreviewKey({
@@ -459,7 +459,7 @@ describe("attachDiffPreview (the tool wrappers' defaults)", () => {
     const view = viewFor(buildFakeTheme());
     const { ctx, invalidated } = makeRenderCtx();
     const attachWith = (indicatorStyle: IndicatorStyle): PreviewTextHost => {
-      const host = makeTextComponent() as unknown as PreviewTextHost;
+      const host = makeTextComponent();
       attach(host, ctx, indicatorStyle, view);
       return host;
     };

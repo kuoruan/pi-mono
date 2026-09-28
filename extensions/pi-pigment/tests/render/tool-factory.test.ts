@@ -182,7 +182,7 @@ describe("renderResult error frame", () => {
       },
     });
     const component = wrapped.renderResult(
-      { content: [{ type: "text", text: "Something failed badly" }] } as never,
+      { content: [{ type: "text", text: "Something failed badly" }] },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -204,7 +204,7 @@ describe("renderResult error frame", () => {
     const theme = buildRenderTheme();
     const wrapped = wrappedFor(orig, {});
     const component = wrapped.renderResult(
-      { content: [{ type: "text", text: "exploded" }] } as never,
+      { content: [{ type: "text", text: "exploded" }] },
       { expanded: true, isPartial: false },
       theme,
       ctx,
@@ -229,7 +229,7 @@ describe("renderResult error frame", () => {
     const wrapped = wrappedFor(orig, {});
     const message = "boom\n\nCommand exited with code 1";
     const component = wrapped.renderResult(
-      { content: [{ type: "text", text: message }] } as never,
+      { content: [{ type: "text", text: message }] },
       { expanded: false, isPartial: false },
       theme,
       ctx,
@@ -250,7 +250,7 @@ describe("renderResult error frame", () => {
     const wrapped = wrappedFor(orig, {});
     const render = (message: string): string => {
       const component = wrapped.renderResult(
-        { content: [{ type: "text", text: message }] } as never,
+        { content: [{ type: "text", text: message }] },
         { expanded: true, isPartial: false },
         theme,
         ctx,
@@ -311,7 +311,7 @@ describe("renderResult error frame", () => {
       buildRenderTheme(),
       ctx,
     );
-    const againHost = again as unknown as TextDouble & { previewIdentity?: string };
+    const againHost = again as DrivenTaskComponent;
     expect(againHost.previewIdentity).toBe(host.previewIdentity);
     expect(againHost.text.text).toBe("SENTINEL"); // the frame was NOT overwritten
     // The attach NEVER invalidates synchronously (the restore-replay loop
@@ -404,7 +404,7 @@ describe("renderResult error frame", () => {
     ctx.isError = true;
     ctx.toolCallId = "never-executed";
     const component = wrappedFor(orig).renderResult(
-      { content: [{ type: "text", text: "old error" }] } as never,
+      { content: [{ type: "text", text: "old error" }] },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -423,7 +423,7 @@ describe("renderResult error frame", () => {
     ctx.lastComponent = container;
     const wrapped = wrappedFor(orig, {});
     const component = wrapped.renderResult(
-      { content: [{ type: "text", text: "command failed" }] } as never,
+      { content: [{ type: "text", text: "command failed" }] },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -443,7 +443,7 @@ describe("renderResult error frame", () => {
       {
         content: [
           { type: "text", text: "first" },
-          { type: "image", data: "xx" } as never,
+          { type: "image", data: "xx" },
           { type: "text", text: "second" },
         ],
       } as never,
@@ -462,7 +462,7 @@ describe("renderResult error frame", () => {
     ctx.isError = true;
     const wrapped = wrappedFor(orig, {});
     const component = wrapped.renderResult(
-      { content: [] } as never,
+      { content: [] },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -476,7 +476,7 @@ describe("renderResult error frame", () => {
     ctx.isError = true;
     const wrapped = wrappedFor(orig, {});
     const component = wrapped.renderResult(
-      { content: [{ type: "text", text: "boom" }] } as never,
+      { content: [{ type: "text", text: "boom" }] },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -496,7 +496,7 @@ describe("renderResult non-error paths", () => {
     // renderPlainTextFallback is the spec bodies' unknown-details exit
     // (write's), not the no-spec path — that one delegates to orig.
     const host = makeTextComponent();
-    const component = renderPlainTextFallback(host as never, buildRenderTheme(), {
+    const component = renderPlainTextFallback(host, buildRenderTheme(), {
       content: [
         { type: "text", text: "line1" },
         { type: "text", text: "line2" },
@@ -512,7 +512,7 @@ describe("renderResult non-error paths", () => {
     const { ctx } = makeRenderCtx();
     const wrapped = wrappedFor(orig, {});
     const component = wrapped.renderResult(
-      { content: [{ type: "text", text: "x" }] } as never,
+      { content: [{ type: "text", text: "x" }] },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -534,7 +534,7 @@ describe("onError hook", () => {
       },
     });
     wrapped.renderResult(
-      { content: [{ type: "text", text: "boom" }] } as never,
+      { content: [{ type: "text", text: "boom" }] },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -577,7 +577,7 @@ describe("onError hook", () => {
       },
     });
     wrapped.renderResult(
-      { content: [] } as never,
+      { content: [] },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -596,7 +596,7 @@ describe("onError hook", () => {
       renderResult: ({ text }) => text,
     });
     wrapped.renderResult(
-      { content: [{ type: "text", text: "ok" }] } as never,
+      { content: [{ type: "text", text: "ok" }] },
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,

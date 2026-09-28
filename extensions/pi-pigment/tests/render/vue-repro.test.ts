@@ -12,7 +12,6 @@ import {
   registerTools,
   resetPigmentForTest,
   toolOf,
-  type TextDouble,
   viewFor,
 } from "#test/fixtures.ts";
 import { vol } from "#test/memfs.ts";
@@ -43,7 +42,7 @@ const runEdit = async (path: string, oldText: string, newText: string) => {
     { expanded: true, isPartial: false },
     buildFakeTheme({ syntaxColors: true }),
     mc.ctx,
-  ) as unknown as TextDouble;
+  );
   const out = await component.previewTask!.render(140);
   return { state: mc.ctx.state, out };
 };
@@ -148,7 +147,7 @@ describe("vue edit result coloring (full seam)", () => {
         { expanded: true, isPartial: false },
         buildFakeTheme({ syntaxColors: true }),
         rctx,
-      ) as unknown as TextDouble;
+      );
       const out = await component.previewTask!.render(120);
       // The script hunk's row carries token colors: token boundaries split
       // the text, so count the color CHUNKS on the const rows (an
@@ -192,7 +191,7 @@ describe("vue edit result coloring — long file, mid-file change", () => {
         { expanded: true, isPartial: false },
         buildFakeTheme({ syntaxColors: true }),
         mc.ctx,
-      ) as unknown as TextDouble;
+      );
       const out = await component.previewTask!.render(140);
       const row = out.split("\n").find((l) => l.includes("value30"));
       // eslint-disable-next-line no-control-regex -- counting color escapes
@@ -244,12 +243,7 @@ describe("the seed memo's lifetime (per row, not per file)", () => {
       const mc = makeRenderCtx();
       mc.ctx.args = args;
       const theme = buildFakeTheme({ syntaxColors: true });
-      const first = edit.renderResult!(
-        result,
-        { expanded: true, isPartial: false },
-        theme,
-        mc.ctx,
-      ) as unknown as TextDouble;
+      const first = edit.renderResult!(result, { expanded: true, isPartial: false }, theme, mc.ctx);
       await first.previewTask!.render(140);
       const read = (mc.ctx.state as { seedText?: string }).seedText;
       expect(read).toContain("ref(33)");
@@ -259,12 +253,7 @@ describe("the seed memo's lifetime (per row, not per file)", () => {
       // pairs with the file as its own edit left it: the later write must
       // not bleed in, and the read must not repeat (no stat, no re-read).
       vol.writeFileSync(path, vue("const later = ref(9);"));
-      const again = edit.renderResult!(
-        result,
-        { expanded: true, isPartial: false },
-        theme,
-        mc.ctx,
-      ) as unknown as TextDouble;
+      const again = edit.renderResult!(result, { expanded: true, isPartial: false }, theme, mc.ctx);
       await again.previewTask!.render(140);
       expect((mc.ctx.state as { seedText?: string }).seedText).toBe(read);
       expect((mc.ctx.state as { seedText?: string }).seedText).not.toContain("ref(9)");
@@ -298,7 +287,7 @@ describe("the seed gate (only embedding grammars read the file)", () => {
       { expanded: true, isPartial: false },
       buildFakeTheme({ syntaxColors: true }),
       mc.ctx,
-    ) as unknown as TextDouble;
+    );
     const out = await component.previewTask!.render(140);
     // TypeScript embeds nothing: the seed producer is never built, so
     // the row state carries no read at all (not even a failed one).
@@ -345,7 +334,7 @@ describe("the seed gate (only embedding grammars read the file)", () => {
         { expanded: true, isPartial: false },
         buildFakeTheme({ syntaxColors: true }),
         mc.ctx,
-      ) as unknown as TextDouble;
+      );
       const out = await component.previewTask!.render(140);
       const row = out.split("\n").find((l) => l.includes("target")) ?? "";
       // eslint-disable-next-line no-control-regex -- counting color escapes

@@ -9,7 +9,7 @@
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import { createShellWrapper } from "./shell-tool.ts";
+import { createShellWrapper, powershellProfile } from "./shell-tool.ts";
 import type { ToolServices } from "./tool-services.ts";
 
 /**
@@ -23,8 +23,5 @@ export function createPowerShellWrapper(
   origPowerShell: ToolDefinition,
   services: ToolServices,
 ): ToolDefinition {
-  return createShellWrapper(origPowerShell, services, {
-    language: "powershell",
-    prompt: "PS>",
-  });
+  return createShellWrapper(origPowerShell, services, powershellProfile);
 }

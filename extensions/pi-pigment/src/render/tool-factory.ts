@@ -34,7 +34,6 @@ import {
 import { armTiming, errorFrameKey, firstTextOf, stopTiming } from "./tool-output.ts";
 import {
   type ExecutionTimingState,
-  type ShellState,
   callStateOf,
   type RenderContext,
   type ToolServices,
@@ -115,12 +114,20 @@ export interface WrapperSpec<TState extends object> {
     ...args: Parameters<ToolDefinition["execute"]>
   ) => ReturnType<ToolDefinition["execute"]>;
   /**
-   * Cleanup before the factory's error frame renders — for wrappers whose
+   * Settle a final frame regardless of outcome — for wrappers whose
    * delegated SDK renderer owns resources that its own (bypassed)
-   * renderResult would have released (the shell tools' timing interval),
-   * and for bridging the failure into render state (the shell tools'
-   * exit-badge parse). Receives the extracted failure message — the same
-   * text the frame renders, "Error" when the result carried no text.
+   * renderResult would have released (the shell tools' timing
+   * interval). Runs on every non-pending frame, before any branch
+   * renders. Distinct from onError (failure-only, carries the
+   * message): settling is outcome-independent and carries nothing.
+   */
+  onSettled?: (ctx: RenderContext<TState>) => void;
+  /**
+   * Bridge a failure into render state before the factory's error
+   * frame renders (the shell tools' exit-badge parse). Receives the
+   * extracted failure message — the same text the frame renders,
+   * "Error" when the result carried no text. Failure-only (carries
+   * the message); outcome-independent cleanup belongs on onSettled.
    */
   onError?: (ctx: RenderContext<TState>, message: string) => void;
   /**
@@ -259,18 +266,16 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       // renders of one row must read one value — it is part of the frame
       // cache key).
       const tookMs = stopTiming(ctx.state as ExecutionTimingState, options.isPartial, ctx.isError);
-      // Every FINAL frame sweeps the streaming interval: the native shell
-      // renderer arms it while partial output streams and clears it only
-      // on the frames it renders itself — the error frame below bypasses
-      // that render, and a success path that replaces the renderer (the
-      // edit/write previews) must not depend on it either. Pending frames
-      // keep their ticking timer (that live invalidate IS the display).
+      // Every FINAL frame settles wrapper resources through the spec
+      // hook (the shell timing interval: the native renderer arms it
+      // while partial output streams and clears it only on the frames
+      // it renders itself — the error frame below bypasses that
+      // render, and a success path that replaces the renderer must not
+      // depend on it either). Pending frames keep their ticking timer
+      // (that live invalidate IS the display). The factory never names
+      // the resource — the wrapper owns it.
       if (status !== "pending") {
-        const state = ctx.state as Pick<ShellState, "interval"> | undefined;
-        if (state?.interval) {
-          clearInterval(state.interval);
-          state.interval = undefined;
-        }
+        spec.onSettled?.(ctx);
       }
 
       if (status === "error") {

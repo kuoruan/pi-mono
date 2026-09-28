@@ -25,12 +25,12 @@ describe("pair-base object selection applies patches", () => {
           kind: "pair",
           light: {
             name: "github-light",
-            theme: { name: "github-light", type: "light" } as never,
+            theme: { name: "github-light", type: "light" },
             bundled: true,
           },
           dark: {
             name: "github-dark",
-            theme: { name: "github-dark", type: "dark" } as never,
+            theme: { name: "github-dark", type: "dark" },
             bundled: true,
           },
         },

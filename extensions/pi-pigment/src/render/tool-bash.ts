@@ -6,7 +6,7 @@
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import { createShellWrapper } from "./shell-tool.ts";
+import { createShellWrapper, bashProfile } from "./shell-tool.ts";
 import type { ToolServices } from "./tool-services.ts";
 
 /**
@@ -20,5 +20,5 @@ export function createBashWrapper(
   origBash: ToolDefinition,
   services: ToolServices,
 ): ToolDefinition {
-  return createShellWrapper(origBash, services, { language: "shellscript", prompt: "$" });
+  return createShellWrapper(origBash, services, bashProfile);
 }

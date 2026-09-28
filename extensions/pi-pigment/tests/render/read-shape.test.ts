@@ -4,13 +4,13 @@ import { createReadWrapper } from "#src/render/tool-read.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
-  type DrivenTaskComponent,
-  type TaskCarrier,
+  type RenderResultCarrier,
   makeRenderCtx,
   makeRenderSession,
   plain,
   resetPigmentForTest,
   viewFor,
+  makeServices,
 } from "#test/fixtures.ts";
 
 function readCallText(args: unknown, expanded: boolean): string {
@@ -66,14 +66,7 @@ describe("read result body", () => {
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "src/a.ts" };
     ctx.expanded = false;
-    const component = (
-      tool.renderResult as unknown as (
-        r: unknown,
-        o: unknown,
-        t: unknown,
-        c: unknown,
-      ) => DrivenTaskComponent & TaskCarrier
-    )(
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
       {
         content: [
           { type: "text", text: "const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\n" },
@@ -106,14 +99,7 @@ describe("read result body", () => {
     // Soft-wrapped continuation rows repeat the gutter's blank shape
     // (no bare column-zero wrap): a long line refolds under its number.
     const long = `const ${"x".repeat(200)} = 1;\n`;
-    const wrapped = await (
-      tool.renderResult as unknown as (
-        r: unknown,
-        o: unknown,
-        t: unknown,
-        c: unknown,
-      ) => DrivenTaskComponent & TaskCarrier
-    )(
+    const wrapped = await (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
       { content: [{ type: "text", text: long }] },
       { expanded: false, isPartial: false },
       buildFakeTheme({ syntaxColors: true }),
@@ -133,14 +119,7 @@ describe("read result body", () => {
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "AGENTS.md" };
     ctx.expanded = false;
-    const component = (
-      tool.renderResult as unknown as (
-        r: unknown,
-        o: unknown,
-        t: unknown,
-        c: unknown,
-      ) => DrivenTaskComponent
-    )(
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
       { content: [{ type: "text", text: "# a\n# b\n# c\n# d\n" }] },
       { expanded: false, isPartial: false },
       fakeTheme,
@@ -172,14 +151,7 @@ describe("read result body", () => {
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "src/a.ts" };
     ctx.expanded = true;
-    const component = (
-      tool.renderResult as unknown as (
-        r: unknown,
-        o: unknown,
-        t: unknown,
-        c: unknown,
-      ) => DrivenTaskComponent
-    )(
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
       { content: [{ type: "text", text: "const answer = 42;\n" }] },
       { expanded: true, isPartial: false },
       fakeTheme,
@@ -213,14 +185,7 @@ describe("read result body", () => {
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "src/a.ts" };
     ctx.expanded = true;
-    const component = (
-      tool.renderResult as unknown as (
-        r: unknown,
-        o: unknown,
-        t: unknown,
-        c: unknown,
-      ) => DrivenTaskComponent & TaskCarrier
-    )(
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
       {
         content: [{ type: "text", text: "const a = 1;\n" }],
         details: {
@@ -262,20 +227,10 @@ describe("read result body", () => {
  * @returns The read wrapper.
  */
 function wrapperFor() {
-  return createReadWrapper(
-    { name: "read" } as never,
-    {
-      render: makeRenderSession(),
-      shortPath: (p: string) => p,
-      indicatorStyle: "bar",
-      headerEllipsis: "off",
-    } as never,
-  );
+  return createReadWrapper({ name: "read" } as never, makeServices());
 }
 
 describe("read collapse and seed", () => {
-  type ResultFn = (r: unknown, o: unknown, t: unknown, c: unknown) => DrivenTaskComponent;
-
   it("returns to the folded preview on expand-then-collapse", async () => {
     resetPigmentForTest();
     const tool = wrapperFor();
@@ -284,7 +239,7 @@ describe("read collapse and seed", () => {
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "src/a.ts" };
     ctx.expanded = true;
-    const renderResult = tool.renderResult as unknown as ResultFn;
+    const renderResult = tool.renderResult as unknown as RenderResultCarrier["renderResult"];
     const host = renderResult(
       { content: [{ type: "text", text: "const a = 1;\n" }] },
       { expanded: true, isPartial: false },
@@ -328,7 +283,7 @@ describe("read collapse and seed", () => {
       ctx.cwd = dir;
       ctx.args = { path: "a.vue", offset: 2, limit: 1 };
       ctx.expanded = true;
-      const component = (tool.renderResult as unknown as ResultFn)(
+      const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
         { content: [{ type: "text", text: "<span>x</span>\n" }] },
         { expanded: true, isPartial: false },
         fakeTheme,
@@ -353,7 +308,7 @@ describe("read collapse and seed", () => {
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "src/a.ts", offset: 5, limit: 1 };
     ctx.expanded = true;
-    const component = (tool.renderResult as unknown as ResultFn)(
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
       { content: [{ type: "text", text: "const a = 1;\n" }] },
       { expanded: true, isPartial: false },
       fakeTheme,
@@ -374,7 +329,7 @@ describe("read collapse and seed", () => {
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "src/a.ts" };
     ctx.expanded = true;
-    const component = (tool.renderResult as unknown as ResultFn)(
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
       {
         content: [{ type: "text", text: "x\n" }],
         details: {

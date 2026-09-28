@@ -143,7 +143,7 @@ describe("rendering pipeline", () => {
       { path: existing, content: "const x = 1;\n" },
       buildRenderTheme(),
       ctx,
-    ) as TextComponent;
+    );
 
     expect(component.text.text).toContain("write");
     expect(component.text.text).toContain("app.ts");
@@ -153,7 +153,7 @@ describe("rendering pipeline", () => {
       { path: join(tempDir, "missing.ts"), content: "const y = 1;\n" },
       buildRenderTheme(),
       createCtx.ctx,
-    ) as TextComponent;
+    );
     expect(createComponent.text.text).toContain("create");
   });
 
@@ -184,7 +184,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as TextComponent & TaskCarrier;
+    );
 
     // Sync phase: the async preview task is scheduled on the component.
     expect(component.previewTask).toBeDefined();
@@ -219,7 +219,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as TextComponent & TaskCarrier;
+    );
     const rendered = await component.previewTask!.render(120);
     // The gutter row-resets onto the canvas (30;30;40); the code area
     // must then open on the add-row bg (bgAdded = canvas ⊕
@@ -289,7 +289,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as TextComponent & TaskCarrier;
+    );
 
     expect(component.previewTask).toBeDefined();
     const rendered = await component.previewTask!.render(120);
@@ -401,7 +401,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as TextComponent & TaskCarrier;
+    );
 
     expect(component.previewTask).toBeDefined();
     const rendered = await component.previewTask!.render(120);
@@ -430,7 +430,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as TextComponent & TaskCarrier;
+    );
 
     expect(component.previewTask).toBeUndefined();
     expect(component.text.text).toContain("Successfully replaced");
@@ -451,7 +451,7 @@ describe("rendering pipeline", () => {
       { expanded: true, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as TextComponent;
+    );
 
     expect(component.text.text).toContain("Successfully wrote");
   });

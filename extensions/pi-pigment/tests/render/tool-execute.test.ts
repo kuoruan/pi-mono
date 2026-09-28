@@ -793,7 +793,7 @@ describe("grep renderResult highlight swap", () => {
       { expanded: true, isPartial: false },
       coloredTheme,
       freshCtx,
-    ) as unknown as TextDouble;
+    );
     live.render(120);
     await waitFor(() => (live.text.text.includes("38;2;224;185;169m") ? true : undefined));
     expect(live.text.text).toContain("38;2;224;185;169m");

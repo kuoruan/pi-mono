@@ -25,21 +25,22 @@ import {
   keyHint,
   keyText,
 } from "@earendil-works/pi-coding-agent";
-import { Container, KeybindingsManager, setKeybindings, Text } from "@earendil-works/pi-tui";
+import { Container, KeybindingsManager, setKeybindings } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { createShellWrapper } from "#src/render/shell-tool.ts";
+import { bashProfile, createShellWrapper } from "#src/render/shell-tool.ts";
 import { expandKeyHint } from "#src/render/tool-output.ts";
 import type { RenderContext } from "#src/render/tool-services.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
 import {
+  type RenderResultCarrier,
   buildRenderTheme,
   makeRenderCtx,
-  makeRenderSession,
   plain,
   registerTools,
   toolOf,
   type TextDouble,
+  makeServices,
 } from "#test/fixtures.ts";
 
 // Session isolation: registerTools must not read the developer's real
@@ -103,7 +104,7 @@ describe("bash output delegation (renderResult)", () => {
       // renderer builds its own Container, never our width-aware Text.
       const textish = { render: () => [""], setText: () => {} };
       const component = bash.renderResult(
-        { content: [{ type: "text", text: "hello from bash\n" }] } as never,
+        { content: [{ type: "text", text: "hello from bash\n" }] },
         { expanded: true, isPartial: false },
         buildRenderTheme(),
         { ...ctx, lastComponent: textish as never },
@@ -308,22 +309,9 @@ describe("bash onError: the native timing interval", () => {
   it("clears the interval and stamps endedAt when the error frame intercepts", () => {
     const wrapped = createShellWrapper(
       createBashToolDefinition(process.cwd()) as never,
-      {
-        shortPath: (p: string) => p,
-        indicatorStyle: "bar",
-        headerEllipsis: "on",
-        textFactory: Text,
-        render: makeRenderSession(),
-      },
-      { language: "shellscript", prompt: "$" },
-    ) as unknown as {
-      renderResult: (
-        result: unknown,
-        options: { expanded: boolean; isPartial: boolean },
-        theme: unknown,
-        ctx: unknown,
-      ) => unknown;
-    };
+      makeServices({ headerEllipsis: "on" }),
+      bashProfile,
+    ) as unknown as RenderResultCarrier;
     vi.useFakeTimers();
     try {
       const { ctx } = makeRenderCtx();

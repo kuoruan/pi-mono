@@ -10,6 +10,7 @@ import type {
   ToolDefinition,
   ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 
 import { createPigmentExtension } from "#src/extension.ts";
 import {
@@ -18,8 +19,8 @@ import {
   type RenderView,
   type RenderSessionInputs,
 } from "#src/render/session.ts";
-import type { PreviewTask } from "#src/render/text-task.ts";
-import type { RenderContext } from "#src/render/tool-services.ts";
+import type { PreviewTask, PreviewTextHost } from "#src/render/text-task.ts";
+import type { RenderContext, ToolServices } from "#src/render/tool-services.ts";
 import { clearHighlightCacheForTest } from "#src/theme/highlight.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
 import type { ThemeSelection } from "#src/theme/theme-resolver.ts";
@@ -117,6 +118,26 @@ export function viewFor(
   return makeRenderSession(inputs).forTheme(theme);
 }
 
+/**
+ * The wrapper assembly services with test defaults (identity shortPath,
+ * bar indicators, ellipsis off, the real Text class, a fresh session).
+ * Typed against ToolServices — a missing field is a compile error,
+ * not a silent `as never` lie.
+ *
+ * @param overrides - Per-field overrides.
+ * @returns The assembly services.
+ */
+export function makeServices(overrides: Partial<ToolServices> = {}): ToolServices {
+  return {
+    shortPath: (p: string) => p,
+    indicatorStyle: "bar",
+    headerEllipsis: "off",
+    textFactory: Text,
+    render: makeRenderSession(),
+    ...overrides,
+  };
+}
+
 /** Fake theme overrides for buildFakeTheme. */
 export interface FakeThemeOverrides {
   diffAdded?: string;
@@ -205,9 +226,11 @@ export function makeTextComponent(): TextDouble {
  * The mock Text component's shape — the test seam every inline
  * `as { text: { text: string } }` / `as { previewTask?: … }` cast
  * replicates. Named (not inferred): the factory annotates it, the
- * aliases Pick from it — one source, zero drift.
+ * aliases Pick from it — one source, zero drift. Extends
+ * PreviewTextHost (every member is present), so doubles pass to
+ * host-typed seams without a cast.
  */
-export interface TextDouble {
+export interface TextDouble extends PreviewTextHost {
   /** The mutable text slot (shared reference — setText writes through). */
   text: { text: string };
   /** Replace the text slot's content. */
@@ -321,6 +344,20 @@ export type TaskCarrier = Pick<TextDouble, "previewTask">;
 export interface RenderCallCarrier {
   /** Invoke the wrapper's renderCall with test-shaped inputs. */
   renderCall: (args: unknown, theme: unknown, ctx: unknown) => TextComponent & TaskCarrier;
+}
+
+/**
+ * A tool narrowed to its renderResult entry (create*Wrapper's SDK-typed
+ * surface takes unknown-typed result/options/theme/ctx in tests).
+ */
+export interface RenderResultCarrier {
+  /** Invoke the wrapper's renderResult with test-shaped inputs. */
+  renderResult: (
+    result: unknown,
+    options: unknown,
+    theme: unknown,
+    ctx: unknown,
+  ) => DrivenTaskComponent & TaskCarrier;
 }
 
 /** A plain text-bearing component (call headers, sync renders). */

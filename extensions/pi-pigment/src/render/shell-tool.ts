@@ -32,9 +32,9 @@ import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
-import { shellBadgeText, shellExitBadgeOf } from "./error-frame.ts";
 import { astInjectRegions, fallbackHeredocRegions } from "./heredoc-inject.ts";
 import type { RenderView } from "./session.ts";
+import { shellBadgeText, shellExitBadgeOf } from "./shell-status.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import {
   argsSettled,
@@ -44,13 +44,33 @@ import {
   argsOf,
 } from "./tool-services.ts";
 
-/** The per-shell rendering inputs: the grammar and the prompt glyph. */
+/** The per-shell rendering inputs: the grammar, the prompt glyph, and the heredoc injection. */
 export interface ShellToolProfile {
   /** The Shiki grammar for this shell's commands. */
   language: "shellscript" | "powershell";
   /** The prompt shown before the command ("$" / "PS>"). */
   prompt: string;
+  /**
+   * The heredoc/code-arg injection (bash's @aliou/sh AST path;
+   * powershell has no equivalent grammar — passes null). Null means
+   * the command highlights purely in the shell grammar.
+   */
+  inject: ((command: string, view: RenderView) => Promise<string>) | null;
 }
+
+/** The bash profile: shellscript grammar, $ prompt, the AST injection. */
+export const bashProfile: ShellToolProfile = {
+  language: "shellscript",
+  prompt: "$",
+  inject: (command, view) => bashInjectRender(command, view),
+};
+
+/** The powershell profile: powershell grammar, PS> prompt, no injection. */
+export const powershellProfile: ShellToolProfile = {
+  language: "powershell",
+  prompt: "PS>",
+  inject: null,
+};
 
 /**
  * Build the shared shell wrapper around `orig` (bash or powershell).
@@ -70,6 +90,15 @@ export function createShellWrapper(
     // frame's background across every result row (the native renderer's
     // timing/packing child Texts compose inside it).
     renderShell: "default",
+    onSettled: (ctx) => {
+      // The native renderer arms the timing interval while partial
+      // output streams and clears it only on the frames it renders
+      // itself — settled frames that bypass it clear here instead.
+      if (ctx.state.interval) {
+        clearInterval(ctx.state.interval);
+        ctx.state.interval = undefined;
+      }
+    },
     onError: (ctx, message) => {
       // Parsed once here; later call-header frames read it (the suffix).
       ctx.state.exitBadge = shellExitBadgeOf(message);
@@ -136,7 +165,7 @@ export function createShellWrapper(
         // control bytes in it must not reach the terminal as sequences.
         // (The highlighter's own escapes are OUR chrome and pass through.)
         // safeCommand is the SAME inert form computed above — reuse it.
-        void renderShellCommand(safeCommand, profile.language, view)
+        void renderShellCommand(safeCommand, profile, view)
           .then((highlighted) => {
             // Compose over the base: renderTokensAnsi closes each token's
             // fg with ESC[39m — re-open the base after every close so
@@ -169,29 +198,27 @@ export function createShellWrapper(
 }
 
 /**
- * Render a shell command with its code regions injected: the parsed AST
- * (@aliou/sh) names each region — heredoc bodies, heredoc file-writes,
- * inline code arguments — and everything between renders in the command's
- * shell grammar. Parse failures fall back to the line scanner (heredocs
- * only), and its failures degrade to pure shell coloring.
+ * Render a shell command with its code regions injected: the profile's
+ * inject slot names each region — heredoc bodies, heredoc file-writes,
+ * inline code arguments — and everything between renders in the
+ * command's shell grammar. A null slot (powershell) renders purely in
+ * the shell grammar.
  *
  * @param command - The inert command text.
- * @param shellLanguage - The shell grammar to highlight with.
+ * @param profile - The shell's grammar and injection.
  * @param view - The frame view (the session's highlight entry).
  * @returns The highlighted command text.
  */
 async function renderShellCommand(
   command: string,
-  shellLanguage: "shellscript" | "powershell",
+  profile: ShellToolProfile,
   view: RenderView,
 ): Promise<string> {
-  // Powershell has no @aliou/sh grammar — the AST path is bash-only; its
-  // commands render purely in the powershell grammar.
-  const regions = shellLanguage === "shellscript" ? await bashInjectRender(command, view) : null;
+  const regions = profile.inject ? await profile.inject(command, view) : null;
   if (regions !== null) return regions;
   const lines = await view.highlight({
     code: command,
-    language: shellLanguage,
+    language: profile.language,
   });
   return lines.join("\n");
 }

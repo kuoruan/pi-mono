@@ -1,20 +1,18 @@
 import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
-import { resetCapabilitiesCache, setCapabilityOverrides, Text } from "@earendil-works/pi-tui";
+import { resetCapabilitiesCache, setCapabilityOverrides } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
-import { createShellWrapper } from "#src/render/shell-tool.ts";
+import { bashProfile, createShellWrapper } from "#src/render/shell-tool.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
   type DrivenTaskComponent,
   type RenderCallCarrier,
   makeRenderCtx,
-  type TaskCarrier,
-  type TextComponent,
-  makeRenderSession,
   plain,
   registerTools,
   toolOf,
+  makeServices,
 } from "#test/fixtures.ts";
 
 describe("bash header ellipsis", () => {
@@ -57,17 +55,9 @@ describe("bash header ellipsis", () => {
   it("renders the full line with no task when the switch is off", () => {
     const bash = createShellWrapper(
       createBashToolDefinition(process.cwd()) as never,
-      {
-        shortPath: (p: string) => p,
-        indicatorStyle: "bar",
-        headerEllipsis: "off",
-        textFactory: Text,
-        render: makeRenderSession(),
-      },
-      { language: "shellscript", prompt: "$" },
-    ) as unknown as {
-      renderCall: (args: unknown, theme: unknown, ctx: unknown) => TextComponent & TaskCarrier;
-    };
+      makeServices(),
+      bashProfile,
+    ) as unknown as RenderCallCarrier;
     const { ctx } = makeRenderCtx();
     const command = `git checkout --track origin/${"very-long-branch-name-".repeat(6)}`;
     ctx.args = { command };
@@ -83,11 +73,7 @@ describe("powershell header ellipsis (parity)", () => {
     const pwsh = toolOf(tools, "powershell");
     const { ctx } = makeRenderCtx();
     ctx.args = { command: `Get-ChildItem ${"very-long-directory-name-".repeat(6)}` };
-    const component = pwsh.renderCall!(
-      ctx.args,
-      buildRenderTheme(),
-      ctx,
-    ) as unknown as DrivenTaskComponent;
+    const component = pwsh.renderCall!(ctx.args, buildRenderTheme(), ctx);
     component.render(40);
     await vi.waitFor(() => {
       if (!plain(component.text.text).includes("…")) throw new Error("waiting");
@@ -108,11 +94,7 @@ describe("grep/find/ls header ellipsis", () => {
       const t = toolOf(tools, tool);
       const { ctx } = makeRenderCtx();
       ctx.args = args;
-      const component = t.renderCall!(
-        ctx.args,
-        buildRenderTheme(),
-        ctx,
-      ) as unknown as DrivenTaskComponent;
+      const component = t.renderCall!(ctx.args, buildRenderTheme(), ctx);
       component.render(40);
       await vi.waitFor(() => {
         if (!plain(component.text.text).includes("…")) throw new Error("waiting");
@@ -132,11 +114,7 @@ describe("header trailing blank follows call state", () => {
     ctx.args = { path: "/project/app.ts", edits: [] };
     // Streaming: the pending header owns no trailing blank.
     ctx.isPartial = true;
-    const component = edit.renderCall!(
-      ctx.args,
-      buildRenderTheme(),
-      ctx,
-    ) as unknown as DrivenTaskComponent;
+    const component = edit.renderCall!(ctx.args, buildRenderTheme(), ctx);
     component.render(120);
     await vi.waitFor(() => {
       if (!plain(component.text.text).includes("← edit")) throw new Error("waiting");
@@ -160,11 +138,7 @@ describe("write/edit header ellipsis (stats chips pinned)", () => {
     const edit = toolOf(tools, "edit");
     const { ctx } = makeRenderCtx();
     ctx.args = { path: `/project/${"deep-".repeat(30)}file.ts`, edits: [] };
-    const component = edit.renderCall!(
-      ctx.args,
-      buildRenderTheme(),
-      ctx,
-    ) as unknown as DrivenTaskComponent;
+    const component = edit.renderCall!(ctx.args, buildRenderTheme(), ctx);
     component.render(40);
     await vi.waitFor(() => {
       if (!plain(component.text.text).includes("…")) throw new Error("waiting");
@@ -175,14 +149,8 @@ describe("write/edit header ellipsis (stats chips pinned)", () => {
   it("clears the task when toggled off (no stale ellipsis frame)", () => {
     const on = createShellWrapper(
       createBashToolDefinition(process.cwd()) as never,
-      {
-        shortPath: (p: string) => p,
-        indicatorStyle: "bar",
-        headerEllipsis: "on",
-        textFactory: Text,
-        render: makeRenderSession(),
-      },
-      { language: "shellscript", prompt: "$" },
+      makeServices({ headerEllipsis: "on" }),
+      bashProfile,
     ) as unknown as RenderCallCarrier;
     const { ctx } = makeRenderCtx();
     const command = `git checkout --track origin/${"very-long-branch-name-".repeat(6)}`;
@@ -192,16 +160,10 @@ describe("write/edit header ellipsis (stats chips pinned)", () => {
     // Same host, switch off: the stale task must clear, setText wins.
     const off = createShellWrapper(
       createBashToolDefinition(process.cwd()) as never,
-      {
-        shortPath: (p: string) => p,
-        indicatorStyle: "bar",
-        headerEllipsis: "off",
-        textFactory: Text,
-        render: makeRenderSession(),
-      },
-      { language: "shellscript", prompt: "$" },
+      makeServices(),
+      bashProfile,
     ) as unknown as RenderCallCarrier;
-    const host = first as unknown as TextComponent & TaskCarrier;
+    const host = first;
     const second = off.renderCall(ctx.args, buildRenderTheme(), {
       ...ctx,
       lastComponent: host,
@@ -218,8 +180,7 @@ describe("header ellipsis toggle", () => {
     const command = `git checkout --track origin/${"very-long-branch-name-".repeat(6)}`;
     const { ctx } = makeRenderCtx();
     ctx.args = { command };
-    const render = (): DrivenTaskComponent =>
-      bash.renderCall!(ctx.args, buildRenderTheme(), ctx) as unknown as DrivenTaskComponent;
+    const render = (): DrivenTaskComponent => bash.renderCall!(ctx.args, buildRenderTheme(), ctx);
     // Collapsed: ellipsis.
     let component = render();
     component.render(40);
@@ -247,11 +208,7 @@ describe("header ellipsis toggle", () => {
     // updateDisplay cycles, so the second attach must see the changed
     // expanded stamp and re-arm (a fresh host would attach unconditionally
     // and prove nothing).
-    const component = bash.renderCall!(
-      ctx.args,
-      buildRenderTheme(),
-      ctx,
-    ) as unknown as DrivenTaskComponent;
+    const component = bash.renderCall!(ctx.args, buildRenderTheme(), ctx);
     component.render(40);
     await vi.waitFor(() => {
       if (!plain(component.text.text).includes("…")) throw new Error("waiting");
@@ -276,7 +233,7 @@ describe("header marks styling", () => {
       command: `python3 - <<'EOF'\n${"print(very_long_line) # comment\n".repeat(8)}EOF`,
     };
     const theme = buildFakeTheme();
-    const component = bash.renderCall!(ctx.args, theme, ctx) as unknown as DrivenTaskComponent;
+    const component = bash.renderCall!(ctx.args, theme, ctx);
     component.render(40);
     await vi.waitFor(() => {
       if (!plain(component.text.text).includes("…")) throw new Error("waiting");
@@ -305,11 +262,7 @@ describe("ls header link target", () => {
       // tool resolves it at execution).
       for (const arg of [`${home}/proj`, "~/proj"]) {
         ctx.args = { path: arg };
-        const component = t.renderCall!(
-          ctx.args,
-          buildRenderTheme(),
-          ctx,
-        ) as unknown as DrivenTaskComponent;
+        const component = t.renderCall!(ctx.args, buildRenderTheme(), ctx);
         component.render(120);
         const raw = component.text.text;
         // Display shortens to ~/proj, but the link target must be the

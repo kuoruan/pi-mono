@@ -17,8 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { isBenignExit, shellBadgeText, shellExitBadgeOf } from "#src/render/error-frame.ts";
-import type { PreviewTextHost } from "#src/render/text-task.ts";
+import { isBenignExit, shellBadgeText, shellExitBadgeOf } from "#src/render/shell-status.ts";
 import type { ShellState } from "#src/render/tool-services.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
 import {
@@ -81,7 +80,7 @@ describe("edit error frame shape", () => {
           },
         ],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -103,11 +102,7 @@ describe("edit error frame shape", () => {
     const theme = buildRenderTheme();
 
     // Live call: the header Text's custom bg = the scheme's base tint.
-    const live = renderCall(
-      { path: "/render-project/app.ts", edits: [] },
-      theme,
-      ctx,
-    ) as PreviewTextHost;
+    const live = renderCall({ path: "/render-project/app.ts", edits: [] }, theme, ctx);
     expect(typeof live.customBgFn).toBe("function");
     const liveBg = live.customBgFn!("row");
     expect(liveBg).toContain("48;2;30;30;40"); // toolSuccessBg in the fake theme's scheme
@@ -118,11 +113,7 @@ describe("edit error frame shape", () => {
     // OVER the Box bg on its rows — without the flip the header row
     // would keep its success tint inside an otherwise red frame).
     ctx.isError = true;
-    const failed = renderCall(
-      { path: "/render-project/app.ts", edits: [] },
-      theme,
-      ctx,
-    ) as PreviewTextHost;
+    const failed = renderCall({ path: "/render-project/app.ts", edits: [] }, theme, ctx);
     const errorBg = failed.customBgFn!("row");
     expect(errorBg).toContain("48;2;40;30;30"); // the fake theme's error bg
   });
@@ -135,7 +126,7 @@ describe("edit error frame shape", () => {
       { path: "/render-project/app.ts", edits: [] },
       buildRenderTheme(),
       ctx,
-    ) as PreviewTextHost;
+    );
     // The row-end continuation must re-open the ERROR bg — the diff-row
     // rowReset (bgBase = the success canvas, 30;30;40 in the fake) would
     // paint the box padding cells green behind an all-error frame.
@@ -147,11 +138,7 @@ describe("edit error frame shape", () => {
   it("a success row's tail continues the SUCCESS bg (no bare-reset tail)", async () => {
     const { renderCall, ctx } = await renderCallFor("edit");
     ctx.args = { path: "/render-project/app.ts", edits: [] };
-    const ok = renderCall(
-      { path: "/render-project/app.ts", edits: [] },
-      buildRenderTheme(),
-      ctx,
-    ) as PreviewTextHost;
+    const ok = renderCall({ path: "/render-project/app.ts", edits: [] }, buildRenderTheme(), ctx);
     // The row-end continuation must re-open the SUCCESS bg — a bare
     // RESET tail would drop the box padding cells to the terminal
     // default behind a success header (the error twin above pins the
@@ -169,11 +156,7 @@ describe("edit error frame shape", () => {
 
     // A pending frame must carry no success tint: the header's custom bg
     // is cleared, so the default shell's pending Box bg shows through.
-    const live = renderCall(
-      { path: "/render-project/app.ts", edits: [] },
-      theme,
-      ctx,
-    ) as PreviewTextHost;
+    const live = renderCall({ path: "/render-project/app.ts", edits: [] }, theme, ctx);
     expect(live.customBgFn).toBeUndefined();
   });
 
@@ -212,26 +195,22 @@ describe("edit error frame shape", () => {
       getBgAnsi: (name) => (name === "toolSuccessBg" ? "\u001b[48;5;123m" : "\u001b[48;5;9m"),
       bg: (_name, text) => text,
     };
-    const live = renderCall(
-      { path: "/render-project/app.ts", edits: [] },
-      theme,
-      ctx,
-    ) as PreviewTextHost;
+    const live = renderCall({ path: "/render-project/app.ts", edits: [] }, theme, ctx);
     expect(live.customBgFn!("row")).toContain("48;5;123");
   });
 
-  it("the error frame sweeps any streaming interval off the render state", async () => {
+  it("a settled shell frame clears the timing interval through onSettled", async () => {
     const tools = await registerTools();
-    const edit = toolOf(tools, "edit");
-    if (!edit?.renderResult) throw new Error("edit not registered");
+    const bash = toolOf(tools, "bash");
+    if (!bash?.renderResult) throw new Error("bash not registered");
     const { ctx } = makeRenderCtx<ShellState>();
     ctx.isError = true;
-    // A shell-style interval handle left on the state by a bypassed
-    // native renderer — the factory's error path must clear it
-    // regardless of the tool (edit has no onError of its own).
+    // The native renderer arms the interval while partial output
+    // streams; a settled frame that bypasses it clears through the
+    // shell wrapper's onSettled (the factory never names the resource).
     ctx.state.interval = { handle: 1 } as unknown as ReturnType<typeof setInterval>;
-    edit.renderResult!(
-      { content: [{ type: "text", text: "boom" }], isError: true } as never,
+    bash.renderResult!(
+      { content: [{ type: "text", text: "boom" }], isError: true },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -239,27 +218,10 @@ describe("edit error frame shape", () => {
     expect(ctx.state.interval).toBeUndefined();
   });
 
-  it("a succeeded final render sweeps a streaming interval too (not only the error path)", async () => {
-    const tools = await registerTools();
-    const edit = toolOf(tools, "edit");
-    if (!edit?.renderResult) throw new Error("edit not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
-    // Every FINAL frame (success included) must extinguish the streaming
-    // interval — the SDK's own renderer clears it on the frames it runs,
-    // but a success path that does NOT delegate (this edit wrapper
-    // replaces the renderer outright) would otherwise leak it.
-    ctx.state.interval = { handle: 1 } as unknown as ReturnType<typeof setInterval>;
-    edit.renderResult!(
-      {
-        content: [{ type: "text", text: 'Successfully edited "app.ts"' }],
-        details: {},
-      } as never,
-      { expanded: false, isPartial: false },
-      buildRenderTheme(),
-      ctx,
-    );
-    expect(ctx.state.interval).toBeUndefined();
-  });
+  // No success-path twin: onSettled runs before the status branch, so
+  // the error-path pin above covers the success path by construction
+  // (a bash success delegates to the native renderer, which needs the
+  // ambient theme — untestable without initTheme's multi-second load).
 
   it("does not repeat the call header — the body opens with the separator blank, then the bar row", async () => {
     const tools = await registerTools();
@@ -277,7 +239,7 @@ describe("edit error frame shape", () => {
           },
         ],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -311,7 +273,7 @@ describe("edit error frame shape", () => {
       {
         content: [{ type: "text", text: "nope" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -333,7 +295,7 @@ describe("edit error frame shape", () => {
       {
         content: [{ type: "text", text: "nope" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       noTookCtx,
@@ -354,7 +316,7 @@ describe("write error frame shape", () => {
       {
         content: [{ type: "text", text: "Failed to write file" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -384,7 +346,7 @@ describe("write error frame shape", () => {
       {
         content: [{ type: "text", text: "Operation aborted" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -418,11 +380,11 @@ describe("bash error frame shape", () => {
       {
         content: [{ type: "text", text: message }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as PreviewTextHost;
+    );
     const rendered = await component.previewTask!.render(60);
     const xRows = plain(rendered)
       .split("\n")
@@ -446,11 +408,11 @@ describe("bash error frame shape", () => {
       {
         content: [{ type: "text", text: message }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as PreviewTextHost;
+    );
     const rows = plain(await component.previewTask!.render(72)).split("\n");
     // The break lands on the space BEFORE "match": the first visual row
     // ends at the word boundary "must", the continuation starts with the
@@ -476,7 +438,7 @@ describe("bash error frame shape", () => {
           },
         ],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -504,7 +466,7 @@ describe("bash error frame shape", () => {
       {
         content: [{ type: "text", text: "\n\nCommand terminated without an exit code" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -526,7 +488,7 @@ describe("bash error frame shape", () => {
       {
         content: [{ type: "text", text: "spawn bash failed: no such file" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -553,7 +515,7 @@ describe("the error frame's Took color follows the failure kind", () => {
       ctx.args = { command: "false" };
       seedTiming(ctx, 42);
       const component = bash.renderResult!(
-        { content: [{ type: "text", text: message }], isError: true } as never,
+        { content: [{ type: "text", text: message }], isError: true },
         { expanded: false, isPartial: false },
         theme,
         ctx,
@@ -580,7 +542,7 @@ describe("the error frame's Took color follows the failure kind", () => {
     ctx.args = { path: "/render-project/app.ts", edits: [] };
     seedTiming(ctx, 42);
     const component = edit.renderResult!(
-      { content: [{ type: "text", text: "nope" }], isError: true } as never,
+      { content: [{ type: "text", text: "nope" }], isError: true },
       { expanded: false, isPartial: false },
       theme,
       ctx,
@@ -690,7 +652,7 @@ describe("grep error frame shape", () => {
       {
         content: [{ type: "text", text: "grep failed: bad regex" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -715,7 +677,7 @@ describe("find error frame shape", () => {
       {
         content: [{ type: "text", text: "find failed" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -739,7 +701,7 @@ describe("ls error frame shape", () => {
       {
         content: [{ type: "text", text: "ls failed" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -763,7 +725,7 @@ describe("powershell error frame shape", () => {
       {
         content: [{ type: "text", text: "\n\nCommand exited with code 1" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -793,7 +755,7 @@ describe("error frame bar follows indicatorStyle", () => {
       {
         content: [{ type: "text", text: "Could not find the exact text" }],
         isError: true,
-      } as never,
+      },
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
@@ -832,7 +794,7 @@ describe("error frame bar follows indicatorStyle", () => {
       { expanded: false, isPartial: false },
       buildRenderTheme(),
       ctx,
-    ) as unknown as PreviewTextHost;
+    );
     const rendered = plain(await component.previewTask!.render(120));
     expect(rendered).toContain("export const x = 1;");
     // The add rows carry NO bar — the column goes blank like everywhere

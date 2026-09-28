@@ -17,7 +17,7 @@ import { renderSplit } from "#src/render/split-view.ts";
 import { renderUnified } from "#src/render/unified-view.ts";
 import { adaptiveWrapRows } from "#src/render/wrap.ts";
 import { FALLBACK_THEME } from "#src/theme/scheme.ts";
-import { plain, viewFor } from "#test/fixtures.ts";
+import { buildFakeTheme, plain, viewFor } from "#test/fixtures.ts";
 
 /**
  * The suite's view caller: the fixed frame (no language, the fallback
@@ -321,23 +321,9 @@ describe("header helpers", () => {
       customBgFn: undefined,
     };
     // Theme WITH an error background.
-    setToolErrorBg(
-      text as never,
-      {
-        fg: () => "",
-        getBgAnsi: (name: string) => (name === "toolErrorBg" ? "\x1b[48;2;9;9;9m" : ""),
-      } as never,
-      FALLBACK_THEME,
-    );
+    setToolErrorBg(text as never, buildFakeTheme({ errorBg: "\x1b[48;2;9;9;9m" }), FALLBACK_THEME);
     // Theme WITHOUT one (throws or returns undefined) falls back to background.
-    setToolErrorBg(
-      text as never,
-      {
-        fg: () => "",
-        getBgAnsi: () => undefined,
-      } as never,
-      FALLBACK_THEME,
-    );
+    setToolErrorBg(text as never, buildFakeTheme({ errorBg: "" }), FALLBACK_THEME);
     setToolErrorBg(
       text as never,
       {

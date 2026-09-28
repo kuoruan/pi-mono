@@ -28,7 +28,6 @@ import {
   type RenderKitPublication,
 } from "#src/render/kit.ts";
 import { createGrepWrapper } from "#src/render/tool-grep.ts";
-import type { ToolServices } from "#src/render/tool-services.ts";
 import {
   buildFakeTheme,
   type DrivenTaskComponent,
@@ -37,6 +36,7 @@ import {
   plain,
   viewFor,
   waitFor,
+  makeServices,
 } from "#test/fixtures.ts";
 
 /**
@@ -174,7 +174,7 @@ describe("channel A: decorate", () => {
       },
       renderResult: () => {
         ran.push("renderResult");
-        return makeTextComponent() as never;
+        return makeTextComponent();
       },
     });
 
@@ -211,12 +211,7 @@ describe("channel A: decorate", () => {
     });
     // The extension's own assembly path: the same factory, the same
     // session, the same services shape.
-    const services = {
-      shortPath: (p: string) => p,
-      indicatorStyle: "bar",
-      textFactory: makeTextComponent,
-      render: kit.session,
-    } as unknown as ToolServices;
+    const services = makeServices({ render: kit.session });
     const own = createGrepWrapper(mine, services);
     const result = {
       content: [{ type: "text", text: "src.ts:1:done" }],

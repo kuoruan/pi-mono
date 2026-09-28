@@ -17,6 +17,7 @@ import type { SeedTextMemo } from "#src/theme/seed.ts";
 
 import { expandHome, shortHome } from "./paths.ts";
 import type { RenderSession } from "./session.ts";
+import type { ShellExitBadge } from "./shell-status.ts";
 import type { TextComponentFactory } from "./text-task.ts";
 
 /**
@@ -179,24 +180,6 @@ export interface ExecutionTimingState {
   startedAt?: number;
   /** Fixed by the first settled renderResult (pi's contract). */
   endedAt?: number;
-}
-
-/**
- * The shell failure taxonomy parsed from an error message's status line
- * (the patterns live beside error-frame's UPSTREAM CONTRACT MIRROR).
- * Exit codes 128-255 are the signal range (killed/terminated) — a
- * different failure KIND than a plain non-zero exit (Ghostty's
- * command-blocks stripe makes the same distinction), and it earns its
- * own color.
- */
-export interface ShellExitBadge {
-  /** The failure kind. */
-  kind: "error" | "signal" | "timeout" | "aborted" | "terminated";
-  /**
-   * The exit code (error/signal) or the timeout seconds (timeout); 0 for
-   * the code-less kinds (aborted/terminated).
-   */
-  value: number;
 }
 
 /**
