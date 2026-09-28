@@ -14,7 +14,7 @@ import {
   MIN_RENDER_WIDTH,
 } from "./diff-view.ts";
 import { injectBg } from "./inject-bg.ts";
-import { borderBar, diffRowFrame, gutterWidth, lineNumberWidth } from "./row-frame.ts";
+import { borderBar, rowFrame, gutterWidth, lineNumberWidth } from "./row-frame.ts";
 import { unifiedWindow } from "./visible-sources.ts";
 import { paintWordDiff, shouldEmphasize, wordDiffAnalysis } from "./word-diff.ts";
 import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
@@ -60,7 +60,7 @@ export async function renderUnified(options: DiffViewOptions): Promise<string> {
 
   // Append one unified row (sign + line number + body) to the output.
   const emitRow = (type: "del" | "add" | "ctx", number: number | null, body: string): void => {
-    const frame = diffRowFrame({ type, number, numberWidth, scheme, indicatorGlyph });
+    const frame = rowFrame({ type, number, numberWidth, scheme, indicatorGlyph });
     const rows = wrapAnsi(expandTabs(body), {
       width: codeWidth,
       maxRows: adaptiveWrapRows(renderWidth),

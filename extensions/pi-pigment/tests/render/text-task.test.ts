@@ -5,13 +5,19 @@
 
 import { describe, expect, it } from "vitest";
 
+import type { IndicatorStyle } from "#src/config/config-schema.ts";
+import { parseDiff } from "#src/core/diff.ts";
 import {
+  attachDiffPreview,
   attachPreviewTask,
   clearPreviewTask,
   definePreviewTask,
   getWidthAwareText,
+  type PreviewTextHost,
 } from "#src/render/text-task.ts";
-import { taskKeyOf } from "#src/render/tool-output.ts";
+import { diffPreviewKey, taskKeyOf } from "#src/render/tool-output.ts";
+import type { ToolServices } from "#src/render/tool-services.ts";
+import { buildFakeTheme, makeRenderCtx, makeTextComponent, viewFor } from "#test/fixtures.ts";
 
 /**
  * A fresh Text-shaped host for the stale-rejection scenarios (each drive
@@ -384,5 +390,89 @@ describe("width-aware render driver (getWidthAwareText)", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(host.current()).toBe("placeholder"); // no fallback landed
     }
+  });
+});
+
+function servicesOf(indicatorStyle: IndicatorStyle): ToolServices {
+  return {
+    shortPath: (p: string) => p,
+    indicatorStyle,
+    headerEllipsis: "on",
+    textFactory: makeTextComponent,
+  } as unknown as ToolServices;
+}
+
+describe("attachDiffPreview (the tool wrappers' defaults)", () => {
+  const diff = parseDiff("const a = 1;\nconst b = 2;\n", "const a = 1;\nconst B = 2;\n");
+
+  function attach(
+    host: PreviewTextHost,
+    ctx: ReturnType<typeof makeRenderCtx>["ctx"],
+    indicatorStyle: IndicatorStyle,
+    view: ReturnType<typeof viewFor>,
+  ): void {
+    attachDiffPreview({
+      text: host,
+      keyPrefix: "ed",
+      diff,
+      language: undefined,
+      maxLines: 60,
+      view,
+      ctx,
+      services: servicesOf(indicatorStyle),
+    });
+  }
+
+  it("derives the streaming bit from the ctx (resultStreaming), not from the caller", () => {
+    // The forget-risk the wrapper exists for: the identity must carry the
+    // streaming stamp exactly when the three-state model says pending —
+    // pinned against diffPreviewKey, the builder setDiffPreviewTask uses.
+    const view = viewFor(buildFakeTheme());
+    const { ctx } = makeRenderCtx(); // settled: argsComplete, not partial
+    const settled = makeTextComponent() as unknown as PreviewTextHost;
+    attach(settled, ctx, "bar", view);
+    expect(settled.previewIdentity).toBe(
+      diffPreviewKey({
+        prefix: "ed",
+        identity: view.scheme.identity,
+        lineCount: diff.lines.length,
+        language: undefined,
+        streaming: false,
+      }),
+    );
+    ctx.isPartial = true;
+    ctx.argsComplete = false;
+    const pending = makeTextComponent() as unknown as PreviewTextHost;
+    attach(pending, ctx, "bar", view);
+    expect(pending.previewIdentity).toBe(
+      diffPreviewKey({
+        prefix: "ed",
+        identity: view.scheme.identity,
+        lineCount: diff.lines.length,
+        language: undefined,
+        streaming: true,
+      }),
+    );
+  });
+
+  it("reads the indicator style from the services and invalidates through the ctx", async () => {
+    const view = viewFor(buildFakeTheme());
+    const { ctx, invalidated } = makeRenderCtx();
+    const attachWith = (indicatorStyle: IndicatorStyle): PreviewTextHost => {
+      const host = makeTextComponent() as unknown as PreviewTextHost;
+      attach(host, ctx, indicatorStyle, view);
+      return host;
+    };
+    // "bar" paints the left-edge glyph; "none" collapses the column —
+    // the style comes from the SERVICES, not a call-site default.
+    expect(await attachWith("bar").previewTask!.render(80)).toContain("▌");
+    expect(await attachWith("none").previewTask!.render(80)).not.toContain("▌");
+    // The ctx passes through untouched: the drained render invalidates
+    // through it (the protocol's only redraw path).
+    const driven = makeHost();
+    attach(driven.text, ctx, "bar", view);
+    driven.text.render(80);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(invalidated.count).toBe(1);
   });
 });

@@ -4,7 +4,7 @@
  * render of a block (the Text/Box caches amortize them across unchanged
  * frames; the first wrap and every width change pay full price). Baseline
  * before optimizing; the ASCII fast path in measurePlain lands against
- * these numbers. The frame-level render costs (wrapAnsi / diffRowFrame /
+ * these numbers. The frame-level render costs (wrapAnsi / rowFrame /
  * injectBg / word diff) live in tests/render/render-hot.bench.ts.
  *
  * The measurePlain / forEachCell groups are gate-negative inputs: they show

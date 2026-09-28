@@ -28,8 +28,8 @@ export interface OutputAssemblyInput {
   lines: string[];
   /** The empty verdict (grep: blank output; find/ls: no entries) — the guard clears any stale task. */
   isEmpty: boolean;
-  /** The collapsed budget (grep 15, find/ls 20). */
-  budget: number;
+  /** The collapsed budget (grep 15, find/ls 20) — omit for never-collapse (read). */
+  budget?: number;
   /** The memoized derivation (key stamps read it). */
   derived: DerivedOutput;
   /** The scheme identity (a theme switch re-renders). */
@@ -46,8 +46,13 @@ export interface OutputAssemblyInput {
   theme: RenderTheme;
   /** The render context (invalidate flows into the task). */
   ctx: { invalidate: () => void };
-  /** The styled swap: shown lines + tail + hidden → the settled body. */
-  renderStyled: (shown: string[], tail: string, hidden: number) => string | Promise<string>;
+  /** The styled swap: shown lines + tail + hidden + the task width → the settled body. */
+  renderStyled: (
+    shown: string[],
+    tail: string,
+    hidden: number,
+    width: number,
+  ) => string | Promise<string>;
 }
 
 /**
@@ -103,11 +108,11 @@ export function assembleOutputBody(input: OutputAssemblyInput): PreviewTextHost 
     text,
     definePreviewTask({
       identity: taskKey,
-      widthAware: false,
+      widthAware: true,
       placeholder: plain,
       fallback: plain,
       invalidate: ctx.invalidate,
-      render: async () => renderStyled(shown, tail, hidden),
+      render: async (w) => renderStyled(shown, tail, hidden, w),
     }),
   );
   return text;

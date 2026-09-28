@@ -1,5 +1,5 @@
 /**
- * The per-frame render hot paths: wrapAnsi / diffRowFrame / injectBg /
+ * The per-frame render hot paths: wrapAnsi / rowFrame / injectBg /
  * word-diff pay per row of every diff view render. The cell-level costs
  * underneath them (measurePlain / forEachCell / SgrState) live in
  * tests/core/ansi-hot.bench.ts; inputs are shared through
@@ -16,7 +16,7 @@ import { test } from "vitest";
 
 import { parseDiff } from "#src/core/diff.ts";
 import { injectBg } from "#src/render/inject-bg.ts";
-import { diffRowFrame } from "#src/render/row-frame.ts";
+import { rowFrame } from "#src/render/row-frame.ts";
 import { shouldUseSplit } from "#src/render/split-verdict.ts";
 import {
   paintWordDiff,
@@ -40,7 +40,7 @@ import {
 // runner wraps every imported binding in a getter, and at nanosecond scale
 // a getter call inside the timed callback would dominate the measurement.
 const _wrapAnsi = wrapAnsi;
-const _diffRowFrame = diffRowFrame;
+const _rowFrame = rowFrame;
 const _injectBg = injectBg;
 const _wordDiffAnalysis = wordDiffAnalysis;
 const _plainWordDiff = plainWordDiff;
@@ -144,9 +144,9 @@ test("wrapAnsi (plain body, one wrap per line)", async ({ bench }) => {
   }).run();
 });
 
-test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) => {
+test("rowFrame (the per-row frame both views compose)", async ({ bench }) => {
   await bench("deleted row (sign + gutter + borders)", () => {
-    sink += _diffRowFrame({
+    sink += _rowFrame({
       type: "del",
       number: 12,
       numberWidth: 3,
@@ -155,7 +155,7 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
     }).gutter.length;
   }).run();
   await bench("added row (change-sign fore/backgrounds)", () => {
-    sink += _diffRowFrame({
+    sink += _rowFrame({
       type: "add",
       number: 9,
       numberWidth: 3,
@@ -164,7 +164,7 @@ test("diffRowFrame (the per-row frame both views compose)", async ({ bench }) =>
     }).gutter.length;
   }).run();
   await bench("context row (blank number cell)", () => {
-    sink += _diffRowFrame({
+    sink += _rowFrame({
       type: "ctx",
       number: null,
       numberWidth: 2,

@@ -57,3 +57,16 @@ export function shortPath(cwd: string, p: string): string {
   if (!outside) return r;
   return shortHome(p);
 }
+
+/**
+ * Normalize a path to POSIX separators: the language detector and the
+ * highlight entry split on "/", and a Windows-style `\\` would hide the
+ * extension from them. Display paths keep the native separator — this is
+ * detection-only, never shown.
+ *
+ * @param filePath - The path to normalize.
+ * @returns The path with platform separators replaced by "/".
+ */
+export function toPosixPath(filePath: string): string {
+  return filePath.split(sep).join("/");
+}

@@ -25,16 +25,15 @@ import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { setCallHeader } from "./error-frame.ts";
 import { clearToolHeaderBg, padDiffBody, summarize, resultLine } from "./header.ts";
-import { injectBg } from "./inject-bg.ts";
-import { borderBar, diffRowFrame, gutterWidth } from "./row-frame.ts";
+import { borderBar, gutterWidth, numberedRows } from "./row-frame.ts";
 import {
+  attachDiffPreview,
   attachPreviewTask,
   definePreviewTask,
   renderEmpty,
-  setDiffPreviewTask,
 } from "./text-task.ts";
 import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
-import { COLLAPSED_LINES, collapsedView, joinBodyTail, streamingStamp } from "./tool-output.ts";
+import { COLLAPSED_LINES, collapsedView, joinBodyTail, newFileKey } from "./tool-output.ts";
 import {
   argsSettled,
   callStateOf,
@@ -43,7 +42,6 @@ import {
   type WriteState,
   argsOf,
 } from "./tool-services.ts";
-import { wrapAnsi } from "./wrap.ts";
 
 /**
  * The `result.details` shapes execute() stashes for renderResult(). Kept
@@ -105,33 +103,15 @@ interface NewFileBodyOptions {
 function newFileBody(options: NewFileBodyOptions): string {
   const { lines, scheme, indicatorGlyph, width } = options;
   const numberWidth = Math.max(2, String(lines.length).length);
-  const gutter = gutterWidth(numberWidth, indicatorGlyph);
-  const codeWidth = Math.max(20, width - gutter);
-  return lines
-    .flatMap((line, i) => {
-      const frame = diffRowFrame({
-        type: "add",
-        number: i + 1,
-        numberWidth,
-        scheme,
-        indicatorGlyph,
-      });
-      // Unlimited wrap budget: the file PREVIEW must show its content
-      // (the diff views' narrow-terminal row cap truncates overlong
-      // lines behind a › marker).
-      const wrapped = wrapAnsi(injectBg(line, { baseBg: frame.codeBg, scheme }), {
-        width: codeWidth,
-        maxRows: Number.POSITIVE_INFINITY,
-        fillBg: frame.codeBg,
-        scheme,
-      });
-      const rows = [`${frame.gutter}${wrapped[0]}${scheme.rowReset}`];
-      for (let rowIndex = 1; rowIndex < wrapped.length; rowIndex++) {
-        rows.push(`${frame.continuation}${wrapped[rowIndex]}${scheme.rowReset}`);
-      }
-      return rows;
-    })
-    .join("\n");
+  return numberedRows({
+    lines,
+    scheme,
+    type: "add",
+    startLine: 1,
+    gutter: gutterWidth(numberWidth, indicatorGlyph),
+    indicatorGlyph,
+    width,
+  }).join("\n");
 }
 
 /**
@@ -298,7 +278,7 @@ export function createWriteWrapper(
         // hlBlockResolved, where the tokenize pays for it.
         const newContent = argsOf<WriteToolInput>(ctx.args).content ?? "";
         const seedFor = seedFromText(newContent, d.language);
-        setDiffPreviewTask({
+        attachDiffPreview({
           text,
           keyPrefix: "wd",
           diff: d.diff,
@@ -306,9 +286,8 @@ export function createWriteWrapper(
           maxLines: MAX_RENDER_LINES,
           view,
           ctx,
-          indicatorStyle,
+          services,
           seedFor,
-          streaming: resultStreaming(ctx),
         });
         return text;
       }
@@ -346,14 +325,12 @@ export function createWriteWrapper(
         // picks it up); the result slot below carries ONLY the content
         // preview — one summary position across every wrapper.
         clearToolHeaderBg(text);
-        // The stamps = the width-neutral input list (the attach guard
-        // compares the identity they derive into — the old newFileKey
-        // state field retired); the WIDTH joins the task key only
-        // (widthAware): the body pre-wraps per render width, so a resize
-        // must re-render. The content fingerprint seals the key (a
-        // same-path same-lineCount rewrite must re-render; within one
-        // call args are frozen, so it never fires — cheap insurance
-        // against a stale memo).
+        // newFileKey owns the width-neutral stamp list (the attach guard
+        // compares the identity it returns — the old newFileKey state
+        // field retired; the content fingerprint seals the key against a
+        // same-path same-lineCount rewrite); the WIDTH joins the task key
+        // only (widthAware): the body pre-wraps per render width, so a
+        // resize must re-render.
         // The pending gate snapshots at attach time (the async render may
         // run after settle — a late read of mutable frame state would
         // revert to the tokenizing path).
@@ -362,15 +339,15 @@ export function createWriteWrapper(
         attachPreviewTask(
           text,
           definePreviewTask({
-            prefix: "nf",
-            stamps: [
-              fp,
-              scheme.identity,
+            identity: newFileKey({
+              prefix: "nf",
+              filePath: fp,
+              identity: scheme.identity,
               lineCount,
-              stats.fingerprint,
-              options.expanded ? "x" : "c",
-              streamingStamp(pending),
-            ],
+              fingerprint: stats.fingerprint,
+              expanded: options.expanded,
+              streaming: pending,
+            }),
             widthAware: true,
             placeholder: padDiffBody(theme.fg("muted", "rendering file…"), scheme),
             fallback: "",

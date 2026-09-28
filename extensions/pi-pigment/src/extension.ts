@@ -34,6 +34,7 @@ import {
   createGrepToolDefinition,
   createLsToolDefinition,
   createPowerShellToolDefinition,
+  createReadToolDefinition,
   createWriteToolDefinition,
   defineTool,
   type ExtensionAPI,
@@ -58,6 +59,7 @@ import { createFindWrapper } from "#src/render/tool-find.ts";
 import { createGrepWrapper } from "#src/render/tool-grep.ts";
 import { createLsWrapper } from "#src/render/tool-ls.ts";
 import { createPowerShellWrapper } from "#src/render/tool-powershell.ts";
+import { createReadWrapper } from "#src/render/tool-read.ts";
 import type { ToolServices } from "#src/render/tool-services.ts";
 import { createWriteWrapper } from "#src/render/tool-write.ts";
 import { listConvertedThemes } from "#src/theme/user-themes.ts";
@@ -270,6 +272,10 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
         : createGrepWrapper(defineTool(createGrepToolDefinition(cwd)), services),
     );
     registerToolIfEnabled("ls", createLsWrapper(defineTool(createLsToolDefinition(cwd)), services));
+    registerToolIfEnabled(
+      "read",
+      createReadWrapper(defineTool(createReadToolDefinition(cwd)), services),
+    );
     registerToolIfEnabled(
       "find",
       yieldSearchTofff

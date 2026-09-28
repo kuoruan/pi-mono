@@ -14,7 +14,6 @@ import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/language.ts";
 import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 
-import { renderHeaderLine } from "./ellipsis.ts";
 import { assembleOutputBody } from "./output-assembly.ts";
 import { accentEmphasis, emphasize, type EmphasisSpec } from "./pattern-emphasis.ts";
 import { createToolWrapper } from "./tool-factory.ts";
@@ -127,18 +126,10 @@ export function createFindWrapper(
   // The call header is ours (mirrors the SDK's shape).
   return createToolWrapper(origFind, services, {
     renderShell: "default",
-    renderCall: ({ text, view, ctx, renderArgs }) => {
-      const { theme } = view;
-      const args = argsOf<FindToolInput>(renderArgs);
-      renderHeaderLine({
-        text,
-        prefix: "fh",
-        view,
-        ctx,
-        services,
-        body: formatFindCall(args, theme),
-      });
-      return text;
+    renderHeader: {
+      prefix: "fh",
+      formatCallBody: (renderArgs, theme) =>
+        formatFindCall(argsOf<FindToolInput>(renderArgs), theme),
     },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
       const { scheme, theme } = view;

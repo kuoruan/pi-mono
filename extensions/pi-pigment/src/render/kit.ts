@@ -36,6 +36,7 @@ import { createFindWrapper } from "./tool-find.ts";
 import { createGrepWrapper } from "./tool-grep.ts";
 import { createLsWrapper } from "./tool-ls.ts";
 import { createPowerShellWrapper } from "./tool-powershell.ts";
+import { createReadWrapper } from "./tool-read.ts";
 import type { ToolServices } from "./tool-services.ts";
 import { createWriteWrapper } from "./tool-write.ts";
 
@@ -148,6 +149,8 @@ function decorate(definition: ToolDefinition, services: ToolServices): ToolDefin
       return createFindWrapper(definition, services);
     case "ls":
       return createLsWrapper(definition, services);
+    case "read":
+      return createReadWrapper(definition, services);
     default:
       throw new Error(
         `pi-pigment cannot decorate "${definition.name}" — available tools: ${TOOL_NAMES.join(", ")}.`,

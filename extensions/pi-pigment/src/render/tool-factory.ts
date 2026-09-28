@@ -20,6 +20,7 @@ import type { Component } from "@earendil-works/pi-tui";
 import { inertText } from "#src/core/ansi.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
 
+import { renderHeaderLine } from "./ellipsis.ts";
 import { ERROR_FRAME_DEFAULT_WIDTH, formatToolErrorResult, setToolErrorBg } from "./error-frame.ts";
 import { clearToolHeaderBg, resultLine } from "./header.ts";
 import type { RenderView } from "./session.ts";
@@ -30,7 +31,7 @@ import {
   getWidthAwareText,
   type PreviewTextHost,
 } from "./text-task.ts";
-import { armTiming, firstTextOf, stopTiming } from "./tool-output.ts";
+import { armTiming, errorFrameKey, firstTextOf, stopTiming } from "./tool-output.ts";
 import {
   type ExecutionTimingState,
   type ShellState,
@@ -73,6 +74,19 @@ export type RenderResultBody<TState extends object> = (args: {
   ) => Component;
 }) => Component;
 
+/** The call-header line spec: the factory owns the renderHeaderLine skeleton. */
+export interface HeaderLineSpec<TState extends object> {
+  /** The width-task key prefix (per tool: "gh"/"fh"/"lh"/"rh"). */
+  prefix: string;
+  /**
+   * The styled header body (the byte-parity format*Call formatter). The
+   * render args stay unknown at the boundary — the wrapper knows its
+   * input shape (argsOf); the ctx carries what ls (cwd) and read
+   * (cwd + expanded) read into their formatters.
+   */
+  formatCallBody: (renderArgs: unknown, theme: RenderTheme, ctx: RenderContext<TState>) => string;
+}
+
 /** A renderCall implementation the factory calls. */
 export type RenderCallBody<TState extends object> = (args: {
   text: PreviewTextHost;
@@ -87,6 +101,13 @@ export type RenderCallBody<TState extends object> = (args: {
 export interface WrapperSpec<TState extends object> {
   /** The renderCall body (undefined delegates to the SDK original). */
   renderCall?: RenderCallBody<TState>;
+  /**
+   * A call-header line the factory renders wholesale: the factory owns
+   * the renderHeaderLine skeleton (text/prefix/view/ctx/services/body),
+   * the spec supplies the key prefix and the body formatter. Takes
+   * precedence over renderCall; no wrapper sets both.
+   */
+  renderHeader?: HeaderLineSpec<TState>;
   /** The renderResult body (the factory handles the error frame around it). */
   renderResult?: RenderResultBody<TState>;
   /** A custom execute (write/edit stash diffs into details). */
@@ -198,6 +219,18 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       // execution arms the clock, and a resumed row renders with
       // executionStarted false, so it never gets one.
       armTiming(ctx.state as ExecutionTimingState, ctx.executionStarted);
+      if (spec.renderHeader) {
+        const view = services.render.forTheme(theme);
+        renderHeaderLine({
+          text,
+          prefix: spec.renderHeader.prefix,
+          view,
+          ctx,
+          services,
+          body: spec.renderHeader.formatCallBody(args, view.theme, ctx),
+        });
+        return text;
+      }
       if (spec.renderCall)
         return spec.renderCall({
           text,
@@ -264,19 +297,21 @@ export function createToolWrapper<TState extends object = Record<string, unknown
           });
         // The attach guard (previewIdentity compare) replaces the old
         // errorFrameKey branch: unchanged re-runs keep the rendered
-        // frame; expand, theme swaps, or a new message change the
-        // identity and re-arm through the protocol.
+        // frame; expand, theme swaps, a new message, or the measured
+        // duration re-arm through the protocol. errorFrameKey owns the
+        // stamp list (the -1 elapsed sentinel included).
         const placeholder = frame(ERROR_FRAME_DEFAULT_WIDTH);
         setToolErrorBg(text, theme, scheme);
         attachPreviewTask(
           text,
           definePreviewTask({
-            prefix: orig.name,
-            // The stamps must cover every input the render closure
-            // captures — tookMs among them; the -1 sentinel (a number,
-            // not "") keeps unmeasured distinguishable from a measured
-            // 0ms.
-            stamps: [options.expanded ? 1 : 0, tookMs ?? -1, scheme.identity, message],
+            identity: errorFrameKey({
+              prefix: orig.name,
+              expanded: options.expanded,
+              tookMs,
+              identity: scheme.identity,
+              message,
+            }),
             widthAware: true,
             placeholder,
             fallback: placeholder,

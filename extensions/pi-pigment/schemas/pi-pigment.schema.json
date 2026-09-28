@@ -13,7 +13,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "enum": ["write", "edit", "bash", "powershell", "grep", "ls", "find"]
+        "enum": ["write", "edit", "bash", "powershell", "grep", "ls", "find", "read"]
       },
       "uniqueItems": true,
       "default": [],

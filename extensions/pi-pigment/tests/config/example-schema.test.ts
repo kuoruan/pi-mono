@@ -37,7 +37,7 @@ describe("config example & schema", () => {
       readFileSync(join(pkgRoot, "schemas/pi-pigment.schema.json"), "utf-8"),
     );
     const tools = schema.properties.disabledTools.items.enum;
-    expect(tools).toEqual(["write", "edit", "bash", "powershell", "grep", "ls", "find"]);
+    expect(tools).toEqual(["write", "edit", "bash", "powershell", "grep", "ls", "find", "read"]);
     // The semantic color keys in $defs match the nine zod keys.
     const keys = Object.keys(schema.$defs.semanticColors.properties);
     expect(keys.toSorted()).toEqual([

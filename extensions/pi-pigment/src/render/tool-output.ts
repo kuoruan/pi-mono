@@ -142,13 +142,14 @@ function limitNoticeOf(output: string, details: unknown): string {
 }
 
 /**
- * The preview-task key builder — one join authority for every wrapper's
- * cache-key stamps (the factory's error frame, write's new-file preview,
- * the diff previews' base key, and outputTaskKey's internals). NUL-joined:
+ * The NUL join authority for every preview-key stamp list. NUL-joined:
  * ":"-joined stamps collide (Unix paths may contain colons, Windows drive
  * letters always do), and NUL cannot appear in any stamp we pass. Serves
  * BOTH the width-neutral identity (the attach guard's input stamp) and
  * the width-appended render key (`taskKeyOf(...) + "\u0000" + width`).
+ * Its callers are the named key builders below (plus outputTaskKey and
+ * the derived PreviewIdentity shape) — a stamp list is spelled in one
+ * place; wrapper call sites never join raw.
  *
  * @param prefix - The key's discriminator prefix.
  * @param stamps - The input segments (the caller pre-strings optionals).
@@ -171,6 +172,147 @@ export function taskKeyOf(prefix: string, stamps: Array<string | number>): strin
  */
 export function streamingStamp(streaming: boolean): string {
   return streaming ? "s" : "";
+}
+
+/** The error frame's preview-key inputs. */
+export interface ErrorFrameKeyOptions {
+  /** The key's discriminator prefix (the tool's name). */
+  prefix: string;
+  /** Whether the frame is expanded (ctrl+o re-fits the frame). */
+  expanded: boolean;
+  /**
+   * The measured duration, or undefined when the frame never armed the
+   * clock (a resumed row). Undefined joins as the -1 sentinel — a
+   * number, so a measured 0ms never collides with never-measured.
+   */
+  tookMs: number | undefined;
+  /** The scheme identity part (a theme swap re-keys). */
+  identity: string;
+  /** The extracted failure message the frame renders. */
+  message: string;
+}
+
+/**
+ * The error frame's preview identity (the factory's error branch). The
+ * stamps must cover every input the frame closure captures — expand
+ * state, the measured duration, the scheme, the message — and the -1
+ * elapsed sentinel lives here, nowhere else.
+ *
+ * @param options - The key's inputs.
+ * @returns The preview identity.
+ */
+export function errorFrameKey(options: ErrorFrameKeyOptions): string {
+  return taskKeyOf(options.prefix, [
+    options.expanded ? 1 : 0,
+    options.tookMs ?? -1,
+    options.identity,
+    options.message,
+  ]);
+}
+
+/** The diff preview's key inputs (edit and write share the builder). */
+export interface DiffPreviewKeyOptions {
+  /** The key's discriminator prefix ("ed" edit, "wd" write). */
+  prefix: string;
+  /** The scheme identity part (a theme swap re-keys). */
+  identity: string;
+  /** The parsed diff's line count (the content stamp). */
+  lineCount: number;
+  /** The Shiki language; undefined joins as "" (plain text). */
+  language: string | undefined;
+  /**
+   * Whether the frame's content is still growing — the "s" stamp splits
+   * pending frames from the settled one, so the settle identity differs
+   * from every partial's and the attach guard re-arms the one-time
+   * highlighted render even when the content no longer grows.
+   */
+  streaming: boolean;
+}
+
+/**
+ * The diff previews' base identity (setDiffPreviewTask's attach key).
+ *
+ * @param options - The key's inputs.
+ * @returns The preview identity.
+ */
+export function diffPreviewKey(options: DiffPreviewKeyOptions): string {
+  return taskKeyOf(options.prefix, [
+    options.identity,
+    options.lineCount,
+    options.language ?? "",
+    streamingStamp(options.streaming),
+  ]);
+}
+
+/** The new-file preview's key inputs (write's create branch). */
+export interface NewFileKeyOptions {
+  /** The key's discriminator prefix. */
+  prefix: string;
+  /** The created file's path. */
+  filePath: string;
+  /** The scheme identity part (a theme swap re-keys). */
+  identity: string;
+  /** The content's line count. */
+  lineCount: number;
+  /** The content fingerprint (a same-path same-lineCount rewrite re-keys). */
+  fingerprint: string;
+  /** Whether the row is expanded (ctrl+o — the window/cap regime re-keys). */
+  expanded: boolean;
+  /** The streaming stamp's input (the "s" settle splitter). */
+  streaming: boolean;
+}
+
+/**
+ * The new-file preview's identity (write's create branch) — the expand
+ * bit rides outputTaskKey's "x"/"c" vocabulary, the streaming stamp
+ * splits pending frames from the settled one.
+ *
+ * @param options - The key's inputs.
+ * @returns The preview identity.
+ */
+export function newFileKey(options: NewFileKeyOptions): string {
+  return taskKeyOf(options.prefix, [
+    options.filePath,
+    options.identity,
+    options.lineCount,
+    options.fingerprint,
+    options.expanded ? "x" : "c",
+    streamingStamp(options.streaming),
+  ]);
+}
+
+/** The call header's preview-key inputs (renderHeaderLine). */
+export interface HeaderLineKeyOptions {
+  /** The key's discriminator prefix (per tool). */
+  prefix: string;
+  /** The styled header body (the ellipsis budget applies to it). */
+  body: string;
+  /** The pinned status suffix. */
+  suffix: string;
+  /** Whether the row is expanded (ctrl+o refit re-keys). */
+  expanded: boolean;
+  /** The scheme identity part (a theme swap re-keys). */
+  identity: string;
+  /** The header's trailing newline (grep/find/ls own theirs). */
+  newline: string;
+}
+
+/**
+ * The call header's preview identity (renderHeaderLine's task) — the
+ * trailing newline joins the list, so the pending→settled blank-line
+ * delta re-keys.
+ *
+ * @param options - The key's inputs.
+ * @returns The preview identity.
+ */
+export function headerLineKey(options: HeaderLineKeyOptions): string {
+  return taskKeyOf(options.prefix, [
+    options.body,
+    options.suffix,
+    options.expanded ? 1 : 0,
+    options.identity,
+    options.newline,
+  ]);
 }
 
 /** The outputTaskKey inputs. */
@@ -392,8 +534,11 @@ export function stopTiming(
 
 /** The view's inputs: the budgets and the footer sources. */
 export interface ViewOptions {
-  /** The collapsed-state line budget (COLLAPSED_LINES.x). */
-  budget: number;
+  /**
+   * The collapsed-state line budget (COLLAPSED_LINES.x). Unset = never
+   * collapse (the window is always the full content).
+   */
+  budget?: number;
   /** Whether the row is expanded (ctrl+o). */
   expanded: boolean;
   /**
@@ -440,8 +585,8 @@ export function collapsedView(lines: string[], opts: ViewOptions): CollapsedWind
   const { budget, expanded, expandedCap, tookMs, notice, theme } = opts;
   // An absent result source means no footer (write's create preview —
   // the SDK's own write renderer never showed timing either).
-  const collapsed = !expanded && lines.length > budget;
-  const window = collapsed ? budget : (expandedCap ?? lines.length);
+  const collapsed = !expanded && budget !== undefined && lines.length > budget;
+  const window = collapsed ? (budget ?? lines.length) : (expandedCap ?? lines.length);
   const hidden = lines.length - Math.min(lines.length, window);
   const shown = lines.slice(0, window);
   // Footers read top-down: the expand hint, the limit notice (the SDK's

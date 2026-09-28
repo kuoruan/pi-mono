@@ -27,6 +27,7 @@ import {
   makeRenderCtx,
   plain,
   registerTools,
+  renderCallFor,
   resetPigmentForTest,
   seedTiming,
   toolOf,
@@ -97,15 +98,12 @@ describe("edit error frame shape", () => {
   });
 
   it("flips the renderCall header's background to the error tint on failed calls", async () => {
-    const tools = await registerTools();
-    const edit = toolOf(tools, "edit");
-    if (!edit?.renderCall) throw new Error("edit not registered");
-    const { ctx } = makeRenderCtx();
+    const { renderCall, ctx } = await renderCallFor("edit");
     ctx.args = { path: "/render-project/app.ts", edits: [] };
     const theme = buildRenderTheme();
 
     // Live call: the header Text's custom bg = the scheme's base tint.
-    const live = edit.renderCall(
+    const live = renderCall(
       { path: "/render-project/app.ts", edits: [] },
       theme,
       ctx,
@@ -120,7 +118,7 @@ describe("edit error frame shape", () => {
     // OVER the Box bg on its rows — without the flip the header row
     // would keep its success tint inside an otherwise red frame).
     ctx.isError = true;
-    const failed = edit.renderCall(
+    const failed = renderCall(
       { path: "/render-project/app.ts", edits: [] },
       theme,
       ctx,
@@ -130,13 +128,10 @@ describe("edit error frame shape", () => {
   });
 
   it("an error row's tail continues the ERROR bg (no success-canvas stripe at the frame edge)", async () => {
-    const tools = await registerTools();
-    const edit = toolOf(tools, "edit");
-    if (!edit?.renderCall) throw new Error("edit not registered");
-    const { ctx } = makeRenderCtx();
+    const { renderCall, ctx } = await renderCallFor("edit");
     ctx.isError = true;
     ctx.args = { path: "/render-project/app.ts", edits: [] };
-    const failed = edit.renderCall(
+    const failed = renderCall(
       { path: "/render-project/app.ts", edits: [] },
       buildRenderTheme(),
       ctx,
@@ -150,12 +145,9 @@ describe("edit error frame shape", () => {
   });
 
   it("a success row's tail continues the SUCCESS bg (no bare-reset tail)", async () => {
-    const tools = await registerTools();
-    const edit = toolOf(tools, "edit");
-    if (!edit?.renderCall) throw new Error("edit not registered");
-    const { ctx } = makeRenderCtx();
+    const { renderCall, ctx } = await renderCallFor("edit");
     ctx.args = { path: "/render-project/app.ts", edits: [] };
-    const ok = edit.renderCall(
+    const ok = renderCall(
       { path: "/render-project/app.ts", edits: [] },
       buildRenderTheme(),
       ctx,
@@ -170,17 +162,14 @@ describe("edit error frame shape", () => {
   });
 
   it("keeps the renderCall header transparent while the call streams (no success-tint leak)", async () => {
-    const tools = await registerTools();
-    const edit = toolOf(tools, "edit");
-    if (!edit?.renderCall) throw new Error("edit not registered");
-    const { ctx } = makeRenderCtx();
+    const { renderCall, ctx } = await renderCallFor("edit");
     ctx.isPartial = true; // streaming: the edit has not executed yet
     ctx.args = { path: "/render-project/app.ts", edits: [] };
     const theme = buildRenderTheme();
 
     // A pending frame must carry no success tint: the header's custom bg
     // is cleared, so the default shell's pending Box bg shows through.
-    const live = edit.renderCall(
+    const live = renderCall(
       { path: "/render-project/app.ts", edits: [] },
       theme,
       ctx,
@@ -189,17 +178,10 @@ describe("edit error frame shape", () => {
   });
 
   it("a pending call header renders with no trailing blank (the frame padding supplies the one)", async () => {
-    const tools = await registerTools();
-    const edit = toolOf(tools, "edit");
-    if (!edit?.renderCall) throw new Error("edit not registered");
-    const { ctx } = makeRenderCtx();
+    const { renderCall, ctx } = await renderCallFor("edit");
     ctx.isPartial = true;
     ctx.args = { path: "/render-project/app.ts", edits: [] };
-    const live = edit.renderCall(
-      { path: "/render-project/app.ts", edits: [] },
-      buildRenderTheme(),
-      ctx,
-    );
+    const live = renderCall({ path: "/render-project/app.ts", edits: [] }, buildRenderTheme(), ctx);
     // Streaming frames carry ONLY the header row: the header's own
     // separator blank would stack on the default shell's bottom padding
     // and double the gap (the two-blank pending frame this pins).
@@ -209,26 +191,16 @@ describe("edit error frame shape", () => {
   });
 
   it("a settled call header keeps its single separator blank row", async () => {
-    const tools = await registerTools();
-    const edit = toolOf(tools, "edit");
-    if (!edit?.renderCall) throw new Error("edit not registered");
-    const { ctx } = makeRenderCtx();
+    const { renderCall, ctx } = await renderCallFor("edit");
     ctx.args = { path: "/render-project/app.ts", edits: [] };
-    const live = edit.renderCall(
-      { path: "/render-project/app.ts", edits: [] },
-      buildRenderTheme(),
-      ctx,
-    );
+    const live = renderCall({ path: "/render-project/app.ts", edits: [] }, buildRenderTheme(), ctx);
     const rows = rowsOf(live);
     expect(rows).toHaveLength(2);
     expect(rows[1]).toBe("");
   });
 
   it("paints a succeeded header with the theme's RAW success slot (not the derived canvas)", async () => {
-    const tools = await registerTools();
-    const edit = toolOf(tools, "edit");
-    if (!edit?.renderCall) throw new Error("edit not registered");
-    const { ctx } = makeRenderCtx();
+    const { renderCall, ctx } = await renderCallFor("edit");
     ctx.args = { path: "/render-project/app.ts", edits: [] };
     // A 256-color success slot: the scheme cannot parse it and would
     // derive a neutral canvas — the header must still paint the slot the
@@ -240,7 +212,7 @@ describe("edit error frame shape", () => {
       getBgAnsi: (name) => (name === "toolSuccessBg" ? "\u001b[48;5;123m" : "\u001b[48;5;9m"),
       bg: (_name, text) => text,
     };
-    const live = edit.renderCall(
+    const live = renderCall(
       { path: "/render-project/app.ts", edits: [] },
       theme,
       ctx,

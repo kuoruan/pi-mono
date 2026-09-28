@@ -14,7 +14,6 @@ import { detectLanguage } from "#src/theme/language.ts";
 import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
-import { renderHeaderLine } from "./ellipsis.ts";
 import { assembleOutputBody } from "./output-assembly.ts";
 import { accentEmphasis, emphasize, type MatchFlags } from "./pattern-emphasis.ts";
 import type { RenderView } from "./session.ts";
@@ -123,29 +122,19 @@ export function createGrepWrapper(
   origGrep: ToolDefinition,
   services: ToolServices,
 ): ToolDefinition {
-  // The call header renders via the SDK's own formatting (the factory's
-  // delegation seam — no renderCall override); renderResult reads the
-  // settled args directly from ctx.args (the SDK's documented pattern:
-  // args are present every frame, live and restored alike).
+  // renderResult reads the settled args directly from ctx.args (the
+  // SDK's documented pattern: args are present every frame, live and
+  // restored alike).
   return createToolWrapper(origGrep, services, {
     renderShell: "default",
-    // The call header is ours now (mirrors the SDK's formatGrepCall —
-    // pattern / path / glob / limit); the SDK's render-utils helpers (str,
-    // shortenPath, invalidArgText) are three lines each, copied here so
-    // the header owns its gap without a deep import the package map
-    // forbids.
-    renderCall: ({ text, view, ctx, renderArgs }) => {
-      const { theme } = view;
-      const args = argsOf<GrepToolInput>(renderArgs);
-      renderHeaderLine({
-        text,
-        prefix: "gh",
-        view,
-        ctx,
-        services,
-        body: formatGrepCall(args, theme),
-      });
-      return text;
+    // The header body mirrors the SDK's formatGrepCall (pattern / path /
+    // glob / limit); the SDK's render-utils helpers (str, shortenPath,
+    // invalidArgText) are three lines each, copied into formatGrepCall —
+    // no deep import the package map forbids.
+    renderHeader: {
+      prefix: "gh",
+      formatCallBody: (renderArgs, theme) =>
+        formatGrepCall(argsOf<GrepToolInput>(renderArgs), theme),
     },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
       const { scheme, theme } = view;

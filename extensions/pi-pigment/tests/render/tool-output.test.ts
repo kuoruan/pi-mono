@@ -5,7 +5,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseHitLine } from "#src/render/tool-grep.ts";
-import { collapsedView, outputMemoOf, outputTaskKey } from "#src/render/tool-output.ts";
+import {
+  collapsedView,
+  diffPreviewKey,
+  errorFrameKey,
+  outputMemoOf,
+  outputTaskKey,
+  taskKeyOf,
+} from "#src/render/tool-output.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
@@ -39,7 +46,7 @@ async function settledText(component: DrivenTaskComponent, probe: string): Promi
   return plain(component.text.text);
 }
 
-describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
+describe("output tool wrappers (grep/find/ls/bash/powershell/read)", () => {
   let tempDir: string;
   let cwdSpy: ReturnType<typeof vi.spyOn>;
 
@@ -55,10 +62,10 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("registers all seven tools by default", { timeout: 20000 }, async () => {
+  it("registers all eight tools by default", { timeout: 20000 }, async () => {
     const tools = await registerTools();
     const names = tools.map((t) => t.name).toSorted();
-    expect(names).toEqual(["bash", "edit", "find", "grep", "ls", "powershell", "write"]);
+    expect(names).toEqual(["bash", "edit", "find", "grep", "ls", "powershell", "read", "write"]);
   });
 
   it("every wrapper explicitly claims the default shell (no SDK shell is inherited)", async () => {
@@ -76,7 +83,7 @@ describe("output tool wrappers (grep/find/ls/bash/powershell)", () => {
       JSON.stringify({ disabledTools: ["bash", "grep", "ls", "find", "powershell"] }),
     );
     const tools = await registerTools();
-    expect(tools.map((t) => t.name).toSorted()).toEqual(["edit", "write"]);
+    expect(tools.map((t) => t.name).toSorted()).toEqual(["edit", "read", "write"]);
   });
 
   it(
@@ -838,5 +845,40 @@ describe("grep context-line parsing", () => {
       content: "see issue-5- notes",
       isContext: true,
     });
+  });
+});
+
+describe("the preview-key builders (the sentinels' single home)", () => {
+  it("errorFrameKey: unmeasured elapsed stamps as the -1 sentinel, apart from any measured value", () => {
+    const base = { prefix: "probe", expanded: true, identity: "scheme-id", message: "boom" };
+    // undefined (a resumed row whose clock never armed) keys DIFFERENTLY
+    // from a measured 0ms — the sentinel's documented purpose; a raw
+    // Array.join would render undefined as "" and blur the two.
+    expect(errorFrameKey({ ...base, tookMs: undefined })).not.toBe(
+      errorFrameKey({ ...base, tookMs: 0 }),
+    );
+    expect(errorFrameKey({ ...base, tookMs: undefined })).not.toBe(
+      errorFrameKey({ ...base, tookMs: 12 }),
+    );
+    // The encoding itself: undefined lands as the -1 stamp, in position.
+    expect(errorFrameKey({ ...base, tookMs: undefined })).toBe(
+      taskKeyOf("probe", [1, -1, "scheme-id", "boom"]),
+    );
+  });
+
+  it("diffPreviewKey: the streaming stamp is one trailing s segment; settled frames add none", () => {
+    const base = { prefix: "wd", identity: "scheme\u0000id", lineCount: 3, language: "ts" };
+    const settled = diffPreviewKey({ ...base, streaming: false });
+    const pending = diffPreviewKey({ ...base, streaming: true });
+    // The settle identity differs from every partial's — the attach guard
+    // re-arms the one-time highlighted render even when the content
+    // stopped growing.
+    expect(pending).not.toBe(settled);
+    // The encoding, composed through the join authority: a trailing "s"
+    // segment when streaming, an empty one when settled (the settled
+    // frame's key shape is untouched — same segment list as ever).
+    expect(pending.endsWith("\u0000s")).toBe(true);
+    expect(settled).toBe(taskKeyOf("wd", ["scheme\u0000id", 3, "ts", ""]));
+    expect(pending).toBe(taskKeyOf("wd", ["scheme\u0000id", 3, "ts", "s"]));
   });
 });

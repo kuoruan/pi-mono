@@ -21,19 +21,13 @@ import { parsePatchFiles } from "#src/core/diff.ts";
 import { linesOf } from "#src/core/lines.ts";
 import { detectLanguage } from "#src/theme/language.ts";
 import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
-import { seedFromLines } from "#src/theme/seed.ts";
+import { memoSeedText, seedFromLines } from "#src/theme/seed.ts";
 
 import { setCallHeader } from "./error-frame.ts";
 import { summarize, resultLine } from "./header.ts";
-import { setDiffPreviewTask } from "./text-task.ts";
+import { attachDiffPreview } from "./text-task.ts";
 import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
-import {
-  argsOf,
-  callStateOf,
-  resultStreaming,
-  type EditState,
-  type ToolServices,
-} from "./tool-services.ts";
+import { argsOf, callStateOf, type EditState, type ToolServices } from "./tool-services.ts";
 
 /** Show at most this many diff lines in an edit preview. */
 const MAX_PREVIEW_LINES = 60;
@@ -97,7 +91,7 @@ export function createEditWrapper(
   origEdit: ToolDefinition,
   services: ToolServices,
 ): ToolDefinition {
-  const { shortPath, indicatorStyle } = services;
+  const { shortPath } = services;
 
   // Execution delegates verbatim (the factory's default path): the SDK's
   // details shape (diff, patch, firstChangedLine) persists into the
@@ -195,24 +189,11 @@ export function createEditWrapper(
         // path for its whole life, so the memo needs no key. The stale
         // window (an external write landing between the call and a later
         // re-render) is display-only and self-heals on the next call.
-        // The read memoizes in the row state: the task render re-runs on
-        // every re-render (attach, settle, resize) and the row has ONE
-        // path for its whole life, so the memo needs no key. The stale
-        // window (an external write landing between the call and a later
-        // re-render) is display-only and self-heals on the next call.
         const seedFor = seedFromLines(() => {
-          let lines = ctx.state.seedLines;
-          if (lines === undefined) {
-            try {
-              lines = linesOf(readFileSync(editPath, "utf-8"));
-            } catch {
-              lines = null; // unreadable file: memoize the miss
-            }
-            ctx.state.seedLines = lines;
-          }
-          return lines;
+          const seed = memoSeedText(ctx.state, () => readFileSync(editPath, "utf-8"));
+          return seed === undefined ? null : linesOf(seed);
         }, language);
-        setDiffPreviewTask({
+        attachDiffPreview({
           text,
           keyPrefix: "ed",
           diff,
@@ -220,11 +201,8 @@ export function createEditWrapper(
           maxLines: MAX_PREVIEW_LINES,
           view,
           ctx,
-          indicatorStyle,
+          services,
           seedFor,
-          // Result growth from the three-state model (pending = streaming)
-          // — the same gate every preview path shares.
-          streaming: resultStreaming(ctx),
         });
         return text;
       }

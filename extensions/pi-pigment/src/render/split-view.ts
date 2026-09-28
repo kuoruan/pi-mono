@@ -15,7 +15,7 @@ import {
   MIN_RENDER_WIDTH,
 } from "./diff-view.ts";
 import { injectBg } from "./inject-bg.ts";
-import { borderBar, diffRowFrame, gutterWidth } from "./row-frame.ts";
+import { borderBar, rowFrame, gutterWidth } from "./row-frame.ts";
 import { splitWindow } from "./visible-sources.ts";
 import { type CharRange, shouldEmphasize, wordDiffAnalysis } from "./word-diff.ts";
 import { adaptiveWrapRows, wrapAnsi } from "./wrap.ts";
@@ -111,7 +111,7 @@ export async function renderSplit(options: DiffViewOptions): Promise<string> {
     // left is a del/ctx/sep line — whose number is oldNum — and right an
     // add/ctx line — whose number is newNum; no type dispatch needed).
     const number = side === "left" ? line.oldNum : line.newNum;
-    const frame = diffRowFrame({ type, number, numberWidth, scheme, indicatorGlyph });
+    const frame = rowFrame({ type, number, numberWidth, scheme, indicatorGlyph });
     const body =
       ranges && ranges.length > 0
         ? injectBg(highlight, {

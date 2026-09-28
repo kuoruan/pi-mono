@@ -159,7 +159,7 @@ describe("session_start assembly (the detection in place)", () => {
     // No config file at all: zero-config — the tools register, the
     // scheme derives from the pi theme, ours-detection runs per render.
     const tools = await registerTools({ cwd: dir, agentDir: join(dir, "agent") });
-    expect(tools.length).toBe(7);
+    expect(tools.length).toBe(8);
     const scheme = viewFor(buildFakeTheme()).scheme;
     expect(scheme.bgBase).toBeTruthy(); // the pi theme's own canvas
   });
@@ -174,7 +174,7 @@ describe("session_start assembly (the detection in place)", () => {
     const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const tools = await registerTools({ cwd: dir, agentDir: join(dir, "agent") });
-      expect(tools.length).toBe(7); // a config error never disables the renderer
+      expect(tools.length).toBe(8); // a config error never disables the renderer
       expect(stderr.mock.calls.flat().join("\n")).toMatch(/no-such-theme/);
     } finally {
       stderr.mockRestore();

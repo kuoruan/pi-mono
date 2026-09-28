@@ -1,6 +1,6 @@
 # pi-pigment
 
-A Pi extension that provides themes and renders tool output — the Shiki bundle converted to registered pi themes (pick one in /theme and the whole pi follows), plus syntax-highlighted diffs for `write`/`edit`, shell-grammar bash/powershell commands with AST-driven heredoc injection, highlighted grep hits, type-colored `ls`/`find` listings. This file pins down the ubiquitous language so reviews, navigators (human or AI), and future contributors share one vocabulary.
+A Pi extension that provides themes and renders tool output — the Shiki bundle converted to registered pi themes (pick one in /theme and the whole pi follows), plus syntax-highlighted diffs for `write`/`edit`, shell-grammar bash/powershell commands with AST-driven heredoc injection, highlighted grep hits, type-colored `ls`/`find` listings, Shiki-painted `read` slices. This file pins down the ubiquitous language so reviews, navigators (human or AI), and future contributors share one vocabulary.
 
 ## Language
 
@@ -41,7 +41,7 @@ Every wrapper declares "default" EXPLICITLY in its WrapperSpec: the factory spre
 - `ShellState` is co-authored with the SDK: the native bash/powershell renderResult (the output-delegation target) reads and writes its timing fields (`startedAt`/`endedAt`/`interval`) — the type is the contract both sides write into.
 - One known cosmetic quirk is accepted: the write wrapper's existence probe reads the filesystem at render time, so a restored create shows the "write" label (the file exists by then; the "✓ new file" result line below carries the truth). Fixing it would need a renderResult→renderCall state bridge, the cross-renderer contract this codebase avoids.
 
-pi-pigment registers `write`, `edit`, `bash`, `grep`, `find`, `ls`, and `powershell` wrappers (grep/find yield to pi-fff when it is loaded — see FFF yield). _Avoid_: override (execution is not overridden), hook.
+pi-pigment registers `write`, `edit`, `bash`, `grep`, `find`, `ls`, `read`, and `powershell` wrappers (grep/find yield to pi-fff when it is loaded — see FFF yield). _Avoid_: override (execution is not overridden), hook.
 
 **Disabled tool**: A tool name listed in `disabledTools` whose wrapper is not registered, falling back to Pi's built-in rendering.
 
@@ -51,7 +51,7 @@ pi-pigment registers `write`, `edit`, `bash`, `grep`, `find`, `ls`, and `powersh
 - Originally — a same-name registration from pi-pigment (which loads first) would crowd out FFF's override-mode tools (first registration wins the name), silently replacing frecency search with the built-ins. ls stays (FFF has no ls).
 - Wrapping another extension's tools outright is structurally impossible: the API exposes no definition lookup, and the register-first-to-win ordering conflicts with needing the other extension's execute.
 
-_Avoid_: setActiveTools to force-activate dormant tools (extending the agent's tool surface is the user's call, not a renderer's). The `disabledTools` config key's valid values: `write`, `edit`, `bash`, `grep`, `find`, `ls`, `powershell`.
+_Avoid_: setActiveTools to force-activate dormant tools (extending the agent's tool surface is the user's call, not a renderer's). The `disabledTools` config key's valid values: `write`, `edit`, `bash`, `grep`, `find`, `ls`, `powershell`, `read`.
 
 ### Diff model
 

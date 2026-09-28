@@ -88,7 +88,7 @@ describe("session_start re-registration (fork/resume)", () => {
     // fork/resume re-fires session_start on the SAME extension instance;
     // the SDK's loader registers tools into a Map keyed by name, so the
     // re-registration replaces. The fixture mirrors that — assert the
-    // mock's fidelity (seven names, no duplicates, twice fired).
+    // mock's fidelity (eight names, no duplicates, twice fired).
     const api = {
       handlers: new Map<string, Array<(e: unknown, ctx: unknown) => void | Promise<void>>>(),
       tools: new Map<string, { name: string }>(),
@@ -119,9 +119,10 @@ describe("session_start re-registration (fork/resume)", () => {
       "grep",
       "ls",
       "powershell",
+      "read",
       "write",
     ]);
-    expect(api.tools.size).toBe(7); // no duplicates across the two fires
+    expect(api.tools.size).toBe(8); // no duplicates across the two fires
   });
 });
 

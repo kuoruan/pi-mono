@@ -4,13 +4,18 @@
  * per-tool render states.
  */
 
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 
 import type { HeaderEllipsis, IndicatorStyle } from "#src/config/config-schema.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
+import type { SeedTextMemo } from "#src/theme/seed.ts";
 
-import { shortHome } from "./paths.ts";
+import { expandHome, shortHome } from "./paths.ts";
 import type { RenderSession } from "./session.ts";
 import type { TextComponentFactory } from "./text-task.ts";
 
@@ -94,6 +99,25 @@ export function headerPath(pathArg: unknown): string | null {
  */
 export function invalidArg(theme: RenderTheme): string {
   return theme.fg("error", "[invalid arg]");
+}
+
+/**
+ * The accent display path, hyperlinked from the RAW arg when the terminal
+ * allows it (the SDK's linkPath shape — resolving the shortened "~/x"
+ * would land under <cwd>/~/x). The invalid chip when the arg is not a
+ * string. One home for the ls/read header parity claim (find/grep paint
+ * the path plain — their SDK originals carry no link).
+ *
+ * @param raw - The stringified `path` arg (argStr's output: string, "", or null when invalid).
+ * @param theme - The pi theme.
+ * @param cwd - The session working directory (the link target's base).
+ * @returns The styled path.
+ */
+export function headerPathLink(raw: string | null, theme: RenderTheme, cwd: string): string {
+  if (raw === null) return invalidArg(theme);
+  const styled = theme.fg("accent", headerPath(raw) ?? ".");
+  if (!getCapabilities().hyperlinks) return styled;
+  return hyperlink(styled, pathToFileURL(resolve(cwd, expandHome(raw) || ".")).href);
 }
 
 /**
@@ -260,16 +284,9 @@ export interface ParsedDiffMemo {
  * facts into the header suffix and caches the diff parse + the seed's
  * file lines).
  */
-export interface EditState {
+export interface EditState extends SeedTextMemo {
   /** The edit-operation count (bridged with the diff stats). */
   editCount?: number;
-  /**
-   * The seed source's lines for embedded grammars: the edited file read
-   * once per call (undefined = not read yet, null = unreadable). The row
-   * has one path, so the memo needs no key; see the seed producer in
-   * tool-edit.ts.
-   */
-  seedLines?: string[] | null;
   /** The parse memo (identity-keyed; see {@link ParsedDiffMemo}). */
   parsedDiff?: ParsedDiffMemo;
   /** The parsed-diff line count. */

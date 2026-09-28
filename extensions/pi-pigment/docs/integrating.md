@@ -166,8 +166,8 @@ See [ADR 0006](adr/0006-theme-provider-architecture.md) and [config.md](config.m
 
 ## Coexistence: first-wins, and how pi-pigment yields
 
-1. **pi-pigment occupies the seven built-in names** (`write`, `edit`, `bash`, `powershell`, `grep`, `ls`, `find`) by same-name registration ([ADR 0005](adr/0005-rendering-only.md)). Register one of these after pi-pigment and yours is silently dropped.
-2. **Occupied names are yielded, not shadowed.** Before registering, pi-pigment reads pi's merged registry: any of the seven already claimed by a non-`builtin` source is skipped with a one-line notice. Factory-time registration always qualifies — register in your factory and pi-pigment never touches the name.
+1. **pi-pigment occupies the eight built-in names** (`write`, `edit`, `bash`, `powershell`, `grep`, `ls`, `find`, `read`) by same-name registration ([ADR 0005](adr/0005-rendering-only.md)). Register one of these after pi-pigment and yours is silently dropped.
+2. **Occupied names are yielded, not shadowed.** Before registering, pi-pigment reads pi's merged registry: any of the eight already claimed by a non-`builtin` source is skipped with a one-line notice. Factory-time registration always qualifies — register in your factory and pi-pigment never touches the name.
 3. **Search yields to pi-fff.** With pi-fff's vocabulary (`/fff-mode`) present, pi-pigment never registers `grep`/`find`, regardless of load order.
 4. **Everything else is yours via the kit.** Whoever wins a name borrows the rendering back (samples A/B): the winner owns semantics, pi-pigment supplies rendering on request.
 5. **Users can opt out per tool** with `disabledTools`.

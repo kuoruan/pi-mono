@@ -103,7 +103,16 @@ describe("channel B: the globalThis publication", () => {
       ["createRenderKit", "createRenderSession", "packageVersion", "tools", "version"].toSorted(),
     );
     expect(kit.version).toBe(RENDER_KIT_PROTOCOL_VERSION);
-    expect(kit.tools).toEqual(["write", "edit", "bash", "powershell", "grep", "ls", "find"]);
+    expect(kit.tools).toEqual([
+      "write",
+      "edit",
+      "bash",
+      "powershell",
+      "grep",
+      "ls",
+      "find",
+      "read",
+    ]);
   });
 
   it("is idempotent — first publisher wins (/reload must not swap the payload)", () => {

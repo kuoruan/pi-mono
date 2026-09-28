@@ -15,7 +15,8 @@ import { clearToolHeaderBg, padDiffBody } from "./header.ts";
 import { shouldUseSplit } from "./split-verdict.ts";
 import { renderSplit } from "./split-view.ts";
 import { termW } from "./term.ts";
-import { streamingStamp, taskKeyOf } from "./tool-output.ts";
+import { diffPreviewKey, taskKeyOf } from "./tool-output.ts";
+import { resultStreaming, type RenderContext, type ToolServices } from "./tool-services.ts";
 import { renderUnified } from "./unified-view.ts";
 
 /**
@@ -160,14 +161,15 @@ export function attachPreviewTask(text: PreviewTextHost, task: PreviewTask): voi
 }
 
 /**
- * The task's identity source — one of two real shapes:
+ * The task's identity source — one of two shapes:
  *
- * - `{ prefix, stamps }` — the derived form: `taskKeyOf` joins them into the identity, so the stamp
- *   list sits VISIBLY at the call site beside the closure it must cover (the protocol's one rule —
- *   the stamps must see every input the render closure captures — becomes a missing array entry to
- *   eyeball, not a lurking cache bug);
- * - `{ identity }` — the precomputed form, for tools whose key composes through `outputTaskKey`
- *   (grep/find/ls: that named-field builder is those tools' own stamps authority).
+ * - `{ identity }` — the precomputed form: every wrapper composes its key through a NAMED builder
+ *   (outputTaskKey for grep/find/ls, errorFrameKey / diffPreviewKey / newFileKey / headerLineKey
+ *   for the diff-class previews) and hands over the string — the stamp lists and their sentinels
+ *   live in those builders, never hand-copied at a call site;
+ * - `{ prefix, stamps }` — the derived form: `taskKeyOf` joins them into the identity. The low-level
+ *   form the builders themselves land on, kept here for ad-hoc keys (tests); a call site listing
+ *   raw stamps must justify why no named builder covers it.
  *
  * The two shapes are exclusive BY TYPE: each member declares the other's keys as `never`, so a
  * literal carrying both fails to compile. Without that, the union's excess-property rule would
@@ -269,17 +271,23 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
   const theme = view.theme;
   const scheme = view.scheme;
   clearToolHeaderBg(text);
-  // ONE stamp list feeds both compares: the identity (the attach guard)
-  // and the width-appended render key derive from the same list through
-  // definePreviewTask — everything else is frozen per task (the diff, the
-  // scheme identity). The streaming bit separates partial frames from
-  // the settled one, so the final frame re-arms and colors in even when
-  // the content no longer grows.
+  // ONE builder output feeds both compares: the identity (the attach
+  // guard) and the width-appended render key derive from it through
+  // definePreviewTask — everything else is frozen per task (the diff,
+  // the scheme identity). diffPreviewKey owns the stamp list; its
+  // streaming bit separates partial frames from the settled one, so the
+  // final frame re-arms and colors in even when the content no longer
+  // grows.
   attachPreviewTask(
     text,
     definePreviewTask({
-      prefix: keyPrefix,
-      stamps: [scheme.identity, diff.lines.length, language ?? "", streamingStamp(streaming)],
+      identity: diffPreviewKey({
+        prefix: keyPrefix,
+        identity: scheme.identity,
+        lineCount: diff.lines.length,
+        language,
+        streaming,
+      }),
       widthAware: true,
       placeholder: theme.fg("muted", " rendering diff…"),
       fallback: "",
@@ -318,6 +326,52 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
       },
     }),
   );
+}
+
+/**
+ * The attachDiffPreview inputs — DiffPreviewInput stripped to what a tool
+ * wrapper's render slot actually varies, plus the frame's own pair (the
+ * render context and the services the defaults derive from).
+ */
+export interface AttachDiffPreviewSpec extends Omit<
+  DiffPreviewInput,
+  "ctx" | "indicatorStyle" | "streaming"
+> {
+  /**
+   * The render context — the invalidate source AND the streaming gate's
+   * input: streaming derives from it through resultStreaming, so a call
+   * site cannot forget the bit (a forgotten one tokenizes every growing
+   * partial and pays the seed read per frame).
+   */
+  ctx: RenderContext<object>;
+  /** Assembly services — indicatorStyle's single source. */
+  services: ToolServices;
+}
+
+/**
+ * Attach the diff preview task described by `spec` to its host Text — the
+ * tool wrappers' entry over setDiffPreviewTask. The four inputs constant
+ * at every call site are derived here (view/ctx pass through; the
+ * indicator style comes from the services; the streaming bit comes from
+ * the context's three-state model), so a preview call site hands over
+ * only what varies between the tools.
+ *
+ * @param spec - The preview's varying inputs plus the render frame.
+ */
+export function attachDiffPreview(spec: AttachDiffPreviewSpec): void {
+  const { text, keyPrefix, diff, language, maxLines, view, ctx, services, seedFor } = spec;
+  setDiffPreviewTask({
+    text,
+    keyPrefix,
+    diff,
+    language,
+    maxLines,
+    view,
+    ctx,
+    indicatorStyle: services.indicatorStyle,
+    seedFor,
+    streaming: resultStreaming(ctx),
+  });
 }
 
 /**

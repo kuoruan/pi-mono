@@ -260,6 +260,24 @@ export function makeRenderCtx<TState extends object = Record<string, unknown>>()
 }
 
 /**
+ * The renderCall suites' one-step prologue: register the tools, pull one
+ * by name, and guard its renderCall — the four-line header every call test
+ * used to repeat, collected here so the non-null guard can't be forgotten
+ * in a new suite. Like toolOf, the guard throws when the tool (or its
+ * renderCall) is missing.
+ *
+ * @param name - The tool to pull (e.g. "bash").
+ * @returns The guarded renderCall plus makeRenderCtx's bundle (ctx,
+ *   invalidated, lastComponent), the ctx typed to the tool's state.
+ */
+export async function renderCallFor<TState extends object = Record<string, unknown>>(name: string) {
+  const tools = await registerTools();
+  const tool = toolOf(tools, name);
+  if (!tool.renderCall) throw new Error(`${name} renderCall not registered`);
+  return { renderCall: tool.renderCall, ...makeRenderCtx<TState>() };
+}
+
+/**
  * Seed a settled execution span into a render ctx — the Took footers read
  * their duration from here (pi's render-state clock, armed by renderCall
  * while the execution is live and stopped by the first settled frame), not
@@ -478,7 +496,7 @@ async function driveSession(
     // alone never triggers a skip — pins this).
     getAllTools: () => [
       ...foreignTools.map((name) => ({ name, sourceInfo: { source: "some-other-extension" } })),
-      ...["write", "edit", "bash", "powershell", "grep", "ls", "find"].map((name) => ({
+      ...["write", "edit", "bash", "powershell", "grep", "ls", "find", "read"].map((name) => ({
         name,
         sourceInfo: { source: "builtin" },
       })),

@@ -18,7 +18,7 @@ There is nothing else to configure — no environment variables, no pi `settings
 ```jsonc
 {
   // Tools pi-pigment does NOT register; Pi's built-in tool is used instead.
-  // Valid values: "write", "edit", "bash", "grep", "find", "ls", "powershell".
+  // Valid values: "write", "edit", "bash", "grep", "find", "ls", "powershell", "read".
   "disabledTools": [],
 
   // Left-edge change indicator in diff views.

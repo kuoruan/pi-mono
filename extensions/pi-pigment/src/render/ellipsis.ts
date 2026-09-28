@@ -12,6 +12,7 @@ import type { RenderView } from "./session.ts";
 import { termW } from "./term.ts";
 import type { PreviewTextHost } from "./text-task.ts";
 import { attachPreviewTask, clearPreviewTask, definePreviewTask } from "./text-task.ts";
+import { headerLineKey } from "./tool-output.ts";
 import type { RenderContext, ToolServices } from "./tool-services.ts";
 
 /** The single-char ellipsis (one column; the TUI is Unicode-safe). */
@@ -175,11 +176,18 @@ export function renderHeaderLine(parts: HeaderParts): void {
   attachPreviewTask(
     text,
     definePreviewTask({
-      prefix,
-      // The trailing blank follows the call state (pending headers own
-      // none) — without it a pending→error transition keeps the
-      // blank-less frame and glues the header to the body below.
-      stamps: [body, suffix, ctx.expanded ? 1 : 0, scheme.identity, newline],
+      // headerLineKey owns the stamp list; the trailing blank rides it
+      // (pending headers own none) — without it a pending→error
+      // transition keeps the blank-less frame and glues the header to
+      // the body below.
+      identity: headerLineKey({
+        prefix,
+        body,
+        suffix,
+        expanded: ctx.expanded,
+        identity: scheme.identity,
+        newline,
+      }),
       widthAware: true,
       placeholder: fit(termW()),
       fallback: full,

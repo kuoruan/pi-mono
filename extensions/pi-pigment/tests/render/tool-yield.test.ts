@@ -17,7 +17,7 @@ describe("tool yield on foreign occupancy", () => {
     expect(names).toEqual(expect.arrayContaining(["write", "edit", "bash", "ls", "find"]));
   });
 
-  test("yields every name when all seven are occupied", async () => {
+  test("yields every name when all eight are occupied", async () => {
     const tools = await registerTools({}, [
       "write",
       "edit",
@@ -26,17 +26,18 @@ describe("tool yield on foreign occupancy", () => {
       "grep",
       "ls",
       "find",
+      "read",
     ]);
     expect(tools).toEqual([]);
   });
 
   test("builtin-source entries do not trigger the yield", async () => {
     // No foreignTools staged: the registry only surfaces builtins, so the
-    // full seven wrappers register — the check keys on the source, not
+    // full eight wrappers register — the check keys on the source, not
     // the bare name.
     const tools = await registerTools({});
     expect(tools.map((tool) => tool.name).toSorted()).toEqual(
-      ["bash", "edit", "find", "grep", "ls", "powershell", "write"].toSorted(),
+      ["bash", "edit", "find", "grep", "ls", "powershell", "read", "write"].toSorted(),
     );
   });
 
@@ -52,16 +53,16 @@ describe("tool yield on foreign occupancy", () => {
   test("resume re-fire does not yield to our own registration (self-shadowing guard)", async () => {
     // The shared registry models pi's persistent one: the first fire's
     // local-sourced wrappers stay visible, so a second fire served from
-    // the same registry must still register all seven — the guard
+    // the same registry must still register all eight — the guard
     // excludes our own prior names, and only genuinely foreign names
     // yield. Without the shared array the mock re-created an empty
     // registry per call and the guard never fired.
     const shared: Awaited<ReturnType<typeof registerTools>> = [];
     const first = await registerTools({}, [], shared);
-    expect(first).toHaveLength(7);
+    expect(first).toHaveLength(8);
     const second = await registerTools({}, [], shared);
     expect(second.map((tool) => tool.name).toSorted()).toEqual(
-      ["bash", "edit", "find", "grep", "ls", "powershell", "write"].toSorted(),
+      ["bash", "edit", "find", "grep", "ls", "powershell", "read", "write"].toSorted(),
     );
   });
 

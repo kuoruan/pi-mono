@@ -28,8 +28,7 @@ vi.mock("fs/promises");
  * @param state - The render row state.
  * @returns The read lines joined, or an empty string when unread.
  */
-const linesOfState = (state: object): string =>
-  ((state as { seedLines?: string[] }).seedLines ?? []).join("\n");
+const linesOfState = (state: object): string => (state as { seedText?: string }).seedText ?? "";
 
 // Render one edit call and hand back its row state + rendered preview.
 const runEdit = async (path: string, oldText: string, newText: string) => {
@@ -252,8 +251,8 @@ describe("the seed memo's lifetime (per row, not per file)", () => {
         mc.ctx,
       ) as unknown as TextDouble;
       await first.previewTask!.render(140);
-      const read = (mc.ctx.state as { seedLines?: string[] }).seedLines;
-      expect(read?.join("\n")).toContain("ref(33)");
+      const read = (mc.ctx.state as { seedText?: string }).seedText;
+      expect(read).toContain("ref(33)");
 
       // The row re-renders (expand, theme swap, resize — the SDK re-runs
       // renderResult with the SAME ctx.state). The frozen diff's prefix
@@ -267,10 +266,8 @@ describe("the seed memo's lifetime (per row, not per file)", () => {
         mc.ctx,
       ) as unknown as TextDouble;
       await again.previewTask!.render(140);
-      expect((mc.ctx.state as { seedLines?: string[] }).seedLines).toBe(read);
-      expect((mc.ctx.state as { seedLines?: string[] }).seedLines?.join("\n")).not.toContain(
-        "ref(9)",
-      );
+      expect((mc.ctx.state as { seedText?: string }).seedText).toBe(read);
+      expect((mc.ctx.state as { seedText?: string }).seedText).not.toContain("ref(9)");
     },
   );
 });
@@ -305,7 +302,7 @@ describe("the seed gate (only embedding grammars read the file)", () => {
     const out = await component.previewTask!.render(140);
     // TypeScript embeds nothing: the seed producer is never built, so
     // the row state carries no read at all (not even a failed one).
-    expect(mc.ctx.state.seedLines).toBeUndefined();
+    expect((mc.ctx.state as { seedText?: unknown }).seedText).toBeUndefined();
     expect(out).toContain("invoke");
   });
 
@@ -353,7 +350,10 @@ describe("the seed gate (only embedding grammars read the file)", () => {
       const row = out.split("\n").find((l) => l.includes("target")) ?? "";
       // eslint-disable-next-line no-control-regex -- counting color escapes
       const chunks = (row.match(/\x1b\[38;2;/g) ?? []).length;
-      return { chunks, read: Array.isArray(mc.ctx.state.seedLines) };
+      return {
+        chunks,
+        read: typeof (mc.ctx.state as { seedText?: unknown }).seedText === "string",
+      };
     };
 
     // A ~1200-byte prefix: the seed lands and the embedded script colors in.

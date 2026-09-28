@@ -5,22 +5,16 @@
  * in a syntax-family tint — collapsed to a line budget until ctrl+o.
  */
 
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-
 import type { LsToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/language.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
 
-import { renderHeaderLine } from "./ellipsis.ts";
 import { assembleOutputBody } from "./output-assembly.ts";
-import { expandHome } from "./paths.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import { COLLAPSED_LINES, joinBodyTail, outputMemoOf } from "./tool-output.ts";
-import { argsOf, argStr, headerPath, invalidArg, type ToolServices } from "./tool-services.ts";
+import { argsOf, argStr, headerPathLink, type ToolServices } from "./tool-services.ts";
 
 /** Tree connectors: dim rules + the last-entry elbow. */
 const TEE = "├── ";
@@ -37,18 +31,7 @@ const ELBOW = "└── ";
  */
 function formatLsCall(args: Partial<LsToolInput>, theme: RenderTheme, cwd?: string): string {
   const limit = args?.limit;
-  const raw = argStr(args?.path);
-  // Invalid → the error chip; otherwise the accent display path,
-  // hyperlinked from the RAW arg (the SDK's linkPath shape — resolving
-  // the shortened "~/x" would land under <cwd>/~/x).
-  let pathDisplay = invalidArg(theme);
-  if (raw !== null) {
-    const path = headerPath(raw) ?? ".";
-    const styled = theme.fg("accent", path);
-    pathDisplay = getCapabilities().hyperlinks
-      ? hyperlink(styled, pathToFileURL(resolve(cwd ?? process.cwd(), expandHome(raw) || ".")).href)
-      : styled;
-  }
+  const pathDisplay = headerPathLink(argStr(args?.path), theme, cwd ?? process.cwd());
   let text = `${theme.fg("toolTitle", theme.bold("ls"))} ${pathDisplay}`;
   if (limit !== undefined) {
     text += theme.fg("toolOutput", ` (limit ${limit})`);
@@ -66,18 +49,10 @@ function formatLsCall(args: Partial<LsToolInput>, theme: RenderTheme, cwd?: stri
 export function createLsWrapper(origLs: ToolDefinition, services: ToolServices): ToolDefinition {
   return createToolWrapper(origLs, services, {
     renderShell: "default",
-    renderCall: ({ text, view, ctx, renderArgs }) => {
-      const { theme } = view;
-      const args = argsOf<LsToolInput>(renderArgs);
-      renderHeaderLine({
-        text,
-        prefix: "lh",
-        view,
-        ctx,
-        services,
-        body: formatLsCall(args, theme, ctx.cwd),
-      });
-      return text;
+    renderHeader: {
+      prefix: "lh",
+      formatCallBody: (renderArgs, theme, ctx) =>
+        formatLsCall(argsOf<LsToolInput>(renderArgs), theme, ctx.cwd),
     },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
       const { scheme, theme } = view;

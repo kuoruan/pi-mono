@@ -32,9 +32,8 @@ import {
   buildRenderTheme,
   makeRenderCtx,
   plain,
-  registerTools,
+  renderCallFor,
   resetPigmentForTest,
-  toolOf,
   waitFor,
 } from "#test/fixtures.ts";
 import { vol } from "#test/memfs.ts";
@@ -53,16 +52,13 @@ beforeEach(() => {
 
 describe("bash call header shape (renderCall)", () => {
   it("re-highlights when the theme identity changes (the cache key carries the scheme)", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx, invalidated } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx, invalidated } = await renderCallFor<ShellState>("bash");
 
     // Theme A: the command highlights and caches under A's identity.
     const themeA = buildFakeTheme();
-    bash.renderCall({ command: "git status --short" }, themeA, ctx);
+    renderCall({ command: "git status --short" }, themeA, ctx);
     await waitFor(() => (invalidated.count > 0 ? true : undefined));
-    bash.renderCall({ command: "git status --short" }, themeA, ctx);
+    renderCall({ command: "git status --short" }, themeA, ctx);
     const keyA = ctx.state.commandHighlightFor;
     expect(keyA).toBeDefined();
 
@@ -72,43 +68,37 @@ describe("bash call header shape (renderCall)", () => {
     // must not ride the cached swap into the new scheme's frames).
     const swapsAfterA = invalidated.count;
     const themeB = buildFakeTheme({ diffAdded: "\x1b[38;2;81;220;121m" });
-    bash.renderCall({ command: "git status --short" }, themeB, ctx);
+    renderCall({ command: "git status --short" }, themeB, ctx);
     const keyB = ctx.state.commandHighlightFor;
     expect(keyB).not.toBe(keyA);
     await waitFor(() => (invalidated.count > swapsAfterA ? true : undefined));
-    const settledB = bash.renderCall({ command: "git status --short" }, themeB, ctx);
+    const settledB = renderCall({ command: "git status --short" }, themeB, ctx);
     expect(plain(settledB.text.text)).toContain("git status --short");
   });
 
   it("re-colors the badge suffix on a theme switch", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx } = await renderCallFor<ShellState>("bash");
     ctx.isError = true;
     ctx.state.exitBadge = { kind: "error", value: 1 };
     const themeA = buildFakeTheme();
-    const aCall = bash.renderCall({ command: "false" }, themeA, ctx);
+    const aCall = renderCall({ command: "false" }, themeA, ctx);
     expect(plain(aCall.text.text)).toBe("$ false · ✗ exit 1");
     const base = buildFakeTheme();
     const themeB: RenderTheme = {
       ...base,
       fg: (name, text) => (name === "error" ? `<${text}>` : base.fg(name, text)),
     };
-    const bCall = bash.renderCall({ command: "false" }, themeB, ctx);
+    const bCall = renderCall({ command: "false" }, themeB, ctx);
     expect(plain(bCall.text.text)).toContain("✗ exit 1");
     expect(bCall.text.text).toContain("<");
     expect(bCall.text.text).not.toContain(themeA.getFgAnsi("error"));
   });
 
   it("defuses control bytes in the command at intake (ADR 0004: the command is model-authored data)", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx } = await renderCallFor<ShellState>("bash");
     // An OSC-52 clipboard exfil payload riding the command string.
     const hostile = "echo '\x1b]52;c;AAAAAA\x07'";
-    const component = bash.renderCall({ command: hostile }, buildRenderTheme(), ctx);
+    const component = renderCall({ command: hostile }, buildRenderTheme(), ctx);
     const text = component.text.text;
     // No raw OSC/ESC reaches the terminal as a live sequence — the
     // payload renders inert (caret notation), the command still legible.
@@ -120,13 +110,10 @@ describe("bash call header shape (renderCall)", () => {
   });
 
   it("reassembles an inline code region on its ORIGINAL line (python -c stays one row)", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx, invalidated } = makeRenderCtx<ShellState>();
-    bash.renderCall({ command: "python3 -c 'print(42)'" }, buildRenderTheme(), ctx);
+    const { renderCall, ctx, invalidated } = await renderCallFor<ShellState>("bash");
+    renderCall({ command: "python3 -c 'print(42)'" }, buildRenderTheme(), ctx);
     await waitFor(() => (invalidated.count > 0 ? true : undefined));
-    const settled = bash.renderCall({ command: "python3 -c 'print(42)'" }, buildRenderTheme(), ctx);
+    const settled = renderCall({ command: "python3 -c 'print(42)'" }, buildRenderTheme(), ctx);
     const text = plain(settled.text.text);
     // One source line stays one rendered row — the old flat parts.join("\n")
     // split the command into three rows at the inline region's mid-line edges.
@@ -135,14 +122,11 @@ describe("bash call header shape (renderCall)", () => {
   });
 
   it("renders the bare prompt for the empty command", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx } = await renderCallFor<ShellState>("bash");
     // An empty command renders while streaming (pending — settled empties
     // fail SDK validation), where the header is bare regardless.
     ctx.isPartial = true;
-    const component = bash.renderCall({ command: "" }, buildRenderTheme(), ctx);
+    const component = renderCall({ command: "" }, buildRenderTheme(), ctx);
     const text = plain(component.text.text);
     // The prompt alone; no highlight task fires for the empty command.
     expect(text).toBe("$ ");
@@ -150,21 +134,18 @@ describe("bash call header shape (renderCall)", () => {
   });
 
   it("never lands a superseded command's highlight (the stale guard)", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx, invalidated } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx, invalidated } = await renderCallFor<ShellState>("bash");
     const theme = buildRenderTheme();
 
     // Command A (args complete) starts its async highlight…
-    bash.renderCall({ command: "echo alpha" }, theme, ctx);
+    renderCall({ command: "echo alpha" }, theme, ctx);
     // …but the command moves on to B before A's highlight resolves.
-    bash.renderCall({ command: "echo beta" }, theme, ctx);
+    renderCall({ command: "echo beta" }, theme, ctx);
     await waitFor(() => (invalidated.count > 0 ? true : undefined));
 
     // Whichever highlight landed, the text shows B — A's colors/text
     // must never appear (state.command moved past it).
-    const settled = bash.renderCall({ command: "echo beta" }, theme, ctx);
+    const settled = renderCall({ command: "echo beta" }, theme, ctx);
     const text = plain(settled.text.text);
     expect(text).toContain("echo beta");
     expect(text).not.toContain("echo alpha");
@@ -183,24 +164,20 @@ describe("bash call header shape (renderCall)", () => {
  */
 describe("shell call header failure badge (renderCall)", () => {
   it("renders the bare prompt line while pending — no state mark", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
+    const { renderCall } = await renderCallFor<ShellState>("bash");
     const theme = buildRenderTheme();
 
     const { ctx: streaming } = makeRenderCtx<ShellState>();
     streaming.isPartial = true;
-    const pending = bash.renderCall({ command: "echo hi" }, theme, streaming);
+    const pending = renderCall({ command: "echo hi" }, theme, streaming);
     expect(plain(pending.text.text)).toBe("$ echo hi");
   });
 
   it("rides the success check as the suffix on both display paths", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
+    const { renderCall } = await renderCallFor<ShellState>("bash");
     const theme = buildFakeTheme();
     // Explicit timeout args render no declaration suffix either.
-    const timeoutArgs = bash.renderCall(
+    const timeoutArgs = renderCall(
       { command: "sleep 100", timeout: 30 },
       theme,
       makeRenderCtx<ShellState>().ctx,
@@ -209,7 +186,7 @@ describe("shell call header failure badge (renderCall)", () => {
     const { ctx, invalidated } = makeRenderCtx<ShellState>();
 
     // Plain path (pre-highlight): the settled success frame grows `· ✓`.
-    const plainCall = bash.renderCall({ command: "echo hi" }, theme, ctx);
+    const plainCall = renderCall({ command: "echo hi" }, theme, ctx);
     expect(plain(plainCall.text.text)).toBe("$ echo hi · ✓");
     // The `·` separator is muted, the ✓ bold in the success color — the
     // failure suffix's exact shape mirrored.
@@ -218,7 +195,7 @@ describe("shell call header failure badge (renderCall)", () => {
 
     // Cached path: the same suffix composes fresh around the highlight.
     await waitFor(() => (invalidated.count > 0 ? true : undefined));
-    const cached = bash.renderCall({ command: "echo hi" }, theme, ctx);
+    const cached = renderCall({ command: "echo hi" }, theme, ctx);
     expect(plain(cached.text.text)).toBe("$ echo hi · ✓");
     expect(cached.text.text).toContain(theme.getFgAnsi("success"));
     // The cache itself stays command-only — the ✓ is per-frame composition.
@@ -227,35 +204,29 @@ describe("shell call header failure badge (renderCall)", () => {
   });
 
   it("carries the worded failure badge as the suffix on the plain path", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx } = await renderCallFor<ShellState>("bash");
     // Error WITHOUT a bridged badge: the header stays bare — degraded,
     // never broken (the frame below names the tool instead).
     ctx.isError = true;
-    const unbadged = bash.renderCall({ command: "false" }, buildRenderTheme(), ctx);
+    const unbadged = renderCall({ command: "false" }, buildRenderTheme(), ctx);
     expect(plain(unbadged.text.text)).toBe("$ false");
     // The badge lands: the echo grows the worded suffix.
     ctx.state.exitBadge = { kind: "error", value: 1 };
-    const call = bash.renderCall({ command: "false" }, buildRenderTheme(), ctx);
+    const call = renderCall({ command: "false" }, buildRenderTheme(), ctx);
     expect(plain(call.text.text)).toBe("$ false · ✗ exit 1");
   });
 
   it("composes the badge fresh on the cached path too — the cache stays badge-free", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx, invalidated } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx, invalidated } = await renderCallFor<ShellState>("bash");
     const theme = buildFakeTheme();
-    bash.renderCall({ command: "git status --short" }, theme, ctx);
+    renderCall({ command: "git status --short" }, theme, ctx);
     await waitFor(() => (invalidated.count > 0 ? true : undefined));
 
     // The error lands: the NEXT call-header frame serves the cached
     // highlight but composes the badge suffix around it fresh.
     ctx.isError = true;
     ctx.state.exitBadge = { kind: "error", value: 1 };
-    const call = bash.renderCall({ command: "git status --short" }, theme, ctx);
+    const call = renderCall({ command: "git status --short" }, theme, ctx);
     expect(plain(call.text.text)).toBe("$ git status --short · ✗ exit 1");
     // The suffix rides the badge's kind color — the bold ✗-worded form,
     // not a bare glyph.
@@ -265,7 +236,7 @@ describe("shell call header failure badge (renderCall)", () => {
 
     // A warning-kind badge (timeout) carries its kind color, not error red.
     ctx.state.exitBadge = { kind: "timeout", value: 30 };
-    const timeoutCall = bash.renderCall({ command: "git status --short" }, theme, ctx);
+    const timeoutCall = renderCall({ command: "git status --short" }, theme, ctx);
     expect(plain(timeoutCall.text.text)).toBe("$ git status --short · ✗ timeout 30s");
     expect(timeoutCall.text.text).toContain(theme.getFgAnsi("warning"));
 
@@ -278,67 +249,52 @@ describe("shell call header failure badge (renderCall)", () => {
   });
 
   it("dims a benign no-match exit 1 (grep) to muted", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx } = await renderCallFor<ShellState>("bash");
     const theme = buildFakeTheme();
     ctx.isError = true;
     ctx.state.exitBadge = { kind: "error", value: 1 };
-    const call = bash.renderCall({ command: "grep foo bar" }, theme, ctx);
+    const call = renderCall({ command: "grep foo bar" }, theme, ctx);
     expect(plain(call.text.text)).toBe("$ grep foo bar · ✗ exit 1");
     expect(call.text.text).toContain(theme.getFgAnsi("muted"));
     expect(call.text.text).not.toContain(theme.getFgAnsi("error"));
   });
 
   it("renders no args timeout suffix, explicit args included", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx } = await renderCallFor<ShellState>("bash");
     ctx.isError = true;
     ctx.state.exitBadge = { kind: "timeout", value: 30 };
-    const call = bash.renderCall({ command: "sleep 100", timeout: 30 }, buildRenderTheme(), ctx);
+    const call = renderCall({ command: "sleep 100", timeout: 30 }, buildRenderTheme(), ctx);
     // ONE "✗ timeout 30s" — the badge's; the args' explicit timeout adds nothing.
     expect(plain(call.text.text)).toBe("$ sleep 100 · ✗ timeout 30s");
 
     // A non-timeout badge too: no "(timeout Ns)" declaration stands beside it.
     ctx.state.exitBadge = { kind: "error", value: 1 };
-    const both = bash.renderCall({ command: "sleep 100", timeout: 30 }, buildRenderTheme(), ctx);
+    const both = renderCall({ command: "sleep 100", timeout: 30 }, buildRenderTheme(), ctx);
     expect(plain(both.text.text)).toBe("$ sleep 100 · ✗ exit 1");
   });
 
   it("clears a stale failure badge when a new execution re-arms the state", async () => {
-    const tools = await registerTools();
-    const bash = toolOf(tools, "bash");
-    if (!bash?.renderCall) throw new Error("bash not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx } = await renderCallFor<ShellState>("bash");
     ctx.state.exitBadge = { kind: "error", value: 1 };
     // A fresh live execution re-arms the clock — the previous failure's
     // badge must not ride the new call's header.
     ctx.executionStarted = true;
     ctx.state.startedAt = undefined;
-    const call = bash.renderCall({ command: "echo next" }, buildRenderTheme(), ctx);
+    const call = renderCall({ command: "echo next" }, buildRenderTheme(), ctx);
     expect(plain(call.text.text)).toBe("$ echo next · ✓");
   });
 
   it("powershell rides the same grammar (terminated badge)", async () => {
-    const tools = await registerTools();
-    const pwsh = toolOf(tools, "powershell");
-    if (!pwsh?.renderCall) throw new Error("powershell not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
+    const { renderCall, ctx } = await renderCallFor<ShellState>("powershell");
     ctx.isError = true;
     ctx.state.exitBadge = { kind: "terminated", value: 0 };
-    const call = pwsh.renderCall({ command: "exit 1" }, buildRenderTheme(), ctx);
+    const call = renderCall({ command: "exit 1" }, buildRenderTheme(), ctx);
     expect(plain(call.text.text)).toBe("PS> exit 1 · ✗ terminated");
   });
 
   it("powershell follows the same suffix on success", async () => {
-    const tools = await registerTools();
-    const pwsh = toolOf(tools, "powershell");
-    if (!pwsh?.renderCall) throw new Error("powershell not registered");
-    const { ctx } = makeRenderCtx<ShellState>();
-    const call = pwsh.renderCall({ command: "Get-ChildItem" }, buildRenderTheme(), ctx);
+    const { renderCall, ctx } = await renderCallFor<ShellState>("powershell");
+    const call = renderCall({ command: "Get-ChildItem" }, buildRenderTheme(), ctx);
     expect(plain(call.text.text)).toBe("PS> Get-ChildItem · ✓");
   });
 });

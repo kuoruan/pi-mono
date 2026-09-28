@@ -199,3 +199,35 @@ export function seedGrammarState(
 export function clearSeedCacheForTest(): void {
   grammarStateCache.clear();
 }
+
+/**
+ * The memoized disk read behind a seed: undefined = not read yet,
+ * null = unreadable (the miss memoizes too). One home for the edit/read
+ * row-state memos (the row has one path for its whole life, so no key).
+ */
+export interface SeedTextMemo {
+  /** The memoized file text. */
+  seedText?: string | null;
+}
+
+/**
+ * Read the seed file once per call, memoizing hits and misses in the row
+ * state. The stale window (an external write between the call and a
+ * later re-render) is display-only and self-heals on the next call.
+ *
+ * @param memo - The row-state memo cell.
+ * @param read - The disk read (a () => string that throws when unreadable).
+ * @returns The file text, or undefined when unreadable.
+ */
+export function memoSeedText(memo: SeedTextMemo, read: () => string): string | undefined {
+  const cached = memo.seedText;
+  if (cached !== undefined) return cached ?? undefined;
+  let text: string | undefined;
+  try {
+    text = read();
+  } catch {
+    text = undefined;
+  }
+  memo.seedText = text ?? null;
+  return text;
+}
