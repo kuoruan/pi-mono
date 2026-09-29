@@ -94,7 +94,7 @@
     "notifyApprovals": {
       "type": "boolean",
       "default": false,
-      "description": "Opt in to info-level notices when AI Guard emits an allow (fresh or cached). Mapped allows say mode auto-approved; path and external_directory families are excluded because the host caps their allows to defer. Subject to notifyLevel; commands and targets are never shown."
+      "description": "Opt in to info-level notices when AI Guard emits an allow (fresh or cached). Fresh reviews carry their total review cost in a duration tail; cache replays say (cached). Mapped allows name the mode (`mode (permissive) auto-approved`); path and external_directory families are excluded because the host caps their allows to defer. Subject to notifyLevel; commands and targets are never shown."
     },
     "circuitBreaker": {
       "type": "object",

@@ -32,7 +32,13 @@ import { isBoundedDelegationSurface } from "#src/review/request/ask.ts";
 
 import { type CircuitBreaker } from "./circuit-breaker.ts";
 import type { PreCallMachineryKind } from "./machinery-kinds.ts";
-import { machineryDenyReason, machineryDeferNotice, withAgentInstruction } from "./verdict-copy.ts";
+import {
+  approvalNotice,
+  machineryDenyReason,
+  machineryDeferNotice,
+  type ReviewCost,
+  withAgentInstruction,
+} from "./verdict-copy.ts";
 import { machineryTarget, type ModelDeferInfo, resolveMapping } from "./verdict-rule.ts";
 
 /**
@@ -136,6 +142,8 @@ export interface MarkedVerdictRelease extends VerdictRelease {
  * @param defer - The fresh review's defer context (undefined on the
  *   cache-hit path — defers are never stored — and when the original is
  *   not a defer).
+ * @param cost - The review's cost for the approval tail (fresh latency or
+ *   cached replay).
  * @returns The record to write, the verdict to return (a returned deny
  *   carries the agent instruction; the record keeps the un-instructed
  *   teaching reason), and the fail-open notice signal (see
@@ -148,6 +156,7 @@ export function releaseVerdictGate(
   emitted: AuthorizerVerdict,
   riskLevel: RiskLevel | undefined,
   defer: ModelDeferInfo | undefined,
+  cost: ReviewCost,
 ): MarkedVerdictRelease {
   const decision = resolveMapping({
     original,
@@ -170,9 +179,10 @@ export function releaseVerdictGate(
     !isBoundedDelegationSurface(record.surface)
   ) {
     ctx.notify(
-      original.kind === "allow"
-        ? "reviewer approved this request"
-        : "mode auto-approved this request",
+      approvalNotice(
+        original.kind === "allow" ? { kind: "reviewer" } : { kind: "mode", mode: ctx.mode },
+        cost,
+      ),
       "info",
     );
   }

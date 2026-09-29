@@ -119,6 +119,76 @@ export function withAgentInstruction(
 export const NOTIFY_REASON_CEILING = 200;
 
 /**
+ * Format a review latency for an operator-facing notify line: whole
+ * milliseconds under a second, one-decimal seconds above. The single
+ * decimal keeps the tail short at notify grade (`(1.2s)` reads faster
+ * than `(1234ms)`); sub-second reviews stay in ms where the unit is
+ * exact.
+ *
+ * @param ms - The latency in milliseconds.
+ * @returns The formatted duration (`123ms` or `1.2s`).
+ */
+export function formatDuration(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** A fresh review's cost: its total model-call cost in milliseconds. */
+export interface FreshReviewCost {
+  kind: "fresh";
+  latencyMs: number;
+}
+
+/** A cache hit's cost: a replay, not a measurement — it names itself. */
+export interface CachedReviewCost {
+  kind: "cached";
+}
+
+/**
+ * What an approval notice's duration tail reports: a fresh review names
+ * its total model-call cost; a cache hit names itself. A cached verdict
+ * is a replay, not a measurement — reporting the stored call's latency
+ * would present a stale number as this ask's cost, so the hit says
+ * `(cached)` instead.
+ */
+export type ReviewCost = FreshReviewCost | CachedReviewCost;
+
+/** The reviewer's own allow: no policy mapping involved. */
+export interface ReviewerApprovalOrigin {
+  kind: "reviewer";
+}
+
+/**
+ * A mode mapping's approval: carries the mode so a lone approval line
+ * still names the policy that let the request through.
+ */
+export interface ModeApprovalOrigin {
+  kind: "mode";
+  mode: Mode;
+}
+
+/**
+ * Which voice approved the request: the reviewer's own allow, or the
+ * mode's mapping of a non-allow verdict.
+ */
+export type ApprovalOrigin = ReviewerApprovalOrigin | ModeApprovalOrigin;
+
+/**
+ * Render an opt-in approval notice: the approval's voice plus its cost
+ * tail. Never carries the command or target (they may hold secrets).
+ *
+ * @param origin - Who approved the request (reviewer or mode).
+ * @param cost - The review's cost (fresh latency or cached replay).
+ * @returns The notification message.
+ */
+export function approvalNotice(origin: ApprovalOrigin, cost: ReviewCost): string {
+  const base =
+    origin.kind === "reviewer"
+      ? "reviewer approved this request"
+      : `mode (${origin.mode}) auto-approved this request`;
+  return cost.kind === "fresh" ? `${base} (${formatDuration(cost.latencyMs)})` : `${base} (cached)`;
+}
+
+/**
  * What actually happened to the request the reviewer denied: the deny held
  * (`"denied"`), or the mode softened it into a human ask (`"asked"`).
  */

@@ -8,7 +8,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  approvalNotice,
   escalationMessage,
+  formatDuration,
   machineryDenyReason,
   withAgentInstruction,
 } from "#src/review/verdict-copy.ts";
@@ -56,6 +58,29 @@ describe("human-facing messages", () => {
     expect(machineryDenyReason(undefined, "permissive")).toBe(
       "reviewer could not complete the review (unknown) — permissive mode denied the request",
     );
+  });
+
+  it("approvalNotice reports the fresh review's total cost or names a cache replay", () => {
+    expect(approvalNotice({ kind: "reviewer" }, { kind: "fresh", latencyMs: 42 })).toBe(
+      "reviewer approved this request (42ms)",
+    );
+    expect(
+      approvalNotice({ kind: "mode", mode: "permissive" }, { kind: "fresh", latencyMs: 1500 }),
+    ).toBe("mode (permissive) auto-approved this request (1.5s)");
+    expect(approvalNotice({ kind: "reviewer" }, { kind: "cached" })).toBe(
+      "reviewer approved this request (cached)",
+    );
+    expect(approvalNotice({ kind: "mode", mode: "lenient" }, { kind: "cached" })).toBe(
+      "mode (lenient) auto-approved this request (cached)",
+    );
+  });
+
+  it("formatDuration stays in ms under a second, one-decimal seconds above", () => {
+    expect(formatDuration(0)).toBe("0ms");
+    expect(formatDuration(999.6)).toBe("1000ms");
+    expect(formatDuration(1000)).toBe("1.0s");
+    expect(formatDuration(1500)).toBe("1.5s");
+    expect(formatDuration(12345)).toBe("12.3s");
   });
 
   it("CLARIFICATION_SUPPRESSED_REASON is the audit marker souping a swallowed clarification", () => {

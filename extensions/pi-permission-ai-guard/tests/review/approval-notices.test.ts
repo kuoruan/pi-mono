@@ -57,9 +57,13 @@ describe("opt-in approval notices", () => {
     expect(await authorize(details, makeQuery("ask"), noLog)).toEqual({ kind: "allow" });
     expect(await authorize(details, makeQuery("ask"), noLog)).toEqual({ kind: "allow" });
     expect(calls).toBe(1);
+    // Fresh reviews report their total cost (the fake call is ~0ms);
+    // the replay names itself instead of restating a stale number.
+    expect(notifications[0]![0]).toMatch(/^reviewer approved this request \([\d.]+m?s\)$/);
+    expect(notifications[0]![1]).toBe("info");
     expect(notifications).toEqual([
-      ["reviewer approved this request", "info"],
-      ["reviewer approved this request", "info"],
+      notifications[0],
+      ["reviewer approved this request (cached)", "info"],
     ]);
   });
 
@@ -84,7 +88,12 @@ describe("opt-in approval notices", () => {
     const { notify, notifications } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
-        config: { ...baseConfig, notifyApprovals: true, mode: "permissive" },
+        config: {
+          ...baseConfig,
+          notifyApprovals: true,
+          mode: "permissive",
+          cache: { maxEntries: 8 },
+        },
         notify,
         engine: makeEngine({
           modelCall: makeFakeCompleteSimple([
@@ -96,9 +105,23 @@ describe("opt-in approval notices", () => {
     expect(await authorize(makeDetails({ value: "cmd" }), makeQuery("ask"), noLog)).toEqual({
       kind: "allow",
     });
-    expect(notifications).toEqual([
-      ["permissive auto-approves non-allow verdicts — hard-tier denials still block", "warning"],
-      ["mode auto-approved this request", "info"],
+    expect(notifications).toHaveLength(2);
+    expect(notifications[0]).toEqual([
+      "permissive auto-approves non-allow verdicts — hard-tier denials still block",
+      "warning",
+    ]);
+    expect(notifications[1]![0]).toMatch(
+      /^mode \(permissive\) auto-approved this request \([\d.]+m?s\)$/,
+    );
+    expect(notifications[1]![1]).toBe("info");
+    // The stored deny replays from cache and maps again — the tail names
+    // the replay instead of restating the first call's latency.
+    expect(await authorize(makeDetails({ value: "cmd" }), makeQuery("ask"), noLog)).toEqual({
+      kind: "allow",
+    });
+    expect(notifications.at(-1)).toEqual([
+      "mode (permissive) auto-approved this request (cached)",
+      "info",
     ]);
   });
 
@@ -118,7 +141,9 @@ describe("opt-in approval notices", () => {
         payload: payload("tool", { surface, value: "ordinary request" }),
       });
       expect(await authorize(details, makeQuery("ask"), noLog)).toEqual({ kind: "allow" });
-      expect(notifications).toEqual([["reviewer approved this request", "info"]]);
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]![0]).toMatch(/^reviewer approved this request \([\d.]+m?s\)$/);
+      expect(notifications[0]![1]).toBe("info");
     },
   );
 

@@ -305,6 +305,8 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         lookup.riskLevel,
         // Cached verdicts are allow/deny only — no defer context at all.
         undefined,
+        // A hit replays a verdict, it measures nothing — the tail says so.
+        { kind: "cached" },
       );
       if (released.markNoticeShown) noticeState.shown = true;
       const { record, verdict } = released;
@@ -415,6 +417,10 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       emitted,
       reviewOutcome.riskLevel,
       deferInfo,
+      // latencyMs already covers the review's total cost: the empty-reply
+      // retry accumulates into it and the pool stamps the whole walk (failover
+      // included), so the tail is the ask's wall-clock review cost.
+      { kind: "fresh", latencyMs: reviewOutcome.latencyMs },
     );
     if (released.markNoticeShown) noticeState.shown = true;
     const { record, verdict } = released;
