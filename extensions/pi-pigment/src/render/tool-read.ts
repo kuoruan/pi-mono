@@ -13,6 +13,7 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path
 import { pathToFileURL } from "node:url";
 
 import type {
+  AgentToolResult,
   ReadToolInput,
   ToolDefinition,
   TruncationResult,
@@ -22,6 +23,7 @@ import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 
 import { expandTabs, inertText } from "#src/core/ansi.ts";
 import { linesOf } from "#src/core/lines.ts";
+import type { FileCodeBlock } from "#src/theme/highlight.ts";
 import { detectLanguage } from "#src/theme/language.ts";
 import type { RenderTheme, ResolvedTheme } from "#src/theme/scheme.ts";
 import { memoSeedText, needsSeed, type SeedTextMemo } from "#src/theme/seed.ts";
@@ -29,8 +31,9 @@ import { memoSeedText, needsSeed, type SeedTextMemo } from "#src/theme/seed.ts";
 import { assembleOutputBody } from "./output-assembly.ts";
 import { expandHome, readDecorativeText, resolveToolPath, toPosixPath } from "./paths.ts";
 import { numberedRows } from "./row-frame.ts";
+import type { FrameView } from "./session.ts";
 import { createToolWrapper } from "./tool-factory.ts";
-import { expandKeyHint, joinBodyTail } from "./tool-output.ts";
+import { type DerivedOutput, expandKeyHint, joinBodyTail } from "./tool-output.ts";
 import { argsOf, argStr, headerPath, invalidArg, type ToolServices } from "./tool-services.ts";
 
 /** Compact resource basenames that collapse to a bare label. */
@@ -241,6 +244,53 @@ function withLineNumbers(
   });
 }
 
+/** The read styled-body inputs: the folded/expanded pair varies only these. */
+interface ReadStyledInput {
+  /** The windowed lines (single source — block.code derives from it). */
+  shown: string[];
+  /** The tail block. */
+  tail: string;
+  /** The hidden count. */
+  hidden: number;
+  /** The render width. */
+  width: number;
+  /** Whether the result is an image note (no gutter, no highlight). */
+  isImage: boolean;
+  /**
+   * The highlight block minus code (seed context rides here for offset
+   * slices; code always joins from shown, so the two cannot diverge).
+   */
+  block: Omit<FileCodeBlock, "code">;
+  /** The gutter's first line number. */
+  startLine: number;
+}
+
+/**
+ * The read styled body: image notes pass through plain, file text
+ * highlights then takes the gutter. One choreography behind both the
+ * folded preview and the expanded body.
+ *
+ * @param input - The styled-body inputs (see ReadStyledInput).
+ * @param view - The session view (highlight).
+ * @param scheme - The resolved theme (gutter).
+ * @returns The settled body.
+ */
+async function renderReadStyled(
+  input: ReadStyledInput,
+  view: FrameView,
+  scheme: ResolvedTheme,
+): Promise<string> {
+  const { shown, tail, hidden, width, isImage, block, startLine } = input;
+  const code = shown.join("\n");
+  if (isImage) return joinBodyTail(code, tail, hidden);
+  const highlighted = await view.highlight({ ...block, code });
+  return joinBodyTail(
+    withLineNumbers(highlighted, scheme, startLine, width).join("\n"),
+    tail,
+    hidden,
+  );
+}
+
 /**
  * The read line-range suffix (:start-end), warning-colored per the SDK.
  *
@@ -256,23 +306,26 @@ function formatReadLineRange(args: Partial<ReadToolInput>, theme: RenderTheme): 
 }
 
 /**
- * The docs label with a breadcrumb tint: the directory dims (muted),
- * only the basename accents — a long docs/ path reads as its file.
+ * A display path with the breadcrumb tint: the directory dims (muted),
+ * only the basename accents — a long path reads as its file. Shared
+ * by the docs label and the plain read path.
  *
- * @param label - The posix docs label (README.md or docs/...).
+ * @param display - The posix display path.
  * @param theme - The pi theme.
- * @returns The styled label.
+ * @returns The styled path.
  */
-function formatDocsLabel(label: string, theme: RenderTheme): string {
-  const slash = label.lastIndexOf("/");
-  if (slash < 0) return theme.fg("accent", label);
-  return theme.fg("muted", label.slice(0, slash + 1)) + theme.fg("accent", label.slice(slash + 1));
+function accentBasename(display: string, theme: RenderTheme): string {
+  const slash = display.lastIndexOf("/");
+  if (slash < 0) return theme.fg("accent", display);
+  return (
+    theme.fg("muted", display.slice(0, slash + 1)) + theme.fg("accent", display.slice(slash + 1))
+  );
 }
 
 /**
- * The read plain path: the docs' three-segment grammar (muted dir +
- * accent base) hyperlinked whole. Read-local — ls keeps its
- * single-accent parity shape (headerPathLink untouched).
+ * The read plain path: the breadcrumb tint hyperlinked whole.
+ * Read-local — ls keeps its single-accent parity shape
+ * (headerPathLink untouched).
  *
  * @param raw - The stringified `path` arg.
  * @param theme - The pi theme.
@@ -281,31 +334,195 @@ function formatDocsLabel(label: string, theme: RenderTheme): string {
  */
 function headerPathSegments(raw: string | null, theme: RenderTheme, cwd: string): string {
   if (raw === null) return invalidArg(theme);
-  const display = headerPath(raw) ?? ".";
-  const slash = display.lastIndexOf("/");
-  const styled =
-    slash < 0
-      ? theme.fg("accent", display)
-      : theme.fg("muted", display.slice(0, slash + 1)) +
-        theme.fg("accent", display.slice(slash + 1));
+  const styled = accentBasename(headerPath(raw) ?? ".", theme);
   if (!getCapabilities().hyperlinks) return styled;
   return hyperlink(styled, pathToFileURL(resolve(cwd, expandHome(raw) || ".")).href);
 }
 
-/** A text content block (the SDK's content shape, narrowed for intake). */
-type TextContentBlock = { type?: string; text?: string };
+/** The read masked-text derivation: the text plus its image mark. */
+interface ReadMasked {
+  /** The masked, tab-expanded text (tail notices lifted). */
+  masked: string;
+  /** Whether the result carries an image block (note, not file text). */
+  isImage: boolean;
+  /** The lifted user-limit notice (`[N more lines…]`), or "" when none. */
+  notice: string;
+}
+
+/**
+ * Lift the SDK's tail notice lines out of the masked text (the
+ * find/grep/ls contract — notices ride the footer, never a guttered
+ * body row): the user-limit continuation returns as the footer notice,
+ * the truncation `[Showing lines…]` drops (the footer already carries
+ * the synthesized `[Truncated:…]`). No prose is matched and no disk is
+ * read — the user-limit branch is recognized by the output's own shape:
+ * the SDK emits exactly `limit` content rows before the notice (when
+ * the file ends within the window it emits fewer rows and no notice),
+ * so a bracketed tail row over a full window is the continuation. The
+ * only blind spot is `limit` landing exactly on the file's last line
+ * with a bracketed final row — the row moves to the footer instead of
+ * the body. Upstream may reword, rename, or translate the prose —
+ * only a shape change breaks this.
+ *
+ * @param masked - The masked text.
+ * @param truncated - Whether details carry a truncation fact.
+ * @param limit - The requested line count (undefined → no user-limit notice possible).
+ * @returns The body text + the footer notice ("" when none lifted).
+ */
+function liftReadNotice(
+  masked: string,
+  truncated: boolean,
+  limit: number | undefined,
+): { body: string; notice: string } {
+  const lines = linesOf(masked);
+  const last = lines[lines.length - 1];
+  if (last === undefined || lines.length < 2) return { body: masked, notice: "" };
+  if (!last.startsWith("[") || !last.endsWith("]")) return { body: masked, notice: "" };
+  const body = masked.slice(0, masked.lastIndexOf(last)).trimEnd();
+  // The SDK's user-limit notice follows a full window (limit rows);
+  // the truncation branch is fact-guarded (details), not counted.
+  if (limit !== undefined && limit > 0 && linesOf(body).length === limit) {
+    return { body, notice: last };
+  }
+  if (truncated) return { body, notice: "" };
+  return { body: masked, notice: "" };
+}
+
+/** The read masked-text derivation inputs: one frame's derive context. */
+interface ReadMaskedInput {
+  /** The row-state memo (the derivation cell's home). */
+  memo: ReadRowMemo;
+  /** The settled result. */
+  result: AgentToolResult<unknown>;
+  /** The path:offset key. */
+  key: string;
+  /** The raw path arg (masking scope). */
+  raw: string;
+  /** The session working directory. */
+  cwd: string;
+  /** The requested line count (undefined → no user-limit notice possible). */
+  limit: number | undefined;
+}
+
+/**
+ * Derive the masked text for one frame: result-identity + path:offset
+ * memoized in the row state (the grep/find/ls outputMemoOf seam is
+ * result-identity keyed — but read's derive inputs are THEMSELVES
+ * derived per frame, so the identity never stabilizes there). Image
+ * notes pass through as plain text (pigment never paints non-text
+ * blocks); file bytes go inert at intake (ADR 0004), secrets mask
+ * same-line-count so the gutter stays aligned, tabs expand for write
+ * parity.
+ *
+ * @param input - The derive inputs (see ReadMaskedInput).
+ * @returns The masked derivation.
+ */
+function deriveReadMasked(input: ReadMaskedInput): ReadMasked {
+  const { memo, result, key, raw, cwd, limit } = input;
+  const cached = memo.readDerive;
+  if (cached && cached.result === result && cached.key === key) {
+    return { masked: cached.masked, isImage: cached.isImage, notice: cached.notice };
+  }
+  const content = result.content ?? [];
+  const isImage = content.some((block) => block.type === "image");
+  const output = inertText(
+    content
+      .filter((block) => block.type === "text" || block.type === undefined)
+      .map((block) => (block.type === "text" ? (block.text ?? "") : ""))
+      .join("")
+      .replaceAll("\r", ""),
+  ).replace(/\n$/, "");
+  const truncated =
+    ((result.details as ReadResultDetails | undefined)?.truncation?.truncated ?? false) === true;
+  const lifted = liftReadNotice(
+    expandTabs(surfaceSecrets(raw, cwd, output).masked),
+    truncated,
+    limit,
+  );
+  memo.readDerive = { result, key, masked: lifted.body, isImage, notice: lifted.notice };
+  return { masked: lifted.body, isImage, notice: lifted.notice };
+}
+
+/**
+ * The offset slice's seed block: file text before the slice seeds
+ * embedded grammars (the edit precedent — one path per row, staleness
+ * is display-only), gated to embedded languages so plain reads never
+ * pay the disk. readDecorativeText never throws; memoSeedText wants
+ * the miss as a throw (it memoizes the null).
+ *
+ * @param memo - The row-state memo.
+ * @param raw - The raw path arg.
+ * @param cwd - The session working directory.
+ * @param offset - The slice's start line.
+ * @returns The seed block (filePath only when unseeded).
+ */
+function readSeedBlock(
+  memo: ReadRowMemo,
+  raw: string,
+  cwd: string,
+  offset: number | undefined,
+): Omit<FileCodeBlock, "code"> {
+  const filePath = toPosixPath(raw);
+  const seedText =
+    offset !== undefined && needsSeed(detectLanguage(filePath))
+      ? memoSeedText(memo, () => {
+          const seedPath = resolveToolPath(cwd, raw);
+          const fileText = readDecorativeText(seedPath);
+          if (fileText === undefined) throw new Error(`unreadable seed: ${seedPath}`);
+          return fileText;
+        })
+      : undefined;
+  return seedText !== undefined && offset !== undefined
+    ? { filePath, context: { text: seedText, startLine: offset } }
+    : { filePath };
+}
 
 /** The read result details (only the truncation the header/footer reads). */
 type ReadResultDetails = { truncation?: TruncationResult };
 
 /**
+ * The read derivation as a DerivedOutput: masked text + line views +
+ * the identity hash. Folded and expanded differ only in the hash
+ * namespace (fold: vs path:offset) — the shape is one.
+ *
+ * @param masked - The masked text.
+ * @param lines - The content lines.
+ * @param hash - The identity hash.
+ * @returns The derived output.
+ */
+function readDerived(masked: string, lines: string[], hash: string): DerivedOutput {
+  return {
+    output: masked,
+    lines,
+    entries: lines.filter((line) => line !== ""),
+    notice: "",
+    hash,
+  };
+}
+
+/** The memoized masked derivation (isImage + notice ride along — a cache hit keeps both). */
+interface ReadDerivation {
+  /** The result identity (a stable result costs one lookup per frame). */
+  result: object;
+  /** The path:offset key. */
+  key: string;
+  /** The masked text (tail notices lifted). */
+  masked: string;
+  /** Whether the result carries an image block (note, not file text — no gutter). */
+  isImage: boolean;
+  /** The lifted user-limit notice ("" when none). */
+  notice: string;
+}
+
+/**
  * The read row-state memo: the seed memo plus the masked-derivation cell
  * (result identity + path:offset key — an unchanged frame reuses the
- * masked text instead of re-running surfaceSecrets per render).
+ * masked text instead of re-running surfaceSecrets per render; limit
+ * rides the result identity, so it needs no key slot of its own).
  */
 type ReadRowMemo = SeedTextMemo & {
   /** The memoized masked derivation. */
-  readDerive?: { result: object; key: string; masked: string };
+  readDerive?: ReadDerivation;
 };
 
 /**
@@ -341,7 +558,7 @@ function formatReadCall(input: ReadHeaderInput): string {
       const origin = compact.kind === "docs" ? theme.fg("muted", "[pi] ") : "";
       const clean = inertText(compact.label);
       const label =
-        compact.kind === "docs" ? formatDocsLabel(clean, theme) : theme.fg("accent", clean);
+        compact.kind === "docs" ? accentBasename(clean, theme) : theme.fg("accent", clean);
       return `${theme.fg("toolTitle", theme.bold(`read ${compact.kind}`))} ` + origin + label;
     }
   }
@@ -409,42 +626,22 @@ export function createReadWrapper(
         }),
     },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
-      const { theme, scheme } = view;
+      const { scheme } = view;
       const args = argsOf<ReadToolInput>(ctx.args);
       const raw = argStr(args?.path) ?? "";
-      // The read derivation, memoized in the row state (the grep/find/ls
-      // outputMemoOf seam is result-identity keyed — but read's derive
-      // inputs (masked text) are THEMSELVES derived per frame, so the
-      // identity never stabilizes there; instead the row state holds the
-      // derive keyed by result identity + path + offset, and a stable
-      // result costs one lookup per frame).
       const memoState = ctx.state as ReadRowMemo;
-      const readKey = `${toPosixPath(raw)}:${args?.offset ?? 0}`;
-      let masked: string;
-      const cached = memoState.readDerive;
-      if (cached && cached.result === result && cached.key === readKey) {
-        masked = cached.masked;
-      } else {
-        // Image results pass through as plain text (the note the SDK
-        // leaves in content) — pigment never paints non-text blocks.
-        const content = (result.content ?? []) as TextContentBlock[];
-        // Inert at intake (ADR 0004): file bytes ride raw (ANSI logs,
-        // hostile escapes); the CR strip mirrors getTextOutput.
-        const output = inertText(
-          content
-            .filter((block) => block.type === "text" || block.type === undefined)
-            .map((block) => block.text ?? "")
-            .join("")
-            .replaceAll("\r", ""),
-        ).replace(/\n$/, "");
-        // Secret-bearing files mask dotenv values before highlight (the
-        // gutter/line-count stay aligned — masking is same-line-count).
-        // Tabs expand before highlight/wrap (write parity): Shiki keeps
-        // tabs inside tokens and the wrapper measures a tab as one column,
-        // while pi-tui renders it as three spaces.
-        masked = expandTabs(surfaceSecrets(raw, ctx.cwd, output).masked);
-        memoState.readDerive = { result: result as object, key: readKey, masked };
-      }
+      const {
+        masked,
+        isImage: isImageResult,
+        notice: moreLinesNotice,
+      } = deriveReadMasked({
+        memo: memoState,
+        result,
+        key: `${toPosixPath(raw)}:${args?.offset ?? 0}`,
+        raw,
+        cwd: ctx.cwd,
+        limit: args?.limit,
+      });
       const contentLines = linesOf(masked);
       // under the header — "did I read the right file" at a glance
       // (compact skill/docs labels included — the label names it, the
@@ -457,53 +654,32 @@ export function createReadWrapper(
           prefix: "r",
           lines: contentLines,
           isEmpty: masked === "",
-          derived: {
-            output: masked,
-            lines: contentLines,
-            entries: contentLines.filter((line) => line !== ""),
-            notice: "",
-            hash: `fold:${toPosixPath(raw)}:${masked.length}`,
-          },
-          schemeIdentity: scheme.identity,
+          derived: readDerived(masked, contentLines, `fold:${toPosixPath(raw)}:${masked.length}`),
+          view,
           budget: READ_FOLDED_LINES,
           expanded: false,
-          theme,
           ctx,
           renderStyled: {
             widthAware: true,
-            render: async (shown, tail, hidden, width) => {
-              const highlighted = await view.highlight({
-                code: shown.join("\n"),
-                filePath: toPosixPath(raw),
-              });
-              return joinBodyTail(
-                withLineNumbers(highlighted, scheme, args?.offset ?? 1, width).join("\n"),
-                tail,
-                hidden,
-              );
-            },
+            render: (shown, tail, hidden, width) =>
+              renderReadStyled(
+                {
+                  shown,
+                  tail,
+                  hidden,
+                  width,
+                  isImage: isImageResult,
+                  block: { filePath: toPosixPath(raw) },
+                  startLine: args?.offset ?? 1,
+                },
+                view,
+                scheme,
+              ),
           },
         });
       }
       const offset = args?.offset;
-      // The seed source (the edit precedent): file text before an offset
-      // slice seeds embedded grammars; the memo lives in the row state
-      // (one path per row, display-only staleness, self-heals next call).
-      // The needsSeed gate (the edit precedent): only embedded
-      // grammars consume a seed, so an offset read of a plain language
-      // never pays for the disk.
-      // readDecorativeText never throws; memoSeedText wants the miss as
-      // a throw (it memoizes the null) — the bridge converts undefined
-      // into the memoized miss.
-      const seedPath = resolveToolPath(ctx.cwd, raw);
-      const seedText =
-        offset !== undefined && needsSeed(detectLanguage(toPosixPath(raw)))
-          ? memoSeedText(memoState, () => {
-              const fileText = readDecorativeText(seedPath);
-              if (fileText === undefined) throw new Error(`unreadable seed: ${seedPath}`);
-              return fileText;
-            })
-          : undefined;
+      const block = readSeedBlock(memoState, raw, ctx.cwd, offset);
       const truncation = (result.details as ReadResultDetails | undefined)?.truncation;
       const filePath = toPosixPath(raw);
       // A single full block, never collapsed (the native renderer shows
@@ -514,37 +690,30 @@ export function createReadWrapper(
         prefix: "r",
         lines: contentLines,
         isEmpty: masked === "",
-        derived: {
-          output: masked,
-          lines: contentLines,
-          entries: contentLines.filter((line) => line !== ""),
-          notice: "",
-          hash: `${filePath}:${offset ?? 0}:${masked.length}`,
-        },
-        schemeIdentity: view.scheme.identity,
+        derived: readDerived(masked, contentLines, `${filePath}:${offset ?? 0}:${masked.length}`),
+        view,
         tookMs,
         expanded: true,
-        notice: truncation?.truncated ? formatTruncationNotice(truncation) : undefined,
-        theme,
+        notice: truncation?.truncated
+          ? formatTruncationNotice(truncation)
+          : moreLinesNotice || undefined,
         ctx,
         renderStyled: {
           widthAware: true,
-          render: async (shown, tail, hidden, width) => {
-            const highlighted = await view.highlight(
-              seedText !== undefined && offset !== undefined
-                ? {
-                    code: shown.join("\n"),
-                    filePath,
-                    context: { text: seedText, startLine: offset },
-                  }
-                : { code: shown.join("\n"), filePath },
-            );
-            return joinBodyTail(
-              withLineNumbers(highlighted, scheme, offset ?? 1, width).join("\n"),
-              tail,
-              hidden,
-            );
-          },
+          render: (shown, tail, hidden, width) =>
+            renderReadStyled(
+              {
+                shown,
+                tail,
+                hidden,
+                width,
+                isImage: isImageResult,
+                block,
+                startLine: offset ?? 1,
+              },
+              view,
+              scheme,
+            ),
         },
       });
     },

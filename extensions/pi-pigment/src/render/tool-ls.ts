@@ -68,11 +68,10 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
         isEmpty: entries.length === 0,
         budget: COLLAPSED_LINES.ls,
         derived,
-        schemeIdentity: scheme.identity,
+        view,
         tookMs,
         expanded: options.expanded,
         notice: derived.notice,
-        theme,
         ctx,
         renderStyled: {
           widthAware: false,

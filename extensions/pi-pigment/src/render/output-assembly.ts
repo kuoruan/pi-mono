@@ -6,8 +6,7 @@
  * tool-output (the window authority) and text-task (the swap protocol),
  * importing from both — neither imports it back, so no cycle.
  */
-import type { RenderTheme } from "#src/theme/scheme.ts";
-
+import type { FrameView } from "./session.ts";
 import type { PreviewTextHost } from "./text-task.ts";
 import { attachPreviewTask, definePreviewTask, renderEmpty } from "./text-task.ts";
 import {
@@ -59,8 +58,8 @@ export interface OutputAssemblyInput {
   budget?: number;
   /** The memoized derivation (key stamps read it). */
   derived: DerivedOutput;
-  /** The scheme identity (a theme switch re-renders). */
-  schemeIdentity: string;
+  /** The frame view (scheme identity + pi theme derive inside). */
+  view: FrameView;
   /** The raw Took reading (undefined → no footer; the key reads tookMs ?? 0). */
   tookMs?: number;
   /** The expanded state (window regime + key stamp). */
@@ -69,8 +68,6 @@ export interface OutputAssemblyInput {
   streaming?: boolean;
   /** The limit notice (the SDK's warning about the whole output). */
   notice?: string;
-  /** The pi theme. */
-  theme: RenderTheme;
   /** The render context (invalidate flows into the task). */
   ctx: RenderContext<object>;
   /** The styled swap (see StyledSwap). */
@@ -96,20 +93,20 @@ export function assembleOutputBody(input: OutputAssemblyInput): PreviewTextHost 
     isEmpty,
     budget,
     derived,
-    schemeIdentity,
+    view,
     expanded,
     streaming,
     notice,
-    theme,
     ctx,
     renderStyled,
     tookMs,
   } = input;
+  const { scheme, theme } = view;
   if (isEmpty) return renderEmpty(text); // nothing to show — clear any stale task
   const taskKey = outputTaskKey({
     prefix,
     derived,
-    identity: schemeIdentity,
+    identity: scheme.identity,
     elapsedMs: tookMs ?? 0,
     expanded,
     streaming,

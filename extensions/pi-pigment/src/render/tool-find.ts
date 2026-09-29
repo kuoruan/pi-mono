@@ -21,6 +21,14 @@ import { COLLAPSED_LINES, joinBodyTail, outputMemoOf } from "./tool-output.ts";
 import { argsOf, argStr, headerPath, invalidArg, type ToolServices } from "./tool-services.ts";
 
 /**
+ * The SDK's empty-result sentinel, byte for byte (find.js: the
+ * zero-results resolve carries this as the whole output, details
+ * undefined). A single named site: upstream rewording only dims the
+ * muted tint back to a path row — no content is lost.
+ */
+const FIND_EMPTY_SENTINEL = "No files found matching pattern";
+
+/**
  * The find call header: the SDK's formatFindCall, byte for byte
  * (toolTitle name, accent pattern, toolOutput path + limit).
  *
@@ -151,11 +159,10 @@ export function createFindWrapper(
         isEmpty: all.length === 0,
         budget: COLLAPSED_LINES.find,
         derived,
-        schemeIdentity: scheme.identity,
+        view,
         tookMs,
         expanded: options.expanded,
         notice: derived.notice,
-        theme,
         ctx,
         renderStyled: {
           widthAware: false,
@@ -163,7 +170,7 @@ export function createFindWrapper(
             // Every shown line is a path or the SDK's empty-result sentinel
             // — the limit notice was lifted into the footer (DerivedOutput).
             const styled = lines.map((line) => {
-              if (line === "No files found matching pattern") {
+              if (line === FIND_EMPTY_SENTINEL) {
                 return theme.fg("muted", line);
               }
               return styleFindPath({ path: line, theme, scheme, anchor, emphasis: emphasisSpec });

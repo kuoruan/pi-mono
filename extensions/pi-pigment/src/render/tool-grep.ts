@@ -137,7 +137,7 @@ export function createGrepWrapper(
         formatGrepCall(argsOf<GrepToolInput>(renderArgs), theme),
     },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
-      const { scheme, theme } = view;
+      const { theme } = view;
       // Inert at intake (ADR 0004): the grep result carries raw file
       // bytes, and EVERY downstream surface — the placeholder's first
       // frame, the fallback, the plain rendering, the highlighted swap —
@@ -164,12 +164,11 @@ export function createGrepWrapper(
         isEmpty: !output.trim(),
         budget: COLLAPSED_LINES.grep,
         derived,
-        schemeIdentity: scheme.identity,
+        view,
         tookMs,
         expanded: options.expanded,
         streaming: pending,
         notice: derived.notice,
-        theme,
         ctx,
         // Streaming frames skip highlighting entirely (the plain form is
         // the placeholder AND the frame); the settled frame re-renders

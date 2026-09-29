@@ -556,4 +556,128 @@ describe("read collapse and seed", () => {
   it("renders the invalid chip for a non-string path", () => {
     expect(readCallText({ path: 42 }, true)).toContain("invalid");
   });
+
+  it("lifts the user-limit tail notice to the footer", async () => {
+    // The SDK appends `[N more lines in file…]` after exactly `limit`
+    // content rows (read.js, user-limit branch) — it rides the footer,
+    // never a guttered body row. No disk involved: the count decides.
+    resetPigmentForTest();
+    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const { ctx } = makeRenderCtx();
+    ctx.args = { path: "/x/big.ts", limit: 3 };
+    ctx.expanded = true;
+    const result = {
+      content: [
+        {
+          type: "text",
+          text: "line1\nline2\nline3\n\n[149 more lines in file. Use offset=4 to continue.]",
+        },
+      ],
+    };
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
+      result,
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    component.render(120);
+    let body = "";
+    await vi.waitFor(() => {
+      body = plain(component.text.text);
+      if (!body.includes("more lines in file") || !/^\s*1\s/m.test(body)) {
+        throw new Error("waiting for styled frame");
+      }
+    });
+    // The notice stands alone in the tail — no gutter number on its row.
+    const noticeRows = body.split("\n").filter((line) => line.includes("more lines in file"));
+    expect(noticeRows).toHaveLength(1);
+    expect(noticeRows[0]).not.toMatch(/^\s*\d+\s/);
+  });
+
+  it.each([
+    // No `limit`: a bracketed tail line is file content, full stop.
+    { args: { path: "/x/notes.ts" }, text: "a\n[see docs for more]" },
+    // `limit` passed but the window is short: the file ended inside
+    // the window, so the SDK emits no notice — same verdict.
+    { args: { path: "/x/notes.ts", limit: 5 }, text: "a\n[see docs for more]" },
+  ])("keeps a bracketed tail line as content ($args.path $args.limit)", async ({ args, text }) => {
+    resetPigmentForTest();
+    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const { ctx } = makeRenderCtx();
+    ctx.args = args;
+    ctx.expanded = true;
+    const result = { content: [{ type: "text", text }] };
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
+      result,
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    component.render(120);
+    let body = "";
+    await vi.waitFor(() => {
+      body = plain(component.text.text);
+      if (!/^\s*1\s/m.test(body)) throw new Error("waiting for styled frame");
+    });
+    expect(body).toContain("[see docs for more]");
+  });
+
+  it("drops the truncation tail notice (the footer carries the synthesis)", async () => {
+    // The SDK appends `[Showing lines X-Y…]` beside details.truncation
+    // — the body drops it, the footer keeps `[Truncated:…]` once.
+    resetPigmentForTest();
+    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const { ctx } = makeRenderCtx();
+    ctx.args = { path: "/x/big.ts" };
+    ctx.expanded = true;
+    const result = {
+      content: [{ type: "text", text: "a\nb\n\n[Showing lines 1-2 of 5.]" }],
+      details: { truncation: { truncated: true, truncatedBy: "lines" } },
+    };
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
+      result,
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    component.render(120);
+    let body = "";
+    await vi.waitFor(() => {
+      body = plain(component.text.text);
+      if (!body.includes("Truncated")) throw new Error("waiting for notice");
+    });
+    expect(body).not.toContain("Showing lines");
+    expect(body).toContain("Truncated");
+  });
+
+  it("image results render the note with no line numbers", async () => {
+    // The SDK marks image reads with an image block (read.js); the text
+    // note is not file text, so a `1` gutter would be noise.
+    resetPigmentForTest();
+    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const { ctx } = makeRenderCtx();
+    ctx.args = { path: "/x/photo.png" };
+    ctx.expanded = true;
+    const result = {
+      content: [
+        { type: "text", text: "Read image file [image/png]" },
+        { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+      ],
+    };
+    const component = (tool.renderResult as unknown as RenderResultCarrier["renderResult"])(
+      result,
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    );
+    component.render(120);
+    let body = "";
+    await vi.waitFor(() => {
+      body = plain(component.text.text);
+      if (!body.includes("Read image file")) throw new Error("waiting for note");
+    });
+    // The note line stands alone — no gutter number prefix.
+    expect(body.split("\n").filter((line) => line.includes("Read image file"))).toHaveLength(1);
+    expect(body).not.toMatch(/^\s*1\s/m);
+  });
 });
