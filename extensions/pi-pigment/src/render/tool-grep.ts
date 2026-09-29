@@ -174,15 +174,18 @@ export function createGrepWrapper(
         // Streaming frames skip highlighting entirely (the plain form is
         // the placeholder AND the frame); the settled frame re-renders
         // once through renderHighlighted and populates the cache.
-        renderStyled: async (shownLines, tail, hidden) => {
-          if (pending) return joinBodyTail(renderPlainOutput(shownLines, theme), tail, hidden);
-          const highlighted = await renderHighlighted({
-            lines: shownLines,
-            pattern,
-            flags,
-            view,
-          });
-          return joinBodyTail(highlighted, tail, hidden);
+        renderStyled: {
+          widthAware: false,
+          render: async (shownLines, tail, hidden) => {
+            if (pending) return joinBodyTail(renderPlainOutput(shownLines, theme), tail, hidden);
+            const highlighted = await renderHighlighted({
+              lines: shownLines,
+              pattern,
+              flags,
+              view,
+            });
+            return joinBodyTail(highlighted, tail, hidden);
+          },
         },
       });
     },

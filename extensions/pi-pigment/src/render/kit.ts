@@ -19,7 +19,7 @@ import { getAgentDir, type ToolDefinition } from "@earendil-works/pi-coding-agen
 import { Text } from "@earendil-works/pi-tui";
 
 import { loadPigmentConfig } from "#src/config/config-layer.ts";
-import { TOOL_NAMES, type IndicatorStyle, type ToolName } from "#src/config/config-schema.ts";
+import { TOOL_NAMES, type PigmentConfig, type ToolName } from "#src/config/config-schema.ts";
 import { defaultIssueSink, type IssueSink } from "#src/core/issue.ts";
 import { VERSION } from "#src/package-json.ts";
 
@@ -46,14 +46,18 @@ export const RENDER_KIT_KEY: string = "pi-pigment.render-kit.v1";
 /** The protocol version of the publication contract — the payload's `version`. */
 export const RENDER_KIT_PROTOCOL_VERSION: number = 1;
 
-/** The kit's inputs: the session environment plus two overrides. */
+/** The kit's inputs: the session environment plus config overrides. */
 export interface RenderKitOptions {
   /** The session's working directory (the only required input). */
   cwd: string;
   /** The agent directory (`getAgentDir()` by default; tests override it). */
   agentDir?: string;
-  /** The change-indicator style (the config layer's value by default). */
-  indicatorStyle?: IndicatorStyle;
+  /**
+   * Config overrides, applied over the resolved two-layer config.
+   * One field (not per-key options) so the surface stays symmetric
+   * with config evolution — new keys need no kit change.
+   */
+  config?: Partial<PigmentConfig>;
   /** The diagnostics sink (one stderr line by default). */
   reportIssue?: IssueSink;
 }
@@ -78,6 +82,12 @@ export interface RenderKit {
    * and re-report their issues.
    */
   readonly session: RenderSession;
+  /**
+   * The effective config (file layers + options.config): the
+   * extension's own assembly reads `disabledTools` off it without
+   * re-reading the config layers.
+   */
+  readonly config: PigmentConfig;
   /**
    * The `definition` with pi-pigment's renderers installed, dispatched by
    * `definition.name`. Execution is untouched (except `write`, whose
@@ -105,13 +115,22 @@ export interface RenderKit {
  * @returns The kit (one per session; hold it).
  */
 export async function createRenderKit(options: RenderKitOptions): Promise<RenderKit> {
-  const { cwd, agentDir = getAgentDir(), indicatorStyle, reportIssue = defaultIssueSink } = options;
-  const { config, issues } = loadPigmentConfig({ cwd, agentDir });
-  for (const issue of issues) reportIssue(issue.message);
+  const { cwd, agentDir = getAgentDir(), reportIssue = defaultIssueSink } = options;
+  const { config: fileConfig, issues } = loadPigmentConfig({ cwd, agentDir });
+  for (const issue of issues) {
+    reportIssue(issue.message);
+  }
+  // Only defined override keys win — a spread would let an explicit
+  // `undefined` key erase the file layer's value.
+  const config: PigmentConfig = { ...fileConfig };
+  for (const [key, value] of Object.entries(options.config ?? {})) {
+    if (value !== undefined) (config as Record<string, unknown>)[key] = value;
+  }
   const session = await autoRenderSession({ cwd, agentDir }, config, reportIssue);
   const services: ToolServices = {
+    cwd,
     shortPath: (p: string) => shortPath(cwd, p),
-    indicatorStyle: indicatorStyle ?? config.indicatorStyle,
+    indicatorStyle: config.indicatorStyle,
     headerEllipsis: config.headerEllipsis,
     textFactory: Text,
     render: session,
@@ -119,6 +138,7 @@ export async function createRenderKit(options: RenderKitOptions): Promise<Render
   return {
     tools: TOOL_NAMES,
     session,
+    config,
     hasTool: (name: string): boolean => (TOOL_NAMES as readonly string[]).includes(name),
     decorate: (definition: ToolDefinition): ToolDefinition => decorate(definition, services),
   };

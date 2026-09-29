@@ -11,7 +11,7 @@
  * scheme, the roots, or pi — intake only.
  */
 import { themeNames } from "@shikijs/themes";
-import type { ThemeRegistration } from "shiki";
+import type { ThemeRegistration } from "shiki/core";
 
 import { compositeHexOver, isAlphaHex8, parseOpaqueHex, rgbToHex } from "#src/core/color.ts";
 

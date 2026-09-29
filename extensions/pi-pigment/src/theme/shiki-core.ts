@@ -7,12 +7,12 @@
 
 import {
   createHighlighterCore,
-  createOnigurumaEngine,
   guessEmbeddedLanguages,
   type HighlighterCore,
   type LanguageInput,
   type ThemedToken,
-} from "shiki";
+} from "shiki/core";
+import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 
 import { fgRgb } from "#src/core/ansi.ts";
 import { createBoundedMap } from "#src/core/bounded-map.ts";
@@ -86,7 +86,9 @@ export async function ensureCore(
     // The await sits INSIDE this try: a construction rejection must reach
     // this catch to clear the poisoned memo.
     corePromise ??= createHighlighterCore({
-      engine: createOnigurumaEngine(import("shiki/wasm")),
+      // Factory form (loadWasm accepts a provider and defers it until the
+      // engine first loads): the WASM import stays as lazy as this core.
+      engine: createOnigurumaEngine(() => import("shiki/wasm")),
     });
     const resolved = await corePromise;
     try {

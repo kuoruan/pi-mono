@@ -8,8 +8,6 @@
  * Shiki highlighting.
  */
 
-import { readFileSync } from "node:fs";
-
 import type {
   AgentToolResult,
   EditToolDetails,
@@ -25,6 +23,7 @@ import { memoSeedText, seedFromLines } from "#src/theme/seed.ts";
 
 import { setCallHeader } from "./error-frame.ts";
 import { summarize, resultLine } from "./header.ts";
+import { readDecorativeText, resolveToolPath } from "./paths.ts";
 import { attachDiffPreview } from "./text-task.ts";
 import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
 import { argsOf, callStateOf, type EditState, type ToolServices } from "./tool-services.ts";
@@ -189,8 +188,16 @@ export function createEditWrapper(
         // path for its whole life, so the memo needs no key. The stale
         // window (an external write landing between the call and a later
         // re-render) is display-only and self-heals on the next call.
+        // readDecorativeText never throws; memoSeedText wants the miss as
+        // a throw (it memoizes the null) — the bridge converts undefined
+        // into the memoized miss.
+        const seedPath = resolveToolPath(ctx.cwd, editPath);
         const seedFor = seedFromLines(() => {
-          const seed = memoSeedText(ctx.state, () => readFileSync(editPath, "utf-8"));
+          const seed = memoSeedText(ctx.state, () => {
+            const fileText = readDecorativeText(seedPath);
+            if (fileText === undefined) throw new Error(`unreadable seed: ${seedPath}`);
+            return fileText;
+          });
           return seed === undefined ? null : linesOf(seed);
         }, language);
         attachDiffPreview({

@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { shortPath } from "#src/render/paths.ts";
+import { resolveToolPath, shortPath } from "#src/render/paths.ts";
 
 const HOME = homedir();
 
@@ -45,5 +45,24 @@ describe("inside-outside boundary (path segments, not prefixes)", () => {
   it("keeps sibling and parent paths absolute", () => {
     expect(shortPath("/a/b", "/a/c")).toBe("/a/c");
     expect(shortPath("/a/b", "/a")).toBe("/a");
+  });
+});
+
+describe("resolveToolPath", () => {
+  it("resolves relative args against the session cwd, never process.cwd()", () => {
+    expect(resolveToolPath("/session", "src/a.ts")).toBe("/session/src/a.ts");
+    // `@` strips first — `@/x.ts` is the absolute /x.ts, not cwd-relative.
+    expect(resolveToolPath("/session", "@/x.ts")).toBe("/x.ts");
+    expect(resolveToolPath("/session", "@rel/x.ts")).toBe("/session/rel/x.ts");
+  });
+
+  it("keeps absolute args and expands ~", () => {
+    expect(resolveToolPath("/session", "/etc/hosts")).toBe("/etc/hosts");
+    expect(resolveToolPath("/session", "@/etc/hosts")).toBe("/etc/hosts");
+    expect(resolveToolPath("/session", "~/.bashrc")).toBe(join(HOME, ".bashrc"));
+  });
+
+  it("passes empty args through as empty", () => {
+    expect(resolveToolPath("/session", "")).toBe("");
   });
 });

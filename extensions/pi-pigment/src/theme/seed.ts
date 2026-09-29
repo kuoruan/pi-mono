@@ -14,7 +14,7 @@
  * file text lives; consumers receive a capped seed or undefined.
  */
 
-import type { GrammarState, HighlighterCore } from "shiki";
+import type { GrammarState, HighlighterCore } from "shiki/core";
 
 import { createBoundedMap } from "#src/core/bounded-map.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";

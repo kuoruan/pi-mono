@@ -8,7 +8,7 @@
  */
 
 import { getLanguageFromPath } from "@earendil-works/pi-coding-agent";
-import { bundledLanguages, bundledLanguagesAlias } from "shiki";
+import { bundledLanguages, bundledLanguagesAlias } from "shiki/langs";
 
 import type { CodeBlock, FileCodeBlock } from "./highlight.ts";
 import { seedFromText } from "./seed.ts";

@@ -74,37 +74,40 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
         notice: derived.notice,
         theme,
         ctx,
-        renderStyled: (shown, tail, hidden) => {
-          // Tree rendering: one entry per row under a connector rule;
-          // type coloring as before (directories accent, code tinted).
-          // The entries carry no limit notice (DerivedOutput lifts it
-          // into the footer), so a notice can never wear a connector.
-          const rows = shown.map((entry, i) => {
-            // The elbow only when this is the TRUE last entry (not the
-            // collapse cut — hidden entries continue the tree).
-            const connector = theme.fg(
-              "muted",
-              i === shown.length - 1 && i === entries.length - 1 ? ELBOW : TEE,
-            );
-            // The SDK's empty-directory sentinel renders as a muted note,
-            // not a tree entry (find does the same for its no-files line).
-            if (entry === "(empty directory)") {
-              return `${theme.fg("muted", entry)}`;
-            }
-            if (entry.endsWith("/")) {
-              return `${connector}${theme.fg("accent", theme.bold(entry))}`;
-            }
-            // Code-file detection reuses detectLanguage (the
-            // SDK/Shiki-shared authority) — no second extension table.
-            // The fgCode escape is channel-scoped like the theme's own
-            // fg() closes (a full \x1b[0m would kill pi core's frame
-            // canvas and whiten the row's tail padding).
-            if (detectLanguage(entry)) {
-              return `${connector}${scheme.fgCode}${entry}${SEQ_FG_DEFAULT}`;
-            }
-            return `${connector}${theme.fg("toolOutput", entry)}`;
-          });
-          return joinBodyTail(rows.join("\n"), tail, hidden);
+        renderStyled: {
+          widthAware: false,
+          render: (shown, tail, hidden) => {
+            // Tree rendering: one entry per row under a connector rule;
+            // type coloring as before (directories accent, code tinted).
+            // The entries carry no limit notice (DerivedOutput lifts it
+            // into the footer), so a notice can never wear a connector.
+            const rows = shown.map((entry, i) => {
+              // The elbow only when this is the TRUE last entry (not the
+              // collapse cut — hidden entries continue the tree).
+              const connector = theme.fg(
+                "muted",
+                i === shown.length - 1 && i === entries.length - 1 ? ELBOW : TEE,
+              );
+              // The SDK's empty-directory sentinel renders as a muted note,
+              // not a tree entry (find does the same for its no-files line).
+              if (entry === "(empty directory)") {
+                return `${theme.fg("muted", entry)}`;
+              }
+              if (entry.endsWith("/")) {
+                return `${connector}${theme.fg("accent", theme.bold(entry))}`;
+              }
+              // Code-file detection reuses detectLanguage (the
+              // SDK/Shiki-shared authority) — no second extension table.
+              // The fgCode escape is channel-scoped like the theme's own
+              // fg() closes (a full \x1b[0m would kill pi core's frame
+              // canvas and whiten the row's tail padding).
+              if (detectLanguage(entry)) {
+                return `${connector}${scheme.fgCode}${entry}${SEQ_FG_DEFAULT}`;
+              }
+              return `${connector}${theme.fg("toolOutput", entry)}`;
+            });
+            return joinBodyTail(rows.join("\n"), tail, hidden);
+          },
         },
       });
     },

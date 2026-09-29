@@ -6,8 +6,6 @@
  * in the call header's suffix, bridged through render state.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-
 import type {
   AgentToolResult,
   ToolDefinition,
@@ -25,6 +23,7 @@ import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { setCallHeader } from "./error-frame.ts";
 import { clearToolHeaderBg, padDiffBody, summarize, resultLine } from "./header.ts";
+import { decorativeExists, readDecorativeText, resolveToolPath } from "./paths.ts";
 import { borderBar, gutterWidth, numberedRows } from "./row-frame.ts";
 import {
   attachDiffPreview,
@@ -167,12 +166,10 @@ export function createWriteWrapper(
       // path landing between our read and the SDK's queued write — is
       // display-only (a preview that momentarily shows a state that never
       // existed) and self-heals on the next render.
-      let old: string | null = null;
-      try {
-        if (fp && existsSync(fp)) old = readFileSync(fp, "utf-8");
-      } catch {
-        old = null;
-      }
+      // The execute ctx carries no cwd in tests (undefined) — fall back
+      // to the session cwd from services (the SDK's own execute falls
+      // back to its session-cwd closure the same way).
+      const oldText = readDecorativeText(resolveToolPath(ctx?.cwd ?? services.cwd, fp)) ?? null;
 
       // The SDK's execute returns AgentToolResult<unknown>; the details we
       // stash below make it this shape — the cast is our view of it.
@@ -186,20 +183,20 @@ export function createWriteWrapper(
       const content = wp.content ?? "";
 
       // Store in details — the only custom field TUI preserves in renderResult
-      if (old !== null && old !== content) {
-        const diff = parseDiff(old, content, 3);
+      if (oldText !== null && oldText !== content) {
+        const diff = parseDiff(oldText, content, 3);
         const lg = detectLanguage(fp);
         result.details = {
           kind: "diff",
           diff,
           language: lg,
         };
-      } else if (old === null) {
+      } else if (oldText === null) {
         result.details = {
           kind: "new",
           filePath: fp,
         };
-      } else if (old === content) {
+      } else if (oldText === content) {
         result.details = { kind: "noChange" };
       }
       return result;
@@ -217,13 +214,7 @@ export function createWriteWrapper(
       // outlives frames within one tool call (pi's contract).
       ctx.state.existsProbes ??= {};
       if (ctx.state.existsProbes[fp] === undefined) {
-        let exists = false;
-        try {
-          exists = !!fp && existsSync(fp);
-        } catch {
-          exists = false;
-        }
-        ctx.state.existsProbes[fp] = exists;
+        ctx.state.existsProbes[fp] = decorativeExists(resolveToolPath(ctx.cwd, fp));
       }
       const isNew = !ctx.state.existsProbes[fp];
       const label = isNew ? "create" : "write";

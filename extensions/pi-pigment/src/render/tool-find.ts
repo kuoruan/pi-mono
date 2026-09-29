@@ -157,16 +157,19 @@ export function createFindWrapper(
         notice: derived.notice,
         theme,
         ctx,
-        renderStyled: (lines, tail, hidden) => {
-          // Every shown line is a path or the SDK's empty-result sentinel
-          // — the limit notice was lifted into the footer (DerivedOutput).
-          const styled = lines.map((line) => {
-            if (line === "No files found matching pattern") {
-              return theme.fg("muted", line);
-            }
-            return styleFindPath({ path: line, theme, scheme, anchor, emphasis: emphasisSpec });
-          });
-          return joinBodyTail(styled.join("\n"), tail, hidden);
+        renderStyled: {
+          widthAware: false,
+          render: (lines, tail, hidden) => {
+            // Every shown line is a path or the SDK's empty-result sentinel
+            // — the limit notice was lifted into the footer (DerivedOutput).
+            const styled = lines.map((line) => {
+              if (line === "No files found matching pattern") {
+                return theme.fg("muted", line);
+              }
+              return styleFindPath({ path: line, theme, scheme, anchor, emphasis: emphasisSpec });
+            });
+            return joinBodyTail(styled.join("\n"), tail, hidden);
+          },
         },
       });
     },

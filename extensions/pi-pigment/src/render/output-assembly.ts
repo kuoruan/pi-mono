@@ -17,6 +17,33 @@ import {
   outputTaskKey,
   renderPlainOutput,
 } from "./tool-output.ts";
+import type { RenderContext } from "./tool-services.ts";
+
+/**
+ * The styled swap: shown lines + tail + hidden + the task width → the
+ * settled body. `widthAware` declares whether the layout reads the
+ * width — the renderer's call, not the assembly's (grep/find/ls have
+ * no width-dependent layout; read's gutter/wrap does).
+ */
+export interface StyledSwap {
+  /** Whether the styled output depends on the render width. */
+  widthAware: boolean;
+  /**
+   * Render the settled body.
+   *
+   * @param shown - The windowed lines.
+   * @param tail - The tail block.
+   * @param hidden - The hidden count.
+   * @param width - The render width (ignored when widthAware is false).
+   * @returns The settled body.
+   */
+  render: (
+    shown: string[],
+    tail: string,
+    hidden: number,
+    width: number,
+  ) => string | Promise<string>;
+}
 
 /** The output-assembly inputs — the three SDK-delegated output tools' shared shape. */
 export interface OutputAssemblyInput {
@@ -45,14 +72,9 @@ export interface OutputAssemblyInput {
   /** The pi theme. */
   theme: RenderTheme;
   /** The render context (invalidate flows into the task). */
-  ctx: { invalidate: () => void };
-  /** The styled swap: shown lines + tail + hidden + the task width → the settled body. */
-  renderStyled: (
-    shown: string[],
-    tail: string,
-    hidden: number,
-    width: number,
-  ) => string | Promise<string>;
+  ctx: RenderContext<object>;
+  /** The styled swap (see StyledSwap). */
+  renderStyled: StyledSwap;
 }
 
 /**
@@ -108,11 +130,11 @@ export function assembleOutputBody(input: OutputAssemblyInput): PreviewTextHost 
     text,
     definePreviewTask({
       identity: taskKey,
-      widthAware: true,
+      widthAware: renderStyled.widthAware,
       placeholder: plain,
       fallback: plain,
       invalidate: ctx.invalidate,
-      render: async (w) => renderStyled(shown, tail, hidden, w),
+      render: async (w) => renderStyled.render(shown, tail, hidden, w),
     }),
   );
   return text;

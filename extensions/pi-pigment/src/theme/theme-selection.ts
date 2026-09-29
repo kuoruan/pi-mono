@@ -7,7 +7,7 @@
  * memoized per identity.
  */
 
-import type { BundledTheme } from "shiki";
+import type { BundledTheme } from "shiki/themes";
 
 import { createBoundedMap, type BoundedMap } from "#src/core/bounded-map.ts";
 import type { SessionEnv } from "#src/core/session-env.ts";
@@ -314,8 +314,14 @@ function identityOf(target: Extract<ThemeSelection, { kind: "object" }>): string
   return JSON.stringify([target.colors, target.light ?? {}, target.dark ?? {}]);
 }
 
-/** Cache of enforced bundled names: name → (bgKey → theme). */
-const enforcedCache = new Map<string, BoundedMap<string, ShikiThemeInput>>();
+/**
+ * Cache of enforced bundled names: name → (bgKey → theme). Bounded like
+ * its siblings (highlightCache 192, matcherMemo 64) — a session cycling
+ * themes/roots would otherwise accumulate full theme objects per
+ * variant indefinitely. Theme data is immutable, so cross-session reuse
+ * is a real win (no session scoping — that would trade cache for purity).
+ */
+const enforcedCache = createBoundedMap<string, BoundedMap<string, ShikiThemeInput>>(64);
 
 /**
  * Whether a patch map carries any overlay at all.

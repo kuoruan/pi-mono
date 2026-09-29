@@ -12,7 +12,7 @@ import type {
   GrepToolDetails,
   LsToolDetails,
 } from "@earendil-works/pi-coding-agent";
-import { keyText } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, formatSize, keyText } from "@earendil-works/pi-coding-agent";
 
 import { inertText } from "#src/core/ansi.ts";
 import { KEY_SEP } from "#src/core/escapes.ts";
@@ -109,27 +109,75 @@ interface ResultDetails {
 }
 
 /**
- * The SDK's limit notice, when this result carries one. grep/find/ls append
- * it as the text's LAST non-empty line AND record the same fact in
- * `details` (one code path does both); the structured field is the
- * authority — exactly what pi's native renderers read — and the trailing
- * line supplies the words, never the other way around: a bracketed filename
- * is not a notice, and no text shape can promote one.
+ * The SDK's limit notice, when this result carries one — SYNTHESIZED from
+ * the structured details fields, never scraped from the text (grep/ls
+ * byte-identical; find's custom-glob path takes the hinted form — see
+ * below). grep/find/ls record the limit fact in `details` (counts and
+ * truncation records);
+ * the trailing bracketed text line the SDK also appends is the SAME fact
+ * in prose, so the memo strips it from the content (see the lift below)
+ * and this function rebuilds the words from the structure. A bracketed
+ * filename is never a notice, and no text shape can promote one — the
+ * contract is structural, not textual (a text scrape would eat a real hit
+ * line like `array[i]`).
  *
- * @param output - The inert output text.
  * @param details - The result's details.
  * @returns The notice line, or "" when the result has none.
  */
-function limitNoticeOf(output: string, details: unknown): string {
+function limitNoticeOf(details: unknown): string {
   const flags = details as LimitFlags | undefined;
-  const limited =
-    flags !== undefined &&
-    (flags.matchLimitReached !== undefined ||
-      flags.resultLimitReached !== undefined ||
-      flags.entryLimitReached !== undefined ||
-      flags.linesTruncated === true ||
-      flags.truncation?.truncated === true);
-  if (!limited) return "";
+  if (flags === undefined) return "";
+  // The SDK's own notice prose (grep.js/find.js/ls.js, byte for byte) —
+  // rebuilt here from the same fields, so the footer reads identically
+  // while the content keeps every real line.
+  const notices: string[] = [];
+  if (flags.matchLimitReached !== undefined) {
+    const limit = flags.matchLimitReached;
+    notices.push(
+      `${limit} matches limit reached. Use limit=${limit * 2} for more, or refine pattern`,
+    );
+  }
+  if (flags.resultLimitReached !== undefined) {
+    // The SDK has two find paths with different prose (find.js:102
+    // bare, :218 with the limit-doubling hint); details carry only the
+    // count, so the hinted form wins — it names the recovery action.
+    const limit = flags.resultLimitReached;
+    notices.push(
+      `${limit} results limit reached. Use limit=${limit * 2} for more, or refine pattern`,
+    );
+  }
+  if (flags.entryLimitReached !== undefined) {
+    const limit = flags.entryLimitReached;
+    notices.push(`${limit} entries limit reached. Use limit=${limit * 2} for more`);
+  }
+  if (flags.truncation?.truncated === true) {
+    notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+  }
+  if (flags.linesTruncated === true) {
+    // GREP_MAX_LINE_LENGTH is SDK-internal (not exported); the value is
+    // pinned by upstream-contracts — a drift breaks the test, not the
+    // frame.
+    notices.push("Some lines truncated to 500 chars. Use read tool to see full lines");
+  }
+  return notices.length > 0 ? `[${notices.join(". ")}]` : "";
+}
+
+/**
+ * Strip the SDK's appended trailing notice line from the output text (the
+ * lift half of the structural contract): when details carry a limit fact,
+ * the SDK appends `[…]` prose as the last non-empty line — that line is
+ * the notice's prose twin, not content, so it leaves the windowed lines
+ * and only the synthesized notice (limitNoticeOf) reaches the footer.
+ * The strip fires ONLY when details carry the fact AND the trailing line
+ * has the bracketed shape; otherwise the text passes through untouched
+ * (a bracketed hit line with no details fact is content, full stop).
+ *
+ * @param output - The inert output text.
+ * @param details - The result's details.
+ * @returns The content text without the trailing notice prose.
+ */
+function liftTrailingNotice(output: string, details: unknown): string {
+  if (!limitNoticeOf(details)) return output;
   const nonEmpty = linesOf(output).filter((line) => line.length > 0);
   const last = nonEmpty[nonEmpty.length - 1];
   // Keep a notice only when real content precedes it: nothing else can
@@ -137,9 +185,9 @@ function limitNoticeOf(output: string, details: unknown): string {
   // result), and the " > 1 " guard keeps the wrapper guards' semantics
   // (an empty body stays empty).
   if (nonEmpty.length < 2 || last === undefined || !last.startsWith("[") || !last.endsWith("]")) {
-    return "";
+    return output;
   }
-  return last;
+  return output.slice(0, output.lastIndexOf(last)).trimEnd();
 }
 
 /**
@@ -380,11 +428,12 @@ export function outputMemoOf(cell: OutputMemoCell): OutputDerive {
   return (result: object) => {
     const hit = weak.get(result);
     if (hit) return hit;
+    const details = (result as ResultDetails).details;
     const output = inertText(firstTextOf(result));
-    const notice = limitNoticeOf(output, (result as ResultDetails).details);
+    const notice = limitNoticeOf(details);
     // The notice's separator blank line (the SDK writes "\n\n[…]") goes
     // with it — neither is content the wrappers window over.
-    const body = notice ? output.slice(0, output.lastIndexOf(notice)).trimEnd() : output;
+    const body = liftTrailingNotice(output, details);
     // ("" keeps the falsy guard: an empty result's line view is [], not
     // [""] — the empty-output path is intercepted by the callers' guards.)
     const lines = body ? linesOf(body) : [];

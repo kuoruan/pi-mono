@@ -129,6 +129,7 @@ export function viewFor(
  */
 export function makeServices(overrides: Partial<ToolServices> = {}): ToolServices {
   return {
+    cwd: "/test",
     shortPath: (p: string) => p,
     indicatorStyle: "bar",
     headerEllipsis: "off",
@@ -524,23 +525,36 @@ async function driveSession(
     },
     // The presence surfaces the fff probe reads (commands register at
     // module load, before any session_start — the order-safe signal).
-    // Foreign tools staged by the suite read back as taken (non-builtin
-    // source); the extension's own registrations read back as local —
-    // exactly like real pi — so a re-fire exercises the self-shadowing
-    // guard (registeredByUs), not the source check. The seven builtins
-    // sit underneath with source builtin (a bare-name collision at the
-    // source check would yield nothing: the reverse assertion — builtin
-    // alone never triggers a skip — pins this).
+    // sourceInfo mirrors real pi: foreign tools under the neighbor's
+    // path, the extension's own registrations under its own path (a
+    // re-fire over this shared registry exercises the self-recognition),
+    // and the eight builtins with source builtin — a builtin name alone
+    // never triggers a skip (the reverse assertion pins this).
     getAllTools: () => [
-      ...foreignTools.map((name) => ({ name, sourceInfo: { source: "some-other-extension" } })),
+      ...foreignTools.map((name) => ({
+        name,
+        // Real pi stamps extension TOOLS with source "local"/"temporary"
+        // (loader createExtension); "extension" is the COMMANDS mapping
+        // (agent-session getCommands). claimedByOther only reads
+        // !== "builtin", so either value exercises it — "local" is the
+        // faithful one.
+        sourceInfo: { source: "local", path: "/foreign-extension" },
+      })),
       ...["write", "edit", "bash", "powershell", "grep", "ls", "find", "read"].map((name) => ({
         name,
-        sourceInfo: { source: "builtin" },
+        sourceInfo: { source: "builtin", path: `<builtin:${name}>` },
       })),
-      ...tools.map((tool) => ({ name: tool.name, sourceInfo: { source: "local" } })),
+      ...tools.map((tool) => ({
+        name: tool.name,
+        sourceInfo: { source: "local", path: "/pi-pigment" },
+      })),
     ],
-    getCommands: () => [],
-    // The /pigment command registers at module load (recorded, not run).
+    // The /pigment command registers at factory time (before any
+    // session_start); its sourceInfo.path is the extension's own path —
+    // the yield check reads self-identity off it.
+    getCommands: () => [
+      { name: "pigment", sourceInfo: { source: "extension", path: "/pi-pigment" } },
+    ],
     registerCommand: (_name: string, _options: unknown) => {},
   };
   await createPigmentExtension(api as unknown as ExtensionAPI);

@@ -9,7 +9,6 @@
  * SDK's imageFallback size line is not rendered either.
  */
 
-import { readFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -28,7 +27,7 @@ import type { RenderTheme, ResolvedTheme } from "#src/theme/scheme.ts";
 import { memoSeedText, needsSeed, type SeedTextMemo } from "#src/theme/seed.ts";
 
 import { assembleOutputBody } from "./output-assembly.ts";
-import { expandHome, toPosixPath } from "./paths.ts";
+import { expandHome, readDecorativeText, resolveToolPath, toPosixPath } from "./paths.ts";
 import { numberedRows } from "./row-frame.ts";
 import { createToolWrapper } from "./tool-factory.ts";
 import { expandKeyHint, joinBodyTail } from "./tool-output.ts";
@@ -67,7 +66,7 @@ const GENERATED_LOCK_FILES: ReadonlySet<string> = new Set([
  */
 function isSensitiveRead(raw: string, cwd: string): boolean {
   if (raw === "") return false;
-  const fileName = basename(isAbsolute(raw) ? raw : resolve(cwd, raw)).toLowerCase();
+  const fileName = basename(resolveToolPath(cwd, raw)).toLowerCase();
   return (
     fileName.startsWith(".env") ||
     fileName.endsWith(".pem") ||
@@ -183,7 +182,7 @@ function classifyCompactRead(
 ): CompactReadLabel | undefined {
   const { raw, cwd, piRoot } = input;
   if (raw === "") return undefined;
-  const absolute = isAbsolute(raw) ? raw : resolve(cwd, raw);
+  const absolute = resolveToolPath(cwd, raw);
   const fileName = basename(absolute);
   // Deliberate parity departure: skill folds case-insensitively while
   // resource keeps its two-spelling enumeration (AGENTS.md/AGENTS.MD)
@@ -300,6 +299,16 @@ type TextContentBlock = { type?: string; text?: string };
 type ReadResultDetails = { truncation?: TruncationResult };
 
 /**
+ * The read row-state memo: the seed memo plus the masked-derivation cell
+ * (result identity + path:offset key — an unchanged frame reuses the
+ * masked text instead of re-running surfaceSecrets per render).
+ */
+type ReadRowMemo = SeedTextMemo & {
+  /** The memoized masked derivation. */
+  readDerive?: { result: object; key: string; masked: string };
+};
+
+/**
  * The read call header body (the range rides the pinned suffix, not
  * the body): the SDK's formatReadCall/formatCompactReadCall shape
  * (toolTitle name, path or compact label), with deliberate tint
@@ -401,42 +410,57 @@ export function createReadWrapper(
     },
     renderResult: ({ text, view, ctx, result, options, tookMs }) => {
       const { theme, scheme } = view;
-      // Image results pass through as plain text (the note the SDK
-      // leaves in content) — pigment never paints non-text blocks.
-      const content = (result.content ?? []) as TextContentBlock[];
-      // Inert at intake (ADR 0004): file bytes ride raw (ANSI logs,
-      // hostile escapes); the CR strip mirrors getTextOutput.
-      const output = inertText(
-        content
-          .filter((block) => block.type === "text" || block.type === undefined)
-          .map((block) => block.text ?? "")
-          .join("")
-          .replaceAll("\r", ""),
-      ).replace(/\n$/, "");
       const args = argsOf<ReadToolInput>(ctx.args);
       const raw = argStr(args?.path) ?? "";
-      // Secret-bearing files mask dotenv values before highlight (the
-      // gutter/line-count stay aligned — masking is same-line-count).
-      // Tabs expand before highlight/wrap (write parity): Shiki keeps
-      // tabs inside tokens and the wrapper measures a tab as one column,
-      // while pi-tui renders it as three spaces.
-      const masked = expandTabs(surfaceSecrets(raw, ctx.cwd, output).masked);
+      // The read derivation, memoized in the row state (the grep/find/ls
+      // outputMemoOf seam is result-identity keyed — but read's derive
+      // inputs (masked text) are THEMSELVES derived per frame, so the
+      // identity never stabilizes there; instead the row state holds the
+      // derive keyed by result identity + path + offset, and a stable
+      // result costs one lookup per frame).
+      const memoState = ctx.state as ReadRowMemo;
+      const readKey = `${toPosixPath(raw)}:${args?.offset ?? 0}`;
+      let masked: string;
+      const cached = memoState.readDerive;
+      if (cached && cached.result === result && cached.key === readKey) {
+        masked = cached.masked;
+      } else {
+        // Image results pass through as plain text (the note the SDK
+        // leaves in content) — pigment never paints non-text blocks.
+        const content = (result.content ?? []) as TextContentBlock[];
+        // Inert at intake (ADR 0004): file bytes ride raw (ANSI logs,
+        // hostile escapes); the CR strip mirrors getTextOutput.
+        const output = inertText(
+          content
+            .filter((block) => block.type === "text" || block.type === undefined)
+            .map((block) => block.text ?? "")
+            .join("")
+            .replaceAll("\r", ""),
+        ).replace(/\n$/, "");
+        // Secret-bearing files mask dotenv values before highlight (the
+        // gutter/line-count stay aligned — masking is same-line-count).
+        // Tabs expand before highlight/wrap (write parity): Shiki keeps
+        // tabs inside tokens and the wrapper measures a tab as one column,
+        // while pi-tui renders it as three spaces.
+        masked = expandTabs(surfaceSecrets(raw, ctx.cwd, output).masked);
+        memoState.readDerive = { result: result as object, key: readKey, masked };
+      }
+      const contentLines = linesOf(masked);
       // under the header — "did I read the right file" at a glance
       // (compact skill/docs labels included — the label names it, the
       // preview proves it). No seed, no notice, no Took: a preview is
       // a preview. Error frames never reach here (the factory
       // intercepts them).
       if (!options.expanded) {
-        const previewLines = linesOf(masked);
         return assembleOutputBody({
           text,
           prefix: "r",
-          lines: previewLines,
+          lines: contentLines,
           isEmpty: masked === "",
           derived: {
             output: masked,
-            lines: previewLines,
-            entries: previewLines.filter((line) => line !== ""),
+            lines: contentLines,
+            entries: contentLines.filter((line) => line !== ""),
             notice: "",
             hash: `fold:${toPosixPath(raw)}:${masked.length}`,
           },
@@ -445,16 +469,19 @@ export function createReadWrapper(
           expanded: false,
           theme,
           ctx,
-          renderStyled: async (shown, tail, hidden, width) => {
-            const highlighted = await view.highlight({
-              code: shown.join("\n"),
-              filePath: toPosixPath(raw),
-            });
-            return joinBodyTail(
-              withLineNumbers(highlighted, scheme, args?.offset ?? 1, width).join("\n"),
-              tail,
-              hidden,
-            );
+          renderStyled: {
+            widthAware: true,
+            render: async (shown, tail, hidden, width) => {
+              const highlighted = await view.highlight({
+                code: shown.join("\n"),
+                filePath: toPosixPath(raw),
+              });
+              return joinBodyTail(
+                withLineNumbers(highlighted, scheme, args?.offset ?? 1, width).join("\n"),
+                tail,
+                hidden,
+              );
+            },
           },
         });
       }
@@ -465,17 +492,20 @@ export function createReadWrapper(
       // The needsSeed gate (the edit precedent): only embedded
       // grammars consume a seed, so an offset read of a plain language
       // never pays for the disk.
-      const seedState = ctx.state as SeedTextMemo;
+      // readDecorativeText never throws; memoSeedText wants the miss as
+      // a throw (it memoizes the null) — the bridge converts undefined
+      // into the memoized miss.
+      const seedPath = resolveToolPath(ctx.cwd, raw);
       const seedText =
         offset !== undefined && needsSeed(detectLanguage(toPosixPath(raw)))
-          ? memoSeedText(seedState, () => {
-              const absolute = isAbsolute(raw) ? raw : resolve(ctx.cwd, raw);
-              return readFileSync(absolute, "utf-8");
+          ? memoSeedText(memoState, () => {
+              const fileText = readDecorativeText(seedPath);
+              if (fileText === undefined) throw new Error(`unreadable seed: ${seedPath}`);
+              return fileText;
             })
           : undefined;
       const truncation = (result.details as ReadResultDetails | undefined)?.truncation;
       const filePath = toPosixPath(raw);
-      const contentLines = linesOf(masked);
       // A single full block, never collapsed (the native renderer shows
       // all lines expanded, with the truncation notice as the only
       // footer) — no budget passed.
@@ -497,17 +527,24 @@ export function createReadWrapper(
         notice: truncation?.truncated ? formatTruncationNotice(truncation) : undefined,
         theme,
         ctx,
-        renderStyled: async (shown, tail, hidden, width) => {
-          const highlighted = await view.highlight(
-            seedText !== undefined && offset !== undefined
-              ? { code: shown.join("\n"), filePath, context: { text: seedText, startLine: offset } }
-              : { code: shown.join("\n"), filePath },
-          );
-          return joinBodyTail(
-            withLineNumbers(highlighted, scheme, offset ?? 1, width).join("\n"),
-            tail,
-            hidden,
-          );
+        renderStyled: {
+          widthAware: true,
+          render: async (shown, tail, hidden, width) => {
+            const highlighted = await view.highlight(
+              seedText !== undefined && offset !== undefined
+                ? {
+                    code: shown.join("\n"),
+                    filePath,
+                    context: { text: seedText, startLine: offset },
+                  }
+                : { code: shown.join("\n"), filePath },
+            );
+            return joinBodyTail(
+              withLineNumbers(highlighted, scheme, offset ?? 1, width).join("\n"),
+              tail,
+              hidden,
+            );
+          },
         },
       });
     },

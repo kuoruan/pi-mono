@@ -231,7 +231,9 @@ async function renderThemeToAnsi(
   // state is computed ONCE per distinct seed+theme and shared by every block
   // carrying it — passing the state object skips the per-block seed
   // re-tokenize `grammarContextCode` would pay. The state never reaches
-  // the output, only the slice tokenizes from it.
+  // the output, only the slice tokenizes from it. The theme MUST be
+  // registered first: getLastGrammarState resolves the theme by name and
+  // throws on an unregistered one.
   const grammarState =
     seed !== undefined ? seedGrammarState(core, seed, language, registeredName) : undefined;
   const tokens = await core.codeToTokensBase(code, {

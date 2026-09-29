@@ -18,7 +18,8 @@
 import { TinyColor } from "@ctrl/tinycolor";
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { RgbColor } from "@earendil-works/pi-tui";
-import type { BundledTheme, ThemeRegistration } from "shiki";
+import type { ThemeRegistration } from "shiki/core";
+import type { BundledTheme } from "shiki/themes";
 
 import { contrastRatio, parseAnsiRgb, parseHexColor, rgbToHex } from "#src/core/color.ts";
 import { fnv1a } from "#src/core/fingerprint.ts";

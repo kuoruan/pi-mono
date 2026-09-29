@@ -781,29 +781,53 @@ describe("the limit notice (the SDK's details, not the text shape)", () => {
   const limited = (text: string, details: unknown) =>
     derive({ content: [{ type: "text", text }], details });
 
-  it("lifts the SDK's trailing notice out of the body when details flags a limit", () => {
+  it("lifts the SDK's trailing notice prose and synthesizes the footer from details", () => {
     const derived = limited("a.ts\nb.ts\n\n[1000 results limit reached]", {
       resultLimitReached: 1000,
     });
     // Lift from BOTH views (grep's line budget and find/ls's entry list),
     // separator blank included: the notice can never render as a hit, a
-    // path, or a tree row.
+    // path, or a tree row. The footer is synthesized from details, not
+    // the prose (hence the hinted form, not the bare bracketed line).
     expect(derived.lines).toEqual(["a.ts", "b.ts"]);
     expect(derived.entries).toEqual(["a.ts", "b.ts"]);
-    expect(derived.notice).toBe("[1000 results limit reached]");
+    expect(derived.notice).toBe(
+      "[1000 results limit reached. Use limit=2000 for more, or refine pattern]",
+    );
   });
 
-  it("reads every flag the SDK's renderers read (grep's three, find/ls's cap, truncation)", () => {
-    const text = "hit.txt:12: x\n\n[50.0KB limit reached]";
-    for (const details of [
-      { matchLimitReached: 200 },
-      { linesTruncated: true },
-      { truncation: { truncated: true } },
-      { resultLimitReached: 500 },
-      { entryLimitReached: 500 },
-    ]) {
-      expect(limited(text, details).notice).toBe("[50.0KB limit reached]");
+  it("synthesizes every flag's footer from details (grep's three, find/ls's cap, truncation)", () => {
+    // No trailing prose in the text — the footer must synthesize from
+    // details alone, and nothing in the text is eaten.
+    const text = "hit.txt:12: x";
+    const cases: Array<[unknown, string]> = [
+      [
+        { matchLimitReached: 200 },
+        "[200 matches limit reached. Use limit=400 for more, or refine pattern]",
+      ],
+      [
+        { linesTruncated: true },
+        "[Some lines truncated to 500 chars. Use read tool to see full lines]",
+      ],
+      [{ truncation: { truncated: true } }, "[50.0KB limit reached]"],
+      [
+        { resultLimitReached: 500 },
+        "[500 results limit reached. Use limit=1000 for more, or refine pattern]",
+      ],
+      [{ entryLimitReached: 500 }, "[500 entries limit reached. Use limit=1000 for more]"],
+    ];
+    for (const [details, notice] of cases) {
+      expect(limited(text, details).notice).toBe(notice);
     }
+  });
+
+  it("keeps a bracketed hit line as content even when details flag a limit", () => {
+    // `array[i]` ends with `]` while details flag a limit — the old
+    // text scrape ate it; the structural contract keeps it.
+    const derived = limited("a.ts:1: array[i]\n\n[1000 results limit reached]", {
+      resultLimitReached: 1000,
+    });
+    expect(derived.lines).toEqual(["a.ts:1: array[i]"]);
   });
 
   it("keeps a bracketed line in the body without details (a filename is not a notice)", () => {
@@ -813,9 +837,12 @@ describe("the limit notice (the SDK's details, not the text shape)", () => {
   });
 
   it("keeps a notice-only body intact (nothing else carries the output)", () => {
+    // liftTrailingNotice's > 1 guard: the SDK never emits a notice over
+    // an empty result, so a lone bracketed line stays content. The
+    // structural footer still synthesizes from details.
     const derived = limited("[50.0KB limit reached]", { truncation: { truncated: true } });
     expect(derived.entries).toEqual(["[50.0KB limit reached]"]);
-    expect(derived.notice).toBe("");
+    expect(derived.notice).toBe("[50.0KB limit reached]");
   });
 });
 

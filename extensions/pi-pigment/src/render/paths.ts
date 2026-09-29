@@ -3,8 +3,9 @@
  * user's home, absolute otherwise.
  */
 
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /**
  * Collapse a path under the user's home to `~`-prefixed form (the SDK
@@ -56,6 +57,59 @@ export function shortPath(cwd: string, p: string): string {
   const outside = r === ".." || r.startsWith(`..${sep}`) || isAbsolute(r);
   if (!outside) return r;
   return shortHome(p);
+}
+
+/**
+ * Resolve a tool path arg the SDK's way (`resolveToCwd`: absolute
+ * stays, `@` strips, `~` expands to the home-joined location,
+ * otherwise relative to the session cwd — never `process.cwd()`, a
+ * resumed/switched session may sit in a different directory than the
+ * process started in). One seam for every decorative filesystem touch
+ * in the render layer. `file://` and unicode-space normalization are
+ * the SDK's, not ours — an exotic arg degrades the preview, never the
+ * frame.
+ *
+ * @param cwd - The session working directory.
+ * @param p - The raw path arg.
+ * @returns The absolute path, or "" when the arg is empty.
+ */
+export function resolveToolPath(cwd: string, p: string): string {
+  if (!p) return "";
+  const unprefixed = p.startsWith("@") ? p.slice(1) : p;
+  if (isAbsolute(unprefixed)) return resolve(unprefixed);
+  return resolve(cwd, expandHome(unprefixed));
+}
+
+/**
+ * Read a file for RENDERING ONLY (diff pre-reads, grammar seeds,
+ * existence probes): never throws — an unreadable file degrades the
+ * preview (unseeded, treated as new), never the frame.
+ *
+ * @param absolute - The resolved absolute path ("" reads as undefined).
+ * @returns The file text, or undefined when unreadable.
+ */
+export function readDecorativeText(absolute: string): string | undefined {
+  if (!absolute) return undefined;
+  try {
+    return readFileSync(absolute, "utf-8");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Probe a file's existence for RENDERING ONLY: never throws.
+ *
+ * @param absolute - The resolved absolute path ("" probes as false).
+ * @returns True when the file exists and is readable.
+ */
+export function decorativeExists(absolute: string): boolean {
+  if (!absolute) return false;
+  try {
+    return existsSync(absolute);
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -44,38 +44,12 @@ import {
   type ToolDefinition,
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 
 import { registerPigmentCommand } from "#src/command/theme-command.ts";
-import { loadPigmentConfig } from "#src/config/config-layer.ts";
 import type { ToolName } from "#src/config/config-schema.ts";
 import type { SessionEnv } from "#src/core/session-env.ts";
-import { publishRenderKit } from "#src/render/kit.ts";
-import { shortPath } from "#src/render/paths.ts";
-import { autoRenderSession } from "#src/render/session.ts";
-import { createBashWrapper } from "#src/render/tool-bash.ts";
-import { createEditWrapper } from "#src/render/tool-edit.ts";
-import { createFindWrapper } from "#src/render/tool-find.ts";
-import { createGrepWrapper } from "#src/render/tool-grep.ts";
-import { createLsWrapper } from "#src/render/tool-ls.ts";
-import { createPowerShellWrapper } from "#src/render/tool-powershell.ts";
-import { createReadWrapper } from "#src/render/tool-read.ts";
-import type { ToolServices } from "#src/render/tool-services.ts";
-import { createWriteWrapper } from "#src/render/tool-write.ts";
+import { createRenderKit, publishRenderKit } from "#src/render/kit.ts";
 import { listConvertedThemes } from "#src/theme/user-themes.ts";
-
-/**
- * Names this extension registered on the previous session_start, for the
- * self-shadowing guard (see claimedByOther below). Without this, a
- * resume/fork re-fire served from the same registry would see our own
- * first-fire wrappers and yield every name to ourselves — seven skips
- * plus seven spurious notices. Cleared on fresh (re)starts —
- * startup/new/reload — where no prior registration of ours can exist.
- * Defensive either way: if pi rebuilds the runtime per session the set
- * is always empty and the guard is a no-op; if registrations persist,
- * it is the only thing standing between us and total self-yield.
- */
-let registeredByUs = new Set<string>();
 
 /**
  * Whether the pi-fff search extension is present — the yield signal for
@@ -124,9 +98,11 @@ function fffPresent(tools: readonly string[], commands: readonly string[]): bool
  * extension's definition or an SDK-passed custom tool, and registering
  * our wrapper under the same name would shadow it (extension
  * registrations win the slot over built-ins, so our wrap is the
- * shadowing one, not the victim). Our own prior registration is
- * excluded via `registeredByUs` — without that, a resume/fork re-fire
- * would see our own wrappers and yield every name to ourselves.
+ * shadowing one, not the victim). Our own prior registration is excluded
+ * by registrant identity — the loader stamps every extension tool with
+ * its extension's `sourceInfo` (path + source), so a resume/fork re-fire
+ * served from the same registry recognizes our own wrappers without any
+ * module-level memory (`ownPath` is this extension's registered path).
  *
  * Order caveat (documented, not worked around): the check only sees
  * tools registered before our session_start fires. A neighbor that
@@ -141,11 +117,28 @@ function fffPresent(tools: readonly string[], commands: readonly string[]): bool
  *
  * @param tools - Registry entries visible at session_start (one snapshot).
  * @param name - The tool name to probe.
+ * @param ownPath - This extension's registered path (self-recognition).
  * @returns True when another extension already owns the name.
  */
-function claimedByOther(tools: readonly ToolInfo[], name: string): boolean {
-  if (registeredByUs.has(name)) return false;
-  return tools.some((tool) => tool.name === name && tool.sourceInfo.source !== "builtin");
+function claimedByOther(
+  tools: readonly ToolInfo[],
+  name: string,
+  ownPath: string | undefined,
+): boolean {
+  // Fail-safe toward keeping our rendering: without our own path we
+  // cannot tell our prior wrappers from a neighbor's (a same-named
+  // `/pigment` command from another extension renames ours to
+  // `pigment:N`, so the lookup misses) — yielding then would disable
+  // ourselves on every resume/fork re-fire.
+  if (ownPath === undefined) return false;
+  return tools.some((tool) => {
+    if (tool.name !== name) return false;
+    // Unattributed entries cannot be proven foreign — only hand-rolled
+    // mocks omit sourceInfo (the SDK always stamps it) — never yield on them.
+    const source = tool.sourceInfo?.source;
+    if (source === undefined || source === "builtin") return false;
+    return tool.sourceInfo.path !== ownPath;
+  });
 }
 
 /**
@@ -167,16 +160,10 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
   // The latest session_start environment — the `/pigment` completer's read
   // (the assembly holds the session value; the command cannot reach ctx).
   let sessionEnv: SessionEnv | undefined;
-  pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
+  pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
     const cwd = ctx.cwd;
     const agentDir = getAgentDir();
     sessionEnv = { cwd, agentDir };
-    // Fresh session starts cannot carry our prior registration — reset
-    // the self-shadowing guard (resume/fork keep it; see registeredByUs).
-    const reason = event.reason;
-    if (reason === "startup" || reason === "new" || reason === "reload") {
-      registeredByUs = new Set<string>();
-    }
     // Config/theme issues surface through the documented channel — the
     // TUI notification area (or RPC client) when present; stderr only in
     // headless modes (print/json), where it is the visible medium.
@@ -187,11 +174,12 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
         console.error(`[pi-pigment] ${message}`);
       }
     };
-    const { config, issues } = loadPigmentConfig({ cwd, agentDir });
-    for (const issue of issues) {
-      reportIssue(issue.message);
-    }
-    const disabledTools = new Set(config.disabledTools);
+    // The session's kit: the extension decorates through the same
+    // surface third parties borrow (kit.decorate), so own rendering and
+    // borrowed rendering are byte-identical by construction — the public
+    // API is dogfooded, never shadow-implemented.
+    const kit = await createRenderKit({ cwd, agentDir, reportIssue });
+    const disabledTools = new Set(kit.config.disabledTools);
     // The shell settings pi bakes into its own bash definition
     // (agent-session's `createAllToolDefinitions(cwd, { bash: {
     // commandPrefix, shellPath } })`). Our same-name registration replaces
@@ -200,19 +188,8 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
     // silently dropped from the command that actually runs. Same read
     // path — and the same trust gate — as pi's own manager: an untrusted
     // project's `.pi/settings.json` must not shape the executing command.
-    const shellSettings = SettingsManager.create(cwd, agentDir, {
-      projectTrusted: ctx.isProjectTrusted(),
-    });
-    // The session seam (session.ts): config + env → the immutable session
-    // value; no setters — a new session is a new value.
-    const session = await autoRenderSession(sessionEnv, config, reportIssue);
-    const services: ToolServices = {
-      shortPath: (p: string) => shortPath(cwd, p),
-      indicatorStyle: config.indicatorStyle,
-      headerEllipsis: config.headerEllipsis,
-      textFactory: Text,
-      render: session,
-    };
+    // Lazily read: a disabled bash skips the settings I/O entirely.
+    let shellSettings: SettingsManager | undefined;
 
     // One registry snapshot per session_start: the merged registry does
     // not change mid-startup (registrations here only take effect for
@@ -220,22 +197,36 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
     // frozen view instead of re-querying pi per tool.
     const registryTools = pi.getAllTools();
     const registryToolNames = registryTools.map((tool) => tool.name);
-    const registryCommandNames = pi.getCommands().map((command) => command.name);
+    const registryCommands = pi.getCommands();
+    const registryCommandNames = registryCommands.map((command) => command.name);
 
-    const registerToolIfEnabled = (toolName: ToolName, tool: ToolDefinition | undefined): void => {
-      if (!tool || disabledTools.has(toolName)) return;
-      // Generic yield: another extension already owns this name — skip
-      // our wrap so we don't shadow it. Reported once per session_start
-      // through the issue channel (the FFF path above stays silent: it
-      // is the documented default, not a surprise).
-      if (claimedByOther(registryTools, toolName)) {
+    // Self-recognition for the yield check: a resume/fork re-fire served
+    // from the same registry sees our own prior wrappers as non-builtin
+    // entries carrying OUR sourceInfo.path — claimedByOther excludes that
+    // path. It is read off our own `/pigment` command (registered at
+    // factory time, before any session_start fires): its sourceInfo.path
+    // IS this extension's path.
+    const ownPath = registryCommands.find((command) => command.name === "pigment")?.sourceInfo.path;
+
+    // A thunk, not a definition: arguments evaluate eagerly, so building
+    // inline would pay the decorate cost (bash's SettingsManager I/O)
+    // for a tool that never registers.
+    const registerToolIfEnabled = (
+      toolName: ToolName,
+      buildDecorated: () => ToolDefinition | undefined,
+    ): void => {
+      if (disabledTools.has(toolName)) return;
+      const tool = buildDecorated();
+      if (!tool) return;
+      // Another extension owns this name — skip our wrap (see
+      // claimedByOther); reported through the issue channel.
+      if (claimedByOther(registryTools, toolName, ownPath)) {
         reportIssue(
           `${toolName} is already provided by another extension — pi-pigment skips its rendering for this tool.`,
         );
         return;
       }
       pi.registerTool(tool);
-      registeredByUs.add(toolName);
     };
 
     // Wrap the DEFINITIONS (not the AgentTool wrappers): the AgentTool
@@ -244,50 +235,45 @@ export function createPigmentExtension(pi: ExtensionAPI): void {
     // header). The definitions are generic over their schemas — the
     // wrappers treat orig renderers as unknown-args seams throughout, so
     // the registration widens once, here.
-    registerToolIfEnabled(
-      "write",
-      createWriteWrapper(defineTool(createWriteToolDefinition(cwd)), services),
+    const decorateBuiltin = (definition: ToolDefinition): ToolDefinition | undefined => {
+      const name = definition.name;
+      if (!kit.hasTool(name)) return undefined;
+      // bash carries pi's shell settings into the executed command (see
+      // above) — rebuild its definition with them before decorating.
+      if (name === "bash") {
+        shellSettings ??= SettingsManager.create(cwd, agentDir, {
+          projectTrusted: ctx.isProjectTrusted(),
+        });
+        return kit.decorate(
+          defineTool(
+            createBashToolDefinition(cwd, {
+              commandPrefix: shellSettings.getShellCommandPrefix(),
+              shellPath: shellSettings.getShellPath(),
+            }),
+          ),
+        );
+      }
+      return kit.decorate(definition);
+    };
+    registerToolIfEnabled("write", () =>
+      decorateBuiltin(defineTool(createWriteToolDefinition(cwd))),
     );
-    registerToolIfEnabled(
-      "edit",
-      createEditWrapper(defineTool(createEditToolDefinition(cwd)), services),
-    );
-    registerToolIfEnabled(
-      "bash",
-      createBashWrapper(
-        defineTool(
-          createBashToolDefinition(cwd, {
-            commandPrefix: shellSettings.getShellCommandPrefix(),
-            shellPath: shellSettings.getShellPath(),
-          }),
-        ),
-        services,
-      ),
-    );
+    registerToolIfEnabled("edit", () => decorateBuiltin(defineTool(createEditToolDefinition(cwd))));
+    registerToolIfEnabled("bash", () => decorateBuiltin(defineTool(createBashToolDefinition(cwd))));
     const yieldSearchTofff = fffPresent(registryToolNames, registryCommandNames);
-    registerToolIfEnabled(
-      "grep",
-      yieldSearchTofff
-        ? undefined
-        : createGrepWrapper(defineTool(createGrepToolDefinition(cwd)), services),
+    registerToolIfEnabled("grep", () =>
+      yieldSearchTofff ? undefined : decorateBuiltin(defineTool(createGrepToolDefinition(cwd))),
     );
-    registerToolIfEnabled("ls", createLsWrapper(defineTool(createLsToolDefinition(cwd)), services));
-    registerToolIfEnabled(
-      "read",
-      createReadWrapper(defineTool(createReadToolDefinition(cwd)), services),
-    );
-    registerToolIfEnabled(
-      "find",
-      yieldSearchTofff
-        ? undefined
-        : createFindWrapper(defineTool(createFindToolDefinition(cwd)), services),
+    registerToolIfEnabled("ls", () => decorateBuiltin(defineTool(createLsToolDefinition(cwd))));
+    registerToolIfEnabled("read", () => decorateBuiltin(defineTool(createReadToolDefinition(cwd))));
+    registerToolIfEnabled("find", () =>
+      yieldSearchTofff ? undefined : decorateBuiltin(defineTool(createFindToolDefinition(cwd))),
     );
     // PowerShell exists only on Windows (the SDK's shell config throws
     // elsewhere); registering the wrapper is harmless on other platforms —
     // the tool never runs — and gives Windows sessions the same rendering.
-    registerToolIfEnabled(
-      "powershell",
-      createPowerShellWrapper(defineTool(createPowerShellToolDefinition(cwd)), services),
+    registerToolIfEnabled("powershell", () =>
+      decorateBuiltin(defineTool(createPowerShellToolDefinition(cwd))),
     );
 
     // NOTE on activation: pi's default active set is read/bash/edit/write

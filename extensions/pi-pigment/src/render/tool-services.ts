@@ -289,6 +289,8 @@ export interface EditState extends SeedTextMemo {
 
 /** Services the tool wrappers need from the assembly. */
 export interface ToolServices {
+  /** The session working directory (execute fallbacks resolve against it, not process.cwd()). */
+  cwd: string;
   /** Path shortener for headers (relative to cwd, `~` for home). */
   shortPath: (p: string) => string;
   /** Configured left-edge change-indicator style. */
