@@ -136,6 +136,8 @@ export function createShellWrapper(
       // Header ellipsis (ADR 0008): the body and the status suffix split
       // BEFORE fitting — the suffix is pinned outside the budget.
       const setHeader = (body: string): void => {
+        // Explicit "": the native result renderer owns the layout below,
+        // so the header never separates (see HeaderParts.newline).
         renderHeaderLine({
           text,
           prefix: "sh",

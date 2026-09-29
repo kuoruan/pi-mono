@@ -119,10 +119,10 @@ export function setCallHeader(text: CustomBgText & PreviewTextHost, opts: CallHe
     opts.cwd,
   );
   // Suffix split BEFORE fitting (ADR 0008): the stats chips are pinned
-  // outside the ellipsis budget. The trailing separator blank rides the
-  // newline (pending frames own no trailing blank — their own blank
-  // would stack on the default shell's bottom padding). renderHeaderLine
-  // owns the text (setText or the width task) — no write here.
+  // outside the ellipsis budget. The trailing blank is renderHeaderLine's
+  // default (pending "" / settled "\n") — opts.status only drives the
+  // background above. renderHeaderLine owns the text (setText or the
+  // width task) — no write here.
   renderHeaderLine({
     text,
     prefix: opts.prefix,
@@ -131,7 +131,6 @@ export function setCallHeader(text: CustomBgText & PreviewTextHost, opts: CallHe
     services: opts.services,
     body,
     suffix: opts.suffix,
-    newline: opts.status === "pending" ? "" : "\n",
   });
 }
 

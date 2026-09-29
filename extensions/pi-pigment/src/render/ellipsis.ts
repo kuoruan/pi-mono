@@ -144,7 +144,13 @@ export interface HeaderParts {
   body: string;
   /** The pinned suffix (never truncated). */
   suffix?: string;
-  /** The header's trailing newline (grep/find/ls own theirs). */
+  /**
+   * The header's trailing newline. Omit for the rule: pending frames
+   * take "" (the shell padding supplies the gap — its own blank would
+   * stack and double it), settled frames take "\n". Pass explicitly
+   * only to break the rule (bash: the native result renderer owns the
+   * layout below, so the header never separates).
+   */
   newline?: string;
 }
 
@@ -157,7 +163,8 @@ export interface HeaderParts {
  * @param parts - The header task's inputs.
  */
 export function renderHeaderLine(parts: HeaderParts): void {
-  const { text, prefix, view, ctx, services, body, suffix = "", newline = "\n" } = parts;
+  const { text, prefix, view, ctx, services, body, suffix = "" } = parts;
+  const newline = parts.newline ?? (ctx.isPartial ? "" : "\n");
   const { scheme, theme } = view;
   // Both marks are muted chrome (the theme owns the slot): the ellipsis
   // breathes in spaces, the fold mark trails one (no glyph crowding).
@@ -176,8 +183,7 @@ export function renderHeaderLine(parts: HeaderParts): void {
   attachPreviewTask(
     text,
     definePreviewTask({
-      // headerLineKey owns the stamp list; the trailing blank rides it
-      // (pending headers own none) — without it a pending→error
+      // The trailing blank rides the key: without it a pending→error
       // transition keeps the blank-less frame and glues the header to
       // the body below.
       identity: headerLineKey({
