@@ -20,6 +20,7 @@ import type {
   AttemptResult,
   AttemptSpec,
   JevPoolEndpoint,
+  JevProvider,
   LaneAdapter,
   PoolEndpoint,
 } from "#src/review/pool.ts";
@@ -38,7 +39,7 @@ export interface JevAdapterDeps {
    * Production prebuilds every endpoint's client at registration so an
    * unresolvable key/baseUrl fails fast, not per ask.
    */
-  createClient?: (provider: JevPoolEndpoint["provider"]) => TypesafeClientLike;
+  createClient?: (provider: JevProvider) => TypesafeClientLike;
   /** Injected clock (tests only). */
   now?: () => number;
 }

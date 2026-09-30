@@ -46,18 +46,28 @@ export type AttemptResult =
     }
   | { kind: "terminal"; result: EngineReviewResult | EngineMachineryFailure };
 
+/** An LLM endpoint's provider: a registry model-provider id. */
+export type LlmProvider = string;
+
 /** One LLM endpoint in the ordered failover list (registry-resolved). */
 export interface LlmPoolEndpoint {
   lane: "llm";
-  provider: string;
+  provider: LlmProvider;
   model: string;
   timeoutMs: number;
+}
+
+/** A Jev endpoint's provider: explicit connection, env-backed when unset. */
+export interface JevProvider {
+  type: "typesafe";
+  baseUrl?: string;
+  apiKey?: string;
 }
 
 /** One Jev endpoint in the ordered failover list (explicitly authenticated). */
 export interface JevPoolEndpoint {
   lane: "jev";
-  provider: { type: "typesafe"; baseUrl?: string; apiKey?: string };
+  provider: JevProvider;
   model: string;
   timeoutMs: number;
 }
