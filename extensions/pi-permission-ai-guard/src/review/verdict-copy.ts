@@ -20,7 +20,7 @@ import type { MachineryFailureKind } from "./machinery-kinds.ts";
  * @returns The deny teaching reason.
  */
 export function uncertainDenyReason(mode: Mode): string {
-  return `Reviewer was uncertain about this request — ${mode} mode denies uncertain requests`;
+  return `reviewer was uncertain about this request — ${mode} mode denies uncertain requests`;
 }
 
 /**

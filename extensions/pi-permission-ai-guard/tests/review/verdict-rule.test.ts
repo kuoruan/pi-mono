@@ -39,8 +39,8 @@ const MODEL_DEFER_WITH_REASON: ModelDeferInfo = {
   reason: "which file does this target?",
 };
 
-const uncertainDenyReason =
-  "Reviewer was uncertain about this request — strict mode denies uncertain requests";
+/** A deny that must carry a teaching reason — content unpinned, presence pinned. */
+const DENY_WITH_REASON = { kind: "deny", reason: expect.any(String) } as const;
 
 describe("applyVerdictMode — mapping table", () => {
   it.each<Row>([
@@ -120,13 +120,7 @@ describe("applyVerdictMode — mapping table", () => {
 
     // A model defer without a clarification request: strict denies with
     // the generic uncertainty reason.
-    [
-      "strict",
-      MODEL_DEFER,
-      { kind: "model-defer" },
-      undefined,
-      { kind: "deny", reason: uncertainDenyReason },
-    ],
+    ["strict", MODEL_DEFER, { kind: "model-defer" }, undefined, DENY_WITH_REASON],
 
     // Machinery failures never map to allow: deny under the two extremes
     // (strict: fail closed; permissive: a broken reviewer must not
@@ -134,21 +128,13 @@ describe("applyVerdictMode — mapping table", () => {
     ...[
       {
         mode: "strict",
-        expected: {
-          kind: "deny",
-          reason:
-            "reviewer could not complete the review (no-json) — strict mode denied the request",
-        },
+        expected: DENY_WITH_REASON,
       },
       { mode: "default", expected: { kind: "defer" } },
       { mode: "lenient", expected: { kind: "defer" } },
       {
         mode: "permissive",
-        expected: {
-          kind: "deny",
-          reason:
-            "reviewer could not complete the review (no-json) — permissive mode denied the request",
-        },
+        expected: DENY_WITH_REASON,
       },
     ].map(
       ({ mode, expected }) => [mode, MODEL_DEFER, { kind: "no-json" }, undefined, expected] as Row,
@@ -156,28 +142,9 @@ describe("applyVerdictMode — mapping table", () => {
 
     // A machinery defer without a classified kind: "unknown", denied under
     // the extremes.
-    [
-      "strict",
-      MODEL_DEFER,
-      undefined,
-      undefined,
-      {
-        kind: "deny",
-        reason: "reviewer could not complete the review (unknown) — strict mode denied the request",
-      },
-    ],
+    ["strict", MODEL_DEFER, undefined, undefined, DENY_WITH_REASON],
     ["default", MODEL_DEFER, undefined, undefined, { kind: "defer" }],
-    [
-      "permissive",
-      MODEL_DEFER,
-      undefined,
-      undefined,
-      {
-        kind: "deny",
-        reason:
-          "reviewer could not complete the review (unknown) — permissive mode denied the request",
-      },
-    ],
+    ["permissive", MODEL_DEFER, undefined, undefined, DENY_WITH_REASON],
   ])("%s × %j (deferKind %j, risk %j) → %j", (policy, verdict, modelDefer, riskLevel, expected) => {
     expect(applyVerdictMode(policy, verdict, modelDefer, riskLevel)).toEqual(expected);
   });

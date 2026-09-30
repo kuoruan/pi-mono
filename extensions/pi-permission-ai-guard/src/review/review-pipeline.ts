@@ -478,7 +478,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // — the notify bridge is itself one of the things that can throw here.
       try {
         deps.notify(
-          `reviewer crashed — deferring to the prompt (${normalizeAndRedactText(errorMessage(e))})`,
+          `reviewer crashed — deferring to you (${normalizeAndRedactText(errorMessage(e))})`,
           // Error-grade, like the breaker's total trip: the review
           // function is DOWN and recovery needs the operator's hand.
           "error",
