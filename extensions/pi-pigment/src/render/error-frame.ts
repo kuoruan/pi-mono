@@ -20,7 +20,6 @@ import { renderHeaderLine } from "./ellipsis.ts";
 import {
   clearToolHeaderBg,
   formatToolFrameHeaderText,
-  formatToolHeaderName,
   setToolSuccessBg,
   type CustomBgText,
 } from "./header.ts";
@@ -118,11 +117,7 @@ export function setCallHeader(text: CustomBgText & PreviewTextHost, opts: CallHe
     opts.pathShortener,
     opts.cwd,
   );
-  // Suffix split BEFORE fitting (ADR 0008): the stats chips are pinned
-  // outside the ellipsis budget. The trailing blank is renderHeaderLine's
-  // default (pending "" / settled "\n") — opts.status only drives the
-  // background above. renderHeaderLine owns the text (setText or the
-  // width task) — no write here.
+  // Suffix split BEFORE fitting (ADR 0008) — the chips stay pinned.
   renderHeaderLine({
     text,
     prefix: opts.prefix,
@@ -152,7 +147,7 @@ export function setToolErrorBg(
     // undefined/empty — either way the regular tool background serves.
     background = theme.getBgAnsi("toolErrorBg") || scheme.bgBase;
   } catch {
-    // Use the regular tool background when the theme has no error background.
+    // Fall through to bgBase below.
   }
   text.setCustomBgFn((line: string) => injectBg(line, { baseBg: background }));
 }
@@ -168,8 +163,6 @@ export interface ErrorFrameInput {
   message: string;
   /** The pi theme. */
   theme: RenderTheme;
-  /** The path shortener (the header path's shortening contract). */
-  pathShortener: (p: string) => string;
   /** Whether ctrl+o expanded the window (full message). */
   expanded: boolean;
   /**
@@ -188,55 +181,9 @@ export interface ErrorFrameInput {
   width: number;
 }
 
-/** The error header's inputs: identity + message + chrome (the badge derives inside). */
-interface ErrorHeaderInput {
-  /** The tool's name (badge parsing only for bash/powershell). */
-  name: string;
-  /** The failure message (the shell badge parses it). */
-  message: string;
-  /** The pi theme. */
-  theme: RenderTheme;
-  /** The header path's shortening contract. */
-  pathShortener: (p: string) => string;
-}
-
-/**
- * The error frame's header row: three shapes by ownership. A shell
- * failure whose tail parses to NO badge keeps the frame's own name
- * header (the degraded-but-named case); a recognized shell status
- * renders body-only under the call header, so the gapless shell header
- * gets one separator blank here; every other tool's call header already
- * trails its own blank — nothing.
- *
- * @param input - Identity + message + chrome (isShell/badge derive inside).
- * @returns The header text (may be "").
- */
-function errorHeaderOf(input: ErrorHeaderInput): string {
-  const { name, message, theme, pathShortener } = input;
-  if (!isShellTool(name)) return "";
-  if (shellExitBadgeOf(message) !== undefined) return "\n";
-  return `${formatToolFrameHeaderText(
-    {
-      meta: theme.fg("error", theme.bold(formatToolHeaderName(name))),
-      theme,
-      topPad: 0,
-      bottomPad: 1,
-    },
-    pathShortener,
-  )}\n`;
-}
-
 /**
  * A failed call's error frame — the body the result slot renders under
  * the (still-visible) call header.
- *
- * Header ownership: non-shell frames render the body alone — the call
- * header above already names the tool (a validation failure's frame still
- * shows the bare tool label up there). Shell frames carry the failure
- * badge on the call header (the command echo's "✗ exit N" suffix,
- * composed by shell-tool), so a RECOGNIZED status line renders body-only
- * here too; the frame's own name header remains solely for a shell
- * failure whose tail parses to NO badge — the degraded-but-named case.
  *
  * The body is WIDTH-AWARE: each logical line pre-wraps to the render
  * width, so the bar column leads every visual row (the TUI's own wrap
@@ -247,14 +194,13 @@ function errorHeaderOf(input: ErrorHeaderInput): string {
  * footer, no trailing pad).
  */
 export function formatToolErrorResult(input: ErrorFrameInput): string {
-  const { name, message, theme, pathShortener, expanded, indicatorStyle, tookMs, width } = input;
-  // Body-only unless the shell status is unrecognized (ownership above).
-  const header = errorHeaderOf({ name, message, theme, pathShortener });
-  const badge = isShellTool(name) ? shellExitBadgeOf(message) : undefined;
-  // The row prefix: the bar glyph + one space in bar mode; EMPTY in
-  // none mode — the frame Box's own padding is the single leading space
-  // the row keeps (collapsing the column here means no second space
-  // appears after the pad). The failure-kind coloring rides the glyph.
+  const { name, message, theme, expanded, indicatorStyle, tookMs, width } = input;
+  // Body-only (the call header above already names the tool — the
+  // SDK's own error frames never repeat it): the gapless shell header
+  // needs one separator blank, anything else needs nothing.
+  const header = isShellTool(name) ? "\n" : "";
+  // No isShellTool guard: only the shell tools' own status lines parse.
+  const badge = shellExitBadgeOf(message);
   // Deliberately no command: the bar is frame-level (failed), the dim lives on the header suffix only.
   const barKind = badge ? shellBadgeColorOf(badge) : "error";
   const barGlyph = borderBar(indicatorStyle);

@@ -44,14 +44,6 @@ const ABORTED_SUFFIX = "Command aborted";
 const TERMINATED_SUFFIX = "Command terminated without an exit code";
 
 /**
- * Parse the shell failure status from an error message's tail.
- *
- * @param message - The tool error message (the SDK appends the status).
- * @returns The badge, or undefined when the tail carries no known status
- *   (a non-shell error, or an upstream message-format change — the frame
- *   then renders without a badge, degraded never broken).
- */
-/**
  * Whether the tool is a shell tool (badge parsing applies). One home —
  * the taxonomy owns the membership, not each call site.
  *
@@ -62,6 +54,17 @@ export function isShellTool(name: string): boolean {
   return name === "bash" || name === "powershell";
 }
 
+/**
+ * Parse the shell failure status from an error message's tail. Branch
+ * order is frequency order (exit ≫ timeout ≫ abort/terminate) — each
+ * branch short-circuits, so the common exit-code failure pays one
+ * anchored regex and nothing more.
+ *
+ * @param message - The tool error message (the SDK appends the status).
+ * @returns The badge, or undefined when the tail carries no known status
+ *   (a non-shell error, or an upstream message-format change — the frame
+ *   then renders without a badge, degraded never broken).
+ */
 export function shellExitBadgeOf(message: string): ShellExitBadge | undefined {
   const exit = message.match(EXIT_CODE_RE);
   if (exit) {

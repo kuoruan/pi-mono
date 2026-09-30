@@ -296,7 +296,6 @@ export function createToolWrapper<TState extends object = Record<string, unknown
             name: orig.name,
             message,
             theme,
-            pathShortener: services.shortPath,
             expanded: options.expanded,
             indicatorStyle: services.indicatorStyle,
             tookMs,

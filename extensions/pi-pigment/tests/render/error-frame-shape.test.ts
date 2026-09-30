@@ -477,7 +477,7 @@ describe("bash error frame shape", () => {
     expect(rows.some((r) => r.startsWith("▌ Command terminated without an exit code"))).toBe(true);
   });
 
-  it("keeps its name header when the tail parses to no badge (the degraded case)", async () => {
+  it("stays headless when the tail parses to no badge (the call header names it)", async () => {
     const tools = await registerTools();
     const bash = toolOf(tools, "bash");
     const { ctx } = makeRenderCtx();
@@ -494,9 +494,9 @@ describe("bash error frame shape", () => {
       ctx,
     );
     const rows = rowsOf(component);
-    // The unrecognized failure still names its tool — degraded, not broken.
-    expect(rows[0]).toBe("bash");
-    expect(rows.some((r) => r.startsWith("▌ spawn bash failed"))).toBe(true);
+    // Headless (one separator blank, then the body) — no repeated tool name.
+    expect(rows[0]).toBe("");
+    expect(rows[1]).toContain("▌ spawn bash failed");
   });
 });
 
