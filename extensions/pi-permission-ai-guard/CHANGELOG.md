@@ -1,5 +1,23 @@
 # pi-permission-ai-guard
 
+## 0.12.0
+
+### Minor Changes
+
+- 523b6cd: Opt-in approval notices (`notifyApprovals`) now carry a duration tail: fresh reviews report their total review cost (`reviewer approved this request (1.2s)`), cache replays say `(cached)`, and mode-mapped allows name the mode (`mode (permissive) auto-approved this request (1.2s)`).
+- 14f8657: Label Jev risk-lane denies by the fixed quartile bands of the 0–4 rubric (low below 0.25, medium below 0.5, high below 0.75, critical at or above), independent of `riskThreshold` — `riskThreshold` alone decides the deny. With the default 0.5, every risk-lane deny reads high or critical and blocks in every mode including permissive, catching danger-missed destruction.
+
+  Derive the defer lean from the danger direction (risk over the line leans deny, a pure intent gap with trusted readings leans allow, otherwise neutral) so the mode ladder treats benign and danger-leaning doubts like the LLM lane. Treat responses with missing readings as malformed (machinery defer, never allow) instead of zero-projecting them.
+
+- 16b5956: Upgrade @gotgenes/pi-permission-system to ^35.0.1 (redirect/heredoc gating fixes).
+- 1d559c1: Upgrade @gotgenes/pi-permission-system to ^36.0.0 (sed/awk/find read-claim fixes).
+
+### Patch Changes
+
+- ad391c9: Move the call-failure audit sink beside the audit cluster with no behaviour change: both engines import it from one place instead of the Jev lane depending on the LLM call module.
+- 6b0ca82: Rewrite the `irreversible_destruction` criteria (Jev) and prompt section (LLM) as a positive definition: only data with no version-control or session recovery counts. Recoverable in-project deletions and unstage-only resets fall through to Deletions (DENY — Unless) instead of hard-denying.
+- ec81634: Unify operator notice voice with no behaviour change: deny reasons start lowercase, and the crash defer notice says "deferring to you" like the other defer notices.
+
 ## 0.11.0
 
 ### Minor Changes

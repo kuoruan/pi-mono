@@ -1,5 +1,14 @@
 # pi-pigment
 
+## 0.3.1
+
+### Patch Changes
+
+- 8f1d6a1: Internal hardening with no behavior change: session-cwd path resolution for decorative reads, registry-identity yield checks, structural limit notices, inlined WASM engine, and leaner shiki subpath imports.
+- 6f2030b: Fix doubled gap under pending call headers: the separator blank now follows the call state by default (pending frames omit it, the shell padding supplies the gap), with header coverage for all eight tools.
+- 0cbfb9c: Lift the read tool's tail notices out of the body: the SDK appends `[N more lines in file…]` (user-limit) and `[Showing lines X–Y…]` (truncation) to the output text, where they used to take a guttered, highlighted body row. The user-limit continuation now rides the footer (recognized by the full-window shape, no prose matching, no disk read); the truncation twin drops since the footer already carries the synthesized notice. Also collapses read's twin styled closures, narrows the assembly seam to the frame view, and converges the read derivation literal.
+- 313d7ff: Follow pi 0.99: read nullish args like the SDK's own renderer (`== null`, models send null for omitted optionals), and drop the factory's verbatim execute passthrough so the signature always follows the host (immune to the new ExtensionToolContext shape and future ones).
+
 ## 0.3.0
 
 ### Minor Changes
