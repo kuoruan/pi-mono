@@ -27,7 +27,11 @@ import { basename } from "node:path";
 
 import type { ExtensionShortcut, RegisteredCommand } from "@earendil-works/pi-coding-agent";
 
-import type { ConfigLayerTarget, SaveConfigFn } from "#src/config/config-layer.ts";
+import type {
+  ConfigLayerTarget,
+  LoadConfigResult,
+  SaveConfigFn,
+} from "#src/config/config-layer.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import { CYCLE_DESCRIPTION } from "#src/config/mode-table.ts";
 import {
@@ -127,8 +131,8 @@ export type AiGuardShortcut = Omit<ExtensionShortcut, "shortcut" | "extensionPat
 
 /** The settings' view of session state — {@link SessionLifecycle} satisfies this structurally. */
 export interface SettingsSessionSurface {
-  /** The live session's config, or undefined when no session is active. */
-  readonly session: { readonly config: AiGuardConfig | undefined } | undefined;
+  /** The live session's load result, or undefined when no session is active. */
+  readonly session: { readonly load: LoadConfigResult } | undefined;
   /** The stable overrides object (single write path, stable identity). */
   readonly overrides: SessionOverrides;
   /**
@@ -304,7 +308,7 @@ export class RuntimeSettings {
     // A session whose config failed to load has no settings to project —
     // clear the line rather than leaving the previous session's fragment
     // advertising a mode that is not applied.
-    if (!session.config) {
+    if (!session.load.config) {
       ctx.ui.setStatus(FOOTER_KEY, undefined);
       return;
     }
@@ -638,7 +642,7 @@ export class RuntimeSettings {
    * @returns The live session config, or undefined with a warning sent.
    */
   #guardSessionConfig(): AiGuardConfig | undefined {
-    const config = this.#deps.session.session?.config;
+    const config = this.#deps.session.session?.load.config;
     if (!config) {
       this.#deps.notify("no active session (config not loaded)", "warning");
       return undefined;
@@ -680,7 +684,7 @@ export class RuntimeSettings {
     // precise field type widens to string at this single seam.
     return effectiveOverride(
       this.#deps.session.overrides,
-      this.#deps.session.session?.config,
+      this.#deps.session.session?.load.config,
       spec.name,
     ) as string | undefined;
   }

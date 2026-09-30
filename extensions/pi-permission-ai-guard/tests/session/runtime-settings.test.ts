@@ -73,9 +73,13 @@ function makeSettings(overridesInit: SessionOverrides = {}, options: MakeSetting
         session: options.noSession
           ? undefined
           : {
-              config: options.noConfig
-                ? undefined
-                : configSchema.parse({ provider: "test", model: "test" }),
+              load: {
+                config: options.noConfig
+                  ? undefined
+                  : configSchema.parse({ provider: "test", model: "test" }),
+                issues: [],
+                outcome: (options.noConfig ? "failed" : "loaded") as "failed" | "loaded",
+              },
             },
         overrides,
         resetBreaker,
@@ -989,7 +993,13 @@ describe("RuntimeSettings — denied command", () => {
     const settings = new RuntimeSettingsClass(
       {
         session: {
-          session: { config: configSchema.parse({ provider: "test", model: "test" }) },
+          session: {
+            load: {
+              config: configSchema.parse({ provider: "test", model: "test" }),
+              issues: [],
+              outcome: "loaded" as const,
+            },
+          },
           overrides,
           resetBreaker: () => undefined,
         },

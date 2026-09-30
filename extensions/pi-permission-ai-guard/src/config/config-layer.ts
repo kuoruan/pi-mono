@@ -41,12 +41,23 @@ export interface ConfigIssue {
   sourcePath?: string;
 }
 
+/** How a config load resolved — assigned at each decision point, never derived. */
+export type ConfigOutcome =
+  /** Config loaded (issues may still carry warnings). */
+  | "loaded"
+  /** No config anywhere (issues empty); distinct from a broken file. */
+  | "none"
+  /** Config exists but unusable (issues explain why); fail-safe, no auto-review. */
+  | "failed";
+
 /** Result of loading and validating the layered config. */
 export interface LoadConfigResult {
   /** Validated config, or absent if loading failed (fail-safe: no auto-review). */
   config?: AiGuardConfig;
   /** All issues encountered (malformed files, schema violations). */
   issues: ConfigIssue[];
+  /** How the load resolved — the fail-safe notice consumes this, not issue counts. */
+  outcome: ConfigOutcome;
 }
 
 /**
@@ -187,10 +198,44 @@ function parseLayerText(text: string): ReadLayerResult {
   return { ok: true, value: parsed };
 }
 
-function readLayer(dir: string, issues: ConfigIssue[]): Record<string, unknown> | undefined {
+/**
+ * How a layer read resolved. The caller matches on this — never on
+ * whether issues accumulated — to tell "no file" from "broken file".
+ */
+type LayerReadOutcome =
+  /** No file in the layer directory. */
+  | "absent"
+  /** File read and usable. */
+  | "loaded"
+  /** File exists but unusable (issue already pushed). */
+  | "skipped";
+
+/** A layer read: the parsed value (when usable) plus how it resolved. */
+interface LayerReadResult {
+  /** The parsed layer object; absent unless the outcome is `loaded`. */
+  value?: Record<string, unknown>;
+  outcome: LayerReadOutcome;
+}
+
+/**
+ * Read one config layer: locate the file (`config.jsonc` wins),
+ * parse it as tolerant JSONC, and expand `${VAR}` refs in its string
+ * leaves. Any failure pushes a file-attributed issue and resolves as
+ * `skipped` — only a missing file is `absent`.
+ *
+ * @param dir - The layer directory to read.
+ * @param issues - Issues accumulator (file-attributed entries).
+ * @param vars - The variable source for env-ref expansion.
+ * @returns The parsed value plus how the read resolved.
+ */
+function readLayer(
+  dir: string,
+  issues: ConfigIssue[],
+  vars: Record<string, string | undefined>,
+): LayerReadResult {
   const found = resolveLayerFile(dir);
   if (!found) {
-    return undefined;
+    return { outcome: "absent" };
   }
   const { path } = found;
   if (found.ambiguous) {
@@ -209,7 +254,7 @@ function readLayer(dir: string, issues: ConfigIssue[]): Record<string, unknown> 
       message: `Failed to read config: ${errorMessage(error)}`,
       sourcePath: path,
     });
-    return undefined;
+    return { outcome: "skipped" };
   }
   const parsed = parseLayerText(text);
   if (!parsed.ok) {
@@ -218,9 +263,241 @@ function readLayer(dir: string, issues: ConfigIssue[]): Record<string, unknown> 
         ? `Failed to read config: ${printParseErrorCode(parsed.failure.code)} at offset ${parsed.failure.offset}`
         : "Expected a JSON object.";
     issues.push({ path: "$", message, sourcePath: path });
-    return undefined;
+    return { outcome: "skipped" };
   }
-  return parsed.value;
+  // Env refs expand here, inside the layer: sourcePath and leaf paths
+  // are both known, and an unresolvable ref skips just this layer.
+  if (!expandLayerEnvRefs(parsed.value, vars, path, issues)) {
+    return { outcome: "skipped" };
+  }
+  return { value: parsed.value, outcome: "loaded" };
+}
+
+/**
+ * Environment-variable interpolation for config string values: `${NAME}`
+ * expands to the variable's value, `${NAME:-fallback}` uses the fallback
+ * when the variable is unset or empty, and `$$` escapes to a literal `$`.
+ * Anything else is literal — `$NAME` (no braces), `${NAME:?…}`, and
+ * command substitution are NOT supported by design.
+ *
+ * @param value - The string value to expand.
+ * @param vars - The variable source (production passes `process.env`).
+ * @returns The expanded string, or undefined when a referenced variable
+ *   has no value and no fallback (the caller skips the layer).
+ */
+export function expandEnvRefs(
+  value: string,
+  vars: Record<string, string | undefined>,
+): string | undefined {
+  // `$$` is an escape for a literal `$` — fold it first behind a
+  // sentinel so `${` scanning never sees through it (else `$${A}`
+  // would expand A instead of yielding the literal `${A}`).
+  const ESC = "\0";
+  const src = value.replaceAll("$$", ESC);
+  let out = "";
+  let rest = src;
+  const done = (s: string): string => s.replaceAll(ESC, "$");
+  for (;;) {
+    const start = rest.indexOf("${");
+    if (start < 0) return done(out + rest);
+    const end = rest.indexOf("}", start + 2);
+    if (end < 0) return done(out + rest);
+    out += rest.slice(0, start);
+    const expr = rest.slice(start + 2, end);
+    rest = rest.slice(end + 1);
+    const fallbackAt = expr.indexOf(":-");
+    const name = fallbackAt < 0 ? expr : expr.slice(0, fallbackAt);
+    const fallback = fallbackAt < 0 ? undefined : expr.slice(fallbackAt + 2);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name ?? "")) {
+      out += "${" + expr + "}";
+      continue;
+    }
+    const found = vars[name as string];
+    if (found !== undefined && found !== "") {
+      out += found;
+    } else if (fallback !== undefined) {
+      out += done(fallback);
+    } else {
+      return undefined;
+    }
+  }
+}
+
+/**
+ * Whether a disk leaf counts as equal to a snapshot leaf: identical, or
+ * an env ref expanding to the snapshot value (an untouched placeholder
+ * still reads as ref text — without this the expanded secret would
+ * overwrite the placeholder on write-back).
+ *
+ * @param previous - The leaf value read from disk.
+ * @param value - The snapshot leaf value.
+ * @param vars - The variable source for env-ref equivalence.
+ * @returns True when the leaf needs no write.
+ */
+export function leafEquals(
+  previous: unknown,
+  value: unknown,
+  vars: Record<string, string | undefined>,
+): boolean {
+  if (Array.isArray(previous) && Array.isArray(value)) {
+    return (
+      previous.length === value.length &&
+      previous.every((item, index) => leafEquals(item, value[index], vars))
+    );
+  }
+  if (isObjectRecord(previous) && isObjectRecord(value)) {
+    const previousKeys = Object.keys(previous);
+    return (
+      previousKeys.length === Object.keys(value).length &&
+      previousKeys.every((key) => key in value && leafEquals(previous[key], value[key], vars))
+    );
+  }
+  return (
+    isDeepStrictEqual(previous, value) ||
+    (typeof previous === "string" && expandEnvRefs(previous, vars) === value)
+  );
+}
+
+/**
+ * Restore `${VAR}` placeholders into an expanded snapshot subtree.
+ * Persist compares the on-disk tree (placeholders intact) against the
+ * in-memory snapshot (refs already expanded): without restoration a
+ * changed array leaf would write back expanded secrets, destroying the
+ * placeholders. Elements resolving to the snapshot value revert to the
+ * on-disk text; everything else keeps the snapshot value. A ref whose
+ * variable vanished since load (env drift) also reverts to the on-disk
+ * text — the placeholder is the operator's intent, and the integrity
+ * gate refuses the write if it no longer matches the snapshot.
+ *
+ * @param previous - The subtree read from disk.
+ * @param value - The snapshot subtree.
+ * @param vars - The variable source for env-ref equivalence.
+ * @returns The value to write back.
+ */
+function restorePlaceholders(
+  previous: unknown,
+  value: unknown,
+  vars: Record<string, string | undefined>,
+): unknown {
+  if (typeof previous === "string") {
+    if (expandEnvRefs(previous, vars) === value) return previous;
+    // Env drift (or an edited value over a placeholder): never write the
+    // snapshot's expanded secret over a ref the operator left on disk.
+    if (previous.includes("${")) return previous;
+    return value;
+  }
+  if (Array.isArray(previous) && Array.isArray(value)) {
+    // Content matching, not positional: prepend/reorder must still find
+    // each element's on-disk placeholder. Each disk element is spent once.
+    const unused = [...previous];
+    return value.map((item) => {
+      const hit = unused.findIndex((candidate) => leafEquals(candidate, item, vars));
+      if (hit === -1) return item;
+      const [matched] = unused.splice(hit, 1);
+      return restorePlaceholders(matched, item, vars);
+    });
+  }
+  if (isObjectRecord(previous) && isObjectRecord(value)) {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      out[key] =
+        key in previous ? restorePlaceholders(previous[key], value[key], vars) : value[key];
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * The single descent primitive: walk a parsed tree, calling `visit` on
+ * each leaf. `arraysAsContainers` selects the leaf strategy — expansion
+ * sees arrays as containers (env refs live inside `fallbacks[]`), while
+ * persist sees them as atomic leaves (arrays are replaced wholesale).
+ *
+ * @param node - The current subtree.
+ * @param path - The accumulated property path.
+ * @param arraysAsContainers - Whether to descend into arrays.
+ * @param visit - Called once per leaf with its value and path.
+ */
+function descend(
+  node: unknown,
+  path: string[],
+  arraysAsContainers: boolean,
+  visit: (value: unknown, path: string[]) => void,
+): void {
+  if (Array.isArray(node)) {
+    if (!arraysAsContainers) {
+      visit(node, path);
+      return;
+    }
+    node.forEach((item, index) => descend(item, [...path, String(index)], true, visit));
+    return;
+  }
+  if (isObjectRecord(node)) {
+    for (const key of Object.keys(node))
+      descend(node[key], [...path, key], arraysAsContainers, visit);
+    return;
+  }
+  visit(node, path);
+}
+
+/**
+ * Expand env refs in every string leaf of a parsed layer, in place.
+ * Non-string leaves and object keys are untouched; a numeric field
+ * holding `"${PORT}"` stays a string and fails zod type-check downstream.
+ *
+ * @param root - The parsed layer object to expand.
+ * @param vars - The variable source.
+ * @param sourcePath - The layer file (for issue attribution).
+ * @param issues - Issues accumulator; one entry per unresolvable leaf.
+ * @returns False when any leaf was unresolvable (the layer is skipped).
+ */
+function expandLayerEnvRefs(
+  root: Record<string, unknown>,
+  vars: Record<string, string | undefined>,
+  sourcePath: string,
+  issues: ConfigIssue[],
+): boolean {
+  let ok = true;
+  descend(root, [], true, (node, path) => {
+    if (typeof node !== "string" || !node.includes("${")) return;
+    const expanded = expandEnvRefs(node, vars);
+    if (expanded === undefined) {
+      ok = false;
+      issues.push({
+        path: path.join(".") || "$",
+        message: `env ref in "${node}" has no value and no fallback — set it or add :-`,
+        sourcePath,
+      });
+      return;
+    }
+    if (expanded !== node) {
+      setPath(root, path, expanded);
+    }
+  });
+  return ok;
+}
+
+/**
+ * Set the value at a JSONPath inside a parsed object (the write half of
+ * {@link readPath}). Intermediate segments are known to be objects — the
+ * walker above only descends through records and arrays.
+ *
+ * @param root - The object to modify in place.
+ * @param path - The property path from the object root.
+ * @param value - The value to set.
+ */
+function setPath(root: Record<string, unknown>, path: readonly string[], value: unknown): void {
+  let current: Record<string, unknown> | unknown[] = root;
+  for (const key of path.slice(0, -1)) {
+    current = (current as Record<string, unknown>)[key] as Record<string, unknown> | unknown[];
+  }
+  const last = path[path.length - 1] as string;
+  if (Array.isArray(current)) {
+    current[Number(last)] = value;
+  } else {
+    (current as Record<string, unknown>)[last] = value;
+  }
 }
 
 /**
@@ -278,23 +555,19 @@ interface LeafEntry {
 }
 
 /**
- * Enumerate the leaf paths of a plain nested object: scalars and arrays
- * are leaves, plain objects recurse. The zod-parsed config's key order is
- * stable, so edits apply in a deterministic sequence.
+ * Enumerate the leaf paths of a plain nested object, over the shared
+ * {@link descend} primitive with the persist strategy (arrays are atomic
+ * leaves). The zod-parsed config's key order is stable, so edits apply
+ * in a deterministic sequence.
  *
  * @param value - The object to walk.
  * @param path - The accumulated property path.
  * @returns Leaf entries (path + value).
  */
 export function leafPaths(value: unknown, path: string[] = []): LeafEntry[] {
-  if (isObjectRecord(value)) {
-    const leaves: LeafEntry[] = [];
-    for (const key of Object.keys(value)) {
-      leaves.push(...leafPaths(value[key], [...path, key]));
-    }
-    return leaves;
-  }
-  return [{ path, value }];
+  const leaves: LeafEntry[] = [];
+  descend(value, path, false, (node, leafPath) => leaves.push({ path: leafPath, value: node }));
+  return leaves;
 }
 
 /**
@@ -325,18 +598,34 @@ function flattenZodIssues(issues: readonly z.core.$ZodIssue[]): ConfigIssue[] {
   return out;
 }
 
-export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
+/**
+ * Load the layered config: global then project (`config.jsonc` wins),
+ * deep-merged (project overrides), `${VAR}` refs expanded per layer,
+ * validated against the zod schema. The project layer is skipped when
+ * untrusted — a present-but-ignored file is named as an issue so the
+ * fail-safe notice doesn't claim no config exists. Fail-safe throughout:
+ * an unusable layer degrades to no auto-review, never to a wrong deny.
+ *
+ * @param env - Paths and project trust for layer resolution.
+ * @param vars - The variable source for env-ref expansion.
+ * @returns The validated config (when usable), all issues, and how the
+ *   load resolved (`none` only when both layers are file-absent).
+ */
+export function loadAiGuardConfig(
+  env: ConfigEnv,
+  vars: Record<string, string | undefined> = process.env,
+): LoadConfigResult {
   const agentDir = resolveAgentDir(env);
   const issues: ConfigIssue[] = [];
 
-  const global = readLayer(getGlobalConfigDir(agentDir), issues);
+  const global = readLayer(getGlobalConfigDir(agentDir), issues, vars);
   // Untrusted projects skip the project layer — a project-local config
   // must not influence the reviewer when the project itself isn't trusted.
   // Name the skip when a file actually exists there: otherwise the
   // fail-safe start reports "no config file found" while one sits ignored.
-  let project: Record<string, unknown> | undefined;
+  let project: LayerReadResult;
   if (env.trustedProject) {
-    project = readLayer(getProjectConfigDir(env.cwd), issues);
+    project = readLayer(getProjectConfigDir(env.cwd), issues, vars);
   } else {
     const skipped = resolveLayerFile(getProjectConfigDir(env.cwd));
     if (skipped) {
@@ -345,11 +634,17 @@ export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
         message: "project config ignored — the project is untrusted",
         sourcePath: skipped.path,
       });
+      project = { outcome: "skipped" };
+    } else {
+      project = { outcome: "absent" };
     }
   }
 
-  if (global === undefined && project === undefined) {
-    return { issues };
+  // `none` only when both layers are file-absent; any skipped layer
+  // means config exists but is unusable — that's `failed`.
+  if (global.outcome !== "loaded" && project.outcome !== "loaded") {
+    const outcome = global.outcome === "absent" && project.outcome === "absent" ? "none" : "failed";
+    return { issues, outcome };
   }
 
   // Deep merge: project overrides global. Plain objects are merged recursively
@@ -357,12 +652,14 @@ export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
   // transcript.maxUserMessages) without repeating the rest. Arrays and
   // non-object values are replaced wholesale.
   const merged: Record<string, unknown> =
-    global && project ? deepMerge(global, project) : (global ?? project ?? {});
+    global.value && project.value
+      ? deepMerge(global.value, project.value)
+      : (global.value ?? project.value ?? {});
 
   const parsed = configSchema.safeParse(merged);
   if (!parsed.success) {
     issues.push(...flattenZodIssues(parsed.error.issues));
-    return { issues };
+    return { issues, outcome: "failed" };
   }
 
   // Ladder-owned surprise warnings (e.g. the extremes plus a breaker
@@ -371,7 +668,7 @@ export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
   // ladder semantics itself.
   issues.push(...modeWarnings(parsed.data));
 
-  return { config: parsed.data, issues };
+  return { config: parsed.data, issues, outcome: "loaded" };
 }
 
 /**
@@ -385,6 +682,11 @@ export interface PersistConfigOptions {
   env: ConfigEnv;
   /** The effective config snapshot to persist. */
   config: AiGuardConfig;
+  /**
+   * The variable source for env-ref equivalence (defaults to
+   * `process.env`, mirroring {@link loadAiGuardConfig}).
+   */
+  vars?: Record<string, string | undefined>;
 }
 
 /**
@@ -411,7 +713,7 @@ export interface PersistConfigOptions {
  * @returns The path (+ created/changed flags), or an error with no write.
  */
 export function persistConfigLayer(options: PersistConfigOptions): SaveConfigResult {
-  const { target, env, config } = options;
+  const { target, env, config, vars = process.env } = options;
   // Refuse before ANY filesystem work: a save into an unhonored layer
   // must not even touch the disk.
   if (target === "project" && !env.trustedProject) {
@@ -450,7 +752,7 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
   } catch (error) {
     return { path, created: false, changed: false, error: errorMessage(error) };
   }
-  return editLayerFile(path, canonical.data, text);
+  return editLayerFile(path, canonical.data, text, vars);
 }
 
 /**
@@ -483,9 +785,15 @@ function createLayerFile(path: string, data: AiGuardConfig): SaveConfigResult {
  * @param path - The existing layer file path.
  * @param data - The validated config snapshot to apply.
  * @param text - The file's current text.
+ * @param vars - The variable source for env-ref equivalence.
  * @returns The save result (`changed: false` when already identical).
  */
-function editLayerFile(path: string, data: AiGuardConfig, text: string): SaveConfigResult {
+function editLayerFile(
+  path: string,
+  data: AiGuardConfig,
+  text: string,
+  vars: Record<string, string | undefined>,
+): SaveConfigResult {
   // Validity gate: never edit a file the loader itself would skip.
   const parsed = parseLayerText(text);
   if (!parsed.ok) {
@@ -497,34 +805,39 @@ function editLayerFile(path: string, data: AiGuardConfig, text: string): SaveCon
     return { path, created: false, changed: false, error: message };
   }
   // Leaf-by-leaf diff: apply each changed leaf sequentially against the
-  // running text, so jsonc-parser edits never overlap.
+  // running text, so jsonc-parser edits never overlap. Leaf equality
+  // (including env-ref equivalence) lives in {@link leafEquals}.
   let running = text;
   let changed = false;
   for (const { path: leafPath, value } of leafPaths(data)) {
     const previous = readPath(parsed.value, leafPath);
-    if (previous === MISSING || !isDeepStrictEqual(previous, value)) {
-      let edits;
-      try {
-        edits = modify(running, leafPath, value, {
-          formattingOptions: { insertSpaces: true, tabSize: 2 },
-        });
-      } catch {
-        // jsonc-parser's setProperty THROWS when a leaf's parent is a
-        // scalar in the existing file ("Can not add index to parent of
-        // type number") — a structural conflict must refuse, not corrupt.
-        // (Non-delete modifies never return zero edits: they either do
-        // the edit or throw — so a differing leaf after a successful
-        // modify always landed.)
-        return {
-          path,
-          created: false,
-          changed: false,
-          error: "refusing to write — the target file's shape conflicts with the current config",
-        };
-      }
-      running = applyEdits(running, edits);
-      changed = true;
+    if (previous !== MISSING && leafEquals(previous, value, vars)) {
+      continue;
     }
+    // Write back with placeholders restored: an equivalent-but-expanded
+    // leaf must not overwrite the on-disk `${VAR}` text with the secret.
+    const writeValue = previous === MISSING ? value : restorePlaceholders(previous, value, vars);
+    let edits;
+    try {
+      edits = modify(running, leafPath, writeValue, {
+        formattingOptions: { insertSpaces: true, tabSize: 2 },
+      });
+    } catch {
+      // jsonc-parser's setProperty THROWS when a leaf's parent is a
+      // scalar in the existing file ("Can not add index to parent of
+      // type number") — a structural conflict must refuse, not corrupt.
+      // (Non-delete modifies never return zero edits: they either do
+      // the edit or throw — so a differing leaf after a successful
+      // modify always landed.)
+      return {
+        path,
+        created: false,
+        changed: false,
+        error: "refusing to write — the target file's shape conflicts with the current config",
+      };
+    }
+    running = applyEdits(running, edits);
+    changed = true;
   }
 
   if (!changed) {
@@ -548,15 +861,15 @@ function editLayerFile(path: string, data: AiGuardConfig, text: string): SaveCon
   }
   for (const { path: leafPath, value } of leafPaths(data)) {
     const saved = readPath(finalParsed.value, leafPath);
-    if (saved === MISSING || !isDeepStrictEqual(saved, value)) {
-      return {
-        path,
-        created: false,
-        changed: false,
-        error:
-          "refusing to write — duplicate keys in the target file would shadow the saved values",
-      };
+    if (saved !== MISSING && leafEquals(saved, value, vars)) {
+      continue;
     }
+    return {
+      path,
+      created: false,
+      changed: false,
+      error: "refusing to write — duplicate keys in the target file would shadow the saved values",
+    };
   }
   try {
     writeFileSync(path, running, "utf-8");

@@ -2,8 +2,13 @@ import { parse as parseJsonc } from "jsonc-parser";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigEnv } from "#src/config/config-layer.ts";
-import { loadAiGuardConfig, persistConfigLayer } from "#src/config/config-layer.ts";
-import { configSchema } from "#src/config/config-schema.ts";
+import {
+  expandEnvRefs,
+  leafEquals,
+  loadAiGuardConfig,
+  persistConfigLayer,
+} from "#src/config/config-layer.ts";
+import { configSchema, fallbackItemSchema } from "#src/config/config-schema.ts";
 import { vol } from "#test/memfs.ts";
 
 vi.mock("node:fs");
@@ -41,6 +46,7 @@ describe("loadAiGuardConfig", () => {
     const result = loadAiGuardConfig(env());
     expect(result.config).toBeUndefined();
     expect(result.issues).toEqual([]);
+    expect(result.outcome).toBe("none");
   });
 
   it("loads global config", () => {
@@ -55,6 +61,7 @@ describe("loadAiGuardConfig", () => {
     expect(result.config).toBeDefined();
     expect(result.config?.provider).toBe("anthropic");
     expect(result.issues).toEqual([]);
+    expect(result.outcome).toBe("loaded");
   });
 
   it("loads project config overriding global", () => {
@@ -105,6 +112,7 @@ describe("loadAiGuardConfig", () => {
     const result = loadAiGuardConfig(env());
     expect(result.config).toBeUndefined();
     expect(result.issues.length).toBeGreaterThan(0);
+    expect(result.outcome).toBe("failed");
   });
 
   it("skips project config when trustedProject is false", () => {
@@ -138,6 +146,268 @@ describe("loadAiGuardConfig", () => {
     expect(result.issues).toHaveLength(1);
     expect(result.issues[0]!.message).toContain("untrusted");
     expect(result.issues[0]!.sourcePath).toContain("config.json");
+    // The fail-safe start switches on this: a skipped-but-present file is
+    // "config not applied", never "no config found".
+    expect(result.outcome).toBe("failed");
+  });
+
+  it("expands env refs in string leaves", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: { type: "typesafe", baseUrl: "https://x.ai/api", apiKey: "${TEST_AI_GUARD_KEY}" },
+        model: "m",
+      }),
+    });
+
+    const result = loadAiGuardConfig(env(), { TEST_AI_GUARD_KEY: "live-key" });
+    expect(result.config).toBeDefined();
+    expect(result.issues).toEqual([]);
+  });
+
+  it("expands env refs inside arrays (fallbacks lane)", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "m",
+        fallbacks: [
+          {
+            provider: {
+              type: "typesafe",
+              baseUrl: "https://x.ai/api",
+              apiKey: "${TEST_AI_GUARD_KEY}",
+            },
+            model: "fb",
+          },
+        ],
+      }),
+    });
+
+    const result = loadAiGuardConfig(env(), { TEST_AI_GUARD_KEY: "live-key" });
+    expect(result.config).toBeDefined();
+    expect(result.issues).toEqual([]);
+  });
+
+  it("uses the :- fallback when the variable is missing, and skips the layer otherwise", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "${TEST_AI_GUARD_MISSING:-fallback-model}",
+      }),
+    });
+    expect(loadAiGuardConfig(env(), {}).config?.model).toBe("fallback-model");
+
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "${TEST_AI_GUARD_MISSING}",
+      }),
+    });
+    const result = loadAiGuardConfig(env(), {});
+    expect(result.config).toBeUndefined();
+    expect(result.issues[0]?.path).toBe("model");
+    expect(result.issues[0]?.message).toContain("TEST_AI_GUARD_MISSING");
+  });
+
+  it("keeps the disk placeholder when the snapshot carries the expanded value", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: { type: "typesafe", baseUrl: "https://x.ai/api", apiKey: "${TEST_AI_GUARD_KEY}" },
+        model: "m",
+      }),
+    });
+    const loaded = loadAiGuardConfig(env(), { TEST_AI_GUARD_KEY: "live-key" });
+    expect(loaded.config).toBeDefined();
+
+    const saved = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: loaded.config!,
+      vars: { TEST_AI_GUARD_KEY: "live-key" },
+    });
+    expect(saved.error).toBeUndefined();
+    // Other leaves (schema defaults missing from the file) still write —
+    // what matters is the placeholder survives, not a zero diff.
+    const disk = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(disk).toContain("${TEST_AI_GUARD_KEY}");
+    expect(disk).not.toContain("live-key");
+  });
+
+  it("keeps array placeholders when another leaf changes", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "cpa",
+        model: "m",
+        fallbacks: [
+          {
+            provider: {
+              type: "typesafe",
+              baseUrl: "https://x.ai/api",
+              apiKey: "${TEST_AI_GUARD_FB_KEY}",
+            },
+            model: "fb",
+          },
+        ],
+      }),
+    });
+    const loaded = loadAiGuardConfig(env(), { TEST_AI_GUARD_FB_KEY: "live-fb-key" });
+    expect(loaded.config).toBeDefined();
+
+    // Change an unrelated leaf so the persist path must write — the
+    // expanded array leaf must keep its on-disk placeholder text.
+    const saved = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...loaded.config!, model: "m2" },
+      vars: { TEST_AI_GUARD_FB_KEY: "live-fb-key" },
+    });
+    expect(saved.error).toBeUndefined();
+    expect(saved.changed).toBe(true);
+    const disk = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(disk).toContain("${TEST_AI_GUARD_FB_KEY}");
+    expect(disk).not.toContain("live-fb-key");
+  });
+
+  it("keeps array placeholders when a snapshot entry is prepended", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "cpa",
+        model: "m",
+        fallbacks: [
+          {
+            provider: {
+              type: "typesafe",
+              baseUrl: "https://x.ai/api",
+              apiKey: "${TEST_AI_GUARD_FB_KEY}",
+            },
+            model: "fb",
+          },
+        ],
+      }),
+    });
+    const loaded = loadAiGuardConfig(env(), { TEST_AI_GUARD_FB_KEY: "live-fb-key" });
+    expect(loaded.config).toBeDefined();
+
+    // Prepending shifts every position: content matching (not positional)
+    // must still find the pre-existing entry's placeholder.
+    const loadedConfig = loaded.config!;
+    const prepended: typeof loadedConfig = {
+      ...loadedConfig,
+      fallbacks: [
+        fallbackItemSchema.parse({
+          provider: { type: "typesafe", baseUrl: "https://y.ai/api", apiKey: "plain-key" },
+          model: "fb2",
+        }),
+        ...loadedConfig.fallbacks,
+      ],
+    };
+    const saved = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: prepended,
+      vars: { TEST_AI_GUARD_FB_KEY: "live-fb-key" },
+    });
+    expect(saved.error).toBeUndefined();
+    expect(saved.changed).toBe(true);
+    const disk = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(disk).toContain("${TEST_AI_GUARD_FB_KEY}");
+    expect(disk).not.toContain("live-fb-key");
+  });
+
+  it("keeps array placeholders when a snapshot entry is appended", () => {
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "cpa",
+        model: "m",
+        fallbacks: [
+          {
+            provider: {
+              type: "typesafe",
+              baseUrl: "https://x.ai/api",
+              apiKey: "${TEST_AI_GUARD_FB_KEY}",
+            },
+            model: "fb",
+          },
+        ],
+      }),
+    });
+    const loaded = loadAiGuardConfig(env(), { TEST_AI_GUARD_FB_KEY: "live-fb-key" });
+    expect(loaded.config).toBeDefined();
+
+    // Appending a fallback changes the array shape: the new entry writes
+    // expanded, but the pre-existing entry keeps its placeholder.
+    const loadedConfig = loaded.config!;
+    const appended: typeof loadedConfig = {
+      ...loadedConfig,
+      fallbacks: [
+        ...loadedConfig.fallbacks,
+        fallbackItemSchema.parse({
+          provider: { type: "typesafe", baseUrl: "https://y.ai/api", apiKey: "plain-key" },
+          model: "fb2",
+        }),
+      ],
+    };
+    const saved = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: appended,
+      vars: { TEST_AI_GUARD_FB_KEY: "live-fb-key" },
+    });
+    expect(saved.error).toBeUndefined();
+    expect(saved.changed).toBe(true);
+    const disk = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(disk).toContain("${TEST_AI_GUARD_FB_KEY}");
+    expect(disk).not.toContain("live-fb-key");
+  });
+
+  describe("expandEnvRefs", () => {
+    const vars = { A: "a", EMPTY: "" };
+    it.each([
+      ["plain", "plain"],
+      ["${A}", "a"],
+      ["Bearer ${A}", "Bearer a"],
+      ["${MISSING:-fb}", "fb"],
+      ["${EMPTY:-fb}", "fb"],
+      ["$${A}", "${A}"],
+      ["$A", "$A"],
+      ["${1BAD}", "${1BAD}"],
+      ["${UNCLOSED", "${UNCLOSED"],
+    ])("%s expands to %s", (input, expected) => {
+      expect(expandEnvRefs(input, vars)).toBe(expected);
+    });
+    it("returns undefined for a missing variable without fallback", () => {
+      expect(expandEnvRefs("${MISSING}", vars)).toBeUndefined();
+    });
+  });
+
+  describe("leafEquals", () => {
+    const vars = { K: "live" };
+    it.each([
+      ["same string", "a", "a", true],
+      ["different string", "a", "b", false],
+      ["deep equal object", { x: 1 }, { x: 1 }, true],
+      ["placeholder expanding to value", "${K}", "live", true],
+      ["placeholder expanding elsewhere", "${K}", "other", false],
+      ["placeholder with unknown var", "${NOPE}", "live", false],
+      ["number vs numeric string", 1, "1", false],
+      ["equal arrays", [{ a: 1 }], [{ a: 1 }], true],
+      ["array with placeholder element", [{ k: "${K}" }], [{ k: "live" }], true],
+      ["array with changed element", [{ k: "${K}" }], [{ k: "other" }], false],
+      ["arrays of different length", [1], [1, 2], false],
+    ])("%s", (_name, previous, value, expected) => {
+      expect(leafEquals(previous, value, vars)).toBe(expected);
+    });
   });
 
   it("honors project config when trustedProject is true", () => {

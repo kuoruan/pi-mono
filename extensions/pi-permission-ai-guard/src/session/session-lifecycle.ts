@@ -69,12 +69,12 @@ import { errorMessage, isObjectRecord } from "#src/utils.ts";
 
 import type { AiGuardUiContext } from "./command/ui-context.ts";
 
-/** What a session_start hands the lifecycle: the session's own inputs. */
-export interface SessionSeed {
-  /** Validated extension config, or undefined if loading failed (fail-safe). */
-  config: LoadConfigResult["config"];
-  /** Config-load issues, for the fail-safe start notice (absent = no config found). */
-  issues?: LoadConfigResult["issues"];
+/**
+ * Host-provided per-session services — immutable once the session starts.
+ * The live event ctx is NOT here: it re-points on tree navigation and
+ * lives in a separate mutable slot (see `SessionLifecycle`).
+ */
+export interface SessionInputs {
   /** Model registry from the session context — resolves the reviewer model. */
   registry: ModelRegistryLike;
   /**
@@ -84,23 +84,34 @@ export interface SessionSeed {
   sessionManager: SessionManagerLike;
   /** Session working directory, sourced from session_start ctx.cwd. */
   cwd: string;
+}
+
+/**
+ * What a session_start hands the lifecycle: immutable inputs plus the
+ * live event ctx (captured separately — see `SessionLifecycle`).
+ */
+export interface SessionSeed extends SessionInputs {
+  /** The config load result (config + issues + outcome travel together). */
+  load: LoadConfigResult;
   /**
    * The most recent event ctx. Kept as the whole object (NOT destructured):
    * `ctx.ui` is a lazy getter that resolves at call time and asserts the
    * extension runner is still active, so a stored reference stays live
-   * across the session. Used for authorize-time notifications. Typed as the
-   * shared {@link AiGuardUiContext} — the stored value IS the full event
-   * ctx, while only `notify` is consumed.
+   * across the session. Used for authorize-time notifications.
    */
   ctx: AiGuardUiContext;
 }
 
 /**
  * Per-session state. Created at session_start, cleared at session_shutdown.
- * KEPT across permissions:ready (ready only completes a missing
- * registration; the session and the registered link are never rebuilt).
+ * Immutable after creation — tree navigation re-points the event ctx
+ * without touching this (see `SessionLifecycle`). KEPT across
+ * permissions:ready (ready only completes a missing registration; the
+ * session and the registered link are never rebuilt).
  */
-export interface SessionState extends SessionSeed {
+export interface SessionState extends SessionInputs {
+  /** As in `SessionSeed` — the load result travels with the session. */
+  load: LoadConfigResult;
   /** Per-session circuit breaker — trips on consecutive denials. */
   circuitBreaker: CircuitBreaker;
   /** Per-session verdict cache — avoids re-reviewing identical commands. */
@@ -180,6 +191,13 @@ function notifyLevelRank(level: NotifyLevel): number {
  */
 export class SessionLifecycle {
   #session: SessionState | undefined;
+  /**
+   * The live event ctx — the only mutable session slot. Re-pointed on
+   * tree navigation; everything else in the session is immutable after
+   * `onSessionStart`. Kept as the whole object (NOT destructured):
+   * `ctx.ui` is a lazy getter resolving at call time.
+   */
+  #eventCtx: AiGuardUiContext | undefined;
   #registered = false;
   /**
    * Per-session latch: a failed registration notifies once, not on every
@@ -211,9 +229,9 @@ export class SessionLifecycle {
    */
   #safeNotify(message: string, level?: NotifyLevel): void {
     try {
-      const target = this.#session;
+      const target = this.#eventCtx;
       if (!target) return;
-      target.ctx.ui.notify(`${NOTIFY_PREFIX} ${message}`, level);
+      target.ui.notify(`${NOTIFY_PREFIX} ${message}`, level);
     } catch (e) {
       // The disposed-runner window is expected, but a lost escalation
       // message must not be silent: in manual mode this notify is the
@@ -236,7 +254,7 @@ export class SessionLifecycle {
   #ambientNotify = (message: string, level?: NotifyLevel): void => {
     const session = this.#session;
     if (!session) return;
-    const threshold = effectiveOverride(this.#overrides, session.config, "notifyLevel");
+    const threshold = effectiveOverride(this.#overrides, session.load.config, "notifyLevel");
     if (threshold === "off") return;
     // Rank order mirrors the TUI levels; an unset level defaults to info
     // (the host's own default for ui.notify).
@@ -295,10 +313,11 @@ export class SessionLifecycle {
    */
   resetBreaker(): BreakerTier | undefined {
     const session = this.#session;
-    if (!session?.config) {
+    const config = session?.load.config;
+    if (!config) {
       throw new Error("no active session — circuit breaker unavailable");
     }
-    return session.circuitBreaker.resetAll(session.config.circuitBreaker);
+    return session.circuitBreaker.resetAll(config.circuitBreaker);
   }
 
   /**
@@ -306,8 +325,8 @@ export class SessionLifecycle {
    * replace the session state, reset the overrides in place, and register
    * against the fresh deps.
    *
-   * @param seed - The session's inputs (config, registry, sessionManager,
-   *   cwd, event ctx).
+   * @param seed - The session's inputs (config load result, registry,
+   *   sessionManager, cwd, event ctx).
    */
   onSessionStart(seed: SessionSeed): void {
     this.#disposeRegistration();
@@ -316,18 +335,21 @@ export class SessionLifecycle {
     // new session can never inherit the previous one's id. A later
     // permissions:ready payload (the official source) may upgrade it.
     this.#sessionId = readSessionId(seed.sessionManager);
+    const { ctx, ...inputs } = seed;
+    this.#eventCtx = ctx;
     this.#session = {
-      ...seed,
+      ...inputs,
       circuitBreaker: new CircuitBreaker(),
       verdictCache: new VerdictCache(),
       denyHistory: [],
     };
-    // Fail-safe start: name the first failing field. Empty issues means
-    // no config exists anywhere — a separate sentence, not "invalid".
-    if (!seed.config) {
+    // Fail-safe start: the outcome names the sentence — a broken file
+    // (`failed`) vs nothing anywhere (`none`). `failed` covers both
+    // invalid values and an ignored-but-present file, hence "not applied".
+    if (!seed.load.config) {
       this.feedbackNotify(
-        seed.issues?.length
-          ? `config invalid (${formatConfigIssues(seed.issues)}) — running with no auto-review; fix the config and restart the session`
+        seed.load.outcome === "failed"
+          ? `config not applied (${formatConfigIssues(seed.load.issues)}) — running with no auto-review; fix the config and restart the session`
           : "no config found — running with no auto-review; add one and restart the session",
         "error",
       );
@@ -344,9 +366,8 @@ export class SessionLifecycle {
   /**
    * Permissions:ready fired. ready fires at least once per session and
    * may repeat (a latch re-emits it at the node's first before_agent_start).
-   * The payload carries the node's own session id — the official source
-   * — so a
-   * non-null id is adopted (a null payload never clobbers a real one).
+   * The payload carries the node's own session id — the official source —
+   * so a non-null id is adopted (a null payload never clobbers a real one).
    * Register once per session, for the session's own node; the service it
    * resolves is stable for the session, so repeats must NOT dispose and
    * re-register — later emissions are no-ops.
@@ -371,13 +392,14 @@ export class SessionLifecycle {
    */
   onSessionTree(ctx: AiGuardUiContext): void {
     if (!this.#session) return;
-    this.#session.ctx = ctx;
+    this.#eventCtx = ctx;
   }
 
   /** The session ended: dispose the registration and drop the session. */
   onShutdown(): void {
     this.#disposeRegistration();
     this.#session = undefined;
+    this.#eventCtx = undefined;
     this.#sessionId = null;
   }
 
@@ -392,25 +414,19 @@ export class SessionLifecycle {
   #tryRegister(): void {
     if (this.#registered || this.#registrationFailed) return;
     const session = this.#session;
-    if (!session?.config) {
-      return;
-    }
+    if (!session?.load.config) return;
     // The service locator is keyed per session node. No session id (neither
     // the ready payload nor the session_start self-read produced one) means
     // no keyed service — skip, asks defer.
-    if (this.#sessionId === null) {
-      return;
-    }
+    if (this.#sessionId === null) return;
     const service = getPermissionsService(this.#sessionId);
-    if (!service) {
-      return;
-    }
+    if (!service) return;
     try {
       // Pool assembly: the single place the config fans out into the
       // ordered endpoint list (primary + fallbacks, any lane mix). An
       // unresolvable endpoint throws here → caught below → fail-safe
       // session start (no auto-review), never a per-ask surprise.
-      const config = session.config;
+      const config = session.load.config;
       const engine: ReviewerEngine = buildReviewerPool(config, {
         registry: session.registry,
         modelCall: this.#deps.modelCall,
@@ -430,6 +446,10 @@ export class SessionLifecycle {
       this.#dispose = service.registerAuthorizer(LINK_NAME, authorize);
       this.#registered = true;
     } catch (e) {
+      // A failed registration latches: every later ready emission for
+      // this session skips the retry (the operator already heard about
+      // it at error grade once). A new session_start unlatches.
+      this.#registrationFailed = true;
       if (isDuplicateAuthorizerError(e, LINK_NAME)) {
         // "already registered" is never benign: every node owns its
         // service, so a duplicate means a STALE registration survived
@@ -439,14 +459,12 @@ export class SessionLifecycle {
           "stale ai-guard registration survived disposal — asks are governed by the previous session's pipeline (deferring to the prompt)",
           "error",
         );
-        this.#registrationFailed = true;
         return;
       }
       this.feedbackNotify(
         `failed to register the reviewer — running with no auto-review (${errorMessage(e)})`,
         "error",
       );
-      this.#registrationFailed = true;
     }
   }
 }

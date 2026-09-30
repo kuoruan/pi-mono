@@ -59,7 +59,11 @@ function makeLifecycle() {
  */
 function makeSeed(overrides: Partial<SessionSeed> = {}): SessionSeed {
   return {
-    config: configSchema.parse({ provider: "test", model: "test" }),
+    load: {
+      config: configSchema.parse({ provider: "test", model: "test" }),
+      issues: [],
+      outcome: "loaded" as const,
+    },
     registry: {
       find: () => undefined,
       complete: () => {
@@ -258,13 +262,16 @@ describe("SessionLifecycle — shutdown", () => {
     const notify = vi.fn<() => void>();
     lifecycle.onSessionStart(
       makeSeed({
-        config: undefined,
-        issues: [
-          {
-            path: "fallbacks.0.provider.apiKey",
-            message: "Too small: expected string to have >=1 characters",
-          },
-        ],
+        load: {
+          config: undefined,
+          outcome: "failed" as const,
+          issues: [
+            {
+              path: "fallbacks.0.provider.apiKey",
+              message: "Too small: expected string to have >=1 characters",
+            },
+          ],
+        },
         ctx: makeCtx(notify) as never,
       }),
     );
@@ -278,9 +285,12 @@ describe("SessionLifecycle — shutdown", () => {
     const { lifecycle } = makeLifecycle();
     const notify = vi.fn<() => void>();
     lifecycle.onSessionStart(
-      makeSeed({ config: undefined, issues: [], ctx: makeCtx(notify) as never }),
+      makeSeed({
+        load: { config: undefined, outcome: "none" as const, issues: [] },
+        ctx: makeCtx(notify) as never,
+      }),
     );
-    expect(notify).toHaveBeenCalledWith(expect.not.stringContaining("config invalid"), "error");
+    expect(notify).toHaveBeenCalledWith(expect.not.stringContaining("config not applied"), "error");
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("no config found"), "error");
   });
 });
@@ -380,7 +390,11 @@ describe("SessionLifecycle — notify level gate", () => {
       lifecycle.onSessionStart(
         makeSeed({
           ctx: makeCtx(notify) as never,
-          config: configSchema.parse({ provider: "test", model: "test", notifyLevel: threshold }),
+          load: {
+            config: configSchema.parse({ provider: "test", model: "test", notifyLevel: threshold }),
+            issues: [],
+            outcome: "loaded" as const,
+          },
         }),
       );
       calls[0]!.notify!("ambient line", level);
@@ -397,12 +411,16 @@ describe("SessionLifecycle — notify level gate", () => {
       lifecycle.onSessionStart(
         makeSeed({
           ctx: makeCtx(notify) as never,
-          config: configSchema.parse({
-            provider: "test",
-            model: "test",
-            notifyApprovals: true,
-            notifyLevel: threshold,
-          }),
+          load: {
+            config: configSchema.parse({
+              provider: "test",
+              model: "test",
+              notifyApprovals: true,
+              notifyLevel: threshold,
+            }),
+            issues: [],
+            outcome: "loaded" as const,
+          },
         }),
       );
       calls[0]!.notify!("reviewer approved this request", "info");
@@ -431,7 +449,11 @@ describe("SessionLifecycle — notify level gate", () => {
     lifecycle.onSessionStart(
       makeSeed({
         ctx: makeCtx(notify) as never,
-        config: configSchema.parse({ provider: "test", model: "test", notifyLevel: "off" }),
+        load: {
+          config: configSchema.parse({ provider: "test", model: "test", notifyLevel: "off" }),
+          issues: [],
+          outcome: "loaded" as const,
+        },
       }),
     );
     // Ambient (pipeline): silenced.

@@ -139,8 +139,7 @@ export function createAiGuardExtension(
     sessionEnv = env;
     const result = loadConfig(env);
     lifecycle.onSessionStart({
-      config: result.config,
-      issues: result.issues,
+      load: result,
       registry: ctx.modelRegistry,
       sessionManager: ctx.sessionManager,
       cwd: ctx.cwd,

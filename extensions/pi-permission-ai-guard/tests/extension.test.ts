@@ -205,7 +205,7 @@ function installExtension(
     createPipeline,
     // Default config seam (see makeBaselineConfig); a test may override
     // it via `deps` — the config-failure tests do.
-    loadConfig: () => ({ config: makeBaselineConfig(), issues: [] }),
+    loadConfig: () => ({ config: makeBaselineConfig(), issues: [], outcome: "loaded" as const }),
     ...deps,
   });
   return { pi, calls, createPipeline };
@@ -329,7 +329,7 @@ describe("createAiGuardExtension lifecycle", () => {
     const { pi } = installExtension(undefined, {
       loadConfig: () => {
         loadCalls++;
-        return { config, issues: [] };
+        return { config, issues: [], outcome: "loaded" as const };
       },
     });
 
@@ -432,7 +432,11 @@ describe("createAiGuardExtension lifecycle", () => {
   it("config load failures are warned and block registration", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { pi, createPipeline } = installExtension(undefined, {
-      loadConfig: () => ({ config: undefined, issues: [{ path: "$", message: "bad config" }] }),
+      loadConfig: () => ({
+        config: undefined,
+        issues: [{ path: "$", message: "bad config" }],
+        outcome: "failed" as const,
+      }),
     });
 
     const ctx = makeSessionCtx();
@@ -454,7 +458,7 @@ describe("createAiGuardExtension lifecycle", () => {
 
   it("a repeated fail-safe session_start notifies again (each re-dispatch is a fresh absence)", () => {
     const { pi } = installExtension(undefined, {
-      loadConfig: () => ({ config: undefined, issues: [] }),
+      loadConfig: () => ({ config: undefined, issues: [], outcome: "none" as const }),
     });
 
     // pi re-dispatches session_start on reload/fork without an
@@ -496,6 +500,7 @@ describe("createAiGuardExtension lifecycle", () => {
         notifyApprovals: false,
       },
       issues: [],
+      outcome: "loaded" as const,
     }));
 
     const { pi } = installExtension(undefined, { loadConfig });
@@ -663,7 +668,7 @@ describe("createAiGuardExtension — save-config actions", () => {
     >((target) => ({ path: `/agent/config-${target}.json`, created: false, changed: true }));
     const config = makeBaselineConfig();
     const { pi } = installExtension(undefined, {
-      loadConfig: () => ({ config, issues: [] }),
+      loadConfig: () => ({ config, issues: [], outcome: "loaded" as const }),
       saveConfig,
     });
 
@@ -694,7 +699,7 @@ describe("createAiGuardExtension — save-config actions", () => {
     const config = makeBaselineConfig();
     // No saveConfig injected: the production persistConfigLayer runs.
     const { pi } = installExtension(undefined, {
-      loadConfig: () => ({ config, issues: [] }),
+      loadConfig: () => ({ config, issues: [], outcome: "loaded" as const }),
     });
 
     // A virtual project dir: the guard must refuse BEFORE any filesystem
