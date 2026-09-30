@@ -73,6 +73,8 @@ import type { AiGuardUiContext } from "./command/ui-context.ts";
 export interface SessionSeed {
   /** Validated extension config, or undefined if loading failed (fail-safe). */
   config: LoadConfigResult["config"];
+  /** Config-load issues, for the fail-safe start notice (absent = no config found). */
+  issues?: LoadConfigResult["issues"];
   /** Model registry from the session context — resolves the reviewer model. */
   registry: ModelRegistryLike;
   /**
@@ -320,14 +322,13 @@ export class SessionLifecycle {
       verdictCache: new VerdictCache(),
       denyHistory: [],
     };
-    // A fail-safe session start (config failed validation) means the
-    // guard runs UNREVIEWED — the operator believes a reviewer stands in
-    // front of asks and none does. That is error-grade, and it rides the
-    // feedback channel (a direct answer to the session starting, not
-    // ambient review-loop traffic) so no notifyLevel threshold can hide it.
+    // Fail-safe start: name the first failing field. Empty issues means
+    // no config exists anywhere — a separate sentence, not "invalid".
     if (!seed.config) {
       this.feedbackNotify(
-        "config failed to load — running in fail-safe mode with no auto-review; fix the config and restart the session",
+        seed.issues?.length
+          ? `config invalid (${formatConfigIssues(seed.issues)}) — running with no auto-review; fix the config and restart the session`
+          : "no config found — running with no auto-review; add one and restart the session",
         "error",
       );
     }
@@ -448,4 +449,18 @@ export class SessionLifecycle {
       this.#registrationFailed = true;
     }
   }
+}
+
+/**
+ * First config-load issue, truncated. Callers guarantee a non-empty list.
+ *
+ * @param issues - The load result's issues.
+ * @returns A short parenthetical naming the failure.
+ */
+function formatConfigIssues(issues: LoadConfigResult["issues"]): string {
+  const [first, ...rest] = issues;
+  if (!first) return "unknown error";
+  const message = first.message.length > 100 ? `${first.message.slice(0, 97)}...` : first.message;
+  const tail = rest.length > 0 ? ` (+${rest.length} more)` : "";
+  return `${first.path}: ${message}${tail}`;
 }

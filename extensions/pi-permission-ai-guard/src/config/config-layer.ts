@@ -332,7 +332,21 @@ export function loadAiGuardConfig(env: ConfigEnv): LoadConfigResult {
   const global = readLayer(getGlobalConfigDir(agentDir), issues);
   // Untrusted projects skip the project layer — a project-local config
   // must not influence the reviewer when the project itself isn't trusted.
-  const project = env.trustedProject ? readLayer(getProjectConfigDir(env.cwd), issues) : undefined;
+  // Name the skip when a file actually exists there: otherwise the
+  // fail-safe start reports "no config file found" while one sits ignored.
+  let project: Record<string, unknown> | undefined;
+  if (env.trustedProject) {
+    project = readLayer(getProjectConfigDir(env.cwd), issues);
+  } else {
+    const skipped = resolveLayerFile(getProjectConfigDir(env.cwd));
+    if (skipped) {
+      issues.push({
+        path: "$",
+        message: "project config ignored — the project is untrusted",
+        sourcePath: skipped.path,
+      });
+    }
+  }
 
   if (global === undefined && project === undefined) {
     return { issues };

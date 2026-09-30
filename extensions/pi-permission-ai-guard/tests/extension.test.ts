@@ -445,7 +445,7 @@ describe("createAiGuardExtension lifecycle", () => {
     expect(createPipeline).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("bad config"));
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("running in fail-safe mode with no auto-review"),
+      expect.stringContaining("running with no auto-review"),
       "error",
     );
 
@@ -467,7 +467,7 @@ describe("createAiGuardExtension lifecycle", () => {
     expect(first.ui.notify).toHaveBeenCalledTimes(1);
     expect(second.ui.notify).toHaveBeenCalledTimes(1);
     expect(second.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("running in fail-safe mode with no auto-review"),
+      expect.stringContaining("running with no auto-review"),
       "error",
     );
   });

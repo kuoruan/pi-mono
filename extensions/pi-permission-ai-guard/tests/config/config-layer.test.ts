@@ -123,6 +123,23 @@ describe("loadAiGuardConfig", () => {
     expect(result.config?.model).toBe("global-model");
   });
 
+  it("names the skipped project config when untrusted and no global config exists", () => {
+    vol.fromJSON({
+      "/project/.pi/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "project-model",
+      }),
+    });
+
+    // No global layer: the skip is the ONLY issue, so the fail-safe start
+    // can name it instead of claiming no config file exists.
+    const result = loadAiGuardConfig(env({ trustedProject: false }));
+    expect(result.config).toBeUndefined();
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0]!.message).toContain("untrusted");
+    expect(result.issues[0]!.sourcePath).toContain("config.json");
+  });
+
   it("honors project config when trustedProject is true", () => {
     vol.fromJSON({
       "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({

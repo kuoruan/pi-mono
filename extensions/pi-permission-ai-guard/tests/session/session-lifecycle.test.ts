@@ -252,6 +252,37 @@ describe("SessionLifecycle — shutdown", () => {
     const { lifecycle } = makeLifecycle();
     expect(() => lifecycle.onSessionTree(makeCtx(vi.fn<() => void>()) as never)).not.toThrow();
   });
+
+  it("the fail-safe start notice names the failing field", () => {
+    const { lifecycle } = makeLifecycle();
+    const notify = vi.fn<() => void>();
+    lifecycle.onSessionStart(
+      makeSeed({
+        config: undefined,
+        issues: [
+          {
+            path: "fallbacks.0.provider.apiKey",
+            message: "Too small: expected string to have >=1 characters",
+          },
+        ],
+        ctx: makeCtx(notify) as never,
+      }),
+    );
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("fallbacks.0.provider.apiKey"),
+      "error",
+    );
+  });
+
+  it("the fail-safe start notice says no config without the invalid prefix", () => {
+    const { lifecycle } = makeLifecycle();
+    const notify = vi.fn<() => void>();
+    lifecycle.onSessionStart(
+      makeSeed({ config: undefined, issues: [], ctx: makeCtx(notify) as never }),
+    );
+    expect(notify).toHaveBeenCalledWith(expect.not.stringContaining("config invalid"), "error");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("no config found"), "error");
+  });
 });
 
 describe("SessionLifecycle — notify bridge", () => {
