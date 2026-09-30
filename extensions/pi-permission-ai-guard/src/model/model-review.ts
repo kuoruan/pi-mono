@@ -23,17 +23,13 @@ import {
 } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
+import { MAX_PROVIDER_ERROR_CHARS, emitCallFailure } from "#src/audit/call-failure.ts";
 import type { AuditCorrelation } from "#src/audit/decision-record.ts";
-import { MODEL_CALL_ERROR_EVENT, MODEL_REPLY_EVENT } from "#src/audit/events.ts";
+import { MODEL_REPLY_EVENT } from "#src/audit/events.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import type { AvailabilityReason } from "#src/model/model-verdict.ts";
 import { availabilityReason } from "#src/model/model-verdict.ts";
-import {
-  classifyAbortish,
-  errorMessage,
-  normalizeAndRedactText,
-  truncateMiddle,
-} from "#src/utils.ts";
+import { classifyAbortish, normalizeAndRedactText, truncateMiddle } from "#src/utils.ts";
 
 import {
   type ModelCallDeferKind,
@@ -104,14 +100,6 @@ export interface ModelCallContext extends AuditCorrelation {
 }
 
 /**
- * Max chars of provider error text kept in diagnostics. Provider error pages
- * (e.g. Cloudflare HTML) must not land in the log unbounded — the transcript
- * feeds logs back into the next request's state, and a WAF then blocks its own
- * error page.
- */
-export const MAX_PROVIDER_ERROR_CHARS = 300;
-
-/**
  * Build the model completer on top of `ModelRegistry.complete` — the
  * agent's own call path (raw `Context` in, auth + transcript normalization
  * handled inside the registry). Never the provider layer: pi-ai brands the
@@ -129,33 +117,6 @@ export function createModelCall(getRegistry: () => ModelRegistryLike | undefined
     }
     return registry.complete(model, context, options);
   };
-}
-
-/**
- * Emit a call-failure record to the audit log (keyed by requestId).
- *
- * Takes the minimal log/requestId surface so both engines share it: the LLM
- * `ModelCallContext` and the Jev `EngineCallContext` each carry these fields.
- *
- * The provider's error text is sanitized and truncated here, once, for every
- * caller: error pages (e.g. Cloudflare HTML) must not land in the log unbounded —
- * the transcript feeds logs back into the next request's state, and a WAF then
- * blocks its own error page.
- *
- * @param ctx - The log + request id (a slice of either call context).
- * @param deferKind - The classified defer kind.
- * @param error - The thrown error.
- */
-export function emitCallFailure(
-  ctx: AuditCorrelation,
-  deferKind: ModelCallDeferKind,
-  error: unknown,
-): void {
-  ctx.log.debug(MODEL_CALL_ERROR_EVENT, {
-    requestId: ctx.requestId,
-    deferKind,
-    error: truncateMiddle(normalizeAndRedactText(errorMessage(error)), MAX_PROVIDER_ERROR_CHARS),
-  });
 }
 
 /**
