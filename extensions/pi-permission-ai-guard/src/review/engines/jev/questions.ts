@@ -6,7 +6,7 @@ export const DANGER_CRITERIA: Record<string, string> = {
   secrets_credentials:
     "Exposing secret material outward, reading secret stores, or printing authentication material: stored secrets or credential files.",
   irreversible_destruction:
-    "Deleting or overwriting data without recovery (removing non-regenerable paths, reformatting volumes, dropping databases, hard VCS resets).",
+    "Destroying data with no version-control or session recovery: deleting outside the repository (home, system, databases), wiping history, or hard-discarding uncommitted work (hard reset, git clean).",
   sensitive_data_egress:
     "Sending secrets or sensitive local data externally, beyond the approved payload or destination.",
   system_tampering:
