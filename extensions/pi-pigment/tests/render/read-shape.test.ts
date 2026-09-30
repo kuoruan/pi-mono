@@ -87,6 +87,9 @@ describe("read call header", () => {
     const header = readCallText({ path: "/x/foo/SKILL.md" }, false);
     expect(header).toContain("✦ foo");
     expect(header).toContain("skill");
+    // The expand hint lives in the folded body's tail only — the
+    // header keeps the label, never a second affordance.
+    expect(header).not.toContain("to expand");
   });
 
   it("marks pi-docs origins so SDK paths never pose as project files", () => {

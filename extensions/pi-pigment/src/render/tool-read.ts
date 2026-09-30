@@ -33,7 +33,7 @@ import { expandHome, readDecorativeText, resolveToolPath, toPosixPath } from "./
 import { numberedRows } from "./row-frame.ts";
 import type { FrameView } from "./session.ts";
 import { createToolWrapper } from "./tool-factory.ts";
-import { type DerivedOutput, expandKeyHint, joinBodyTail } from "./tool-output.ts";
+import { type DerivedOutput, joinBodyTail } from "./tool-output.ts";
 import { argsOf, argStr, headerPath, invalidArg, type ToolServices } from "./tool-services.ts";
 
 /** Compact resource basenames that collapse to a bare label. */
@@ -564,21 +564,16 @@ function formatReadCall(input: ReadHeaderInput): string {
 }
 
 /**
- * The read pinned suffix: the `:offset-limit` range (state that must
- * survive truncation) plus the folded expand hint. The hint rides the
- * suffix — not the body — so the range keeps its `path:range (hint)`
- * order on every frame (the body carries no hint of its own).
+ * The read pinned suffix: the `:offset-limit` range plus the sensitive
+ * warning (the expand hint lives in the folded body's tail).
  *
  * @param input - Settled args + theme + shared path context + frame state.
  * @returns The suffix (may be "").
  */
 function formatReadSuffix(input: ReadHeaderInput): string {
-  const { args, theme, cwd, expanded, piRoot } = input;
+  const { args, theme, cwd } = input;
   const range = formatReadLineRange(args, theme);
   const raw = argStr(args?.path);
-  if (!expanded && raw !== null && classifyCompactRead({ raw, cwd, piRoot }) !== undefined) {
-    return `${range} (${expandKeyHint(theme)})`;
-  }
   if (raw !== null && isSensitiveRead(raw, cwd)) {
     return `${range} ${theme.fg("warning", "⚠ sensitive")}`;
   }
