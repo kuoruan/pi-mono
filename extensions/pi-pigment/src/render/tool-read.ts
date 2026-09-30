@@ -232,7 +232,6 @@ function withLineNumbers(
   width: number,
 ): string[] {
   const numberWidth = Math.max(2, String(startLine + lines.length - 1).length);
-  // The read gutter is number + one space (no sign column to budget).
   return numberedRows({
     lines,
     scheme,
@@ -299,7 +298,9 @@ async function renderReadStyled(
  * @returns The suffix, or "" without offset/limit.
  */
 function formatReadLineRange(args: Partial<ReadToolInput>, theme: RenderTheme): string {
-  if (args?.offset === undefined && args?.limit === undefined) return "";
+  // Strict tool schemas make models send null for omitted optionals
+  // (the SDK's own read renderer reads them with `== null`).
+  if (args?.offset == null && args?.limit == null) return "";
   const start = args.offset ?? 1;
   const end = args.limit !== undefined ? start + args.limit - 1 : "";
   return theme.fg("warning", `:${start}${end ? `-${end}` : ""}`);
@@ -381,7 +382,7 @@ function liftReadNotice(
   const body = masked.slice(0, masked.lastIndexOf(last)).trimEnd();
   // The SDK's user-limit notice follows a full window (limit rows);
   // the truncation branch is fact-guarded (details), not counted.
-  if (limit !== undefined && limit > 0 && linesOf(body).length === limit) {
+  if (limit != null && limit > 0 && linesOf(body).length === limit) {
     return { body, notice: last };
   }
   if (truncated) return { body, notice: "" };
@@ -543,18 +544,13 @@ function formatReadCall(input: ReadHeaderInput): string {
   if (!expanded && raw !== null) {
     const compact = classifyCompactRead({ raw, cwd, piRoot });
     if (compact?.kind === "skill") {
-      // Inert like the path display (F2): the label is a basename slice
-      // of the model-supplied path.
+      // Model-supplied label — inert, like the path display.
       const label = inertText(compact.label);
       return theme.fg("accent", theme.bold(`✦ ${label}`)) + theme.fg("muted", " skill");
     }
     if (compact) {
-      // The pi-docs origin mark: SDK-space paths collapse exactly like
-      // project files, so the header names the source (`[pi]`, the
-      // `[skill]` chip's bracket kin) — otherwise a pi README is
-      // indistinguishable from the project's. The docs label keeps its
-      // breadcrumb (muted dir + accent base) behind the mark; resource
-      // labels stay a single accent span.
+      // `[pi]` names the source — without it an SDK README is
+      // indistinguishable from a project file.
       const origin = compact.kind === "docs" ? theme.fg("muted", "[pi] ") : "";
       const clean = inertText(compact.label);
       const label =
@@ -562,9 +558,7 @@ function formatReadCall(input: ReadHeaderInput): string {
       return `${theme.fg("toolTitle", theme.bold(`read ${compact.kind}`))} ` + origin + label;
     }
   }
-  // The plain path in the docs' three-segment grammar (muted dir +
-  // accent base), hyperlinked whole — read-local, so ls keeps its
-  // single-accent parity shape.
+  // Read-local breadcrumb (ls keeps its single-accent shape).
   const pathDisplay = headerPathSegments(raw, theme, cwd);
   return `${theme.fg("toolTitle", theme.bold("read"))} ${pathDisplay}`;
 }
@@ -585,8 +579,6 @@ function formatReadSuffix(input: ReadHeaderInput): string {
   if (!expanded && raw !== null && classifyCompactRead({ raw, cwd, piRoot }) !== undefined) {
     return `${range} (${expandKeyHint(theme)})`;
   }
-  // Secret-bearing files ride the plain branch in both states (never
-  // compact) — the banner shows folded and expanded alike.
   if (raw !== null && isSensitiveRead(raw, cwd)) {
     return `${range} ${theme.fg("warning", "⚠ sensitive")}`;
   }
@@ -643,11 +635,7 @@ export function createReadWrapper(
         limit: args?.limit,
       });
       const contentLines = linesOf(masked);
-      // under the header — "did I read the right file" at a glance
-      // (compact skill/docs labels included — the label names it, the
-      // preview proves it). No seed, no notice, no Took: a preview is
-      // a preview. Error frames never reach here (the factory
-      // intercepts them).
+      // Folded shows the preview only: no seed, no notice, no Took.
       if (!options.expanded) {
         return assembleOutputBody({
           text,

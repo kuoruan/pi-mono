@@ -9,8 +9,6 @@
 
 import type {
   AgentToolResult,
-  AgentToolUpdateCallback,
-  ExtensionContext,
   Theme,
   ToolDefinition,
   ToolRenderResultOptions,
@@ -219,23 +217,9 @@ export function createToolWrapper<TState extends object = Record<string, unknown
     // (edit: "self" → "default" so the Box owns the frame's background).
     ...(spec.renderShell !== undefined ? { renderShell: spec.renderShell } : {}),
 
-    // Delegation verbatim unless the spec owns the execute (write/edit),
-    // timed: the elapsed-ms sideband in details is what the grep/find/ls
-    // result footers read (bash's native renderer shows its own timing).
-    async execute(
-      tid: string,
-      params: unknown,
-      sig: AbortSignal | undefined,
-      upd: AgentToolUpdateCallback<unknown> | undefined,
-      ctx: ExtensionContext,
-    ): Promise<AgentToolResult<unknown>> {
-      // Verbatim delegation — the wrapper never touches the result. Timing
-      // lives in the render state (armTiming/stopTiming), so nothing a
-      // footer shows is written into the session.
-      return spec.execute
-        ? await spec.execute(tid, params, sig, upd, ctx)
-        : await orig.execute(tid, params as never, sig, upd, ctx);
-    },
+    // Only write/edit own an execute — the rest keep `orig`'s, so the
+    // signature follows the host across SDK versions without naming it.
+    ...(spec.execute !== undefined ? { execute: spec.execute } : {}),
 
     renderCall(args: unknown, theme: Theme, ctx: RenderContext<TState>): Component {
       const text = getWidthAwareText(ctx.lastComponent, textFactory);
