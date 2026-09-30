@@ -1,5 +1,15 @@
 # pi-permission-ai-guard
 
+## 0.13.0
+
+### Minor Changes
+
+- e24ae10: Support `${VAR}` / `${VAR:-default}` / `$$` env interpolation in config string leaves (including inside `fallbacks[]`), and keep `${...}` placeholders intact on save: persisting restores on-disk placeholder text instead of writing expanded secrets back, across append/prepend/remove/reorder. A placeholder whose variable vanished since load also keeps its on-disk text (the integrity gate refuses the write rather than leaking the secret).
+
+### Patch Changes
+
+- c884510: Name the failing config fields in the fail-safe start notice instead of a bare "fix the config", and report an ignored project config in untrusted projects rather than claiming no config file exists.
+
 ## 0.12.0
 
 ### Minor Changes
