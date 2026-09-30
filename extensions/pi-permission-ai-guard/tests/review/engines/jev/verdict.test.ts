@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { DANGER_NONE } from "#src/review/engines/jev/questions.ts";
-import { projectRawAnswers, synthesizeJevVerdict } from "#src/review/engines/jev/verdict.ts";
+import {
+  IncompleteJevResponseError,
+  projectRawAnswers,
+  riskLevelFromScore,
+  synthesizeJevVerdict,
+} from "#src/review/engines/jev/verdict.ts";
 import type { JevAnswers, JevThresholds } from "#src/review/engines/jev/verdict.ts";
 
 const THRESHOLDS: JevThresholds = {
@@ -78,24 +83,24 @@ describe("synthesizeJevVerdict", () => {
     expect(out.lean).toBeUndefined();
   });
 
-  it("soft-denies low when intent is not established but risk is moderate", () => {
-    const out = synthesizeJevVerdict(
+  it("labels the deny by quartile bands: 0.6 high, 0.8 critical", () => {
+    // riskLevel is a fixed rubric reading, independent of riskThreshold:
+    // 0.5–0.75 reads high, 0.75+ reads critical. Tier follows the label
+    // through denyTier, so both block in every mode at the default 0.5.
+    const high = synthesizeJevVerdict(
       confident({ intentMatch: 0.2, riskScore: 0.6 }),
       THRESHOLDS,
       7,
     );
-    expect(out.verdict.kind).toBe("deny");
-    expect(out.riskLevel).toBe("low");
-  });
-
-  it("soft-denies medium when the risk score is high", () => {
-    const out = synthesizeJevVerdict(
+    expect(high.verdict.kind).toBe("deny");
+    expect(high.riskLevel).toBe("high");
+    const critical = synthesizeJevVerdict(
       confident({ intentMatch: 0.2, riskScore: 0.8 }),
       THRESHOLDS,
       7,
     );
-    expect(out.verdict.kind).toBe("deny");
-    expect(out.riskLevel).toBe("medium");
+    expect(critical.verdict.kind).toBe("deny");
+    expect(critical.riskLevel).toBe("critical");
   });
 
   it("denies at the risk bar even when intent is established", () => {
@@ -120,7 +125,9 @@ describe("synthesizeJevVerdict", () => {
     });
   });
 
-  it("defers when intent is not established and the risk score is low", () => {
+  it("defers with an allow lean when intent falls short and risk is low", () => {
+    // Matrix #7: the screen is clean, only the authorization link is
+    // unclear — lenient allows, default asks.
     const out = synthesizeJevVerdict(
       confident({ intentMatch: 0.2, riskScore: 0.3 }),
       THRESHOLDS,
@@ -128,7 +135,7 @@ describe("synthesizeJevVerdict", () => {
     );
     expect(out.verdict).toEqual({ kind: "defer" });
     expect(out.deferKind).toBe("model-defer");
-    expect(out.lean).toBe("deny");
+    expect(out.lean).toBe("allow");
   });
 
   it("defers naming intent when intent falls short and risk is low", () => {
@@ -140,7 +147,63 @@ describe("synthesizeJevVerdict", () => {
     expect(out.verdict).toEqual({ kind: "defer" });
     expect(out.deferKind).toBe("model-defer");
     expect(out.deferReason).toContain("intent_match");
+    expect(out.lean).toBe("allow");
+  });
+
+  it("defers with a deny lean when confidence is low but risk is over the line", () => {
+    // Matrix #5: evidence of danger never leans allow — lenient asks.
+    const out = synthesizeJevVerdict(
+      {
+        dangerCategory: DANGER_NONE,
+        dangerConfidence: 0.9,
+        intentMatch: 0.9,
+        riskScore: 0.8,
+        riskConfidence: 0.2,
+      },
+      THRESHOLDS,
+      7,
+    );
+    expect(out.verdict).toEqual({ kind: "defer" });
+    expect(out.deferKind).toBe("model-defer");
     expect(out.lean).toBe("deny");
+  });
+
+  it("defers neutral when confidence is low and risk is under the line", () => {
+    // Matrix #6: an untrusted reading has no direction — lenient allows
+    // with a fail-open notice, default asks.
+    const out = synthesizeJevVerdict(
+      {
+        dangerCategory: DANGER_NONE,
+        dangerConfidence: 0.2,
+        intentMatch: 0.9,
+        riskScore: 0.3,
+        riskConfidence: 0.9,
+      },
+      THRESHOLDS,
+      7,
+    );
+    expect(out.verdict).toEqual({ kind: "defer" });
+    expect(out.deferKind).toBe("model-defer");
+    expect(out.lean).toBeUndefined();
+  });
+
+  it("defers neutral on a low-confidence intent gap — untrusted readings lean nothing", () => {
+    // Low intent alone does not lean allow when the readings are
+    // untrusted: lenient allows with a fail-open notice, not silently.
+    const out = synthesizeJevVerdict(
+      {
+        dangerCategory: DANGER_NONE,
+        dangerConfidence: 0.2,
+        intentMatch: 0.2,
+        riskScore: 0.3,
+        riskConfidence: 0.9,
+      },
+      THRESHOLDS,
+      7,
+    );
+    expect(out.verdict).toEqual({ kind: "defer" });
+    expect(out.deferKind).toBe("model-defer");
+    expect(out.lean).toBeUndefined();
   });
 
   it("names the axis whose confidence is under the floor", () => {
@@ -159,17 +222,50 @@ describe("projectRawAnswers", () => {
       risk: { type: "score", score: 3, confidence: 0.9 },
     });
     expect(answers.riskScore).toBe(0.75);
-    // The normalized value must read on the same scale as the table: raw 3
-    // (= 0.75) lands on the medium tier the soft-deny branch checks.
+    // Raw 3 reads critical on the quartile bands.
     const out = synthesizeJevVerdict(answers, THRESHOLDS, 1);
     expect(out.verdict.kind).toBe("deny");
-    expect(out.riskLevel).toBe("medium");
+    expect(out.riskLevel).toBe("critical");
   });
 
-  it("degrades missing answers to the safest zero-ish projection", () => {
-    const answers = projectRawAnswers({});
-    expect(answers.dangerCategory).toBe(DANGER_NONE);
-    expect(answers.riskScore).toBe(0);
+  it("maps quartile bands independent of the threshold", () => {
+    expect(riskLevelFromScore(0)).toBe("low");
+    expect(riskLevelFromScore(0.24)).toBe("low");
+    expect(riskLevelFromScore(0.25)).toBe("medium");
+    expect(riskLevelFromScore(0.49)).toBe("medium");
+    expect(riskLevelFromScore(0.5)).toBe("high");
+    expect(riskLevelFromScore(0.74)).toBe("high");
+    expect(riskLevelFromScore(0.75)).toBe("critical");
+    expect(riskLevelFromScore(1)).toBe("critical");
+  });
+
+  it("throws on missing readings — never answered is malformed, not zero", () => {
+    expect(() => projectRawAnswers({})).toThrow(IncompleteJevResponseError);
+    expect(() =>
+      projectRawAnswers({
+        danger_category: { type: "choice", choice: "none", confidence: 0.9 },
+        intent_match: { type: "noul", noul: 0.2 },
+      }),
+    ).toThrow(IncompleteJevResponseError);
+    expect(() =>
+      projectRawAnswers({
+        danger_category: { type: "choice", choice: "none", confidence: 0.9 },
+        intent_match: { type: "noul", noul: 0.2 },
+        risk: { type: "score", confidence: 0.9 },
+      }),
+    ).toThrow(IncompleteJevResponseError);
+  });
+
+  it("treats missing confidence as zero (uncertain), not malformed", () => {
+    const answers = projectRawAnswers({
+      danger_category: { type: "choice", choice: "none" },
+      intent_match: { type: "noul", noul: 0.9 },
+      risk: { type: "score", score: 1 },
+    });
+    expect(answers.dangerConfidence).toBe(0);
     expect(answers.riskConfidence).toBe(0);
+    const out = synthesizeJevVerdict(answers, THRESHOLDS, 1);
+    expect(out.verdict).toEqual({ kind: "defer" });
+    expect(out.deferKind).toBe("model-defer");
   });
 });

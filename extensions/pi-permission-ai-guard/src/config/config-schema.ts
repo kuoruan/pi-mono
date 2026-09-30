@@ -174,7 +174,11 @@ const configBaseSchema = z.object({
       // once. Falls back to top-level timeoutMs when omitted.
       timeoutMs: z.number().int().min(1).max(300_000).optional(),
     })
-    .default({ intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.5 }),
+    .default({
+      intentThreshold: 0.5,
+      riskThreshold: 0.5,
+      confidenceThreshold: 0.5,
+    }),
 
   // How the link disposes the reviewer's non-allow verdicts (the leniency
   // ladder, strictest first). Hard-tier denies (riskLevel high|critical,

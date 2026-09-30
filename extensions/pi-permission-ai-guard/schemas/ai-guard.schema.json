@@ -199,7 +199,7 @@
           "minimum": 0,
           "maximum": 1,
           "default": 0.5,
-          "description": "Risk score at or above which the action denies (soft tier). Raising it widens what auto-allows in every mode."
+          "description": "Risk score at or above which the action denies; the tier follows the fixed quartile bands. Raising it widens what auto-allows in every mode."
         },
         "confidenceThreshold": {
           "type": "number",

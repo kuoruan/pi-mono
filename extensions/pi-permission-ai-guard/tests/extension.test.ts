@@ -486,7 +486,11 @@ describe("createAiGuardExtension lifecycle", () => {
         maxTokens: 4096,
         reasoning: "off" as const,
         instructions: null,
-        typesafe: { intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.5 },
+        typesafe: {
+          intentThreshold: 0.5,
+          riskThreshold: 0.5,
+          confidenceThreshold: 0.5,
+        },
         mode: "default" as const,
         notifyLevel: "info" as const,
         notifyApprovals: false,

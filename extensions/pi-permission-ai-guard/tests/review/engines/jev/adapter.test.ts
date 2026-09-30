@@ -75,7 +75,11 @@ const endpoint = (model = "jev-1.13", timeoutMs = 15000): PoolEndpoint => ({
 const adapter = (client: TypesafeClientLike) =>
   createJevAdapter({
     config: {
-      typesafe: { intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.5 },
+      typesafe: {
+        intentThreshold: 0.5,
+        riskThreshold: 0.5,
+        confidenceThreshold: 0.5,
+      },
       instructions: null,
     },
     createClient: () => client,
@@ -202,6 +206,62 @@ describe("Jev adapter disposition", () => {
       },
     );
     expect(requests).toEqual([{ model: "backup-model", timeout: 2000 }]);
+  });
+});
+
+describe("Jev adapter incomplete responses", () => {
+  // Never answered is malformed, not zero: projection throws and the
+  // catch routes to a machinery defer (never allow, in every mode).
+  // (A fully-empty answers object is covered at the verdict layer by the
+  // projection-throws test — this fixture always carries the base keys.)
+  it("reports terminal machinery defer when answers itself is missing", async () => {
+    const attempt = await adapter({
+      systemOne: async () => ({ ...response(), answers: undefined }) as never,
+    }).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    expect(attempt.kind).toBe("terminal");
+    if (attempt.kind !== "terminal") return;
+    expect(attempt.result).toMatchObject({
+      outcome: { verdict: { kind: "defer" }, deferKind: "call-failed" },
+    });
+  });
+
+  it.each([[{ danger_category: undefined }], [{ risk: undefined }], [{ intent_match: undefined }]])(
+    "reports terminal machinery defer on missing answers %j",
+    async (overrides) => {
+      const attempt = await adapter({
+        systemOne: async () => response(overrides as Record<string, unknown>),
+      }).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+      expect(attempt.kind).toBe("terminal");
+      if (attempt.kind !== "terminal") return;
+      expect(attempt.result).toMatchObject({
+        outcome: { verdict: { kind: "defer" }, deferKind: "call-failed" },
+      });
+    },
+  );
+
+  it("reports terminal machinery defer on a missing reading field", async () => {
+    const attempt = await adapter({
+      systemOne: async () => response({ risk: { type: "score", confidence: 0.9 } }),
+    }).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    expect(attempt.kind).toBe("terminal");
+    if (attempt.kind !== "terminal") return;
+    expect(attempt.result).toMatchObject({
+      outcome: { verdict: { kind: "defer" }, deferKind: "call-failed" },
+    });
+  });
+
+  it("answers model-defer on missing confidence (uncertain, not malformed)", async () => {
+    const attempt = await adapter({
+      systemOne: async () =>
+        response({
+          danger_category: { type: "choice", choice: "none" },
+          risk: { type: "score", score: 1 },
+        }),
+    }).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    expect(attempt.kind).toBe("answered");
+    if (attempt.kind !== "answered") return;
+    expect(attempt.result.outcome.verdict).toEqual({ kind: "defer" });
+    expect(attempt.result.outcome.deferKind).toBe("model-defer");
   });
 });
 

@@ -133,7 +133,12 @@ Free models may hit usage limits or disappear without notice. In chat-model mode
 }
 ```
 
-Each backup uses its own registered provider credentials; this config does not accept API keys or base URLs for chat-model entries. AI Guard tries backups in order when a model disappears from the registry or its provider clearly reports quota/payment limits, an unavailable model (HTTP 404/410), a timeout, network failure, or server error. Ambiguous errors ask you rather than triggering failover. It **does not** seek a second opinion on an allow, deny, uncertain verdict, malformed reply, authentication failure, or access refusal. Auth failure on any backup stops the chain rather than bypassing that provider. When all models fail, the existing mode rules apply; nothing gets automatically approved by an outage. An explicitly configured backup's allow is trusted even in `strict` mode.
+Each backup uses its own registered provider credentials; this config does not accept API keys or base URLs for chat-model entries. AI Guard tries backups in order, and only on availability failures:
+
+- switch: the model disappears from the registry, or its provider clearly reports quota/payment limits, an unavailable model (HTTP 404/410), a timeout, network failure, or server error;
+- stop and ask you instead: ambiguous errors, a real allow, deny, or uncertain verdict, a malformed reply, an authentication failure, or an access refusal — backups never get a second vote on a decision.
+
+Auth failure on any backup stops the chain rather than bypassing that provider. When all models fail, the existing mode rules apply; nothing gets automatically approved by an outage. An explicitly configured backup's allow is trusted even in `strict` mode.
 
 With backups, each model gets one provider attempt rather than the normal provider retry; an empty successful reply may still retry within that model's timeout. `timeoutMs` applies to each model unless its entry overrides it. The whole walk also has a budget ceiling (`max(2 × primary timeout, 30s)`, mirroring LiteLLM's 30s router timeout): each endpoint gets `min(its own timeout, remaining budget)`, and the walk stops once under 2s remain. Fallback entries default to `min(top-level timeoutMs, 10s)` (LiteLLM `request_timeout` convention — backups are usually cheap fast models); an explicit per-entry `timeoutMs` always wins. Without backups, a single endpoint keeps the SDK's normal retry behavior, where `timeoutMs` bounds each attempt rather than the total. Backup verdicts are not cached, so the primary is retried on the next ask. Failover transitions appear as `ai_guard.fallback` review records without URLs, credentials, or provider error text. Every contacted model receives the permission request (including command text and target paths) plus stripped conversation context: choose providers you trust with that data and account for their costs.
 
@@ -143,16 +148,16 @@ With backups, each model gets one provider attempt rather than the normal provid
 
 Set `provider` to `{ "type": "typesafe" }` to review through TypeSafe's Jev (System One) instead of an LLM. `model` carries the Jev id (`jev-1.13`, `jev-latest`). Connection fields are optional: unset `baseUrl`/`apiKey` fall back to `TYPESAFE_BASE_URL` / `TYPESAFE_API_KEY`, then the SDK built-in default URL. Pointing `baseUrl` at `https://openrouter.ai/api` with an OpenRouter key routes through OpenRouter (model ids pass through bare; responses carry extra `id`/`provider`/`usage.cost`, passed through).
 
-| Field                 | Default | Description                                                                        |
-| --------------------- | ------- | ---------------------------------------------------------------------------------- |
-| `intentThreshold`     | `0.5`   | Intent probability at or above which the anchor counts as authorizing the action   |
-| `riskThreshold`       | `0.5`   | Risk score at or above which the action denies (soft tier — see mode ladder below) |
-| `confidenceThreshold` | `0.5`   | Minimum answer confidence; below it the verdict defers                             |
-| `timeoutMs`           | —       | SDK timeout per attempt; falls back to top-level `timeoutMs`                       |
+| Field                 | Default | Description                                                                      |
+| --------------------- | ------- | -------------------------------------------------------------------------------- |
+| `intentThreshold`     | `0.5`   | Intent probability at or above which the anchor counts as authorizing the action |
+| `riskThreshold`       | `0.5`   | Risk score at or above which the action denies; the tier follows the score       |
+| `confidenceThreshold` | `0.5`   | Minimum answer confidence; below it the verdict defers                           |
+| `timeoutMs`           | —       | SDK timeout per attempt; falls back to top-level `timeoutMs`                     |
 
-A risk deny lands on the soft tier (low/medium), so `permissive` mode lets it through — raising `riskThreshold` widens what auto-allows in every mode, including `strict`. Only a danger-category hit denies hard. The 0.75 medium/low tier split does not follow `riskThreshold`.
+`riskLevel` reads the fixed quartile bands of the 0–4 rubric (low below 0.25, medium below 0.5, high below 0.75, critical at or above) and does not move with `riskThreshold`; `riskThreshold` alone decides the deny. `lean` is the danger direction, derived not declared: a risk score at or above the line leans deny, a pure intent gap with trusted readings leans allow, anything else is neutral. A response missing a reading is malformed and routes to a machinery defer (never allow); missing confidence just reads as uncertain. How the three answers reach each verdict row is mapped out in [Mode](#mode).
 
-In Jev mode `reasoning`/`maxTokens` are ignored, and `instructions` overlays rather than replaces: a string is shared background for every question; `{ background?, questions? }` adds onto the built-in set (`danger_category`, `intent_match`, `risk`).
+In Jev mode `reasoning`/`maxTokens` are ignored. `instructions` overlays rather than replaces — see [Custom rules (Jev mode)](#custom-rules-jev-mode).
 
 #### Backup System One endpoints
 
@@ -182,7 +187,7 @@ If your primary Jev service runs out of quota, removes a free model, or becomes 
 
 The SDK appends `/v1/systemone` to each base URL. For Command Code use `https://api.commandcode.ai/provider` and `typesafe/jev` (Provider API access requires an eligible plan); for a local compatible server use its base URL and model ID. The local server must expose the System One API, not just a chat endpoint. The SDK requires a key string even if your local server does not check it.
 
-AI Guard tries a backup only after an availability failure (quota or payment limit, missing model/endpoint, HTTP 409/425 conflict, connection, timeout, or server error — one table shared with the chat-model lane). A real allow, deny, or uncertain decision is final: backups never get a second vote. Authentication failures, access denials, and invalid requests stop and ask you instead of switching providers. When all endpoints fail, the usual mode rules apply; the default mode asks you, while headless Pi denies. A backup's valid allow is treated as a reviewer allow **even in `strict` mode**: configuring a backup explicitly trusts it to decide when the primary cannot answer. Fallback attempts appear in the permission review log without URLs or keys. Backup decisions are not cached, so the primary gets another chance next time. Backups receive the same permission request (including command text and target paths) and stripped conversation context; use only providers you trust with that data. If a local model produces different probability scales, test its approval thresholds before trusting it with permissions.
+AI Guard tries a backup only after an availability failure (quota or payment limit, missing model/endpoint, HTTP 409/425 conflict, connection, timeout, or server error — one table shared with the chat-model lane). The no-second-vote rule, the stop-and-ask cases, and the all-failed behavior are the same as the chat-model lane above: a real allow, deny, or uncertain decision is final, and nothing gets automatically approved by an outage. A backup's valid allow is treated as a reviewer allow **even in `strict` mode**: configuring a backup explicitly trusts it to decide when the primary cannot answer. Fallback attempts appear in the permission review log without URLs or keys. Backup decisions are not cached, so the primary gets another chance next time. Backups receive the same permission request (including command text and target paths) and stripped conversation context; use only providers you trust with that data. If a local model produces different probability scales, test its approval thresholds before trusting it with permissions.
 
 With backups configured, each endpoint gets one SDK request rather than the SDK's normal retries. Timeouts apply **per endpoint**, so set `typesafe.timeoutMs` and each backup's optional `timeoutMs` low enough for an acceptable worst-case wait. Without backups, the SDK's normal retry behavior is unchanged.
 
@@ -230,6 +235,20 @@ Each mode is two cut lines on that order — an auto-pass band, an ask band, a t
 | `deny` (hard: `high\|critical`, or missing) | deny     | deny      | deny      | deny         |
 
 The reading per mode: `strict` — the reviewer's allow is the only pass (full fail-closed automation); `default` — you judge every flag but hard danger (the resting mode and the onboarding posture — watch the reviewer work, then loosen); `lenient` — only the reviewer's active alarms ask you (soft denies and deny-leaning doubts); `permissive` — only clear high-danger requests are blocked. `lean` moves a defer across only the ask↔allow boundary, in the lean's own direction; it never appears in dialogs or notify lines (the ask is the human's judgment moment) — it lives in the `ai_guard.decision` audit record.
+
+The Jev lane reaches the same vocabulary through its three answers (`riskThreshold` defaults to 0.5):
+
+| Jev answers ↓                                                | Verdict                                     | strict | default | lenient | permissive |
+| ------------------------------------------------------------ | ------------------------------------------- | ------ | ------- | ------- | ---------- |
+| authorized, low risk, confident                              | allow                                       | allow  | allow   | allow   | allow      |
+| unauthorized, low risk, confident                            | defer + `lean: allow`                       | deny   | ask     | allow   | allow      |
+| low risk, unsure                                             | defer (neutral)                             | deny   | ask     | allow   | allow      |
+| high risk, unsure                                            | defer + `lean: deny`                        | deny   | ask     | ask     | allow      |
+| medium risk, confident (only when the line is set below 0.5) | deny soft                                   | deny   | ask     | ask     | allow      |
+| danger hit (any confidence)                                  | deny hard                                   | deny   | deny    | deny    | deny       |
+| high risk, confident                                         | deny (high or critical at the default line) | deny   | deny    | deny    | deny       |
+
+With the default line at 0.5, every decisive risk deny reads high or critical and blocks in every mode; lower the line below 0.5 to reopen a soften-able band.
 
 Rules that hold in every mode:
 

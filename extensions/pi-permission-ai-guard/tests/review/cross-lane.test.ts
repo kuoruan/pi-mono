@@ -102,7 +102,11 @@ describe("cross-lane failover", () => {
       adapters: {
         jev: createJevAdapter({
           config: {
-            typesafe: { intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.5 },
+            typesafe: {
+              intentThreshold: 0.5,
+              riskThreshold: 0.5,
+              confidenceThreshold: 0.5,
+            },
             instructions: null,
           },
           createClient: () => ({
@@ -150,7 +154,11 @@ describe("cross-lane failover", () => {
         }),
         jev: createJevAdapter({
           config: {
-            typesafe: { intentThreshold: 0.5, riskThreshold: 0.5, confidenceThreshold: 0.5 },
+            typesafe: {
+              intentThreshold: 0.5,
+              riskThreshold: 0.5,
+              confidenceThreshold: 0.5,
+            },
             instructions: null,
           },
           createClient: () => safeJev,
