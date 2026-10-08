@@ -484,7 +484,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     ]);
   });
 
-  it("model-defer mirror keeps a long clarification on one line", async () => {
+  it("model-defer mirror carries a long clarification whole", async () => {
     const { notifications, notify } = makeNotifySpy();
     const authorize = createReviewPipeline(
       makePipeline({
@@ -495,8 +495,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
               type: "text",
               text: JSON.stringify({
                 verdict: "defer",
-                reason:
-                  "this clarification is deliberately long enough that the notify copy must truncate it to stay on one line",
+                reason: "the reviewer needs the operator to clarify " + "x".repeat(200),
               }),
             },
           ]),
@@ -505,11 +504,10 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     );
     await expectVerdict(authorize, { value: "npm install x" }, { kind: "defer" });
     expect(notifications).toHaveLength(1);
-    // The clarification goes out whole: the operator must be able to
-    // answer the question, and only a runaway ramble (200+) truncates.
-    expect(notifications[0]![0]).not.toContain("\n");
+    // The clarification goes out whole: the operator has to be able to answer
+    // the question, so nothing is cut — 200+ characters included.
     expect(notifications[0]![0]).toContain(
-      "this clarification is deliberately long enough that the notify copy must truncate it to stay on one line",
+      "the reviewer needs the operator to clarify " + "x".repeat(200),
     );
     expect(notifications[0]![0]).not.toContain("[...truncated...]");
   });

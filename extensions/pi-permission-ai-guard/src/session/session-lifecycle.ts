@@ -471,15 +471,15 @@ export class SessionLifecycle {
 }
 
 /**
- * First config-load issue, truncated. Callers guarantee a non-empty list.
+ * First config-load issue, whole — the operator has to be able to read what
+ * the config failed on. Callers guarantee a non-empty list.
  *
  * @param issues - The load result's issues.
- * @returns A short parenthetical naming the failure.
+ * @returns A parenthetical naming the failure.
  */
 function formatConfigIssues(issues: LoadConfigResult["issues"]): string {
   const [first, ...rest] = issues;
   if (!first) return "unknown error";
-  const message = first.message.length > 100 ? `${first.message.slice(0, 97)}...` : first.message;
   const tail = rest.length > 0 ? ` (+${rest.length} more)` : "";
-  return `${first.path}: ${message}${tail}`;
+  return `${first.path}: ${first.message}${tail}`;
 }

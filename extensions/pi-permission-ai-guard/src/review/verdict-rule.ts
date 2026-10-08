@@ -29,13 +29,11 @@ import type {
   VerdictLean,
   VerdictOrigin,
 } from "#src/model/model-verdict.ts";
-import { truncateMiddle } from "#src/utils.ts";
 
 import {
   escalationMessage,
   machineryDenyReason,
   machineryDeferNotice,
-  NOTIFY_REASON_CEILING,
   uncertainDenyReason,
   type DenyInstructionSource,
 } from "./verdict-copy.ts";
@@ -323,7 +321,7 @@ export function resolveMapping(input: MappingInput): MappingDecision {
     emitted.kind === "defer" && original.kind === "defer"
       ? deferKind === "model-defer" && deferReason
         ? {
-            message: `reviewer asks — ${truncateMiddle(deferReason, NOTIFY_REASON_CEILING)}`,
+            message: `reviewer asks — ${deferReason}`,
             level: "info",
           }
         : deferKind !== undefined && deferKind !== "model-defer"

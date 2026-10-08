@@ -39,16 +39,13 @@ describe("human-facing messages", () => {
     expect(escalationMessage(DENY, "low", "denied")).not.toContain("instead");
   });
 
-  it("escalationMessage carries a sane reason whole; only a ramble hits the ceiling", () => {
-    // ~150 is the prompt's anchor for a concise sentence — comfortably
-    // under the 200 display ceiling.
-    const sane = "x".repeat(120);
-    expect(escalationMessage({ kind: "deny", reason: sane }, "low", "denied")).toContain(sane);
+  it("escalationMessage carries the reason whole, however long it runs", () => {
+    // A runaway ramble is the operator's only warning of what the reviewer
+    // objected to — it is not cut, in either notice.
     const ramble = "y".repeat(400);
     const message = escalationMessage({ kind: "deny", reason: ramble }, "low", "denied");
-    expect(message).not.toContain("\n");
-    expect(message).toContain("[...truncated...]");
-    expect(message).toContain("yyy");
+    expect(message).toContain(ramble);
+    expect(message).not.toContain("[...truncated...]");
   });
 
   it("machineryDenyReason names the failure kind and the mode, tolerating none", () => {

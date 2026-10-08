@@ -459,6 +459,27 @@ describe("createAiGuardExtension lifecycle", () => {
     warnSpy.mockRestore();
   });
 
+  it("a fail-safe start names the config issue whole", () => {
+    const longMessage = "x".repeat(300);
+    const { pi } = installExtension(undefined, {
+      loadConfig: () => ({
+        config: undefined,
+        issues: [{ path: "model", message: longMessage }],
+        outcome: "failed" as const,
+      }),
+    });
+
+    const ctx = makeSessionCtx();
+    pi.fire("session_start", {}, ctx);
+
+    // The operator has to read what the config failed on to fix it, so the
+    // issue goes out whole — never clipped to a "..." summary.
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining(`model: ${longMessage}`),
+      "error",
+    );
+  });
+
   it("a repeated fail-safe session_start notifies again (each re-dispatch is a fresh absence)", () => {
     const { pi } = installExtension(undefined, {
       loadConfig: () => ({ config: undefined, issues: [], outcome: "none" as const }),

@@ -9,7 +9,6 @@ import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 import type { Mode } from "#src/config/config-schema.ts";
 import type { MachineryFailureKind } from "#src/model/machinery-kinds.ts";
 import type { RiskLevel } from "#src/model/model-verdict.ts";
-import { truncateMiddle } from "#src/utils.ts";
 
 /**
  * The deny reason when the reviewer's own uncertainty is denied with no
@@ -109,15 +108,6 @@ export function withAgentInstruction(
 }
 
 /**
- * Defensive ceiling for model reasons in notify copies. The prompt
- * anchors reasons at ~150 characters (a concise sentence); the ceiling is
- * the hard display bound when a model runs long — 200 keeps the head+tail
- * view readable while preserving the conclusion and the evidence tail.
- * The audit record keeps the full text regardless.
- */
-export const NOTIFY_REASON_CEILING = 200;
-
-/**
  * Format a review latency for an operator-facing notify line: whole
  * milliseconds under a second, one-decimal seconds above. The single
  * decimal keeps the tail short at notify grade (`(1.2s)` reads faster
@@ -214,16 +204,16 @@ export function escalationMessage(
   // "Warning:" prefix at warning level — "Warning: [ai-guard] … risk: x"
   // would double up. Parens carry the detail colon-free.
   //
-  // The reason goes out whole — the operator must be able to read (and for
-  // a clarification, answer) the model's full text; only a pathological
-  // ramble hits the ceiling. The audit record keeps the full text either way.
+  // The reason goes out whole — the operator must be able to read (and,
+  // for a clarification, answer) the model's full text, however long it
+  // runs. The audit record keeps it too.
   //
   // Multi-part construction: segments carry no leading spaces — the join
   // owns the separator, so an absent segment can never leave a gap.
   return [
     `reviewer denied this request`,
     riskLevel ? `(risk ${riskLevel})` : undefined,
-    reason ? `— ${truncateMiddle(reason, NOTIFY_REASON_CEILING)}` : undefined,
+    reason ? `— ${reason}` : undefined,
     // The tail appears only when the outcome diverges from the fact
     // sentence: "denied this request" needs no "— denied" echo; "asking
     // you instead" corrects the operator's read of the sentence (the
