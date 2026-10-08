@@ -148,10 +148,7 @@ async function executeCall(
       maxTokens,
       // Provider-level retry (429/408/409/5xx per pi-ai's classifier,
       // backoff and retry-after honored) — the signal spans every attempt,
-      // so timeoutMs stays the TOTAL budget, retries included. The
-      // empty-reply retry in reviewModel passes 0: that call is itself the
-      // retry budget being spent, and a provider error there has none left
-      // (max 3 requests per review — see the retry loop in reviewModel).
+      // so timeoutMs stays the TOTAL budget, retries included.
       maxRetries: providerRetries,
     };
     // reasoning: "off" → don't pass reasoning option → pi-ai sets
@@ -241,9 +238,9 @@ export async function reviewModel(
   let text = contentText(result.reply.content, "");
   // A provider error is not model silence. With backups configured, don't
   // repeat an auth/policy refusal before checking whether failover is safe:
-  // `providerRetries === 0` is how the adapter reports "backups exist" (it
-  // passes `singleEndpoint ? 1 : 0`), so an error reply is left to failover
-  // classification instead of getting a second local attempt.
+  // the adapter passes `providerRetries = 0` whenever the walk has backups,
+  // so an error reply is left to failover classification instead of getting
+  // a second local attempt.
   if (
     !text.trim() &&
     result.latencyMs < timeoutMs / 2 &&
@@ -313,9 +310,7 @@ export async function reviewModel(
  * @param result - The successful call whose reply carried no text.
  * @returns The diagnostic payload for the decision record.
  */
-export function buildEmptyReplyDiagnostic(
-  result: CallResult & { ok: true },
-): ReviewOutcomeDiagnostic {
+function buildEmptyReplyDiagnostic(result: CallResult & { ok: true }): ReviewOutcomeDiagnostic {
   return {
     stopReason: result.reply.stopReason ?? null,
     rawStopReason: result.reply.rawStopReason ?? null,
@@ -334,7 +329,7 @@ export function buildEmptyReplyDiagnostic(
  * @param latencyMs - The call latency to record.
  * @param attempts - How many executeCall attempts produced this reply.
  */
-export function emitEmptyReplyDiagnostic(
+function emitEmptyReplyDiagnostic(
   ctx: AuditCorrelation,
   diagnostic: ReviewOutcomeDiagnostic,
   latencyMs: number,

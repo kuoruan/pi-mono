@@ -25,11 +25,8 @@ import type {
 } from "@gotgenes/pi-permission-system";
 
 import type { BreakerVerdict } from "#src/config/config-schema.ts";
+import { PRE_CALL_MACHINERY_KINDS, type PreCallMachineryKind } from "#src/model/machinery-kinds.ts";
 import type { ReviewOutcome, VerdictKind } from "#src/model/model-verdict.ts";
-import {
-  PRE_CALL_MACHINERY_KINDS,
-  type PreCallMachineryKind,
-} from "#src/review/machinery-kinds.ts";
 import { normalizeAndRedactText } from "#src/utils.ts";
 
 /** The audit-log correlation slice every call context carries (log + request id). */

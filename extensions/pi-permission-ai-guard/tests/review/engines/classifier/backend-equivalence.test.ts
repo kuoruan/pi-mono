@@ -25,7 +25,7 @@ import { makeDetails } from "#test/fixtures.ts";
 
 import { errorClassifierReply, registryFacade } from "./stubs.ts";
 
-const spec: AttemptSpec = { index: 0, singleEndpoint: false, timeoutMs: 5_000 };
+const spec: AttemptSpec = { hasFailover: true, timeoutMs: 5_000 };
 
 function attemptContext() {
   return {
@@ -42,6 +42,7 @@ const registryEndpoint: ClassifierPoolEndpoint = {
   provider: "typesafe",
   model: "jev-latest",
   timeoutMs: 5_000,
+  id: "typesafe/jev-latest",
 };
 
 const directEndpoint: ClassifierPoolEndpoint = {
@@ -50,6 +51,7 @@ const directEndpoint: ClassifierPoolEndpoint = {
   provider: { type: "typesafe", baseUrl: "https://x.example", apiKey: "k" },
   model: "jev-1.13",
   timeoutMs: 5_000,
+  id: "typesafe/jev-1.13",
 };
 
 /**

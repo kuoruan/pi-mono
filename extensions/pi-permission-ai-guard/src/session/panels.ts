@@ -14,8 +14,8 @@ import type { LogEntry } from "#src/audit/decision-log-reader.ts";
 import { buildReportCandidates } from "#src/audit/report.ts";
 import type { NotifyFn } from "#src/notice.ts";
 import type { DenyRecord } from "#src/review/review-pipeline.ts";
+import type { AiGuardUiContext } from "#src/session/command/ui-context.ts";
 
-import type { AiGuardUiContext } from "./command/ui-context.ts";
 import { type RecordDetail, showRecordDetail } from "./record-detail.ts";
 
 /**

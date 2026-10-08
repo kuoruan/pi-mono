@@ -25,6 +25,7 @@ import {
 } from "#src/audit/events.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import { effectiveOverride, type SessionOverrides } from "#src/config/session-overrides.ts";
+import { PRE_CALL_MACHINERY_KINDS } from "#src/model/machinery-kinds.ts";
 import type { NotifyFn } from "#src/notice.ts";
 import { type DriftWarnState, openAsk } from "#src/review/request/ask.ts";
 import {
@@ -39,7 +40,6 @@ import { errorMessage, normalizeAndRedactText, shortHash } from "#src/utils.ts";
 
 import { accountModelOutcome, type CircuitBreaker, consumeTrip } from "./circuit-breaker.ts";
 import { releaseMachineryGate, releaseVerdictGate } from "./disposition.ts";
-import { PRE_CALL_MACHINERY_KINDS } from "./machinery-kinds.ts";
 import { isMachineryFailure, type ReviewerEngine } from "./reviewer-engine.ts";
 import type { VerdictCache } from "./verdict-cache.ts";
 import { withAgentInstruction } from "./verdict-copy.ts";

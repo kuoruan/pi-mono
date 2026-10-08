@@ -18,16 +18,9 @@ import type {
 import { isMachineryFailure } from "#src/review/reviewer-engine.ts";
 import { makeDetails } from "#test/fixtures.ts";
 
-function recordingLog() {
-  const events: Array<{ event: string; details: Record<string, unknown> }> = [];
-  const log = {
-    review: (event: string, details: Record<string, unknown>) => events.push({ event, details }),
-    debug: (event: string, details: Record<string, unknown>) => events.push({ event, details }),
-  };
-  return { events, log };
-}
+import { type RecordingLogSink, makeMergedRecordingLog } from "./pipeline-helpers.ts";
 
-const ctx = (log: ReturnType<typeof recordingLog>["log"]): EngineCallContext => ({
+const ctx = (log: RecordingLogSink): EngineCallContext => ({
   transcript: { trustedIntent: ["x"], toolCalls: [], strippedCount: 0 },
   request: { ask: buildAskContext(makeDetails({ value: "x" }), "/project"), target: "x" },
   log,
@@ -39,6 +32,8 @@ const chatEndpoint = (model: string, timeoutMs = 1000): PoolEndpoint => ({
   provider: "anthropic",
   model,
   timeoutMs,
+  // The lane's bare audit identity — the pool appends the walk position.
+  id: `anthropic/${model}`,
 });
 
 const classifierEndpoint = (model: string, timeoutMs = 1000): PoolEndpoint => ({
@@ -47,6 +42,7 @@ const classifierEndpoint = (model: string, timeoutMs = 1000): PoolEndpoint => ({
   provider: { type: "typesafe", baseUrl: "https://x.example", apiKey: "k" },
   model,
   timeoutMs,
+  id: `typesafe/${model}`,
 });
 
 /**
@@ -64,18 +60,16 @@ const answered = (verdict: "allow" | "deny" | "defer", modelId: string): EngineR
 /**
  * Stub adapter driven by a per-endpoint script.
  *
- * @param script - Maps (endpoint, index) to the scripted disposition.
+ * @param script - Maps an endpoint to the scripted disposition.
  * @returns A lane adapter replaying the script.
  */
-function stubAdapter(
-  script: (endpoint: PoolEndpoint, index: number) => AttemptResult,
-): LaneAdapter {
-  return { attempt: async (endpoint, _ctx, spec) => script(endpoint, spec.index) };
+function stubAdapter(script: (endpoint: PoolEndpoint) => AttemptResult): LaneAdapter {
+  return { attempt: async (endpoint, _ctx, _spec) => script(endpoint) };
 }
 
 function pool(
   endpoints: PoolEndpoint[],
-  script: (endpoint: PoolEndpoint, index: number) => AttemptResult,
+  script: (endpoint: PoolEndpoint) => AttemptResult,
   lanes: Array<PoolEndpoint["lane"]> = ["chat", "classifier"],
   now?: () => number,
 ) {
@@ -97,7 +91,7 @@ describe("reviewer pool", () => {
       calls++;
       return { kind: "answered", result: answered("allow", "m") };
     });
-    const { events, log } = recordingLog();
+    const { events, log } = makeMergedRecordingLog();
     const result = await engine.review(ctx(log));
     if (isMachineryFailure(result)) throw new Error("unexpected machinery");
     expect(result.outcome.verdict.kind).toBe("allow");
@@ -107,16 +101,15 @@ describe("reviewer pool", () => {
   });
 
   it("advances in order on retryable, marks backup verdicts uncached, and audits each hop", async () => {
-    const { events, log } = recordingLog();
-    const engine = pool([chatEndpoint("a"), classifierEndpoint("b"), chatEndpoint("c")], (_e, i) =>
-      i < 2
-        ? {
+    const { events, log } = makeMergedRecordingLog();
+    const engine = pool([chatEndpoint("a"), classifierEndpoint("b"), chatEndpoint("c")], (e) =>
+      e.model === "c"
+        ? { kind: "answered", result: answered("allow", e.id) }
+        : {
             kind: "retryable",
-            modelId: `m${i}`,
             reason: "http-429",
-            finalize: () => answered("defer", `m${i}`),
-          }
-        : { kind: "answered", result: answered("allow", "m2") },
+            finalize: () => answered("defer", e.id),
+          },
     );
     const result = await engine.review(ctx(log));
     if (isMachineryFailure(result)) throw new Error("unexpected machinery");
@@ -126,7 +119,8 @@ describe("reviewer pool", () => {
     expect(events[0]?.details).toMatchObject({
       failedEndpoint: 0,
       nextEndpoint: 1,
-      modelId: "m0",
+      // The failed endpoint's own identity, position included.
+      modelId: "anthropic/a",
       reason: "http-429",
     });
     expect(events[1]?.details).toMatchObject({ failedEndpoint: 1, nextEndpoint: 2 });
@@ -143,7 +137,7 @@ describe("reviewer pool", () => {
       kind: "terminal",
       result: failure,
     }));
-    const { events, log } = recordingLog();
+    const { events, log } = makeMergedRecordingLog();
     const result = await engine.review(ctx(log));
     expect(isMachineryFailure(result)).toBe(true);
     expect(events).toEqual([]);
@@ -151,15 +145,14 @@ describe("reviewer pool", () => {
 
   it("invokes finalize on exhaustion and stamps wall-clock latency", async () => {
     let elapsed = 0;
-    const { events, log } = recordingLog();
+    const { events, log } = makeMergedRecordingLog();
     const ticking: LaneAdapter = {
       attempt: async (endpoint, c, spec) => {
         elapsed += 2_250;
-        return stubAdapter((_e, i) => ({
+        return stubAdapter((e) => ({
           kind: "retryable",
-          modelId: `m${i}`,
           reason: "http-503",
-          finalize: () => answered("defer", `m${i}`),
+          finalize: () => answered("defer", e.id),
         })).attempt(endpoint, c, spec);
       },
     };
@@ -171,7 +164,7 @@ describe("reviewer pool", () => {
     const result = await engine.review(ctx(log));
     if (isMachineryFailure(result)) throw new Error("unexpected machinery");
     expect(result.outcome.verdict.kind).toBe("defer");
-    expect(result.modelId).toBe("m1");
+    expect(result.modelId).toBe("anthropic/b (fallback 1)");
     expect(result.outcome.latencyMs).toBe(4_500);
     // Exhaustion settles through ship: the backup verdict never caches.
     expect(result.cacheable).toBe(false);
@@ -185,12 +178,12 @@ describe("reviewer pool", () => {
       modelId: "m1",
       detail: "m1",
     };
-    const engine = pool([chatEndpoint("a"), chatEndpoint("b")], (_e, i) =>
-      i === 0
-        ? { kind: "retryable", modelId: "m0", reason: "timeout", finalize: () => failure }
+    const engine = pool([chatEndpoint("a"), chatEndpoint("b")], (e) =>
+      e.model === "a"
+        ? { kind: "retryable", reason: "timeout", finalize: () => failure }
         : { kind: "terminal", result: failure },
     );
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     const result = await engine.review(ctx(log));
     expect(isMachineryFailure(result)).toBe(true);
     expect("cacheable" in result).toBe(false);
@@ -201,11 +194,10 @@ describe("reviewer pool", () => {
     const seenTimeouts: number[] = [];
     // Unscoped from the parent on purpose: shares the file-level pin shape.
     // eslint-disable-next-line unicorn/consistent-function-scoping
-    const script = (_endpoint: PoolEndpoint, index: number): AttemptResult => ({
+    const script = (_endpoint: PoolEndpoint): AttemptResult => ({
       kind: "retryable",
-      modelId: `m${index}`,
       reason: "http-503",
-      finalize: () => answered("defer", `m${index}`),
+      finalize: () => answered("defer", "m"),
     });
     const trimming: LaneAdapter = {
       attempt: async (endpoint, c, spec) => {
@@ -216,7 +208,7 @@ describe("reviewer pool", () => {
         return stubAdapter(script).attempt(endpoint, c, spec);
       },
     };
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     // Budget 12s over three 10s endpoints, clock advancing 5s per hop:
     // 12s→10s, then 7s→7s; remaining 2s meets the floor, so all three run
     // with trimmed budgets and the last failure (index 2) finalizes.
@@ -228,7 +220,7 @@ describe("reviewer pool", () => {
     }).review(ctx(log));
     if (isMachineryFailure(result)) throw new Error("unexpected machinery");
     expect(result.outcome.verdict.kind).toBe("defer");
-    expect(result.modelId).toBe("m2");
+    expect(result.modelId).toBe("anthropic/c (fallback 2)");
     expect(seenTimeouts).toEqual([10_000, 7_000, 2_000]);
   });
 
@@ -250,9 +242,11 @@ describe("reviewer pool", () => {
         if (tag === "first-i0") await gate;
         return {
           kind: "retryable",
-          modelId: tag,
           reason: "http-503",
-          finalize: () => answered("defer", tag),
+          // The tag rides the verdict kind, not the identity: the pool owns
+          // identity stamping, so both walks would end on the same endpoint's
+          // id — only a review-local fact tells them apart.
+          finalize: () => answered(tag.startsWith("first-") ? "deny" : "allow", "m"),
         };
       },
     };
@@ -261,7 +255,7 @@ describe("reviewer pool", () => {
       adapters: { chat: racing, classifier: racing },
       walkBudgetMs: 60_000,
     });
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     const first = racingPool.review(ctx(log));
     await Promise.resolve(); // first review reaches its gate
     const second = racingPool.review(ctx(log));
@@ -270,24 +264,23 @@ describe("reviewer pool", () => {
     const firstResult = await first;
     if (isMachineryFailure(firstResult) || isMachineryFailure(secondResult))
       throw new Error("unexpected machinery");
-    expect(secondResult.modelId).toBe("second-i1");
-    expect(firstResult.modelId).toBe("first-i1");
+    expect(secondResult.outcome.verdict.kind).toBe("allow");
+    expect(firstResult.outcome.verdict.kind).toBe("deny");
   });
 
   it("stops the walk when the remaining budget falls below the floor", async () => {
     let elapsed = 0;
     const tickAdapter: LaneAdapter = {
-      attempt: async (endpoint, _c, spec) => {
+      attempt: async (endpoint, _c, _spec) => {
         elapsed += 9_000;
         return {
           kind: "retryable",
-          modelId: `m${spec.index}`,
           reason: "http-503",
-          finalize: () => answered("defer", `m${spec.index}`),
+          finalize: () => answered("defer", endpoint.id),
         };
       },
     };
-    const { events, log } = recordingLog();
+    const { events, log } = makeMergedRecordingLog();
     // Budget 12s: after the first 9s attempt 3s remain — still above the
     // 2s floor, so the second attempt runs; its 9s push remaining below
     // the floor and the walk finalizes on the second failure without
@@ -299,7 +292,7 @@ describe("reviewer pool", () => {
       now: () => elapsed,
     }).review(ctx(log));
     if (isMachineryFailure(result)) throw new Error("unexpected machinery");
-    expect(result.modelId).toBe("m1");
+    expect(result.modelId).toBe("anthropic/b (fallback 1)");
     // One hop audited (0→1); the third endpoint never runs.
     expect(events).toHaveLength(1);
     expect(events[0]?.details).toMatchObject({ failedEndpoint: 0, nextEndpoint: 1 });
@@ -314,11 +307,10 @@ describe("reviewer pool", () => {
     const seen: number[] = [];
     // Unscoped from the parent on purpose: shares the file-level pin shape.
     // eslint-disable-next-line unicorn/consistent-function-scoping
-    const script = (_endpoint: PoolEndpoint, index: number): AttemptResult => ({
+    const script = (_endpoint: PoolEndpoint): AttemptResult => ({
       kind: "retryable",
-      modelId: `m${index}`,
       reason: "timeout",
-      finalize: () => answered("defer", `m${index}`),
+      finalize: () => answered("defer", "m"),
     });
     const recording: LaneAdapter = {
       attempt: async (endpoint, c, spec) => {
@@ -327,7 +319,7 @@ describe("reviewer pool", () => {
         return stubAdapter(script).attempt(endpoint, c, spec);
       },
     };
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     await createReviewerPool({
       endpoints: [chatEndpoint("a", 5_000), chatEndpoint("b", 5_000)],
       adapters: { chat: recording, classifier: recording },
@@ -336,25 +328,24 @@ describe("reviewer pool", () => {
     expect(seen).toEqual([5_000, 3_000]);
   });
 
-  it("passes singleEndpoint through to the adapter", async () => {
+  it("passes the walk-level hasFailover through to the adapter", async () => {
     const seen: boolean[] = [];
     let first = true;
     const adapter: LaneAdapter = {
-      attempt: async (_e, _c, spec) => {
-        seen.push(spec.singleEndpoint);
+      attempt: async (endpoint, _c, spec) => {
+        seen.push(spec.hasFailover);
         if (first) {
           first = false;
-          return { kind: "answered", result: answered("allow", "m") };
+          return { kind: "answered", result: answered("allow", endpoint.id) };
         }
         return {
           kind: "retryable",
-          modelId: "m",
           reason: "timeout",
-          finalize: () => answered("allow", "m"),
+          finalize: () => answered("allow", endpoint.id),
         };
       },
     };
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     await createReviewerPool({
       endpoints: [chatEndpoint("a")],
       adapters: { chat: adapter, classifier: adapter },
@@ -364,7 +355,11 @@ describe("reviewer pool", () => {
       endpoints: [chatEndpoint("a"), chatEndpoint("b")],
       adapters: { chat: adapter, classifier: adapter },
     }).review(ctx(log));
-    // Single pool: one attempt (true). Two-endpoint pool: both attempts (false, false).
-    expect(seen).toEqual([true, false, false]);
+    // The flag is a property of the walk, not of the position: a
+    // single-endpoint pool reports false (its lone attempt keeps the
+    // transport's retries), and EVERY attempt of a two-endpoint pool reports
+    // true — the walk is the retry, so even the last endpoint runs without
+    // the transport's own retries spending its budget again.
+    expect(seen).toEqual([false, true, true]);
   });
 });

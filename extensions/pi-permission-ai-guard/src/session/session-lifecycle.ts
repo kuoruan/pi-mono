@@ -66,9 +66,8 @@ import type { SessionManagerLike } from "#src/review/request/transcript-stripper
 import { type DenyRecord, type ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
 import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
+import type { AiGuardUiContext } from "#src/session/command/ui-context.ts";
 import { errorMessage, isObjectRecord } from "#src/utils.ts";
-
-import type { AiGuardUiContext } from "./command/ui-context.ts";
 
 /**
  * Host-provided per-session services — immutable once the session starts.

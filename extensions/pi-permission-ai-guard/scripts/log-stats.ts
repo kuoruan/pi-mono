@@ -30,6 +30,7 @@
 import { parseArgs } from "node:util";
 
 import { readLogLines, reviewLogPath } from "#src/audit/decision-log-reader.ts";
+import { DECISION_EVENT } from "#src/audit/events.ts";
 import { readTailLinesFromFile } from "#src/audit/log-tail-fs.ts";
 
 /** A repeated-ask group's running aggregate at the model gate. */
@@ -66,7 +67,7 @@ function main(): void {
   }
 
   // ── 1. Model-defer lean distribution ──
-  const modelGates = records.filter((r) => r.event === "ai_guard.decision" && r.gate === "model");
+  const modelGates = records.filter((r) => r.event === DECISION_EVENT && r.gate === "model");
   const defers = modelGates.filter((r) => r.verdict === "defer");
   const leanCount = new Map<string, number>();
   for (const d of defers) {

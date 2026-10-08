@@ -1,9 +1,8 @@
 /**
- * Classifier lane endpoint construction. Owns every lane-shape fact the
- * assembler used to re-derive: which provider shapes and `modelType`
- * values address this lane, which registry backends must resolve before
- * registration, and how the two backends (direct SDK vs pi's built-in
- * classifier) prebuild their clients.
+ * Classifier lane endpoint construction. Owns the lane-shape facts: which
+ * provider shapes and `modelType` values address this lane, which registry
+ * backends must resolve before registration, and how the two backends
+ * (direct SDK vs pi's built-in classifier) prebuild their clients.
  *
  * Nothing downstream of this module branches on lane or backend shape —
  * the pool walks endpoints, the adapter attempts them.
@@ -36,12 +35,15 @@ type ClassifierLookup = (
   model: string,
 ) => ClassifierModel<string> | undefined;
 
+/** Sink for degraded (non-primary) rejections. */
+type ClassifierSkipSink = (issue: ConfigIssue) => void;
+
 /** What a lane must know to admit one configured endpoint into the pool. */
 export interface ClassifierAdmission {
   /** Catalog probe; absent means the registry cannot answer (old pi). */
   probe?: ClassifierProbe;
   /** Sink for degraded (non-primary) rejections. */
-  onSkipped?: (issue: ConfigIssue) => void;
+  onSkipped?: ClassifierSkipSink;
 }
 
 /**
@@ -65,6 +67,8 @@ export function resolveClassifierEntry(
   position: number,
   admission?: ClassifierAdmission,
 ): ClassifierPoolEndpoint[] {
+  // Two spellings, one built here: a registry endpoint is named by Pi's
+  // provider id, the direct backend by the SDK protocol (`typesafe`).
   const endpoint: ClassifierPoolEndpoint =
     typeof target.provider === "object"
       ? {
@@ -73,6 +77,7 @@ export function resolveClassifierEntry(
           provider: target.provider,
           model: target.model,
           timeoutMs: target.timeoutMs,
+          id: `typesafe/${target.model}`,
         }
       : {
           lane: "classifier",
@@ -80,18 +85,18 @@ export function resolveClassifierEntry(
           provider: target.provider,
           model: target.model,
           timeoutMs: target.timeoutMs,
+          id: `${target.provider}/${target.model}`,
         };
   if (endpoint.backend !== "registry") return [endpoint];
   // No admission means the caller wants pure routing (every endpoint
   // admitted as written) — the structural gate is opt-in.
   if (!admission) return [endpoint];
-  const id = `${endpoint.provider}/${endpoint.model}`;
   if (!admission.probe) {
     return reject(
       position,
       admission.onSkipped,
       `registry classifier fallback needs pi with classifier support — skipped`,
-      `registry classifier primary (${id}) needs pi with classifier support — upgrade pi or use a direct System One provider`,
+      `registry classifier primary (${endpoint.id}) needs pi with classifier support — upgrade pi or use a direct System One provider`,
       "",
     );
   }
@@ -99,8 +104,8 @@ export function resolveClassifierEntry(
     return reject(
       position,
       admission.onSkipped,
-      `registry classifier model ${id} not found in pi's model catalog — skipped`,
-      `registry classifier primary (${id}) not found in pi's model catalog — check the provider id and model`,
+      `registry classifier model ${endpoint.id} not found in pi's model catalog — skipped`,
+      `registry classifier primary (${endpoint.id}) not found in pi's model catalog — check the provider id and model`,
       ".model",
     );
   }
@@ -228,10 +233,9 @@ export function classifierProbe(registry: ModelRegistryLike): ClassifierProbe | 
  */
 function reject(
   position: number,
-  onSkipped: ((issue: ConfigIssue) => void) | undefined,
+  onSkipped: ClassifierSkipSink | undefined,
   fallbackMessage: string,
   primaryMessage: string,
-  /** Suffix naming the offending field (a catalog miss is the model's). */
   field: string,
 ): ClassifierPoolEndpoint[] {
   if (position === 0) throw new Error(primaryMessage);

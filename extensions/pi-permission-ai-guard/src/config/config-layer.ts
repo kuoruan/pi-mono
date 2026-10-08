@@ -30,6 +30,7 @@ import { errorMessage, isObjectRecord } from "#src/utils.ts";
 
 import {
   type AiGuardConfig,
+  CLASSIFIER_ALIAS_KEY,
   EXTENSION_ID,
   configSchema,
   uncoveredInstructionLanes,
@@ -304,23 +305,23 @@ function foldLegacyAlias(
   path: string,
   issues: ConfigIssue[],
 ): void {
-  const alias = layer.typesafe;
+  const alias = layer[CLASSIFIER_ALIAS_KEY];
   if (isObjectRecord(alias) && layer.classifier === undefined) {
     issues.push({
-      path: "typesafe",
-      message: "`typesafe` is deprecated — rename it to `classifier`",
+      path: CLASSIFIER_ALIAS_KEY,
+      message: `\`${CLASSIFIER_ALIAS_KEY}\` is deprecated — rename it to \`classifier\``,
       sourcePath: path,
     });
     const { timeoutMs, ...thresholds } = alias;
     if (timeoutMs !== undefined) {
       issues.push({
-        path: "typesafe.timeoutMs",
-        message: "`typesafe.timeoutMs` is ignored — set the top-level `timeoutMs` instead",
+        path: `${CLASSIFIER_ALIAS_KEY}.timeoutMs`,
+        message: `\`${CLASSIFIER_ALIAS_KEY}.timeoutMs\` is ignored — set the top-level \`timeoutMs\` instead`,
         sourcePath: path,
       });
     }
     layer.classifier = thresholds;
-    delete layer.typesafe;
+    delete layer[CLASSIFIER_ALIAS_KEY];
   }
   const current = layer.classifier;
   if (isObjectRecord(current) && current.timeoutMs !== undefined) {
@@ -385,6 +386,11 @@ export function expandEnvRefs(
     }
   }
 }
+
+// ── Leaf provenance: how a save knows what a leaf looked like on disk ──
+// One concept, four predicates — `readRawLayer` → `restorePlaceholders` →
+// `leafEquals`, all walking with `descend`'s read/write split. Read them
+// together; none is meaningful alone.
 
 /**
  * Whether a disk leaf counts as equal to a snapshot leaf: identical, or
@@ -898,9 +904,10 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
 /**
  * A layer's config file parsed, but NOT env-expanded: the write path needs
  * the raw `${VAR}` texts as the placeholder provenance (see
- * {@link restorePlaceholders}). An unreadable or malformed file reads as
- * undefined — a layer the loader skips cannot conflict with this write, so it
- * is the loader's problem, not the save's.
+ * {@link restorePlaceholders}, and the leaf-provenance note above
+ * `leafEquals`). An unreadable or malformed file reads as undefined — a
+ * layer the loader skips cannot conflict with this write, so it is the
+ * loader's problem, not the save's.
  *
  * @param dir - The layer's config directory.
  * @returns The file path plus its parsed object, if any.
@@ -1026,16 +1033,16 @@ function editLayerFile(
   // `typesafe` leaf and the loop above never touches it. Leaving it in place
   // would make the written file self-contradictory on the next load (both
   // keys is a schema error), so the save migrates it out.
-  if (readPath(parsed.value, ["typesafe"]) !== MISSING) {
+  if (readPath(parsed.value, [CLASSIFIER_ALIAS_KEY]) !== MISSING) {
     // `modify` deletes only the FIRST matching key while the loader reads the
     // LAST, and JSONC allows the key twice. Delete until none remain: a copy
     // left behind would sit beside the `classifier` key this save writes, and
     // the final gate would refuse with a "shape conflict" nobody can act on.
     for (;;) {
-      running = applyEdits(running, modify(running, ["typesafe"], undefined, {}));
+      running = applyEdits(running, modify(running, [CLASSIFIER_ALIAS_KEY], undefined, {}));
       changed = true;
       const current = parseLayerText(running);
-      if (!current.ok || readPath(current.value, ["typesafe"]) === MISSING) break;
+      if (!current.ok || readPath(current.value, [CLASSIFIER_ALIAS_KEY]) === MISSING) break;
     }
   }
 

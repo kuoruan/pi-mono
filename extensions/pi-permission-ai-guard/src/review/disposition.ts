@@ -26,12 +26,12 @@ import type { AuthorizerLog, AuthorizerVerdict } from "@gotgenes/pi-permission-s
 import { type DecisionRecordEntry, mapped } from "#src/audit/decision-record.ts";
 import { DECISION_EVENT } from "#src/audit/events.ts";
 import type { Mode } from "#src/config/config-schema.ts";
+import type { PreCallMachineryKind } from "#src/model/machinery-kinds.ts";
 import type { RiskLevel } from "#src/model/model-verdict.ts";
 import type { NotifyFn } from "#src/notice.ts";
 import { isBoundedDelegationSurface } from "#src/review/request/ask.ts";
 
 import { type CircuitBreaker } from "./circuit-breaker.ts";
-import type { PreCallMachineryKind } from "./machinery-kinds.ts";
 import {
   approvalNotice,
   machineryDenyReason,

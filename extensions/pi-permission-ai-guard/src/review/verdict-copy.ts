@@ -7,10 +7,9 @@
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import type { Mode } from "#src/config/config-schema.ts";
+import type { MachineryFailureKind } from "#src/model/machinery-kinds.ts";
 import type { RiskLevel } from "#src/model/model-verdict.ts";
 import { truncateMiddle } from "#src/utils.ts";
-
-import type { MachineryFailureKind } from "./machinery-kinds.ts";
 
 /**
  * The deny reason when the reviewer's own uncertainty is denied with no

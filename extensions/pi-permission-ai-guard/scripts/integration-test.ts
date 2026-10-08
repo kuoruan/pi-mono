@@ -32,6 +32,7 @@ import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type {
+  Authorizer,
   AuthorizerLog,
   AuthorizerVerdict,
   PermissionQuery,
@@ -39,6 +40,7 @@ import type {
   PromptPermissionDetails,
 } from "@gotgenes/pi-permission-system";
 
+import { DECISION_EVENT, MODEL_REPLY_EVENT } from "#src/audit/events.ts";
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
 import type { ModelRegistryLike } from "#src/model/model-registry.ts";
 import { buildReviewerPool } from "#src/review/build-pool.ts";
@@ -299,7 +301,7 @@ function buildHarness(
   apiKey: string,
   providerInstance: AnyProvider | null, // null on the classifier path (no registry)
 ): {
-  authorize: ReturnType<typeof createReviewPipeline>;
+  authorize: Authorizer["authorize"];
   log: AuthorizerLog & { events: LogEvent[] };
 } {
   // A registry with no models: chat endpoints resolve to model-unresolved
@@ -428,7 +430,7 @@ async function runCase(
       `  ${icon} ${tc.name}: expected ${expected.join("|")} got ${verdict.kind}${detail}`,
     );
 
-    const decision = log.events.find((e) => e.event === "ai_guard.decision")?.details;
+    const decision = log.events.find((e) => e.event === DECISION_EVENT)?.details;
     if (decision) {
       const parts = [
         `gate=${decision.gate}`,
@@ -442,7 +444,7 @@ async function runCase(
       // (timeout/call-failed). For clean verdicts the full JSON is still
       // useful for spotting parser-tolerated quirks, so pull it from the
       // model_reply debug event when available.
-      const replyEvent = log.events.find((e) => e.event === "ai_guard.model_reply")?.details;
+      const replyEvent = log.events.find((e) => e.event === MODEL_REPLY_EVENT)?.details;
       const fullText = replyEvent?.rawReply;
       const recorded = decision.rawReply;
       if (fullText) {

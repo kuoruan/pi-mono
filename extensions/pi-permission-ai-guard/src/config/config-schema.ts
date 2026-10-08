@@ -196,12 +196,19 @@ const retiredTimeoutMsSchema = z.number().int().min(1).max(300_000).optional();
 
 /**
  * A classifier threshold block as written. The current `classifier` key and
- * its deprecated alias `typesafe` share this shape; the transform folds the
- * alias into `classifier`.
+ * its deprecated alias share this shape; the transform folds the alias into
+ * `classifier`.
  */
 const classifierBlockSchema = classifierThresholdsSchema.extend({
   timeoutMs: retiredTimeoutMsSchema,
 });
+
+/**
+ * The deprecated spelling of the `classifier` block: one name for the three
+ * sites that fold it (this schema's refine/transform, the loader's per-layer
+ * fold, and the save path's leaf removal).
+ */
+export const CLASSIFIER_ALIAS_KEY = "typesafe";
 
 const configBaseSchema = z.object({
   model: z.string().min(1),
@@ -249,7 +256,7 @@ const configBaseSchema = z.object({
   // refine time (a default would always materialize one of them); the
   // legacy-key fold below then fills the winner, and defaults apply to that.
   classifier: classifierBlockSchema.optional(),
-  typesafe: classifierBlockSchema.optional(),
+  [CLASSIFIER_ALIAS_KEY]: classifierBlockSchema.optional(),
 
   // How the link disposes the reviewer's non-allow verdicts (the leniency
   // ladder, strictest first). Hard-tier denies (riskLevel high|critical,
@@ -334,13 +341,13 @@ const configShapeSchema = z
           "modelType applies to registry (string) providers only — remove it from this direct System One config",
       });
     }
-    // `typesafe` is the deprecated alias of `classifier`. Both written is
-    // a contradiction the operator must resolve — never silently pick one.
-    if (config.classifier !== undefined && config.typesafe !== undefined) {
+    // The alias key is the deprecated spelling of `classifier`. Both written
+    // is a contradiction the operator must resolve — never silently pick one.
+    if (config.classifier !== undefined && config[CLASSIFIER_ALIAS_KEY] !== undefined) {
       ctx.addIssue({
         code: "custom",
-        path: ["typesafe"],
-        message: "typesafe is deprecated — remove it and keep only `classifier`",
+        path: [CLASSIFIER_ALIAS_KEY],
+        message: `${CLASSIFIER_ALIAS_KEY} is deprecated — remove it and keep only \`classifier\``,
       });
     }
     // Lane slots: a written slot whose lane the pool never runs would
@@ -432,7 +439,7 @@ export function uncoveredInstructionLanes(config: AiGuardConfig): Array<"chat" |
 }
 
 /** Distributive omit — plain `Omit` on a union collapses it to one member. */
-type OmitLegacy<T> = T extends unknown ? Omit<T, "typesafe"> : never;
+type OmitLegacy<T> = T extends unknown ? Omit<T, typeof CLASSIFIER_ALIAS_KEY> : never;
 
 export const configSchema = configShapeSchema.transform((config): AiGuardConfig => {
   // Fold the deprecated alias into `classifier` and strip the retired
@@ -442,8 +449,8 @@ export const configSchema = configShapeSchema.transform((config): AiGuardConfig 
   // values. A single file writing both keys never reaches this transform (the
   // refine rejected it), and the load path folds the alias per layer before
   // merging, so exactly one key arrives here whatever the files said.
-  const { typesafe, ...rest } = config;
-  const written = config.classifier ?? typesafe;
+  const { [CLASSIFIER_ALIAS_KEY]: alias, ...rest } = config;
+  const written = config.classifier ?? alias;
   if (written === undefined) {
     return { ...rest, classifier: CLASSIFIER_THRESHOLD_DEFAULTS };
   }

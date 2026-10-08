@@ -42,10 +42,10 @@ import {
 } from "#src/config/session-overrides.ts";
 import type { NotifyFn } from "#src/notice.ts";
 import type { BreakerTier } from "#src/review/circuit-breaker.ts";
+import type { CommandEntry, SettingOption } from "#src/session/command/table.ts";
+import { displayPhrase, verbWord } from "#src/session/command/table.ts";
+import type { AiGuardUiContext } from "#src/session/command/ui-context.ts";
 
-import type { CommandEntry, SettingOption } from "./command/table.ts";
-import { displayPhrase, verbWord } from "./command/table.ts";
-import type { AiGuardUiContext } from "./command/ui-context.ts";
 import {
   openDeniedPanel,
   openReportPanel,

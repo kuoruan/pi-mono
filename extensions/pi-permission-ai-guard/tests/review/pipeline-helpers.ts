@@ -13,7 +13,11 @@ import type {
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { PermissionCheckResult, PermissionQuery } from "@gotgenes/pi-permission-system";
+import type {
+  Authorizer,
+  PermissionCheckResult,
+  PermissionQuery,
+} from "@gotgenes/pi-permission-system";
 import { expect } from "vitest";
 
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
@@ -22,7 +26,7 @@ import type { NotifyFn } from "#src/notice.ts";
 import { buildReviewerPool } from "#src/review/build-pool.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
 import type { ModelCallFn } from "#src/review/engines/chat/call.ts";
-import type { ReviewPipelineDeps, createReviewPipeline } from "#src/review/review-pipeline.ts";
+import type { ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
 import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
 import { withAgentInstruction } from "#src/review/verdict-copy.ts";
@@ -130,20 +134,38 @@ export interface RecordedLog {
   data: Record<string, unknown>;
 }
 
+/** A review/debug log pair that only records: each sink forwards its call. */
+export interface RecordingLogSink {
+  review: (event: string, details: Record<string, unknown>) => void;
+  debug: (event: string, details: Record<string, unknown>) => void;
+}
+
+/** A {@link RecordingLogSink} plus the emissions it collected, keyed by sink. */
+export interface RecordingLog {
+  log: RecordingLogSink;
+  reviewCalls: RecordedLog[];
+  debugCalls: RecordedLog[];
+}
+
+/** One merged emission (either sink), in call order. */
+export interface MergedLogEvent {
+  event: string;
+  details: Record<string, unknown>;
+}
+
+/** A {@link RecordingLogSink} plus every emission, merged in call order. */
+export interface MergedRecordingLog {
+  log: RecordingLogSink;
+  events: MergedLogEvent[];
+}
+
 /**
  * A log pair that records every review/debug emission for assertions — the
  * once-per-test collector boilerplate collapsed to one call.
  *
  * @returns The recording log and its collected review/debug emissions.
  */
-export function makeRecordingLog(): {
-  log: {
-    review: (event: string, data: Record<string, unknown>) => void;
-    debug: (event: string, data: Record<string, unknown>) => void;
-  };
-  reviewCalls: RecordedLog[];
-  debugCalls: RecordedLog[];
-} {
+export function makeRecordingLog(): RecordingLog {
   const reviewCalls: RecordedLog[] = [];
   const debugCalls: RecordedLog[] = [];
   const log = {
@@ -151,6 +173,22 @@ export function makeRecordingLog(): {
     debug: (event: string, data: Record<string, unknown>) => debugCalls.push({ event, data }),
   };
   return { log, reviewCalls, debugCalls };
+}
+
+/**
+ * A log pair that funnels every review/debug emission into ONE ordered
+ * `events` array — for assertions that care about the sequence across both
+ * sinks ({@link makeRecordingLog} splits them by sink instead).
+ *
+ * @returns The log and its merged emissions.
+ */
+export function makeMergedRecordingLog(): MergedRecordingLog {
+  const events: MergedLogEvent[] = [];
+  const log = {
+    review: (event: string, details: Record<string, unknown>) => events.push({ event, details }),
+    debug: (event: string, details: Record<string, unknown>) => events.push({ event, details }),
+  };
+  return { events, log };
 }
 
 /**
@@ -185,7 +223,7 @@ export function makeNotifySpy(): {
  *   (default `"content"`; `"machinery"` for reviewer-failure denies).
  */
 export async function expectVerdict(
-  authorize: ReturnType<typeof createReviewPipeline>,
+  authorize: Authorizer["authorize"],
   details: Record<string, unknown>,
   expected: { kind: string; reason?: string },
   state: PermissionCheckResult["state"] = "ask",

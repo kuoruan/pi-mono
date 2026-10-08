@@ -164,7 +164,7 @@ export const MODE_BLURBS: Readonly<Record<string, string>> = Object.fromEntries(
 );
 
 /** The generated shortcut description's cycle part ("default → lenient → permissive"). */
-export const CYCLE_DESCRIPTION: string = CYCLE_MODE_VALUES.join(" → ");
+export const CYCLE_DESCRIPTION = CYCLE_MODE_VALUES.join(" → ");
 
 /**
  * A ladder-owned config surprise warning. Deliberately NOT the loader's

@@ -23,7 +23,6 @@ import type {
   LaneAdapter,
   PoolEndpoint,
 } from "#src/review/pool.ts";
-import { withFallbackIndex } from "#src/review/pool.ts";
 import type { EngineCallContext, EngineReviewResult } from "#src/review/reviewer-engine.ts";
 
 import { type ClassifierClientLike, buildClassifierRequest, createDirectClient } from "./client.ts";
@@ -96,20 +95,17 @@ export function createClassifierAdapter(deps: ClassifierAdapterDeps): LaneAdapte
     ): Promise<AttemptResult> {
       if (endpoint.lane !== "classifier")
         throw new Error("classifier adapter received a chat endpoint");
-      const { index, singleEndpoint, timeoutMs } = spec;
-      // The audit identity names the model that answered: a registry endpoint
-      // carries Pi's own provider id, while the direct backend is the SDK
-      // protocol (`typesafe`) whatever the model.
-      const idPrefix = endpoint.backend === "registry" ? endpoint.provider : "typesafe";
-      const modelId = withFallbackIndex(`${idPrefix}/${endpoint.model}`, index);
+      const { hasFailover, timeoutMs } = spec;
+      const modelId = endpoint.id;
       const startedAt = now();
       try {
         const response = await clientFor(endpoint).systemOne(
           buildClassifierRequest(ctx.transcript, ctx.request, config.instructions, endpoint.model),
           {
             timeout: timeoutMs,
-            // Preserve SDK retry behavior for existing single-endpoint users.
-            ...(singleEndpoint ? {} : { retry: { maxRetries: 0 } }),
+            // With backups in the walk the pool's next hop is the retry:
+            // each SDK retry would spend the shared walk budget again.
+            ...(hasFailover ? { retry: { maxRetries: 0 } } : {}),
           },
         );
         const outcome: ReviewOutcome = synthesizeClassifierVerdict(
@@ -133,7 +129,7 @@ export function createClassifierAdapter(deps: ClassifierAdapterDeps): LaneAdapte
           };
         };
         if (reason) {
-          return { kind: "retryable", modelId, reason, finalize: terminalDefer };
+          return { kind: "retryable", reason, finalize: terminalDefer };
         }
         // Auth/policy refusals and malformed requests: terminal defer for
         // the operator (never machinery — the classifier lane has no pre-call

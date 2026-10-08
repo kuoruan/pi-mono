@@ -19,6 +19,7 @@ import type {
 import type { AttemptSpec, ClassifierRegistryEndpoint, PoolEndpoint } from "#src/review/pool.ts";
 import { buildAskContext } from "#src/review/request/ask.ts";
 import { makeDetails } from "#test/fixtures.ts";
+import { makeMergedRecordingLog } from "#test/review/pipeline-helpers.ts";
 
 function response(overrides: Record<string, unknown> = {}): ClassifierSystemOneResponse {
   return {
@@ -33,15 +34,6 @@ function response(overrides: Record<string, unknown> = {}): ClassifierSystemOneR
   };
 }
 
-function recordingLog() {
-  const events: Array<{ event: string; details?: Record<string, unknown> }> = [];
-  const log: AuthorizerLog = {
-    review: (event, details) => events.push({ event, details }),
-    debug: (event, details) => events.push({ event, details }),
-  };
-  return { events, log };
-}
-
 function attemptContext(log: AuthorizerLog) {
   return {
     transcript: { trustedIntent: ["inspect files"], toolCalls: [], strippedCount: 0 },
@@ -54,13 +46,11 @@ function attemptContext(log: AuthorizerLog) {
 /**
  * Per-attempt spec for adapter tests.
  *
- * @param index - The endpoint position.
- * @param singleEndpoint - Whether this is the only endpoint.
+ * @param hasFailover - Whether another endpoint follows this one in the walk.
  * @returns The attempt spec.
  */
-const spec = (index: number, singleEndpoint: boolean): AttemptSpec => ({
-  index,
-  singleEndpoint,
+const spec = (hasFailover: boolean): AttemptSpec => ({
+  hasFailover,
   timeoutMs: 5_000,
 });
 
@@ -70,6 +60,7 @@ const endpoint = (model = "jev-1.13", timeoutMs = 15000): PoolEndpoint => ({
   provider: { type: "typesafe", baseUrl: "https://x.example", apiKey: "k" },
   model,
   timeoutMs,
+  id: `typesafe/${model}`,
 });
 
 const adapter = (client: ClassifierClientLike) =>
@@ -100,8 +91,8 @@ describe("classifier adapter disposition", () => {
   it("answers a valid allow with the primary identity", async () => {
     const attempt = await adapter(safe).attempt(
       endpoint(),
-      attemptContext(recordingLog().log),
-      spec(0, true),
+      attemptContext(makeMergedRecordingLog().log),
+      spec(false),
     );
     expect(attempt.kind).toBe("answered");
     if (attempt.kind !== "answered") return;
@@ -117,8 +108,8 @@ describe("classifier adapter disposition", () => {
     ]) {
       const attempt = await adapter({ systemOne: async () => response(overrides) }).attempt(
         endpoint(),
-        attemptContext(recordingLog().log),
-        spec(0, false),
+        attemptContext(makeMergedRecordingLog().log),
+        spec(true),
       );
       expect(attempt.kind).toBe("answered");
     }
@@ -129,13 +120,12 @@ describe("classifier adapter disposition", () => {
     async (status) => {
       const attempt = await adapter(throwing(httpError(status))).attempt(
         endpoint(),
-        attemptContext(recordingLog().log),
-        spec(0, false),
+        attemptContext(makeMergedRecordingLog().log),
+        spec(true),
       );
       expect(attempt.kind).toBe("retryable");
       if (attempt.kind !== "retryable") return;
       expect(attempt.reason).toBe(`http-${status}`);
-      expect(attempt.modelId).toBe("typesafe/jev-1.13");
     },
   );
 
@@ -143,8 +133,8 @@ describe("classifier adapter disposition", () => {
     for (const failure of [new APITimeoutError(5_000), new APIConnectionError("socket hang up")]) {
       const attempt = await adapter(throwing(failure)).attempt(
         endpoint(),
-        attemptContext(recordingLog().log),
-        spec(0, false),
+        attemptContext(makeMergedRecordingLog().log),
+        spec(true),
       );
       expect(attempt.kind).toBe("retryable");
     }
@@ -153,11 +143,11 @@ describe("classifier adapter disposition", () => {
   it.each([400, 401, 403, 422])(
     "reports terminal defer (never machinery) on HTTP %i",
     async (status) => {
-      const { events, log } = recordingLog();
+      const { events, log } = makeMergedRecordingLog();
       const attempt = await adapter(throwing(httpError(status))).attempt(
         endpoint(),
         attemptContext(log),
-        spec(0, false),
+        spec(true),
       );
       expect(attempt.kind).toBe("terminal");
       if (attempt.kind !== "terminal") return;
@@ -172,8 +162,8 @@ describe("classifier adapter disposition", () => {
   it("reports terminal defer on unexpected local exceptions", async () => {
     const attempt = await adapter(throwing(new Error("unexpected parsing bug"))).attempt(
       endpoint(),
-      attemptContext(recordingLog().log),
-      spec(0, false),
+      attemptContext(makeMergedRecordingLog().log),
+      spec(true),
     );
     expect(attempt.kind).toBe("terminal");
   });
@@ -187,8 +177,8 @@ describe("classifier adapter disposition", () => {
       },
     };
     const a = adapter(probe);
-    await a.attempt(endpoint(), attemptContext(recordingLog().log), spec(0, true));
-    await a.attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    await a.attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(false));
+    await a.attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(true));
     expect(seen).toEqual([undefined, { maxRetries: 0 }]);
   });
 
@@ -202,10 +192,9 @@ describe("classifier adapter disposition", () => {
     };
     await adapter(probe).attempt(
       endpoint("backup-model", 2000),
-      attemptContext(recordingLog().log),
+      attemptContext(makeMergedRecordingLog().log),
       {
-        index: 1,
-        singleEndpoint: false,
+        hasFailover: true,
         timeoutMs: 2000,
       },
     );
@@ -222,7 +211,7 @@ describe("classifier adapter incomplete responses", () => {
     const attempt = await adapter({
       systemOne: async () =>
         ({ ...response(), answers: undefined }) as unknown as ClassifierSystemOneResponse,
-    }).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    }).attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(true));
     expect(attempt.kind).toBe("terminal");
     if (attempt.kind !== "terminal") return;
     expect(attempt.result).toMatchObject({
@@ -235,7 +224,7 @@ describe("classifier adapter incomplete responses", () => {
     async (overrides) => {
       const attempt = await adapter({
         systemOne: async () => response(overrides as Record<string, unknown>),
-      }).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+      }).attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(true));
       expect(attempt.kind).toBe("terminal");
       if (attempt.kind !== "terminal") return;
       expect(attempt.result).toMatchObject({
@@ -247,7 +236,7 @@ describe("classifier adapter incomplete responses", () => {
   it("reports terminal machinery defer on a missing reading field", async () => {
     const attempt = await adapter({
       systemOne: async () => response({ risk: { type: "score", confidence: 0.9 } }),
-    }).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    }).attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(true));
     expect(attempt.kind).toBe("terminal");
     if (attempt.kind !== "terminal") return;
     expect(attempt.result).toMatchObject({
@@ -262,7 +251,7 @@ describe("classifier adapter incomplete responses", () => {
           danger_category: { type: "choice", choice: "none" },
           risk: { type: "score", score: 1 },
         }),
-    }).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    }).attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(true));
     expect(attempt.kind).toBe("answered");
     if (attempt.kind !== "answered") return;
     expect(attempt.result.outcome.verdict).toEqual({ kind: "defer" });
@@ -270,12 +259,16 @@ describe("classifier adapter incomplete responses", () => {
   });
 });
 
-const registryEndpoint = (): ClassifierRegistryEndpoint => ({
+const registryEndpoint = (
+  provider = "typesafe",
+  model = "jev-latest",
+): ClassifierRegistryEndpoint => ({
   lane: "classifier",
   backend: "registry",
-  provider: "typesafe",
-  model: "jev-latest",
+  provider,
+  model,
   timeoutMs: 15000,
+  id: `${provider}/${model}`,
 });
 
 describe("classifier registry seam", () => {
@@ -300,8 +293,8 @@ describe("classifier registry seam", () => {
     });
     const attempt = await adapterWithFacade.attempt(
       registryEndpoint(),
-      attemptContext(recordingLog().log),
-      spec(0, true),
+      attemptContext(makeMergedRecordingLog().log),
+      spec(false),
     );
     expect(seen).toEqual(["facade"]);
     expect(attempt.kind).toBe("answered");
@@ -322,9 +315,9 @@ describe("classifier registry seam", () => {
       registryClient: () => safe,
     });
     const attempt = await withFacade.attempt(
-      { ...registryEndpoint(), provider: "cloudflare-workers-ai", model: "classify-v1" },
-      attemptContext(recordingLog().log),
-      spec(0, true),
+      registryEndpoint("cloudflare-workers-ai", "classify-v1"),
+      attemptContext(makeMergedRecordingLog().log),
+      spec(false),
     );
     expect(attempt.kind).toBe("answered");
     if (attempt.kind !== "answered") return;
@@ -337,8 +330,8 @@ describe("classifier registry seam", () => {
     // the adapter), not a rejection.
     const attempt = await adapter(safe).attempt(
       registryEndpoint(),
-      attemptContext(recordingLog().log),
-      spec(0, true),
+      attemptContext(makeMergedRecordingLog().log),
+      spec(false),
     );
     expect(attempt.kind).toBe("terminal");
     if (attempt.kind !== "terminal") return;

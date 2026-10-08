@@ -14,8 +14,8 @@
  */
 
 import type { AuditCorrelation } from "#src/audit/decision-record.ts";
+import type { EngineMachineryKind } from "#src/model/machinery-kinds.ts";
 import type { ReviewOutcome } from "#src/model/model-verdict.ts";
-import type { EngineMachineryKind } from "#src/review/machinery-kinds.ts";
 import type { ReviewRequestContext } from "#src/review/request/review-request.ts";
 import type { StrippedTranscript } from "#src/review/request/transcript-stripper.ts";
 
@@ -37,6 +37,9 @@ export interface EngineReviewResult {
   cacheable?: boolean;
 }
 
+/** What an engine attempt produced: a review result, or a pre-call machinery failure. */
+export type EngineAttemptResult = EngineReviewResult | EngineMachineryFailure;
+
 /** A reviewer backend: ask in, ReviewOutcome out. */
 export interface ReviewerEngine {
   /**
@@ -44,7 +47,7 @@ export interface ReviewerEngine {
    * Pre-call failures (the review never opened) return a tagged
    * {@link EngineMachineryFailure} for the pipeline's machinery lane.
    */
-  review(ctx: EngineCallContext): Promise<EngineReviewResult | EngineMachineryFailure>;
+  review(ctx: EngineCallContext): Promise<EngineAttemptResult>;
 }
 
 /**
@@ -71,8 +74,6 @@ export interface EngineMachineryFailure {
  * @param result - The engine result to narrow.
  * @returns True when the result is a machinery failure.
  */
-export function isMachineryFailure(
-  result: EngineReviewResult | EngineMachineryFailure,
-): result is EngineMachineryFailure {
+export function isMachineryFailure(result: EngineAttemptResult): result is EngineMachineryFailure {
   return typeof result === "object" && result !== null && "ok" in result && result.ok === false;
 }

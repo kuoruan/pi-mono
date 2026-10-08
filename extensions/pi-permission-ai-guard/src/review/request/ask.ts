@@ -29,8 +29,8 @@ import type {
 } from "@gotgenes/pi-permission-system";
 
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
+import { PRE_CALL_MACHINERY_KINDS } from "#src/model/machinery-kinds.ts";
 import { warn } from "#src/notice.ts";
-import { PRE_CALL_MACHINERY_KINDS } from "#src/review/machinery-kinds.ts";
 import { globMatch } from "#src/utils.ts";
 
 /**

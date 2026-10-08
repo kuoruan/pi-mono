@@ -8,6 +8,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
+import { PRE_CALL_MACHINERY_KINDS } from "#src/model/machinery-kinds.ts";
 import type { ModelRegistryLike, ResolvedRequestAuth } from "#src/model/model-registry.ts";
 import type { ReviewOutcome } from "#src/model/model-verdict.ts";
 import {
@@ -15,9 +16,7 @@ import {
   buildReviewPrompt,
   buildReviewSystemPrompt,
 } from "#src/review/engines/chat/prompt.ts";
-import { PRE_CALL_MACHINERY_KINDS } from "#src/review/machinery-kinds.ts";
 import type { AttemptResult, AttemptSpec, LaneAdapter, PoolEndpoint } from "#src/review/pool.ts";
-import { withFallbackIndex } from "#src/review/pool.ts";
 import type {
   EngineCallContext,
   EngineMachineryFailure,
@@ -66,8 +65,8 @@ export function createChatAdapter(deps: ChatAdapterDeps): LaneAdapter {
       spec: AttemptSpec,
     ): Promise<AttemptResult> {
       if (endpoint.lane !== "chat") throw new Error("chat adapter received a classifier endpoint");
-      const { index, singleEndpoint, timeoutMs } = spec;
-      const modelId = withFallbackIndex(`${endpoint.provider}/${endpoint.model}`, index);
+      const { hasFailover, timeoutMs } = spec;
+      const modelId = endpoint.id;
       let model: Model<Api> | undefined;
       try {
         model = deps.registry.find(endpoint.provider, endpoint.model);
@@ -84,7 +83,6 @@ export function createChatAdapter(deps: ChatAdapterDeps): LaneAdapter {
         };
         return {
           kind: "retryable",
-          modelId,
           reason: "model-unresolved",
           finalize: () => failure,
         };
@@ -116,12 +114,13 @@ export function createChatAdapter(deps: ChatAdapterDeps): LaneAdapter {
         systemPrompt,
         buildReviewPrompt(ctx.transcript, ctx.request),
         timeoutMs,
-        singleEndpoint ? 1 : 0,
+        // A walk with backups is the retry: only a single-endpoint walk
+        // keeps the transport's own retry behavior.
+        hasFailover ? 0 : 1,
       );
       if (outcome.availabilityReason) {
         return {
           kind: "retryable",
-          modelId,
           reason: outcome.availabilityReason,
           finalize: (): EngineReviewResult => ({ outcome, modelId }),
         };

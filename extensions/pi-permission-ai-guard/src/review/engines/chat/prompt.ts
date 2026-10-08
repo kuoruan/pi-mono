@@ -184,10 +184,8 @@ permission request and decide whether it should run.
   Destruction above.`;
 
 /**
- * Review output contract — always appended, never overridden. Custom
- * `instructions` append to the safety rules by default and swap them out with
- * `replace: true`; the verdict format stays identical either way, so the
- * model's output shape never depends on which rules the user customized.
+ * Review output contract — always appended, never overridden, so the model's
+ * output shape never depends on which rules the operator customized.
  */
 const VERDICT_SECTION = `## Verdict
 
@@ -367,11 +365,9 @@ export interface ChatInstructions {
 /**
  * Build the review system prompt: safety policy + fixed verdict output
  * contract. Custom `rules` append to the built-in policy by default; with
- * `replace: true` they stand in for it. The verdict format is always
- * appended, so the model's output shape never depends on which rules the
- * operator customized. The prompt is not cached (pi-ai's `completeSimple`
- * does not set `cache_control`) — do not add caching here; the per-call
- * sections vary and wiring it is upstream's job.
+ * `replace: true` they stand in for it. The prompt is not cached (pi-ai's
+ * `completeSimple` does not set `cache_control`) — do not add caching here;
+ * the per-call sections vary and wiring it is upstream's job.
  *
  * @param instructions - The chat lane's resolved rules and replace switch.
  * @returns The review system prompt string.

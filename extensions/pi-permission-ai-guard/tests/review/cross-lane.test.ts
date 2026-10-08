@@ -27,25 +27,21 @@ import { createReviewerPool } from "#src/review/pool.ts";
 import { buildAskContext } from "#src/review/request/ask.ts";
 import { isMachineryFailure } from "#src/review/reviewer-engine.ts";
 import { makeDetails } from "#test/fixtures.ts";
-
 import {
   REGISTRY_API,
   REGISTRY_MODEL_ID,
   classifierReply,
   findClassifierOfType,
-} from "./engines/classifier/stubs.ts";
-import { defaultRegistry, fakeModel } from "./pipeline-helpers.ts";
+} from "#test/review/engines/classifier/stubs.ts";
 
-function recordingLog() {
-  const events: Array<{ event: string; details: Record<string, unknown> }> = [];
-  const log = {
-    review: (event: string, details: Record<string, unknown>) => events.push({ event, details }),
-    debug: (event: string, details: Record<string, unknown>) => events.push({ event, details }),
-  };
-  return { events, log };
-}
+import {
+  type RecordingLogSink,
+  defaultRegistry,
+  fakeModel,
+  makeMergedRecordingLog,
+} from "./pipeline-helpers.ts";
 
-const reviewCtx = (log: ReturnType<typeof recordingLog>["log"]) => ({
+const reviewCtx = (log: RecordingLogSink) => ({
   transcript: { trustedIntent: ["check"], toolCalls: [], strippedCount: 0 },
   request: { ask: buildAskContext(makeDetails({ value: "ls" }), "/project"), target: "ls" },
   log,
@@ -95,7 +91,7 @@ const chatAllowCall: ModelCallFn = async () => chatAllow();
 
 describe("cross-lane failover", () => {
   it("fails over from a classifier primary to an chat backup", async () => {
-    const { events, log } = recordingLog();
+    const { events, log } = makeMergedRecordingLog();
     const engine = createReviewerPool({
       endpoints: [
         {
@@ -104,8 +100,15 @@ describe("cross-lane failover", () => {
           provider: { type: "typesafe", baseUrl: "https://primary.example", apiKey: "k" },
           model: "jev-1.13",
           timeoutMs: 5000,
+          id: "typesafe/jev-1.13",
         },
-        { lane: "chat", provider: "anthropic", model: "backup", timeoutMs: 5000 },
+        {
+          lane: "chat",
+          provider: "anthropic",
+          model: "backup",
+          timeoutMs: 5000,
+          id: "anthropic/backup",
+        },
       ],
       adapters: {
         classifier: createClassifierAdapter({
@@ -144,17 +147,24 @@ describe("cross-lane failover", () => {
   });
 
   it("fails over from an chat primary to a classifier backup", async () => {
-    const { events, log } = recordingLog();
+    const { events, log } = makeMergedRecordingLog();
     const safeClassifier: ClassifierClientLike = { systemOne: async () => classifierAllow() };
     const engine = createReviewerPool({
       endpoints: [
-        { lane: "chat", provider: "anthropic", model: "primary", timeoutMs: 5000 },
+        {
+          lane: "chat",
+          provider: "anthropic",
+          model: "primary",
+          timeoutMs: 5000,
+          id: "anthropic/primary",
+        },
         {
           lane: "classifier",
           backend: "direct",
           provider: { type: "typesafe", baseUrl: "https://backup.example", apiKey: "k" },
           model: "jev-1.13",
           timeoutMs: 5000,
+          id: "typesafe/jev-1.13",
         },
       ],
       adapters: {
@@ -291,7 +301,7 @@ describe("cross-lane failover", () => {
       chat: { rules: null, replace: false },
       classifier: { background: "classifier background" },
     });
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     await buildReviewerPool(shared, { registry, modelCall: sniffingCall }).review(reviewCtx(log));
     expect(seenSystems).toHaveLength(1);
     expect(seenSystems[0]).toContain("shared rules");
@@ -338,13 +348,20 @@ describe("cross-lane failover", () => {
     };
     const engine = createReviewerPool({
       endpoints: [
-        { lane: "chat", provider: "anthropic", model: "primary", timeoutMs: 5000 },
+        {
+          lane: "chat",
+          provider: "anthropic",
+          model: "primary",
+          timeoutMs: 5000,
+          id: "anthropic/primary",
+        },
         {
           lane: "classifier",
           backend: "direct",
           provider: { type: "typesafe", baseUrl: "https://backup.example", apiKey: "k" },
           model: "jev-1.13",
           timeoutMs: 5000,
+          id: "typesafe/jev-1.13",
         },
       ],
       adapters: {
@@ -364,7 +381,7 @@ describe("cross-lane failover", () => {
         }),
       },
     });
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     const result = await engine.review(reviewCtx(log));
     if (isMachineryFailure(result)) throw new Error("unexpected machinery");
     expect(result.outcome.verdict.kind).toBe("deny");
@@ -387,6 +404,33 @@ describe("registry backend resolution", () => {
       provider: "typesafe",
       model: "jev-latest",
     });
+  });
+
+  it("builds each endpoint's audit identity with the endpoint", () => {
+    // The lane owns the spelling: chat and registry endpoints carry
+    // `provider/model`, a direct classifier endpoint the SDK protocol
+    // prefix. Built where the endpoint is built — the pool appends the walk
+    // position and nothing else.
+    const chatConfig = configSchema.parse({ provider: "anthropic", model: "claude-haiku-4-5" });
+    expect(resolvePoolEndpoints(chatConfig).map((e) => e.id)).toEqual([
+      "anthropic/claude-haiku-4-5",
+    ]);
+
+    const directConfig = configSchema.parse({ provider: { type: "typesafe" }, model: "jev-1.13" });
+    expect(resolvePoolEndpoints(directConfig).map((e) => e.id)).toEqual(["typesafe/jev-1.13"]);
+
+    // A deliberately non-typesafe provider id: the registry spelling must
+    // come from the endpoint itself, never from a hardcoded protocol prefix
+    // (the bug this replaced) — `typesafe/jev-latest` would hide it, since
+    // the wrong prefix and the right one spell the same string there.
+    const registryConfig = configSchema.parse({
+      provider: "cloudflare-workers-ai",
+      model: "classify-v1",
+      modelType: "classifier",
+    });
+    expect(resolvePoolEndpoints(registryConfig).map((e) => e.id)).toEqual([
+      "cloudflare-workers-ai/classify-v1",
+    ]);
   });
 
   it("drives a registry whose methods read `this` (pi's real shape)", async () => {
@@ -428,7 +472,7 @@ describe("registry backend resolution", () => {
     });
     expect(seen.some((s) => s.startsWith("find:true"))).toBe(true);
 
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     await pool.review(reviewCtx(log));
     // ...and the ask runs classify with the receiver bound.
     expect(seen.some((s) => s.startsWith("classify:true"))).toBe(true);
@@ -547,7 +591,7 @@ describe("registry backend resolution", () => {
       throw httpError(500);
     };
     const pool = buildReviewerPool(config, { registry, modelCall: failing });
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     const result = await pool.review(reviewCtx(log));
     expect(attempts).toBe(1);
     expect(isMachineryFailure(result)).toBe(false);
@@ -605,7 +649,7 @@ describe("registry backend resolution", () => {
     // The model vanishes after registration — the primary degrades to a
     // walk the surviving fallback still answers.
     present = false;
-    const { log } = recordingLog();
+    const { log } = makeMergedRecordingLog();
     const result = await pool.review(reviewCtx(log));
     // classify was attempted against the prebuilt facade — no wiring throw,
     // and a real verdict flowed back through the translation path.

@@ -15,8 +15,12 @@ import { availabilityReason } from "#src/review/failure-taxonomy.ts";
 import type { AttemptSpec, PoolEndpoint } from "#src/review/pool.ts";
 import { buildAskContext } from "#src/review/request/ask.ts";
 import { makeDetails } from "#test/fixtures.ts";
-
-import { defaultRegistry, fakeModel } from "../../pipeline-helpers.ts";
+import {
+  type RecordingLogSink,
+  defaultRegistry,
+  fakeModel,
+  makeMergedRecordingLog,
+} from "#test/review/pipeline-helpers.ts";
 
 function reply(
   text: string,
@@ -43,16 +47,7 @@ function reply(
   } satisfies AssistantMessage;
 }
 
-function recordingLog() {
-  const events: Array<{ event: string; details: Record<string, unknown> }> = [];
-  const log = {
-    review: (event: string, details: Record<string, unknown>) => events.push({ event, details }),
-    debug: (event: string, details: Record<string, unknown>) => events.push({ event, details }),
-  };
-  return { events, log };
-}
-
-function attemptContext(log: ReturnType<typeof recordingLog>["log"]) {
+function attemptContext(log: RecordingLogSink) {
   return {
     transcript: { trustedIntent: ["inspect current directory"], toolCalls: [], strippedCount: 0 },
     request: { ask: buildAskContext(makeDetails({ value: "pwd" }), "/project"), target: "pwd" },
@@ -68,13 +63,11 @@ const registry = defaultRegistry({
 /**
  * Per-attempt spec for adapter tests.
  *
- * @param index - The endpoint position.
- * @param singleEndpoint - Whether this is the only endpoint.
+ * @param hasFailover - Whether another endpoint follows this one in the walk.
  * @returns The attempt spec.
  */
-const spec = (index: number, singleEndpoint: boolean): AttemptSpec => ({
-  index,
-  singleEndpoint,
+const spec = (hasFailover: boolean): AttemptSpec => ({
+  hasFailover,
   timeoutMs: 5_000,
 });
 
@@ -83,6 +76,7 @@ const endpoint = (model = "primary", timeoutMs = 5000): PoolEndpoint => ({
   provider: "anthropic",
   model,
   timeoutMs,
+  id: `anthropic/${model}`,
 });
 
 const adapter = (modelCall: ModelCallFn, registryOverride = registry) =>
@@ -105,8 +99,8 @@ describe("chat adapter disposition", () => {
     ]) {
       const attempt = await adapter(async () => reply(text)).attempt(
         endpoint(),
-        attemptContext(recordingLog().log),
-        spec(0, false),
+        attemptContext(makeMergedRecordingLog().log),
+        spec(true),
       );
       expect(attempt.kind).toBe("answered");
       if (attempt.kind !== "answered") continue;
@@ -118,14 +112,13 @@ describe("chat adapter disposition", () => {
   it.each([402, 404, 408, 409, 410, 425, 429, 503])(
     "reports retryable on HTTP %i with the audit reason",
     async (status) => {
-      const { log } = recordingLog();
+      const { log } = makeMergedRecordingLog();
       const attempt = await adapter(async () => {
         throw httpError(status);
-      }).attempt(endpoint(), attemptContext(log), spec(0, false));
+      }).attempt(endpoint(), attemptContext(log), spec(true));
       expect(attempt.kind).toBe("retryable");
       if (attempt.kind !== "retryable") return;
       expect(attempt.reason).toBe(`http-${status}`);
-      expect(attempt.modelId).toBe("anthropic/primary");
     },
   );
 
@@ -134,7 +127,7 @@ describe("chat adapter disposition", () => {
   it.each([400, 401, 403, 422])("answers terminal defer on HTTP %i refusal", async (status) => {
     const attempt = await adapter(async () => {
       throw httpError(status);
-    }).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    }).attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(true));
     expect(attempt.kind).toBe("answered");
     if (attempt.kind !== "answered") return;
     expect(attempt.result.outcome).toMatchObject({
@@ -147,8 +140,8 @@ describe("chat adapter disposition", () => {
     const missing = defaultRegistry({ find: () => undefined });
     const attempt = await adapter(async () => allow(), missing).attempt(
       endpoint(),
-      attemptContext(recordingLog().log),
-      spec(0, false),
+      attemptContext(makeMergedRecordingLog().log),
+      spec(true),
     );
     expect(attempt.kind).toBe("retryable");
     if (attempt.kind !== "retryable") return;
@@ -163,30 +156,32 @@ describe("chat adapter disposition", () => {
     });
     const attempt = await adapter(async () => allow(), denied).attempt(
       endpoint(),
-      attemptContext(recordingLog().log),
-      spec(0, false),
+      attemptContext(makeMergedRecordingLog().log),
+      spec(true),
     );
     expect(attempt.kind).toBe("terminal");
     if (attempt.kind !== "terminal") return;
     expect(attempt.result).toMatchObject({ ok: false, kind: "auth-failed" });
   });
 
-  it("passes singleEndpoint through to provider retries", async () => {
+  it("passes hasFailover through to provider retries", async () => {
     const retries: Array<number | undefined> = [];
     const modelCall: ModelCallFn = async (_, __, options) => {
       retries.push(options?.maxRetries);
       return allow();
     };
     const a = adapter(modelCall);
-    await a.attempt(endpoint(), attemptContext(recordingLog().log), spec(0, true));
-    await a.attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    // Alone in the walk: the transport keeps its retry. With a backup
+    // behind it: no local retry, the pool's next hop is the retry.
+    await a.attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(false));
+    await a.attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(true));
     expect(retries).toEqual([1, 0]);
   });
 
   it("never trusts partial allow text from an errored stream", async () => {
     const attempt = await adapter(async () =>
       reply('{"verdict":"allow"}', "error", "403: content blocked"),
-    ).attempt(endpoint(), attemptContext(recordingLog().log), spec(0, false));
+    ).attempt(endpoint(), attemptContext(makeMergedRecordingLog().log), spec(true));
     expect(attempt.kind).toBe("answered");
     if (attempt.kind !== "answered") return;
     expect(attempt.result.outcome.verdict.kind).toBe("defer");

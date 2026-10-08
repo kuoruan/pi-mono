@@ -107,6 +107,12 @@ export function resolvePoolEndpoints(
   ];
 }
 
+/** The per-lane instructions slices the config resolves to. */
+export interface LaneInstructions {
+  chat: ChatInstructions;
+  classifier: ClassifierOverlay;
+}
+
 /**
  * Scope `instructions` per lane. A string is the one broadcast form: it
  * appends the same content to each lane's content key (chat `rules`,
@@ -118,10 +124,7 @@ export function resolvePoolEndpoints(
  * @param config - The validated extension config.
  * @returns The per-lane instructions slices.
  */
-export function resolveLaneInstructions(config: AiGuardConfig): {
-  chat: ChatInstructions;
-  classifier: ClassifierOverlay;
-} {
+export function resolveLaneInstructions(config: AiGuardConfig): LaneInstructions {
   const instructions = config.instructions;
   if (typeof instructions === "string") {
     return {

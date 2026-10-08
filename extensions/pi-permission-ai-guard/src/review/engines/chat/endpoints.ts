@@ -27,5 +27,6 @@ export function buildChatEndpoint(target: LaneTarget): ChatPoolEndpoint {
     provider: target.provider,
     model: target.model,
     timeoutMs: target.timeoutMs,
+    id: `${target.provider}/${target.model}`,
   };
 }
