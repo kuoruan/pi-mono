@@ -4,12 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MODEL_CALL_ERROR_EVENT } from "#src/audit/events.ts";
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
+import type { ChatRegistryLike } from "#src/model/model-registry.ts";
 import {
   type ModelCallFn,
   type ModelCallContext,
   createModelCall,
   reviewModel,
-} from "#src/model/model-review.ts";
+} from "#src/review/engines/chat/call.ts";
 
 const baseConfig = configSchema.parse({
   provider: "anthropic",
@@ -67,7 +68,7 @@ function makeReply(
       totalTokens: 0,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
-  } as AssistantMessage;
+  } satisfies AssistantMessage;
 }
 
 const timeoutCompleteSimple = async (
@@ -319,13 +320,18 @@ describe("reviewModel — riskLevel passthrough", () => {
 
 describe("createModelCall", () => {
   it("delegates to registry.complete with model, context, and options", async () => {
+    // An opaque marker: this test pins pass-through identity, not the reply shape.
     const reply = { ok: true } as unknown as AssistantMessage;
     const complete = vi.fn<() => Promise<AssistantMessage>>(async () => reply);
-    const registry = { complete } as never;
+    const registry = {
+      find: () => undefined,
+      getApiKeyAndHeaders: async () => ({ ok: false as const, error: "unused" }),
+      complete,
+    } satisfies ChatRegistryLike;
     const run = createModelCall(() => registry);
     const model = { provider: "test" } as Model<any>;
-    const context = {} as Context;
-    const options = { maxTokens: 1 } as never;
+    const context = { messages: [] };
+    const options = { maxTokens: 1 };
     await expect(run(model, context, options)).resolves.toBe(reply);
     expect(complete).toHaveBeenCalledTimes(1);
     expect(complete).toHaveBeenCalledWith(model, context, options);

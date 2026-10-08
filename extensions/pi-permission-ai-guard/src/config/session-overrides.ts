@@ -8,7 +8,7 @@ import type { AiGuardConfig, Mode, NotifyThreshold } from "#src/config/config-sc
 /**
  * Session overrides, written per session. Set via the
  * `/ai-guard` command or the `ctrl+alt+g` shortcut; each change is appended
- * to the pi session file (custom entry, never LLM context) and restored on
+ * to the pi session file (custom entry, never chat context) and restored on
  * resume. A new session starts from the config values.
  *
  * Invariant: an override key PRESENT means it carries a defined value.

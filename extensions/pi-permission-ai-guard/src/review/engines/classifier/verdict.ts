@@ -6,9 +6,9 @@ import { DANGER_NONE } from "./questions.ts";
 /**
  * The built-in answers as 0–1 probabilities/confidences: `noul` arrives
  * as a probability already, the 0–4 `score` is normalized by
- * {@link projectRawAnswers}, so the table below speaks one scale.
+ * {@link projectClassifierAnswers}, so the table below speaks one scale.
  */
-export interface JevAnswers {
+export interface ClassifierAnswers {
   dangerCategory: string;
   dangerConfidence: number;
   intentMatch: number;
@@ -16,14 +16,14 @@ export interface JevAnswers {
   riskConfidence: number;
 }
 
-export interface JevThresholds {
+export interface ClassifierThresholds {
   intentThreshold: number;
   riskThreshold: number;
   confidenceThreshold: number;
 }
 
 /** One raw SDK answer (the per-question shape the SDK returns). */
-export interface TypesafeRawAnswer {
+interface TypesafeRawAnswer {
   type: string;
   noul?: number;
   choice?: string;
@@ -36,38 +36,40 @@ export interface TypesafeRawAnswer {
  * The adapter's catch routes it to a machinery defer (never allow) —
  * a reviewer that did not answer is broken, not uncertain.
  */
-export class IncompleteJevResponseError extends Error {
+export class IncompleteClassifierResponseError extends Error {
   constructor(public readonly missing: string) {
-    super(`incomplete Jev response: missing ${missing}`);
-    this.name = "IncompleteJevResponseError";
+    super(`incomplete classifier response: missing ${missing}`);
+    this.name = "IncompleteClassifierResponseError";
   }
 }
 
 /**
- * Project the SDK's typed answers into {@link JevAnswers} — the single
+ * Project the SDK's typed answers into {@link ClassifierAnswers} — the single
  * 0–4 → 0–1 scale-conversion point.
  *
  * Readings are required: `danger_category` / `intent_match` / `risk` must
  * be present with their reading fields (choice / noul / score). A missing
- * reading throws {@link IncompleteJevResponseError} — "never answered"
+ * reading throws {@link IncompleteClassifierResponseError} — "never answered"
  * is a malformed response, not a zero reading. Confidence is optional:
  * missing confidence reads as 0 (uncertain), the model's own defer path.
  *
  * @param raw - The SDK's typed answers by question id.
  * @returns The calibrated 0–1 answers.
  */
-export function projectRawAnswers(raw: Record<string, TypesafeRawAnswer>): JevAnswers {
+export function projectClassifierAnswers(
+  raw: Record<string, TypesafeRawAnswer>,
+): ClassifierAnswers {
   const danger = raw.danger_category;
   if (danger?.choice === undefined) {
-    throw new IncompleteJevResponseError("danger_category.choice");
+    throw new IncompleteClassifierResponseError("danger_category.choice");
   }
   const intent = raw.intent_match;
   if (intent?.noul === undefined) {
-    throw new IncompleteJevResponseError("intent_match.noul");
+    throw new IncompleteClassifierResponseError("intent_match.noul");
   }
   const risk = raw.risk;
   if (risk?.score === undefined) {
-    throw new IncompleteJevResponseError("risk.score");
+    throw new IncompleteClassifierResponseError("risk.score");
   }
   return {
     dangerCategory: danger.choice,
@@ -82,7 +84,7 @@ export function projectRawAnswers(raw: Record<string, TypesafeRawAnswer>): JevAn
  * Danger category → audit risk tier. Every DENY-Always deny is critical;
  * unlisted categories fall back to high (an unknown danger is never soft).
  */
-export const DANGER_TIER: Readonly<Record<string, RiskLevel>> = {
+const DANGER_TIER: Readonly<Record<string, RiskLevel>> = {
   secrets_credentials: "critical",
   irreversible_destruction: "critical",
   sensitive_data_egress: "critical",
@@ -132,8 +134,8 @@ const KEY_CONFIDENCES = [
  * @returns The lean, or undefined for neutral.
  */
 function deriveLean(
-  answers: JevAnswers,
-  thresholds: JevThresholds,
+  answers: ClassifierAnswers,
+  thresholds: ClassifierThresholds,
   confident: boolean,
 ): VerdictLean | undefined {
   if (answers.riskScore >= thresholds.riskThreshold) return "deny";
@@ -158,9 +160,9 @@ function deriveLean(
  * @param latencyMs - The call latency for the audit record.
  * @returns The synthesized review outcome.
  */
-export function synthesizeJevVerdict(
-  answers: JevAnswers,
-  thresholds: JevThresholds,
+export function synthesizeClassifierVerdict(
+  answers: ClassifierAnswers,
+  thresholds: ClassifierThresholds,
   latencyMs: number,
 ): ReviewOutcome {
   if (answers.dangerCategory !== DANGER_NONE) {

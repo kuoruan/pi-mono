@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { configSchema, hasTypesafeProvider } from "#src/config/config-schema.ts";
+import { configSchema, hasDirectProvider } from "#src/config/config-schema.ts";
 import { buildReviewerPool } from "#src/review/build-pool.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { makeDetails } from "#test/fixtures.ts";
@@ -41,7 +41,7 @@ describe("fallback verdict cache", () => {
     expect(reviews).toBe(2);
   });
 
-  it("retries primary after an LLM backup, then caches the healthy primary", async () => {
+  it("retries primary after an chat backup, then caches the healthy primary", async () => {
     const calls: string[] = [];
     const config = configSchema.parse({
       provider: "anthropic",
@@ -49,10 +49,10 @@ describe("fallback verdict cache", () => {
       fallbacks: [{ provider: "openai", model: "backup" }],
       cache: { maxEntries: 8 },
     });
-    if (hasTypesafeProvider(config)) throw new Error("expected LLM config");
+    if (hasDirectProvider(config)) throw new Error("expected chat config");
     const engine = buildReviewerPool(config, {
       registry: defaultRegistry({
-        find: (provider, model) => ({ ...fakeModel, provider, id: model }) as never,
+        find: (provider, model) => ({ ...fakeModel, provider, id: model }),
       }),
       modelCall: async (model) => {
         calls.push(model.id);

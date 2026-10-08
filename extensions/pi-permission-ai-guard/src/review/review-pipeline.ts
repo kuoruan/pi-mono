@@ -73,7 +73,7 @@ export interface DenyRecord {
 export interface ReviewPipelineDeps {
   /** Validated extension config. */
   config: AiGuardConfig;
-  /** The reviewer backend (LLM or Jev) — the only seam the pipeline reviews through. */
+  /** The reviewer backend (chat or classifier) — the only seam the pipeline reviews through. */
   engine: ReviewerEngine;
   /** Session manager for transcript stripping (trusted intent + tool calls). */
   sessionManager: SessionManagerLike;

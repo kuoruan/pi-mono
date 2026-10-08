@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  parseVerdictObject,
-  parseTextFallback,
-  GENERIC_DENY_REASON,
-} from "#src/model/model-verdict.ts";
+import { GENERIC_DENY_REASON } from "#src/model/model-verdict.ts";
+import { parseVerdictObject, parseTextFallback } from "#src/review/engines/chat/verdict-parser.ts";
 
 describe("parseVerdictObject", () => {
   it("parses allow verdict", () => {

@@ -138,8 +138,7 @@ export function buildReportCandidates(
     // contextHash, and none may be missing (a record without a
     // contextHash excludes the whole group).
     const hashes = new Set(records.map((r) => r.contextHash));
-    if (hashes.size !== 1) continue;
-    if (records.some((r) => r.contextHash === undefined)) continue;
+    if (hashes.size !== 1 || hashes.has(undefined)) continue;
     // No terminal deny in the group.
     if (records.some((r) => r.requestId && deniedRequestIds.has(r.requestId))) continue;
 

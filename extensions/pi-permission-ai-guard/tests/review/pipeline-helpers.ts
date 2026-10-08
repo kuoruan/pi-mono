@@ -17,10 +17,11 @@ import type { PermissionCheckResult, PermissionQuery } from "@gotgenes/pi-permis
 import { expect } from "vitest";
 
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
-import type { ModelCallFn, ModelRegistryLike } from "#src/model/model-review.ts";
+import type { ModelRegistryLike } from "#src/model/model-registry.ts";
 import type { NotifyFn } from "#src/notice.ts";
 import { buildReviewerPool } from "#src/review/build-pool.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
+import type { ModelCallFn } from "#src/review/engines/chat/call.ts";
 import type { ReviewPipelineDeps, createReviewPipeline } from "#src/review/review-pipeline.ts";
 import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
@@ -33,34 +34,49 @@ export const baseConfig: AiGuardConfig = configSchema.parse({
   cache: { maxEntries: 0 },
 });
 
+/**
+ * A `complete` stand-in returning a complete assistant reply.
+ *
+ * @param replyContent - The reply's content blocks.
+ * @param overrides - Reply fields to replace (e.g. an aborted stop reason).
+ * @returns The fake `complete` implementation.
+ */
 export function makeFakeCompleteSimple(
   replyContent: AssistantMessage["content"],
+  overrides: Partial<AssistantMessage> = {},
 ): (
   _model?: Model<Api>,
   _context?: Context,
   _options?: SimpleStreamOptions,
 ) => Promise<AssistantMessage> {
-  return async (): Promise<AssistantMessage> =>
-    ({
-      role: "assistant",
-      content: replyContent,
-      stopReason: "toolUse",
-      api: "anthropic-messages",
-      provider: "test",
-      model: "test-model",
-      timestamp: Date.now(),
-      usage: {
-        input: 100,
-        output: 50,
-        cacheRead: 0,
-        cacheWrite: 0,
-        total: 150,
-        totalTokens: 150,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-    }) as AssistantMessage;
+  return async (): Promise<AssistantMessage> => ({
+    role: "assistant",
+    content: replyContent,
+    stopReason: "toolUse",
+    api: "anthropic-messages",
+    provider: "test",
+    model: "test-model",
+    timestamp: Date.now(),
+    usage: {
+      input: 100,
+      output: 50,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 150,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    ...overrides,
+  });
 }
 
+/**
+ * A session-manager fragment over loose entries. The cast is the point: the
+ * stripper's contract is tolerance, so the suites hand it entries a
+ * `SessionEntry` type would reject.
+ *
+ * @param entries - The session entries to serve.
+ * @returns The session-manager fragment.
+ */
 export function makeSessionManagerWith(entries: unknown[]) {
   return {
     getSessionId: () => "s1",
@@ -199,6 +215,8 @@ export const defaultRegistry = (
   overrides: Partial<{
     find: ModelRegistryLike["find"];
     getApiKeyAndHeaders: ModelRegistryLike["getApiKeyAndHeaders"];
+    classify: ModelRegistryLike["classify"];
+    findOfType: ModelRegistryLike["findOfType"];
   }> = {},
 ): ModelRegistryLike => ({
   // Unit tests drive the pipeline through the `modelCall` seam, never
@@ -215,7 +233,7 @@ export const defaultRegistry = (
  * Default pooled engine: registry + modelCall wrapped behind the engine seam.
  *
  * @param opts - Optional `modelCall`/`registry` overrides for fixtures.
- * @returns A pooled reviewer engine (single LLM endpoint, no fallbacks).
+ * @returns A pooled reviewer engine (single chat endpoint, no fallbacks).
  */
 export const makeEngine = (
   opts: { modelCall?: ModelCallFn; registry?: ModelRegistryLike } = {},

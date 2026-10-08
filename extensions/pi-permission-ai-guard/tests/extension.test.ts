@@ -8,6 +8,7 @@
 
 import { existsSync } from "node:fs";
 
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ConfigEnv, ConfigLayerTarget, LoadConfigResult } from "#src/config/config-layer.ts";
@@ -201,7 +202,9 @@ function installExtension(
   const pi = makeMockPi();
   if (service !== null) mocks.getPermissionsService.mockReturnValue(service);
   const { createPipeline, calls } = makeStubPipeline();
-  createAiGuardExtension(pi as any, {
+  // The mock implements the surfaces the extension touches, not every
+  // `ExtensionAPI` member; the one assertion is confined to this call site.
+  createAiGuardExtension(pi as unknown as ExtensionAPI, {
     createPipeline,
     // Default config seam (see makeBaselineConfig); a test may override
     // it via `deps` — the config-failure tests do.
@@ -481,6 +484,7 @@ describe("createAiGuardExtension lifecycle", () => {
       config: {
         provider: "test",
         model: "test",
+        modelType: "chat" as const,
         fallbacks: [],
         surfaces: ["bash"],
         transcript: { maxUserMessages: 5, maxToolCalls: 10, maxCharsPerEntry: 1000 },
@@ -490,7 +494,7 @@ describe("createAiGuardExtension lifecycle", () => {
         maxTokens: 4096,
         reasoning: "off" as const,
         instructions: null,
-        typesafe: {
+        classifier: {
           intentThreshold: 0.5,
           riskThreshold: 0.5,
           confidenceThreshold: 0.5,

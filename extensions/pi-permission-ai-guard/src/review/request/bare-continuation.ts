@@ -60,7 +60,7 @@ const BARE_CONTINUATION_PHRASES = new Set([
   "yes go",
   "yes go ahead",
   "keep at it",
-  "don't stop",
+  // `"don't stop"` folds to this; a punctuated spelling would never match.
   "don t stop",
   "dont stop",
   "do not stop",

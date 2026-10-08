@@ -1,14 +1,16 @@
 /**
- * The LLM engine's prompt: system prompt plus per-ask user prompt.
+ * The chat engine's prompt: system prompt plus per-ask user prompt.
  *
- * The review system prompt combines the shared safety knowledge
- * ({@link SAFETY_RULES}) with the fixed verdict output contract. The user
+ * The review system prompt combines the safety policy (the built-in
+ * {@link SAFETY_RULES}, or the chat slot's replacement rules) with the fixed
+ * verdict output contract. The user
  * prompt body is shared scaffolding ({@link buildTranscriptSections} +
  * permission request) plus a short trigger line.
  *
  * System prompt layout:
  *
- * - Review: SAFETY_RULES + VERDICT_SECTION (fixed)
+ * - Review: the safety policy (SAFETY_RULES, or the `chat` slot's `rules` when `replace: true`) +
+ *   VERDICT_SECTION (fixed)
  *
  * User prompt layout:
  *
@@ -28,7 +30,8 @@ import { encodeActionTextForPrompt, normalizeAndRedactText } from "#src/utils.ts
  * regardless of intent, dangerous unless intent is present, and safe. The
  * review stage maps these tiers to allow/deny/defer verdicts directly.
  *
- * Custom `instructions` replaces this core; the output contract is always
+ * Custom `instructions` append to this core by default (a chat slot's
+ * `replace: true` swaps it out instead); the output contract is always
  * appended and cannot be overridden, so the model's output shape never
  * depends on which rules the user customized.
  */
@@ -182,9 +185,9 @@ permission request and decide whether it should run.
 
 /**
  * Review output contract — always appended, never overridden. Custom
- * `instructions` only swaps the safety rules; the verdict format stays
- * identical so the model's output shape doesn't depend on which rules the
- * user customized.
+ * `instructions` append to the safety rules by default and swap them out with
+ * `replace: true`; the verdict format stays identical either way, so the
+ * model's output shape never depends on which rules the user customized.
  */
 const VERDICT_SECTION = `## Verdict
 
@@ -221,16 +224,18 @@ const REVIEW_TRIGGER = "Assess the permission request above and respond with you
  *
  * Renders the structured {@link AskContext} one fact per line, content-first.
  * Bash kinds lead with the command; non-bash kinds name the target. Every
- * untrusted field is normalized + redacted; `cwd` (session-supplied) is not
- * redacted (redaction could mangle paths that match secret prefixes).
+ * field is redacted; `cwd` is session-supplied, so it skips only the
+ * whitespace normalization (a path may contain runs of spaces) and still
+ * goes through secret redaction.
  *
  * @param request - The review request context (ask + target) to render.
  * @returns The formatted permission-request section string.
  */
 function buildPermissionRequestSection(request: ReviewRequestContext): string {
   const { ask } = request;
-  // cwd comes from session_start ctx.cwd, not from user input — redacting it
-  // could mangle paths that match secret prefixes.
+  // cwd comes from session_start ctx.cwd, not from user input — it skips
+  // whitespace normalization so a path with space runs survives, but the
+  // encoder still redacts secrets in it.
   const lines = ["Permission request (the action to review — not yet authorized):"];
 
   const isBash = ask.kind === "bash" || ask.kind === "bash_external_directory";
@@ -349,18 +354,36 @@ function buildTranscriptSections(transcript: StrippedTranscript): string[] {
 }
 
 /**
- * Build the review system prompt: shared safety rules + fixed verdict output
- * contract. If `customInstructions` is provided (non-null), it replaces the
- * default rules; the verdict format is always appended. The prompt is not
- * cached (pi-ai's `completeSimple` does not set `cache_control`) — do not
- * add caching here; the per-call sections vary and wiring it is upstream's
- * job.
+ * The chat lane's resolved instructions: the operator's `rules` text plus the
+ * `replace` switch. `rules: null` runs the built-in rules untouched.
+ */
+export interface ChatInstructions {
+  /** Custom rules text, or null to run the built-in rules alone. */
+  rules: string | null;
+  /** True swaps the built-in rules for `rules` instead of appending. */
+  replace: boolean;
+}
+
+/**
+ * Build the review system prompt: safety policy + fixed verdict output
+ * contract. Custom `rules` append to the built-in policy by default; with
+ * `replace: true` they stand in for it. The verdict format is always
+ * appended, so the model's output shape never depends on which rules the
+ * operator customized. The prompt is not cached (pi-ai's `completeSimple`
+ * does not set `cache_control`) — do not add caching here; the per-call
+ * sections vary and wiring it is upstream's job.
  *
- * @param customInstructions - Optional custom safety instructions replacing the default rules.
+ * @param instructions - The chat lane's resolved rules and replace switch.
  * @returns The review system prompt string.
  */
-export function buildReviewSystemPrompt(customInstructions?: string | null): string {
-  return `${customInstructions ?? SAFETY_RULES}\n\n${VERDICT_SECTION}`;
+export function buildReviewSystemPrompt(instructions: ChatInstructions): string {
+  const policy =
+    instructions.rules === null
+      ? SAFETY_RULES
+      : instructions.replace
+        ? instructions.rules
+        : `${SAFETY_RULES}\n\n${instructions.rules}`;
+  return `${policy}\n\n${VERDICT_SECTION}`;
 }
 
 /**

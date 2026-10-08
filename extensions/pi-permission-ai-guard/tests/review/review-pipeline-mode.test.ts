@@ -879,12 +879,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     expect(record.emittedVerdict).toBeUndefined();
 
     // permissive: same ask denies with the machinery reason and a mapped record.
-    const permissiveCalls: { event: string; data: Record<string, unknown> }[] = [];
-    const permissiveLog = {
-      review: (event: string, data: Record<string, unknown>) =>
-        permissiveCalls.push({ event, data }),
-      debug: () => {},
-    } as never;
+    const { log: permissiveLog, reviewCalls: permissiveCalls } = makeRecordingLog();
     const permissive = createReviewPipeline(
       makePipeline({ config: { ...baseConfig, mode: "permissive" } }),
     );

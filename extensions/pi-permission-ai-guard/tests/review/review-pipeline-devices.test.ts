@@ -4,7 +4,6 @@
  * misses, context sensitivity), plus the review follow-ups they gate.
  */
 
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import { BREAKER_DENY_REASON } from "#src/audit/decision-record.ts";
@@ -297,10 +296,7 @@ describe("createReviewPipeline — verdict cache", () => {
     const cache = new VerdictCache();
     let modelCalled = 0;
     const sessionEntries: unknown[] = [];
-    const sessionManager = {
-      getSessionId: () => "s1",
-      buildContextEntries: () => sessionEntries as SessionEntry[],
-    };
+    const sessionManager = makeSessionManagerWith(sessionEntries);
     const authorize = createReviewPipeline(
       makePipeline({
         config: { ...baseConfig, cache: { ...baseConfig.cache, maxEntries: 5 } },

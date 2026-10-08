@@ -188,6 +188,10 @@ const SAVE_MENU_LABEL = "save config";
 /** The save-config verb's two valid targets (completion and picker order). */
 const SAVE_TARGETS = ["global", "project"] as const;
 
+/** The no-dialog fallback hint, shared by the menu and picker entry points. */
+const MENU_NEEDS_UI_HINT =
+  "settings menu needs an interactive UI — use /ai-guard <setting> <value>";
+
 /**
  * Owns the runtime settings surface for the given specs.
  *
@@ -343,10 +347,7 @@ export class RuntimeSettings {
    */
   async #menu(ctx: AiGuardUiContext): Promise<void> {
     if (!ctx.hasUI) {
-      this.#deps.notify(
-        "settings menu needs an interactive UI — use /ai-guard <setting> <value>",
-        "error",
-      );
+      this.#deps.notify(MENU_NEEDS_UI_HINT, "error");
       return;
     }
     const rows = this.#entries.flatMap((e) =>
@@ -409,10 +410,7 @@ export class RuntimeSettings {
         // direct `/ai-guard <setting> <value>` form works everywhere.
         if (args[0] === undefined) {
           if (!ctx.hasUI) {
-            this.#deps.notify(
-              "settings menu needs an interactive UI — use /ai-guard <setting> <value>",
-              "error",
-            );
+            this.#deps.notify(MENU_NEEDS_UI_HINT, "error");
             return;
           }
           await this.#pickValue(spec, ctx);
@@ -720,7 +718,7 @@ export class RuntimeSettings {
    * @param ctx - The command/shortcut UI context for notify + setStatus.
    */
   #apply(spec: EnumSettingSpec, value: string | undefined, ctx: AiGuardUiContext): void {
-    if (!this.#deps.session.session) return;
+    if (!this.#guardSessionConfig()) return;
     this.#writeOverride(spec, value);
     // Persist into the session file so the override survives resume.
     persistSetting(this.#deps.appendEntry, spec.name, value ?? null);

@@ -1,7 +1,7 @@
 /**
  * Persistence for session-scoped runtime settings (/ai-guard): setting
  * changes are appended to the pi session file as custom entries (which
- * never enter LLM context) and restored from the active branch on
+ * never enter chat context) and restored from the active branch on
  * session_start / session_tree.
  *
  * Pure module — no pi handle, no session state. The append function and

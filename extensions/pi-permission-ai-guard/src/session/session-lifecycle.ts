@@ -57,10 +57,11 @@ import { type Authorizer, getPermissionsService } from "@gotgenes/pi-permission-
 import { type LoadConfigResult } from "#src/config/config-layer.ts";
 import { LINK_NAME } from "#src/config/config-schema.ts";
 import { effectiveOverride, type SessionOverrides } from "#src/config/session-overrides.ts";
-import { type ModelCallFn, type ModelRegistryLike } from "#src/model/model-review.ts";
+import type { ModelRegistryLike } from "#src/model/model-registry.ts";
 import { NOTIFY_PREFIX, warn, type NotifyLevel } from "#src/notice.ts";
 import { buildReviewerPool } from "#src/review/build-pool.ts";
 import { type BreakerTier, CircuitBreaker } from "#src/review/circuit-breaker.ts";
+import type { ModelCallFn } from "#src/review/engines/chat/call.ts";
 import type { SessionManagerLike } from "#src/review/request/transcript-stripper.ts";
 import { type DenyRecord, type ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
 import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
@@ -380,7 +381,6 @@ export class SessionLifecycle {
     if (typeof id === "string" && id !== "") {
       this.#sessionId = id;
     }
-    if (this.#registered) return;
     this.#tryRegister();
   }
 
@@ -430,6 +430,8 @@ export class SessionLifecycle {
       const engine: ReviewerEngine = buildReviewerPool(config, {
         registry: session.registry,
         modelCall: this.#deps.modelCall,
+        onSkippedFallback: (issue) =>
+          this.feedbackNotify(`fallback skipped (${issue.path} — ${issue.message})`, "warning"),
       });
       const deps: ReviewPipelineDeps = {
         config,

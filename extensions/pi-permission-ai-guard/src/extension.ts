@@ -18,8 +18,8 @@ import {
 } from "#src/config/config-layer.ts";
 import { MODE_VALUES, NOTIFY_LEVEL_VALUES } from "#src/config/config-schema.ts";
 import { CYCLE_MODE_VALUES, EMPHASIZED_MODE, MODE_BLURBS } from "#src/config/mode-table.ts";
-import { type ModelCallFn, createModelCall } from "#src/model/model-review.ts";
 import { warn } from "#src/notice.ts";
+import { type ModelCallFn, createModelCall } from "#src/review/engines/chat/call.ts";
 import { type ReviewPipelineDeps, createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { RuntimeSettings, type EnumSettingSpec } from "#src/session/runtime-settings.ts";
 import { SessionLifecycle } from "#src/session/session-lifecycle.ts";

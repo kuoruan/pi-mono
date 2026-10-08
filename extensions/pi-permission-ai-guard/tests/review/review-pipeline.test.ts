@@ -7,10 +7,10 @@
  * review-pipeline-devices.test.ts.
  */
 
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DECISION_EVENT, MODEL_REPLY_EVENT } from "#src/audit/events.ts";
+import type { ModelCallFn } from "#src/review/engines/chat/call.ts";
 import { createReviewPipeline, type DenyRecord } from "#src/review/review-pipeline.ts";
 import { withAgentInstruction } from "#src/review/verdict-copy.ts";
 import { makeDetails } from "#test/fixtures.ts";
@@ -35,35 +35,17 @@ describe("createReviewPipeline — guard clauses", () => {
   // request-ask.test.ts (pure function, no model stack needed).
 
   it("defers without a model call when policy already allows", async () => {
-    let modelCalled = false;
-    const authorize = createReviewPipeline(
-      makePipeline({
-        engine: makeEngine({
-          modelCall: async () => {
-            modelCalled = true;
-            return {} as AssistantMessage;
-          },
-        }),
-      }),
-    );
+    const modelCall = vi.fn<ModelCallFn>(makeFakeCompleteSimple([]));
+    const authorize = createReviewPipeline(makePipeline({ engine: makeEngine({ modelCall }) }));
     await expectVerdict(authorize, { value: "ls -la" }, { kind: "defer" }, "allow");
-    expect(modelCalled).toBe(false);
+    expect(modelCall).not.toHaveBeenCalled();
   });
 
   it("defers without a model call when policy already denies", async () => {
-    let modelCalled = false;
-    const authorize = createReviewPipeline(
-      makePipeline({
-        engine: makeEngine({
-          modelCall: async () => {
-            modelCalled = true;
-            return {} as AssistantMessage;
-          },
-        }),
-      }),
-    );
+    const modelCall = vi.fn<ModelCallFn>(makeFakeCompleteSimple([]));
+    const authorize = createReviewPipeline(makePipeline({ engine: makeEngine({ modelCall }) }));
     await expectVerdict(authorize, { value: "cat .env" }, { kind: "defer" }, "deny");
-    expect(modelCalled).toBe(false);
+    expect(modelCall).not.toHaveBeenCalled();
   });
 
   it("queries the deterministic engine at gate parity", async () => {
@@ -297,14 +279,11 @@ describe("createReviewPipeline — verdicts", () => {
     const authorize = createReviewPipeline(
       makePipeline({
         engine: makeEngine({
-          modelCall: async () =>
-            ({
-              role: "assistant",
-              content: [],
-              stopReason: "aborted",
-              rawStopReason: "max_tokens",
-              errorMessage: "provider hiccup",
-            }) as unknown as AssistantMessage,
+          modelCall: makeFakeCompleteSimple([], {
+            stopReason: "aborted",
+            rawStopReason: "max_tokens",
+            errorMessage: "provider hiccup",
+          }),
         }),
       }),
     );

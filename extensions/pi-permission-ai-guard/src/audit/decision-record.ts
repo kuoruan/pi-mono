@@ -139,18 +139,15 @@ export interface CoverageRecord {
 export const BREAKER_DENY_REASON = "Circuit breaker tripped: too many denials this session";
 
 /**
- * Sentinel for the `rawReply` audit field when no verbatim reply is recorded.
- * The model call produced a parseable clean verdict (allow/deny); the JSON is
- * already captured in the structured verdict fields, so the raw text is
+ * Sentinel for the `rawReply` audit field when a clean verdict's raw text is
  * omitted. Distinct from null so it can't be confused with the throw-based
- * absence (timeout / call-failed / empty-reply).
+ * absence — see the field comment in {@link DecisionRecord.model}.
  */
 const CLEAN_VERDICT_OMITTED = "(clean verdict, rawReply omitted)";
 
 /**
- * Pick the rawReply value for the decision record, distinguishing the
- * three reply states (defer-with-text / defer-threw / clean verdict). See
- * the field comment in {@link DecisionRecord.model} for the rationale.
+ * Pick the rawReply value for the decision record; the three reply states it
+ * distinguishes are documented on the field in {@link DecisionRecord.model}.
  *
  * @param reviewOutcome - The full-review call outcome.
  * @param preRedacted - The caller's already-redacted defer reply, when it
@@ -161,21 +158,14 @@ const CLEAN_VERDICT_OMITTED = "(clean verdict, rawReply omitted)";
  */
 function rawReplyForRecord(reviewOutcome: ReviewOutcome, preRedacted?: string): string | null {
   if (reviewOutcome.verdict.kind === "defer") {
-    // defer: keep the raw text when the call produced any (no-json / invalid-
-    // verdict-value / model-defer); null when it threw before replying
-    // (timeout / call-failed) or returned an empty body (empty-reply), so the
-    // absence of text stays a genuine null. The reply is redacted exactly
-    // once — by the caller when it hands `preRedacted`, here otherwise — so
-    // the audit record carries no more than the debug stream does (the
-    // model may parrot prompt content: credentials, working directory).
+    // The reply is redacted exactly once — by the caller when it hands
+    // `preRedacted`, here otherwise — so the audit record carries no more
+    // than the debug stream does (the model may parrot prompt content:
+    // credentials, working directory).
     return reviewOutcome.rawReply !== undefined
       ? (preRedacted ?? normalizeAndRedactText(reviewOutcome.rawReply))
       : null;
   }
-  // Clean allow/deny: the JSON parsed; verdict, reason (deny only), and
-  // riskLevel are already in the structured record fields, so the raw text is
-  // omitted via a sentinel (not null, to stay distinct from the throw-based
-  // defer absence above).
   return CLEAN_VERDICT_OMITTED;
 }
 

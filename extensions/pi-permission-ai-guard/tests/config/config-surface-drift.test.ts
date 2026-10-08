@@ -12,9 +12,9 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { leafPaths } from "#src/config/config-layer.ts";
 import {
   BREAKER_VERDICT_VALUES,
+  MODEL_TYPE_VALUES,
   MODE_VALUES,
   REASONING_VALUES,
   configSchema,
@@ -29,21 +29,65 @@ const schemaJson = JSON.parse(
       default?: unknown;
       description?: string;
       enum?: unknown[];
-      properties?: Record<string, { enum?: unknown[] }>;
+      properties?: Record<string, { enum?: unknown[]; default?: unknown }>;
     }
   >;
 };
 
 /**
  * Collect leaf paths and values from a materialized config object, as a
- * dotted-path → value map (built on the same leaf enumeration the edit
- * algorithm uses, so this test cannot drift from what edits walk).
+ * dotted-path → value map. The walker below is FROZEN local to this
+ * test: it mirrors the module's arrays-as-leaves rule, but the module's
+ * own walker is pinned by the load/persist suites, not by this copy.
  *
  * @param obj - The parsed config (defaults applied).
  * @returns A path → value map of every leaf.
  */
 function flatLeafPaths(obj: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(leafPaths(obj).map((e) => [e.path.join("."), e.value]));
+  const entries: Array<{ path: string[]; value: unknown }> = [];
+  descend(obj, [], (node, path) => entries.push({ path, value: node }));
+  return Object.fromEntries(entries.map((e) => [e.path.join("."), e.value]));
+}
+
+/**
+ * Leaf enumeration mirroring the module's own walker: plain objects
+ * recurse, arrays are atomic leaves (the edit strategy's rule). Local to
+ * this test on purpose — the walker is the comparison, not a unit under
+ * test, and the module's own behaviour is pinned through
+ * `loadAiGuardConfig`/`persistConfigLayer`.
+ *
+ * @param node - The value to walk.
+ * @param path - The accumulated property path.
+ * @param visit - Receives each leaf with its path.
+ * @returns Nothing.
+ */
+function descend(
+  node: unknown,
+  path: string[],
+  visit: (node: unknown, path: string[]) => void,
+): void {
+  if (isPlainObject(node)) {
+    for (const [key, value] of Object.entries(node)) descend(value, [...path, key], visit);
+    return;
+  }
+  visit(node, path);
+}
+
+/**
+ * Whether the value is a plain (non-array, non-null) object.
+ *
+ * @param value - The value to test.
+ * @returns True for a plain object.
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A JSON-schema node, as far as the default walk needs to see it. */
+interface SchemaNode {
+  default?: unknown;
+  properties?: Record<string, SchemaNode>;
+  anyOf?: SchemaNode[];
 }
 
 /**
@@ -53,17 +97,34 @@ function flatLeafPaths(obj: Record<string, unknown>): Record<string, unknown> {
  * @param base - The path prefix for recursive calls.
  * @returns A path → default map.
  */
-function jsonDefaults(
-  node: { properties?: Record<string, { default?: unknown; properties?: unknown }> },
-  base = "",
-): Record<string, unknown> {
+function jsonDefaults(node: SchemaNode, base = ""): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, prop] of Object.entries(node.properties ?? {})) {
     const path = base ? `${base}.${key}` : key;
     if ("default" in prop) out[path] = prop.default;
     if (prop.properties) {
-      Object.assign(out, jsonDefaults(prop as never, path));
+      Object.assign(out, jsonDefaults(prop, path));
     }
+  }
+  return out;
+}
+
+/**
+ * Collect the defaults `jsonDefaults` cannot reach: the ones inside an
+ * `anyOf` branch. That walk stops at a scalar default, so a union arm's
+ * own defaults (`instructions`'s slot defaults sit behind
+ * `instructions: null`) are never compared by the top-level assertion.
+ *
+ * @param node - A schema node with `properties`.
+ * @param base - The path prefix for recursive calls.
+ * @returns A path → default map for every `anyOf` branch.
+ */
+function anyOfDefaults(node: SchemaNode, base = ""): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, prop] of Object.entries(node.properties ?? {})) {
+    const path = base ? `${base}.${key}` : key;
+    for (const branch of prop.anyOf ?? []) Object.assign(out, jsonDefaults(branch, path));
+    if (prop.properties) Object.assign(out, anyOfDefaults(prop, path));
   }
   return out;
 }
@@ -82,13 +143,47 @@ describe("config surface drift", () => {
       // unmaterialized so conditional item types remain valid in editors.
       expect(zodSide.fallbacks).toEqual([]);
       delete zodSide.fallbacks;
-      expect(zodSide).toEqual(jsonDefaults(schemaJson));
+      // modelType is a string-provider field: the direct variant carries
+      // no default for it (the reserved optional only surfaces user input).
+      const expected = jsonDefaults(schemaJson);
+      if (typeof provider === "object") delete expected.modelType;
+      // The deprecated `typesafe` alias exists for input compatibility
+      // only: zod folds it into `classifier` and drops the key, so its
+      // JSON-schema defaults must not appear in the parsed shape.
+      for (const key of Object.keys(expected)) {
+        if (key.startsWith("typesafe.")) delete expected[key];
+      }
+      expect(zodSide).toEqual(expected);
     }
+  });
+
+  it("nested anyOf defaults agree with zod (the main walk stops short)", () => {
+    // `instructions` defaults to null, so the slot defaults inside its
+    // object branch are never reached by the walk above. Fill both slots
+    // and require every default the JSON schema promises inside a branch
+    // to come back from zod with the same value.
+    const promised = anyOfDefaults(schemaJson);
+    expect(Object.keys(promised).length).toBeGreaterThan(0);
+    const zodSide = flatLeafPaths(
+      configSchema.parse({
+        provider: "x",
+        model: "x",
+        // Both lanes must exist or the classifier slot is rejected as a
+        // no-op; only the chat slot carries a JSON-schema default.
+        fallbacks: [{ provider: "y", model: "y", modelType: "classifier" }],
+        instructions: { chat: { rules: "r" }, classifier: { background: "b" } },
+      }),
+    );
+    // Projected key-by-key so a mismatch names the offending path (the
+    // lint rule forbids passing an expect message).
+    const actual = Object.fromEntries(Object.keys(promised).map((path) => [path, zodSide[path]]));
+    expect(actual).toEqual(promised);
   });
 
   it("JSON-schema enums match the zod enums", () => {
     expect(schemaJson.properties.mode.enum).toEqual([...MODE_VALUES]);
     expect(schemaJson.properties.reasoning.enum).toEqual([...REASONING_VALUES]);
+    expect(schemaJson.properties.modelType.enum).toEqual([...MODEL_TYPE_VALUES]);
     expect(schemaJson.properties.circuitBreaker.properties!.verdict.enum).toEqual([
       ...BREAKER_VERDICT_VALUES,
     ]);

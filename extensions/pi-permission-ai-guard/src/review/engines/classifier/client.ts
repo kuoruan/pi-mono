@@ -11,50 +11,49 @@ import {
   TypeSafeClient,
 } from "@typesafe-ai/sdk";
 
-import type { JevQuestionId } from "#src/config/config-schema.ts";
+import type { ClassifierQuestionId } from "#src/config/config-schema.ts";
 import type { ReviewRequestContext } from "#src/review/request/review-request.ts";
 import type { StrippedTranscript } from "#src/review/request/transcript-stripper.ts";
 import { normalizeAndRedactText } from "#src/utils.ts";
 
 import {
   applyOverlay,
-  normalizeOverlay,
-  type JevInstructionsInput,
-  type JevQuestionEntry,
+  type ClassifierOverlay,
+  type ClassifierQuestionEntry,
 } from "./instructions.ts";
 import { DANGER_CRITERIA, RISK_RUBRIC } from "./questions.ts";
 
 /** Direct TypeSafe connection (both fields optional — unset falls back to env/SDK defaults). */
-export interface TypesafeConnection {
+export interface DirectConnection {
   baseUrl?: string;
   apiKey?: string;
 }
 
 /**
  * The built-in reviewer role: every question's first background layer.
- * Not user configuration — it tells Jev it is a permission reviewer
- * (the LLM path's system prompt equivalent), so intent/scope read
+ * Not user configuration — it tells the classifier it is a permission reviewer
+ * (the chat path's system prompt equivalent), so intent/scope read
  * against the authorization anchor rather than free-floating.
  */
-export const JEV_REVIEWER_BACKGROUND =
+const CLASSIFIER_REVIEWER_BACKGROUND =
   "You are reviewing one tool call for an AI coding agent. Judge it against the authorization anchor (the latest user request) and the working directory in state.";
 
 /** The built-in questions in the SDK's request shapes. */
-export interface JevQuestions extends Questions {
+export interface ClassifierQuestions extends Questions {
   danger_category: ChoiceQuestion<typeof DANGER_CRITERIA>;
   intent_match: NoulQuestion;
   risk: ScoreQuestion<typeof RISK_RUBRIC>;
 }
 
 /** The TypeSafe systemOne response: typed answers plus model and usage metadata. */
-export type TypesafeSystemOneResponse = SystemOneResult<JevQuestions>;
+export type ClassifierSystemOneResponse = SystemOneResult<ClassifierQuestions>;
 
 /** Minimal SDK surface this module uses (the seam unit tests fake). */
-export interface TypesafeClientLike {
+export interface ClassifierClientLike {
   systemOne(
-    request: SystemOneRequest<JevQuestions>,
+    request: SystemOneRequest<ClassifierQuestions>,
     options?: Pick<RequestOptions, "timeout" | "signal" | "retry">,
-  ): Promise<TypesafeSystemOneResponse>;
+  ): Promise<ClassifierSystemOneResponse>;
 }
 
 /**
@@ -64,7 +63,7 @@ export interface TypesafeClientLike {
  * @param connection - The resolved baseUrl/apiKey pair (either may be undefined).
  * @returns The SDK-backed client.
  */
-export function createTypesafeClient(connection: TypesafeConnection): TypesafeClientLike {
+export function createDirectClient(connection: DirectConnection): ClassifierClientLike {
   return new TypeSafeClient({
     apiKey: connection.apiKey,
     baseURL: connection.baseUrl,
@@ -76,7 +75,7 @@ export function createTypesafeClient(connection: TypesafeConnection): TypesafeCl
  * authorization anchor, and the stripped context — optional keys are
  * added only when present, so no undefined value ever serializes.
  *
- * The untrusted ask fields are redacted here, the LLM prompt's twin: the
+ * The untrusted ask fields are redacted here, the chat prompt's twin: the
  * pipeline hands engines the raw projection (only the transcript arrives
  * sanitized), so a credential in the command would otherwise leave for
  * the TypeSafe service in the clear. The session-supplied working
@@ -97,13 +96,13 @@ function buildState(request: ReviewRequestContext, transcript: StrippedTranscrip
     authorization_anchor: transcript.trustedIntent.at(-1) ?? "(none found)",
     earlier_context: transcript.trustedIntent.slice(0, -1),
     tool_calls: transcript.toolCalls,
-    // cwd comes from the session, not user input — passed unredacted
-    // (redaction could mangle paths matching secret prefixes). Note: the
-    // LLM prompt still redacts its cwd line (its own doc says otherwise) —
-    // that fork is tracked separately, not papered over here.
+    // cwd comes from the session, not user input — passed verbatim, since a
+    // path must survive intact and secret redaction could mangle one that
+    // happens to match a key prefix. This is the deliberate fork from the
+    // chat prompt, whose cwd line takes secret redaction.
     working_directory: ask.workingDirectory,
   };
-  // Non-bash action carriers (the LLM prompt's tool-input/read-path lines):
+  // Non-bash action carriers (the chat prompt's tool-input/read-path lines):
   // without these a replace/mcp ask is reviewed blind on intent alone.
   if (ask.toolInputPreview) state.tool_input = normalizeAndRedactText(ask.toolInputPreview);
   if (ask.readPath) state.read_path = normalizeAndRedactText(ask.readPath);
@@ -122,26 +121,25 @@ function buildState(request: ReviewRequestContext, transcript: StrippedTranscrip
  *
  * @param transcript - The stripped transcript.
  * @param request - The review request (ask + resolved target).
- * @param instructions - The background/overlay input.
- * @param model - The Jev model id.
+ * @param instructions - The classifier lane's resolved overlay.
+ * @param model - The classifier model id.
  * @returns The System One request payload.
  */
-export function buildJevRequest(
+export function buildClassifierRequest(
   transcript: StrippedTranscript,
   request: ReviewRequestContext,
-  instructions: JevInstructionsInput,
+  instructions: ClassifierOverlay,
   model: string,
-): SystemOneRequest<JevQuestions> {
+): SystemOneRequest<ClassifierQuestions> {
   // Three layers, applied in order: the built-in reviewer role, the
   // user's shared background, then the question's own override (each
   // layer adds rather than replacing).
-  const overlay = normalizeOverlay(instructions);
-  const perQuestion = overlay.questions ?? {};
-  const bg = overlay.background;
+  const perQuestion = instructions.questions ?? {};
+  const bg = instructions.background;
 
-  const q = (id: JevQuestionId, base: string): JevQuestionEntry => {
+  const q = (id: ClassifierQuestionId, base: string): ClassifierQuestionEntry => {
     // The built-in role always leads: the user's background appends after it.
-    const withRole = applyOverlay(base, JEV_REVIEWER_BACKGROUND);
+    const withRole = applyOverlay(base, CLASSIFIER_REVIEWER_BACKGROUND);
     const withBg = bg === undefined ? withRole : applyOverlay(withRole, bg);
     const extra = perQuestion[id];
     return extra === undefined ? withBg : applyOverlay(withBg, extra);

@@ -40,9 +40,10 @@ import type {
 } from "@gotgenes/pi-permission-system";
 
 import { type AiGuardConfig, configSchema } from "#src/config/config-schema.ts";
-import { type ModelRegistryLike, createModelCall } from "#src/model/model-review.ts";
+import type { ModelRegistryLike } from "#src/model/model-registry.ts";
 import { buildReviewerPool } from "#src/review/build-pool.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
+import { createModelCall } from "#src/review/engines/chat/call.ts";
 import type { SessionManagerLike } from "#src/review/request/transcript-stripper.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
 import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
@@ -129,7 +130,7 @@ function parseCliArgs(): CliArgs {
     apiKey,
     // Only the typesafe path has a provider-owned default: the SDK resolves
     // its own URL and model, so borrowing Anthropic's would quietly send a
-    // Jev run to the wrong endpoint.
+    // classifier run to the wrong endpoint.
     baseUrl:
       values["base-url"] ??
       process.env.PI_AI_GUARD_BASE_URL ??
@@ -174,7 +175,7 @@ function buildProvider(provider: ProviderName): AnyProvider {
 // ── Session helpers ─────────────────────────────────────────────────
 
 function emptySession(): SessionManagerLike {
-  return { getSessionId: () => "s1", buildContextEntries: () => [] as SessionEntry[] };
+  return { getSessionId: () => "s1", buildContextEntries: () => [] };
 }
 
 function sessionWithUserMessages(messages: string[]): SessionManagerLike {
@@ -183,8 +184,8 @@ function sessionWithUserMessages(messages: string[]): SessionManagerLike {
     id: String(i),
     parentId: i > 0 ? String(i - 1) : null,
     timestamp: String(i),
-    message: { role: "user", content: text },
-  })) as unknown as SessionEntry[];
+    message: { role: "user", content: text, timestamp: 0 },
+  }));
   return { getSessionId: () => "s1", buildContextEntries: () => entries };
 }
 
@@ -202,7 +203,7 @@ function sessionWithInjection(userIntent: string, maliciousToolResult: string): 
       id: "1",
       parentId: null,
       timestamp: "1",
-      message: { role: "user", content: userIntent },
+      message: { role: "user", content: userIntent, timestamp: 0 },
     },
     {
       type: "message",
@@ -214,6 +215,19 @@ function sessionWithInjection(userIntent: string, maliciousToolResult: string): 
         content: [
           { type: "toolCall", id: "tc1", name: "bash", arguments: { command: "cat README.md" } },
         ],
+        api: "anthropic-messages",
+        provider: "test",
+        model: "test-model",
+        stopReason: "toolUse",
+        timestamp: 0,
+        usage: {
+          input: 1,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 2,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
       },
     },
     {
@@ -223,11 +237,14 @@ function sessionWithInjection(userIntent: string, maliciousToolResult: string): 
       timestamp: "3",
       message: {
         role: "toolResult",
+        toolCallId: "tc1",
         toolName: "bash",
         content: [{ type: "text", text: maliciousToolResult }],
+        isError: false,
+        timestamp: 0,
       },
     },
-  ] as unknown as SessionEntry[];
+  ];
   return { getSessionId: () => "s1", buildContextEntries: () => entries };
 }
 
@@ -280,13 +297,13 @@ function buildHarness(
   config: AiGuardConfig,
   model: Model<any> | null,
   apiKey: string,
-  providerInstance: AnyProvider | null, // null on the Jev path (no registry)
+  providerInstance: AnyProvider | null, // null on the classifier path (no registry)
 ): {
   authorize: ReturnType<typeof createReviewPipeline>;
   log: AuthorizerLog & { events: LogEvent[] };
 } {
-  // A registry with no models: LLM endpoints resolve to model-unresolved
-  // (failover/defer as configured); Jev endpoints never touch it.
+  // A registry with no models: chat endpoints resolve to model-unresolved
+  // (failover/defer as configured); classifier endpoints never touch it.
   const nullRegistry: ModelRegistryLike = {
     find: () => undefined,
     getApiKeyAndHeaders: async () => ({ ok: false as const, error: "no registry" }),
@@ -294,8 +311,9 @@ function buildHarness(
       throw new Error("no registry");
     },
   };
-  // The fake registry only serves LLM endpoints (Jev never touches it) —
-  // null on the pure-Jev path. Pool assembly dispatches per endpoint lane.
+  // The fake registry only serves chat endpoints (the classifier lane never
+  // touches it) — null on the pure-classifier path. Pool assembly dispatches
+  // per endpoint lane.
   const poolEngine = (): ReviewerEngine => {
     const registry: ModelRegistryLike =
       model === null || providerInstance === null
@@ -328,8 +346,8 @@ function buildHarness(
   };
   const authorize = createReviewPipeline({
     config,
-    // Pool assembly fans out per endpoint lane: the Jev lane owns its SDK
-    // call (no registry involved), the LLM lane uses the fake registry.
+    // Pool assembly fans out per endpoint lane: the classifier lane owns its SDK
+    // call (no registry involved), the chat lane uses the fake registry.
     engine: poolEngine(),
     sessionManager: tc.sessionManager ?? emptySession(),
     cwd: process.cwd(),

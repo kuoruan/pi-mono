@@ -7,9 +7,9 @@ A Pi extension that reviews permission **asks** with a light model, using a toke
 Six directories under `src/`, one per concept cluster (the glossary sections below map onto them):
 
 - `config/` — the operator-configured surface: schema, layered load/persist, the mode ladder's declarative facts.
-- `review/request/` — from permission ask to review input: eligibility, the structured projection (ADR 0011), cache identity, transcript stripping. Prompt rendering lives with its engine in `review/engines/llm/prompt.ts`.
-- `model/` — talking to the reviewer model: auth/call/retry, verdict parsing.
-- `review/` — the review engines and their verdicts: the pipeline, the `ReviewerEngine` seam and its pooled implementation (`pool.ts` walking heterogeneous endpoints through per-lane `LaneAdapter`s, `build-pool.ts` assembly), `engines/llm` vs `engines/jev`, mode mapping, the failure taxonomy, circuit breaker, verdict cache.
+- `review/request/` — from permission ask to review input: eligibility, the structured projection (ADR 0011), cache identity, transcript stripping. Prompt rendering lives with its engine in `review/engines/chat/prompt.ts`.
+- `model/` — lane-neutral ground shared by both lanes: the registry projection (`model-registry.ts` — chat reads `find`/`getApiKeyAndHeaders`/`complete`, the classifier reads optional `classify`/`findOfType`) and the verdict taxonomy (`model-verdict.ts`). Each lane's call machinery lives with its lane: the chat text path in `engines/chat/call.ts` plus its tolerant JSON parser (`engines/chat/verdict-parser.ts`), the System One SDK + registry facade in `engines/classifier/client.ts` + `registry-client.ts`. The switch/terminal classification tables shared by both lanes live in `review/failure-taxonomy.ts` (two input adapters over one matrix: untyped strings for the chat lane, typed SDK errors for the classifier lane).
+- `review/` — the review engines and their verdicts: the pipeline, the `ReviewerEngine` seam and its pooled implementation (`pool.ts` walking heterogeneous endpoints through per-lane `LaneAdapter`s, `build-pool.ts` assembly), `engines/chat` vs `engines/classifier`, mode mapping, the failure taxonomy, circuit breaker, verdict cache.
 - `session/` — session state and the operator surface: lifecycle, the `/ai-guard` command table, overrides, session-file persistence.
 - `audit/` — the decision record and its readers: record factories, the review-log reader + fs tail adapter, report candidates.
 
@@ -76,23 +76,27 @@ Note: `external_directory`/`path` asks reach this link, but any `allow` on them 
 
 ### Review
 
-**ReviewerEngine**: The `ReviewOutcome` producer seam (`review(ctx) -> EngineReviewResult | EngineMachineryFailure`). One pooled supervisor (`createReviewerPool`) walks an ordered, heterogeneous endpoint list through one per-lane `LaneAdapter` each (`attempt` → a three-state `AttemptResult`: `answered`, `retryable(reason, finalize)`, or `terminal`). Two lanes: LLM (the `ModelRegistry.complete` text path) and Jev (ADR 0005 — the TypeSafe SDK `systemOne` path; answers are calibrated probabilities, never text, so deny reasons synthesize from the danger-category name; a danger hit denies before the confidence check, and low confidence defers like the LLM lean). `buildReviewerPool` resolves the endpoint list from config (primary + ordered `fallbacks`, lanes freely mixed) and wires the adapters. The pipeline never branches on the lane.
+**Lane**: One reviewer implementation class — `chat` (a Pi chat model's text verdict, through `ModelRegistry.complete`) or `classifier` (TypeSafe System One's calibrated probabilities). It is an endpoint's identity, not a transport: `provider: { type: "typesafe" }` and a registry entry with `modelType: "classifier"` name the same lane through two backends. Each lane's code lives in `engines/<lane>/` behind one `LaneAdapter`, and the endpoint list mixes lanes freely. _Avoid_: calling a mode-ladder band a lane — `mode-table.ts`'s "defer lane" is a band in the ladder (the defer split by lean), never a reviewer.
+
+**ReviewerEngine**: The `ReviewOutcome` producer seam (`review(ctx) -> EngineReviewResult | EngineMachineryFailure`). One pooled supervisor (`createReviewerPool`) walks an ordered, heterogeneous endpoint list through one per-lane `LaneAdapter` each (`attempt` → a three-state `AttemptResult`: `answered`, `retryable(reason, finalize)`, or `terminal`). Two lanes: chat (the `ModelRegistry.complete` text path) and classifier (ADR 0005 — the TypeSafe SDK `systemOne` path; answers are calibrated probabilities, never text, so deny reasons synthesize from the danger-category name; a danger hit denies before the confidence check, and low confidence defers like the chat lean). `buildReviewerPool` resolves the endpoint list from config (primary + ordered `fallbacks`, lanes freely mixed) and wires the adapters. The pipeline never branches on the lane.
 
 **WAF note**: the danger Choice criteria doubles as an attack-word list, and TypeSafe's Cloudflare WAF scores the request body — literal commands, system paths, or exploit spellings in criteria wording accumulate WAF score until the whole call returns HTTP 403 (full outage 2026-09-23, fixed by slimming `DANGER_CRITERIA` to descriptive wording). Keep criteria descriptive, never imperative; provider error pages are truncated to 300 chars before logging so they cannot reflux into the next request's state.
 
 **TypeSafe vs Jev**: Two independent axes, two words — pick by what the change would touch.
 
-- **TypeSafe** is the _transport/provider_ surface: the `@typesafe-ai/sdk` client (`TypesafeClientLike`, `createTypesafeClient`, `TypesafeConnection`), the SDK's `systemOne` wire shapes (`TypesafeSystemOneResponse`, `TypesafeRawAnswer`), the provider value (`{ type: "typesafe" }`), the `typesafe` config section, the `TYPESAFE_*` env fallbacks, and the `modelId` prefix (`typesafe/<model>`).
-- **Jev** is the _model strategy_: the ported question set (`JEV_QUESTION_IDS`, `questions.ts` criteria/rubric), the calibrated answers and their projection (`TypesafeRawAnswer` → `JevAnswers`, `JevThresholds`), the instruction overlay (`JevOverlay`), and the verdict synthesis (`synthesizeJevVerdict`).
+- **TypeSafe** is the _transport/provider_ surface: the `@typesafe-ai/sdk` client (`ClassifierClientLike`, `createDirectClient`, `DirectConnection`), the SDK's `systemOne` wire shapes (`ClassifierSystemOneResponse`, `TypesafeRawAnswer`), the provider value (`{ type: "typesafe" }`), the `TYPESAFE_*` env fallbacks, and the `modelId` prefix a direct endpoint records (`typesafe/<model>` — a registry endpoint records Pi's provider id instead).
+- **Jev** is the _model strategy_: the ported question set (`CLASSIFIER_QUESTION_IDS`, `questions.ts` criteria/rubric), the calibrated answers and their projection (`TypesafeRawAnswer` → `ClassifierAnswers`), the `classifier` config block (the calibrated thresholds, with its deprecated `typesafe` alias), the instruction overlay (`ClassifierOverlay`), and the verdict synthesis (`synthesizeClassifierVerdict`).
 
-If the change is "a different SDK, API, or provider field", the name is TypeSafe; if it is "a different question set, calibration, or deny rule", the name is Jev. The lane (`engines/jev/`, `createJevAdapter`) is named for the strategy — the transport is the adapter it hides behind `TypesafeClientLike`.
-**Model call path** (LLM engine only — Jev reaches its model through the TypeSafe SDK's `systemOne` instead): LLM calls go through `ModelRegistry.complete` (the agent's own call path — raw `Context` in, auth + transcript normalization inside the registry). Never the provider layer directly: upstream brands the provider input, so `getProvider().streamSimple()` breaks on every tightening. Known asymmetry: the pipeline auth gate accepts compatibility-headers providers that `prepareRequest` rejects — both fail safe to `call-failed` defer, and such a provider could not run the agent itself. _Avoid_: provider-layer calls
+If the change is "a different SDK, API, or provider field", the name is TypeSafe; if it is "a different question set, calibration, or deny rule", the name is Jev. The lane (`engines/classifier/`, `createClassifierAdapter`) is named for the strategy.
+
+The classifier lane has two backends behind one adapter: **direct** (the TypeSafe SDK's `systemOne`, configured with `{ type: "typesafe" }`) and **registry** (a string provider with `modelType: "classifier"`, run through Pi's built-in `modelRegistry.classify`; `registry-client.ts` translates to and from the SDK-shaped call). Chat has one: registry `ModelRegistry.complete`.
+**Model call path** (chat engine only — lives in `engines/chat/call.ts`; the classifier lane reaches its model through the TypeSafe SDK's `systemOne` instead): chat calls go through `ModelRegistry.complete` (the agent's own call path — raw `Context` in, auth + transcript normalization inside the registry). Never the provider layer directly: upstream brands the provider input, so `getProvider().streamSimple()` breaks on every tightening. Known asymmetry: the pipeline auth gate accepts compatibility-headers providers that `prepareRequest` rejects — both fail safe to `call-failed` defer, and such a provider could not run the agent itself. _Avoid_: provider-layer calls
 
 **Full review**: The JSON-verdict review. The model receives a stripped transcript + the permission request and is asked to return `{"verdict":"allow|deny|defer","reason":"...","riskLevel":"..."}`. A tolerant parser extracts the JSON from prose-wrapped replies, so providers that wrap JSON in text still work. Deny and defer carry a `reason`; allow omits it. A deny reason must state what makes the request dangerous — an assessment that concludes "safe" must be an `allow` (the reason binds to the verdict; a live contradictory pair is a model misfire, not a pipeline error).
 
 **Upstream retry**: One retry per mechanism per review, budgeted inside `timeoutMs` (the total-budget promise — a review never exceeds one window):
 
-- **Provider errors** (408/409/429/5xx and connection-level failures, per pi-ai's classifier) retry inside pi-ai's provider layer, with backoff and `retry-after`; the timeout signal spans every attempt. Jev instead fails a timed-out attempt outright (only 408/429/5xx retry inside the SDK) — `typesafe.timeoutMs` is strictly per-attempt.
+- **Provider errors** (408/409/429/5xx and connection-level failures, per pi-ai's classifier) retry inside pi-ai's provider layer, with backoff and `retry-after`; the timeout signal spans every attempt. The classifier lane instead fails a timed-out attempt outright (only 408/429/5xx retry inside the SDK) — its per-attempt timeout is the endpoint's `timeoutMs` (the top-level value for the primary, the entry's own for a backup).
 - **Empty replies** (200 with no usable text) retry at the review layer, gated on the first attempt consuming less than half the window (the retry always has ≥ half a window).
 
 The retry carries no provider-layer retry — three requests is the hard ceiling. `attempts: 2` marks a retried review in the decision record; the retry's budgetless provider errors fail straight to `call-failed`. The first attempt's empty diagnostic goes to the debug stream before the retry replaces the reply.
@@ -133,7 +137,7 @@ The retry carries no provider-layer retry — three requests is the hard ceiling
 - `getPermissionsService(sessionId)` — the session-keyed service locator
 - `permissions:ready` — fires at least once per session, may repeat
 
-All from `@gotgenes/pi-permission-system` (peer range `>=27.1.1 <33.0.0` — a bounded interval: the API surface we consume is identical across every published major, and a future major bumps one token instead of rewriting an OR chain; v28 adds decision attribution, v29 removes the process-root slot this extension never referenced, and v32 relays a UI-bearing child's asks to its declared parent, where the parent's own chain — this extension included — adjudicates):
+All from `@gotgenes/pi-permission-system` (peer range `>=27.1.1 <37.0.0` — a bounded interval: the API surface we consume is identical across every published major, and a future major bumps one token instead of rewriting an OR chain; v28 adds decision attribution, v29 removes the process-root slot this extension never referenced, and v32 relays a UI-bearing child's asks to its declared parent, where the parent's own chain — this extension included — adjudicates):
 
 - **Registration** — the extension registers an `"ai-guard"` chain link via `service.registerAuthorizer` on the session's OWN permissions node: the service is fetched from the session-keyed locator, registered exactly once per session (whichever of session_start / permissions:ready comes first; ready repeats are no-ops), and released on session_shutdown.
 - **One instance per node** — this rests on the v27 host contract of one extension instance per session node (each node has its own ExtensionContext — upstream ADR 0012); nodes never share an instance.
@@ -141,7 +145,7 @@ All from `@gotgenes/pi-permission-system` (peer range `>=27.1.1 <33.0.0` — a b
 
 ## Prompt writing principles
 
-The safety rules prompt (`SAFETY_RULES` in `src/review/engines/llm/prompt.ts`) is the semantic instruction fed to the review model. These principles govern how it is written and maintained.
+The safety rules prompt (`SAFETY_RULES` in `src/review/engines/chat/prompt.ts`) is the semantic instruction fed to the review model. These principles govern how it is written and maintained.
 
 ### 1. Semantic, not literal
 
@@ -163,7 +167,7 @@ Absent intent defaults to defer, not deny. "(none found)" is insufficient eviden
 
 Transcript, tool calls, action text, and permission requests are untrusted. A user goal authorizes only matching actions, not unrelated or higher-risk side effects. Authorization is judged by material effect, not by command syntax.
 
-### 5. LLM is the semantic layer, not the deterministic gate
+### 5. The model is the semantic layer, not the deterministic gate
 
 Deterministic interception is done by the policy engine; the model adds semantic judgment. Tool-name exceptions belong in policy config, not in the prompt. The prompt does not list allow-listed tool names.
 

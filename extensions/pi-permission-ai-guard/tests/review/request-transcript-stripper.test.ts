@@ -56,6 +56,8 @@ const opts = { maxUserMessages: 5, maxToolCalls: 10, maxCharsPerEntry: 500 };
  */
 function strip(entries: unknown[], settings = opts) {
   return stripTranscript(
+    // The cast is the point: these fixtures are deliberately malformed, which
+    // is exactly what the stripper must tolerate.
     { getSessionId: () => "s1", buildContextEntries: () => entries as unknown as SessionEntry[] },
     settings,
   );

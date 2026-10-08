@@ -1,5 +1,9 @@
 /**
- * Model call: ask the reviewer model to assess a permission request.
+ * Chat lane model call: ask the reviewer model to assess a permission
+ * request. Chat-only by construction — the classifier lane reaches its
+ * model through the System One SDK (`classifier/client.ts`), never
+ * `ModelRegistry.complete`, so this call machinery lives with its lane
+ * instead of the lane-neutral `model/` directory.
  *
  * {@link reviewModel} is the single entry point — it takes a resolved
  * {@link ModelCallContext} (model + auth + call config) and the prompt pair,
@@ -21,28 +25,21 @@ import {
   type SimpleStreamOptions,
   contentText,
 } from "@earendil-works/pi-ai";
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 import { MAX_PROVIDER_ERROR_CHARS, emitCallFailure } from "#src/audit/call-failure.ts";
 import type { AuditCorrelation } from "#src/audit/decision-record.ts";
 import { MODEL_REPLY_EVENT } from "#src/audit/events.ts";
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
-import type { AvailabilityReason } from "#src/model/model-verdict.ts";
-import { availabilityReason } from "#src/model/model-verdict.ts";
+import type { ModelRegistryLike } from "#src/model/model-registry.ts";
+import type {
+  AvailabilityReason,
+  ModelCallDeferKind,
+  ReviewOutcome,
+  ReviewOutcomeDiagnostic,
+} from "#src/model/model-verdict.ts";
+import { parseTextFallback } from "#src/review/engines/chat/verdict-parser.ts";
+import { availabilityReason } from "#src/review/failure-taxonomy.ts";
 import { classifyAbortish, normalizeAndRedactText, truncateMiddle } from "#src/utils.ts";
-
-import {
-  type ModelCallDeferKind,
-  type ReviewOutcome,
-  type ReviewOutcomeDiagnostic,
-  parseTextFallback,
-} from "./model-verdict.ts";
-
-/**
- * Auth result from `ModelRegistry.getApiKeyAndHeaders`, derived from the
- * upstream return type (not exported from the package root).
- */
-export type ResolvedRequestAuth = Awaited<ReturnType<ModelRegistry["getApiKeyAndHeaders"]>>;
 
 /** One model-call round trip: (model, context, options) → the full reply. */
 export type ModelCallFn = (
@@ -50,14 +47,6 @@ export type ModelCallFn = (
   context: Context,
   options?: SimpleStreamOptions,
 ) => Promise<AssistantMessage>;
-
-/**
- * Minimal structural projection of the pi-coding-agent `ModelRegistry` needed
- * by this extension. Defined as a `Pick` of the real class instance type so
- * the accepted method set tracks the package's exported shape instead of a
- * hand-written interface that can silently diverge.
- */
-export type ModelRegistryLike = Pick<ModelRegistry, "find" | "getApiKeyAndHeaders" | "complete">;
 
 /**
  * Result of the shared call scaffolding in {@link executeCall}.
@@ -82,7 +71,7 @@ type CallResult =
 export type ModelCallAuth = Pick<SimpleStreamOptions, "apiKey" | "headers">;
 
 /**
- * Everything a model review call needs, captured once. The LLM engine builds
+ * Everything a model review call needs, captured once. The chat engine builds
  * this from its resolved model + auth + call context; {@link reviewModel}
  * consumes it.
  */
@@ -251,7 +240,10 @@ export async function reviewModel(
   // Parse the verdict from the model's text reply as JSON.
   let text = contentText(result.reply.content, "");
   // A provider error is not model silence. With backups configured, don't
-  // repeat an auth/policy refusal before checking whether failover is safe.
+  // repeat an auth/policy refusal before checking whether failover is safe:
+  // `providerRetries === 0` is how the adapter reports "backups exist" (it
+  // passes `singleEndpoint ? 1 : 0`), so an error reply is left to failover
+  // classification instead of getting a second local attempt.
   if (
     !text.trim() &&
     result.latencyMs < timeoutMs / 2 &&

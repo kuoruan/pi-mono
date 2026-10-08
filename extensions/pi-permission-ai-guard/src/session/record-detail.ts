@@ -85,6 +85,12 @@ export type DialogTheme = Pick<Theme, "fg" | "bg" | "bold">;
 export type DialogKeybindings = Pick<KeybindingsManager, "matches">;
 
 /**
+ * The TUI slice the custom-dialog factory signature requires — the dialogs
+ * here don't read it.
+ */
+export type DialogTui = { requestRender(): void };
+
+/**
  * The options shape a custom-dialog call carries: the host's
  * `ctx.ui.custom` options (overlay flag + pi-tui overlay positioning).
  */
@@ -101,7 +107,7 @@ export interface DialogOverlayOptions {
  */
 export type CustomDialogFn = <T>(
   factory: (
-    tui: { requestRender(): void },
+    tui: DialogTui,
     theme: DialogTheme,
     keybindings: DialogKeybindings,
     done: (result: T) => void,

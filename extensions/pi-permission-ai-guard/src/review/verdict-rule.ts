@@ -318,7 +318,7 @@ export function resolveMapping(input: MappingInput): MappingDecision {
   // wants clarified), or the machinery cause (a forced defer must name
   // its failure kind — same doctrine as the pre-call gates). A terse
   // model defer without a reason stays silent (the verdict itself
-  // completed; parseVerdictObject documents the omission).
+  // completed; a missing reason is tolerated by design).
   const deferNotice: { message: string; level: "info" | "warning" } | null =
     emitted.kind === "defer" && original.kind === "defer"
       ? deferKind === "model-defer" && deferReason

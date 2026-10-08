@@ -31,7 +31,7 @@ export interface EngineCallContext extends AuditCorrelation {
 export interface EngineReviewResult {
   /** The review outcome for the shared downstream. */
   outcome: ReviewOutcome;
-  /** Audit identity, e.g. "cpa/lite" or "typesafe/jev-1.13". */
+  /** Audit identity, e.g. "anthropic/claude-haiku-4-5" or "typesafe/jev-1.13". */
   modelId: string;
   /** False for fallback verdicts: retry the primary on the next ask. */
   cacheable?: boolean;
@@ -55,7 +55,7 @@ export interface ReviewerEngine {
 export interface EngineMachineryFailure {
   ok: false;
   kind: EngineMachineryKind;
-  /** Audit identity of the engine that failed (e.g. "cpa/lite"). */
+  /** Audit identity of the engine that failed (e.g. "anthropic/claude-haiku-4-5"). */
   modelId: string;
   /**
    * Sanitized detail for the audit record — the auth error text.

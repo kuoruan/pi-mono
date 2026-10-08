@@ -6,10 +6,13 @@
  * through the extension surface in extension.test.ts.
  */
 
+import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
 import { configSchema } from "#src/config/config-schema.ts";
+import type { SessionManagerLike } from "#src/review/request/transcript-stripper.ts";
 import type { ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
+import type { AiGuardUiContext } from "#src/session/command/ui-context.ts";
 import { SessionLifecycle, readSessionId } from "#src/session/session-lifecycle.ts";
 import type { SessionSeed } from "#src/session/session-lifecycle.ts";
 
@@ -69,23 +72,75 @@ function makeSeed(overrides: Partial<SessionSeed> = {}): SessionSeed {
       complete: () => {
         throw new Error("unreachable in unit tests");
       },
-      getApiKeyAndHeaders: async () => ({ ok: false }) as never,
+      // The failing arm of the auth union needs its `error`; supplying it
+      // keeps the stub assignable without a cast.
+      getApiKeyAndHeaders: async () => ({ ok: false, error: "no key in this unit test" }),
     },
     sessionManager: { getSessionId: () => "s1", buildContextEntries: () => [] },
     cwd: "/project",
-    ctx: makeCtx(vi.fn<() => void>()) as never,
+    ctx: makeCtx(vi.fn<ExtensionUIContext["notify"]>()),
     ...overrides,
   };
 }
 
 /**
- * A session ctx carrying a notify spy.
+ * A session ctx carrying the spies a test asserts on.
  *
- * @param notify - The notify function the ctx's ui exposes.
- * @returns A minimal event ctx.
+ * The single cast is confined here on purpose: pi's ui surface has ~20
+ * members (the generic `custom<T>` among them), and the lifecycle reads only
+ * `notify`, `setStatus` and `hasUI` — typing the rest would be fixture
+ * theatre that has to be maintained against pi. The parameter types are the
+ * real ones, so a spy's signature is still checked.
+ *
+ * @param notify - The notify spy the ctx's ui exposes.
+ * @param setStatus - The footer-status spy the ctx's ui exposes.
+ * @returns A ctx the lifecycle accepts.
  */
-function makeCtx(notify: (message: string, level?: string) => void) {
-  return { ui: { notify } };
+function makeCtx(
+  notify: ExtensionUIContext["notify"],
+  setStatus: ExtensionUIContext["setStatus"] = () => {},
+): AiGuardUiContext {
+  // The lifecycle reads only `notify`/`setStatus`/`hasUI`; `AiGuardUiContext`
+  // also carries `select` and the generic `custom`, which this fixture omits
+  // on purpose, so the assertion stands in for what it leaves out.
+  return { ui: { notify, setStatus }, hasUI: true } as unknown as AiGuardUiContext;
+}
+
+/**
+ * A ctx whose `notify` getter throws once `isStale()` flips true — the
+ * extension-runner-disposed case the notify bridge must survive.
+ *
+ * @param notifyFor - Resolves the notify function at access time.
+ * @param isStale - Whether the runner is already disposed.
+ * @returns A ctx with a lazy, throwable `notify`.
+ */
+function makeLazyCtx(
+  notifyFor: () => ExtensionUIContext["notify"],
+  isStale: () => boolean,
+): AiGuardUiContext {
+  return {
+    ui: {
+      get notify() {
+        if (isStale()) throw new Error("extension context accessed after dispose");
+        return notifyFor();
+      },
+      setStatus: () => {},
+    },
+    hasUI: true,
+    // Partial stand-in, as `makeCtx`: the `notify` getter is what this fixture
+    // exists to exercise.
+  } as unknown as AiGuardUiContext;
+}
+
+/**
+ * A session-manager stub of the real structural shape, so {@link readSessionId}
+ * is exercised through its own signature.
+ *
+ * @param getSessionId - The id source (may throw, to test the guard).
+ * @returns A session-manager stub.
+ */
+function makeSessionManager(getSessionId: () => string): SessionManagerLike {
+  return { getSessionId, buildContextEntries: () => [] };
 }
 
 describe("SessionLifecycle — the resetBreaker seam", () => {
@@ -197,14 +252,14 @@ describe("SessionLifecycle — session identity + registration guard", () => {
   });
 
   it("readSessionId reads the id, maps missing to null, and never throws", () => {
-    expect(readSessionId({ getSessionId: () => "s9" } as never)).toBe("s9");
-    expect(readSessionId({ getSessionId: () => "" } as never)).toBeNull();
+    expect(readSessionId(makeSessionManager(() => "s9"))).toBe("s9");
+    expect(readSessionId(makeSessionManager(() => ""))).toBeNull();
     expect(
-      readSessionId({
-        getSessionId: () => {
+      readSessionId(
+        makeSessionManager(() => {
           throw new Error("no such method");
-        },
-      } as never),
+        }),
+      ),
     ).toBeNull();
   });
 
@@ -254,7 +309,9 @@ describe("SessionLifecycle — shutdown", () => {
 
   it("session_tree before any session is a no-op guard", () => {
     const { lifecycle } = makeLifecycle();
-    expect(() => lifecycle.onSessionTree(makeCtx(vi.fn<() => void>()) as never)).not.toThrow();
+    expect(() =>
+      lifecycle.onSessionTree(makeCtx(vi.fn<ExtensionUIContext["notify"]>())),
+    ).not.toThrow();
   });
 
   it("the fail-safe start notice names the failing field", () => {
@@ -272,7 +329,7 @@ describe("SessionLifecycle — shutdown", () => {
             },
           ],
         },
-        ctx: makeCtx(notify) as never,
+        ctx: makeCtx(notify),
       }),
     );
     expect(notify).toHaveBeenCalledWith(
@@ -287,7 +344,7 @@ describe("SessionLifecycle — shutdown", () => {
     lifecycle.onSessionStart(
       makeSeed({
         load: { config: undefined, outcome: "none" as const, issues: [] },
-        ctx: makeCtx(notify) as never,
+        ctx: makeCtx(notify),
       }),
     );
     expect(notify).toHaveBeenCalledWith(expect.not.stringContaining("config not applied"), "error");
@@ -299,7 +356,7 @@ describe("SessionLifecycle — notify bridge", () => {
   it("deps.notify routes through the ctx captured at session_start", async () => {
     const { lifecycle, calls } = makeLifecycle();
     const notify = vi.fn<() => void>();
-    lifecycle.onSessionStart(makeSeed({ ctx: makeCtx(notify) as never }));
+    lifecycle.onSessionStart(makeSeed({ ctx: makeCtx(notify) }));
     expect(calls.length).toBe(1);
 
     // The pipeline's notify dep calls through the ctx stored on the
@@ -315,7 +372,7 @@ describe("SessionLifecycle — notify bridge", () => {
     const notify = vi.fn<() => void>();
     lifecycle.onSessionStart(
       makeSeed({
-        ctx: { ui: { notify, setStatus }, hasUI: true } as never,
+        ctx: makeCtx(notify, setStatus),
       }),
     );
     calls[0]!.notify!(
@@ -347,16 +404,12 @@ describe("SessionLifecycle — notify bridge", () => {
     // A ctx that goes stale AFTER session_start: the ui getter works while
     // the handler runs, then throws like pi's disposed-runner assertActive.
     let stale = false;
-    const baseUi = { notify: vi.fn<() => void>() };
-    const staleCtx = {
-      ui: {
-        get notify() {
-          if (stale) throw new Error("extension context accessed after dispose");
-          return baseUi.notify;
-        },
-      },
-    };
-    lifecycle.onSessionStart(makeSeed({ ctx: staleCtx as never }));
+    const baseNotify = vi.fn<ExtensionUIContext["notify"]>();
+    const staleCtx = makeLazyCtx(
+      () => baseNotify,
+      () => stale,
+    );
+    lifecycle.onSessionStart(makeSeed({ ctx: staleCtx }));
 
     // A lost escalation message is visible (manual mode's notify is the
     // only channel carrying the reviewer's reasoning), never silent —
@@ -389,7 +442,7 @@ describe("SessionLifecycle — notify level gate", () => {
       const notify = vi.fn<() => void>();
       lifecycle.onSessionStart(
         makeSeed({
-          ctx: makeCtx(notify) as never,
+          ctx: makeCtx(notify),
           load: {
             config: configSchema.parse({ provider: "test", model: "test", notifyLevel: threshold }),
             issues: [],
@@ -410,7 +463,7 @@ describe("SessionLifecycle — notify level gate", () => {
       const notify = vi.fn<() => void>();
       lifecycle.onSessionStart(
         makeSeed({
-          ctx: makeCtx(notify) as never,
+          ctx: makeCtx(notify),
           load: {
             config: configSchema.parse({
               provider: "test",
@@ -433,7 +486,7 @@ describe("SessionLifecycle — notify level gate", () => {
   it("a session override read per-call beats the config value", () => {
     const { lifecycle, calls } = makeLifecycle();
     const notify = vi.fn<() => void>();
-    lifecycle.onSessionStart(makeSeed({ ctx: makeCtx(notify) as never }));
+    lifecycle.onSessionStart(makeSeed({ ctx: makeCtx(notify) }));
     // Config default is info; an override to warning must silence info
     // on the very next call (no re-registration needed).
     lifecycle.overrides.notifyLevel = "warning";
@@ -448,7 +501,7 @@ describe("SessionLifecycle — notify level gate", () => {
     const notify = vi.fn<() => void>();
     lifecycle.onSessionStart(
       makeSeed({
-        ctx: makeCtx(notify) as never,
+        ctx: makeCtx(notify),
         load: {
           config: configSchema.parse({ provider: "test", model: "test", notifyLevel: "off" }),
           issues: [],

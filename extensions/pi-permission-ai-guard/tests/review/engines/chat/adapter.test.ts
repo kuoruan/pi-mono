@@ -1,5 +1,5 @@
 /**
- * LLM adapter tests: error → three-state mapping. The orchestrating loop
+ * Chat adapter tests: error → three-state mapping. The orchestrating loop
  * lives in the pool; here each backend response pins its disposition:
  * answered (valid verdict), retryable (availability failure), or
  * terminal (auth refusal).
@@ -9,9 +9,9 @@ import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 
 import { configSchema } from "#src/config/config-schema.ts";
-import type { ModelCallFn } from "#src/model/model-review.ts";
-import { availabilityReason } from "#src/model/model-verdict.ts";
-import { createLlmAdapter } from "#src/review/engines/llm/adapter.ts";
+import { createChatAdapter } from "#src/review/engines/chat/adapter.ts";
+import type { ModelCallFn } from "#src/review/engines/chat/call.ts";
+import { availabilityReason } from "#src/review/failure-taxonomy.ts";
 import type { AttemptSpec, PoolEndpoint } from "#src/review/pool.ts";
 import { buildAskContext } from "#src/review/request/ask.ts";
 import { makeDetails } from "#test/fixtures.ts";
@@ -40,7 +40,7 @@ function reply(
       totalTokens: 2,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
-  } as AssistantMessage;
+  } satisfies AssistantMessage;
 }
 
 function recordingLog() {
@@ -56,7 +56,7 @@ function attemptContext(log: ReturnType<typeof recordingLog>["log"]) {
   return {
     transcript: { trustedIntent: ["inspect current directory"], toolCalls: [], strippedCount: 0 },
     request: { ask: buildAskContext(makeDetails({ value: "pwd" }), "/project"), target: "pwd" },
-    requestId: "llm-adapter-test",
+    requestId: "chat-adapter-test",
     log,
   };
 }
@@ -66,7 +66,7 @@ const registry = defaultRegistry({
 });
 
 /**
- * Per-attempt spec for adapter tests: index 0 with the endpoint's own timeout.
+ * Per-attempt spec for adapter tests.
  *
  * @param index - The endpoint position.
  * @param singleEndpoint - Whether this is the only endpoint.
@@ -79,15 +79,15 @@ const spec = (index: number, singleEndpoint: boolean): AttemptSpec => ({
 });
 
 const endpoint = (model = "primary", timeoutMs = 5000): PoolEndpoint => ({
-  lane: "llm",
+  lane: "chat",
   provider: "anthropic",
   model,
   timeoutMs,
 });
 
 const adapter = (modelCall: ModelCallFn, registryOverride = registry) =>
-  createLlmAdapter({
-    config: { reasoning: "off", maxTokens: 4096, instructions: null },
+  createChatAdapter({
+    config: { reasoning: "off", maxTokens: 4096, instructions: { rules: null, replace: false } },
     registry: registryOverride,
     modelCall,
   });
@@ -95,7 +95,7 @@ const adapter = (modelCall: ModelCallFn, registryOverride = registry) =>
 const httpError = (status: number) => Object.assign(new Error("provider failure"), { status });
 const allow = () => reply('{"verdict":"allow"}');
 
-describe("LLM adapter disposition", () => {
+describe("chat adapter disposition", () => {
   it("answers valid verdicts (allow, deny, defer, malformed) without failover signal", async () => {
     for (const text of [
       '{"verdict":"allow"}',
@@ -193,7 +193,7 @@ describe("LLM adapter disposition", () => {
   });
 });
 
-describe("LLM availability and config", () => {
+describe("chat availability and config", () => {
   it("status outranks error text, protecting refusals that mention rate limits", () => {
     expect(
       availabilityReason(
@@ -242,14 +242,14 @@ describe("LLM availability and config", () => {
   });
 
   it("accepts either-lane backups per item and still bounds the list", () => {
-    const jevBackup = {
+    const classifierBackup = {
       provider: { type: "typesafe", baseUrl: "https://x.example", apiKey: "k" },
-      model: "jev",
+      model: "classifier",
     };
     const parsed = configSchema.parse({
       provider: "anthropic",
       model: "primary",
-      fallbacks: [{ provider: "openai", model: "m" }, jevBackup],
+      fallbacks: [{ provider: "openai", model: "m" }, classifierBackup],
     });
     expect(parsed.fallbacks).toHaveLength(2);
     for (const invalid of [

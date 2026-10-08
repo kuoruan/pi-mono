@@ -1,6 +1,6 @@
 /**
  * ReviewerPool: one ordered failover loop over heterogeneous reviewer
- * endpoints (LLM registry models and Jev System One endpoints, in any
+ * endpoints (chat registry models and classifier System One endpoints, in any
  * order). Per-lane adapters translate backend failures into the
  * three-state {@link AttemptResult}; the pool only pattern-matches the
  * three states — it never interprets a backend error itself.
@@ -46,38 +46,48 @@ export type AttemptResult =
     }
   | { kind: "terminal"; result: EngineReviewResult | EngineMachineryFailure };
 
-/** An LLM endpoint's provider: a registry model-provider id. */
-export type LlmProvider = string;
-
-/** One LLM endpoint in the ordered failover list (registry-resolved). */
-export interface LlmPoolEndpoint {
-  lane: "llm";
-  provider: LlmProvider;
+/** One chat endpoint in the ordered failover list (registry-resolved). */
+export interface ChatPoolEndpoint {
+  lane: "chat";
+  /** A registry model-provider id (never a connection object). */
+  provider: string;
   model: string;
   timeoutMs: number;
 }
 
-/** A Jev endpoint's provider: explicit connection, env-backed when unset. */
-export interface JevProvider {
+/** A classifier endpoint's provider: explicit connection, env-backed when unset. */
+export interface ClassifierProvider {
   type: "typesafe";
   baseUrl?: string;
   apiKey?: string;
 }
 
-/** One Jev endpoint in the ordered failover list (explicitly authenticated). */
-export interface JevPoolEndpoint {
-  lane: "jev";
-  provider: JevProvider;
-  model: string;
-  timeoutMs: number;
-}
+/** One classifier endpoint in the ordered failover list. */
+export type ClassifierPoolEndpoint =
+  | {
+      lane: "classifier";
+      /** Explicit connection, env-backed when unset. */
+      backend: "direct";
+      provider: ClassifierProvider;
+      model: string;
+      timeoutMs: number;
+    }
+  | {
+      lane: "classifier";
+      /** Pi's built-in classifier, resolved through the model registry. */
+      backend: "registry";
+      provider: string;
+      model: string;
+      timeoutMs: number;
+    };
+
+/** The registry classifier endpoint: pi resolves the model, so `provider` is a name. */
+export type ClassifierRegistryEndpoint = Extract<ClassifierPoolEndpoint, { backend: "registry" }>;
 
 /** One endpoint in the ordered failover list (pure data — lane dispatch is the adapter's). */
-export type PoolEndpoint = LlmPoolEndpoint | JevPoolEndpoint;
+export type PoolEndpoint = ChatPoolEndpoint | ClassifierPoolEndpoint;
 
 /** The lane discriminant shared by endpoints and adapters. */
-export type PoolLane = PoolEndpoint["lane"];
-
 /**
  * Stamp a shipped result: backup verdicts never cache (the primary gets
  * another chance next ask); machinery never caches (no verdict at all).
@@ -138,11 +148,24 @@ export const WALK_BUDGET_FLOOR_MS = 2_000;
  */
 export const FALLBACK_TIMEOUT_DEFAULT_MS = 10_000;
 
+/**
+ * Audit identity for one pool position: the lane's own `provider/model`
+ * (or `typesafe/model`) prefix plus the backup's 1-based position. Shared
+ * by both lanes so one audit row reads the same whichever lane served it.
+ *
+ * @param id - The lane's identity prefix.
+ * @param index - The endpoint position (0 = primary, no suffix).
+ * @returns The audit identity string.
+ */
+export function withFallbackIndex(id: string, index: number): string {
+  return index ? `${id} (fallback ${index})` : id;
+}
+
 export interface ReviewerPoolDeps {
   /** Ordered endpoints: primary first, backups after (at least one). */
   endpoints: PoolEndpoint[];
   /** Lane adapters, keyed by lane. */
-  adapters: Record<PoolLane, LaneAdapter>;
+  adapters: Record<PoolEndpoint["lane"], LaneAdapter>;
   /**
    * Walk budget ceiling: the whole ordered walk never waits longer than
    * this (default `2 × primary timeout`, floored at 30s so one slow

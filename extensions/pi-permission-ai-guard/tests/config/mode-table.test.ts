@@ -54,6 +54,7 @@ describe("modeWarnings", () => {
   const base = {
     provider: "p",
     model: "m",
+    modelType: "chat" as const,
     fallbacks: [],
     reasoning: "off" as const,
     timeoutMs: 15000,
@@ -61,7 +62,7 @@ describe("modeWarnings", () => {
     transcript: { maxUserMessages: 5, maxToolCalls: 10, maxCharsPerEntry: 1000 },
     surfaces: ["bash"],
     instructions: null,
-    typesafe: {
+    classifier: {
       intentThreshold: 0.5,
       riskThreshold: 0.5,
       confidenceThreshold: 0.5,

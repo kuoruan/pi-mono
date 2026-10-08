@@ -21,7 +21,32 @@ import {
   type RuntimeSettings,
   RuntimeSettings as RuntimeSettingsClass,
 } from "#src/session/runtime-settings.ts";
+import {
+  type SessionBranchReader,
+  SETTING_ENTRY_TYPE,
+} from "#src/session/session-settings-store.ts";
 import { makeUiCtx } from "#test/host-ctx.ts";
+
+/**
+ * A branch reader over custom setting entries, built in real `SessionEntry`
+ * shapes so the reader is exercised through its own signature.
+ *
+ * @param data - One setting-change payload per entry, oldest first.
+ * @returns A branch reader whose `getBranch` returns those entries.
+ */
+function makeBranch(...data: unknown[]): SessionBranchReader {
+  return {
+    getBranch: () =>
+      data.map((entryData, i) => ({
+        type: "custom" as const,
+        id: `entry-${i}`,
+        parentId: i === 0 ? null : `entry-${i - 1}`,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        customType: SETTING_ENTRY_TYPE,
+        data: entryData,
+      })),
+  };
+}
 
 const SPECS: readonly EnumSettingSpec[] = [
   {
@@ -521,10 +546,7 @@ describe("RuntimeSettings — shortcut", () => {
 describe("RuntimeSettings — restore + footer", () => {
   it("restore applies the persisted override through the stable overrides object", () => {
     const { settings, overrides } = makeSettings();
-    settings.restore({
-      getBranch: () =>
-        [{ type: "custom", customType: "ai-guard-setting", data: { mode: "strict" } }] as never[],
-    });
+    settings.restore(makeBranch({ mode: "strict" }));
     expect(overrides.mode).toBe("strict");
   });
 
@@ -798,19 +820,14 @@ describe("RuntimeSettings — settings-menu labels stay plain", () => {
     const { settings, overrides } = makeSettings({ mode: "permissive" });
     const menuOptions: string[][] = [];
     let calls = 0;
-    const select = vi.fn<(title: string, options: string[]) => Promise<string | undefined>>(
-      async (title, options) => {
-        if (calls++ === 0) {
-          menuOptions.push(options);
-          return "mode — permissive (session)";
-        }
-        return "permissive";
-      },
-    );
-    const ctx = {
-      hasUI: true,
-      ui: { notify: vi.fn<() => void>(), setStatus: vi.fn<() => void>(), select },
-    } as never;
+    const ctx = makeUiCtx();
+    ctx.ui.select.mockImplementation(async (_title, options) => {
+      if (calls++ === 0) {
+        menuOptions.push(options);
+        return "mode — permissive (session)";
+      }
+      return "permissive";
+    });
     await settings.command.handler("", ctx);
     expect(overrides.mode).toBe("permissive");
     // The menu label is plain — the warning-red emphasis is footer-only.
@@ -823,16 +840,11 @@ describe("RuntimeSettings — settings-menu labels stay plain", () => {
     // without menuRows silently narrows it — this trips.
     const { settings } = makeSettings();
     const menuOptions: string[][] = [];
-    const select = vi.fn<(title: string, options: string[]) => Promise<string | undefined>>(
-      async (_title, options) => {
-        menuOptions.push(options);
-        return undefined; // cancel
-      },
-    );
-    const ctx = {
-      hasUI: true,
-      ui: { notify: vi.fn<() => void>(), setStatus: vi.fn<() => void>(), select },
-    } as never;
+    const ctx = makeUiCtx();
+    ctx.ui.select.mockImplementation(async (_title, options) => {
+      menuOptions.push(options);
+      return undefined; // cancel
+    });
     await settings.command.handler("", ctx);
     const labels = menuOptions[0]!;
     // Exactly the menu-reachable rows: the specs (mode in this fixture)

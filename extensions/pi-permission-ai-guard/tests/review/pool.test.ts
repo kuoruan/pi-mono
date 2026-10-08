@@ -8,13 +8,15 @@ import { describe, expect, it } from "vitest";
 
 import { FALLBACK_EVENT } from "#src/audit/events.ts";
 import type { AttemptResult, LaneAdapter, PoolEndpoint } from "#src/review/pool.ts";
-import { WALK_BUDGET_FLOOR_MS, createReviewerPool } from "#src/review/pool.ts";
+import { createReviewerPool } from "#src/review/pool.ts";
+import { buildAskContext } from "#src/review/request/ask.ts";
 import type {
   EngineCallContext,
   EngineMachineryFailure,
   EngineReviewResult,
 } from "#src/review/reviewer-engine.ts";
 import { isMachineryFailure } from "#src/review/reviewer-engine.ts";
+import { makeDetails } from "#test/fixtures.ts";
 
 function recordingLog() {
   const events: Array<{ event: string; details: Record<string, unknown> }> = [];
@@ -25,23 +27,23 @@ function recordingLog() {
   return { events, log };
 }
 
-const ctx = (log: ReturnType<typeof recordingLog>["log"]): EngineCallContext =>
-  ({
-    transcript: { trustedIntent: ["x"], toolCalls: [], strippedCount: 0 },
-    request: { ask: {} as never, target: "x" },
-    log,
-    requestId: "pool-test",
-  }) as EngineCallContext;
+const ctx = (log: ReturnType<typeof recordingLog>["log"]): EngineCallContext => ({
+  transcript: { trustedIntent: ["x"], toolCalls: [], strippedCount: 0 },
+  request: { ask: buildAskContext(makeDetails({ value: "x" }), "/project"), target: "x" },
+  log,
+  requestId: "pool-test",
+});
 
-const llmEndpoint = (model: string, timeoutMs = 1000): PoolEndpoint => ({
-  lane: "llm",
+const chatEndpoint = (model: string, timeoutMs = 1000): PoolEndpoint => ({
+  lane: "chat",
   provider: "anthropic",
   model,
   timeoutMs,
 });
 
-const jevEndpoint = (model: string, timeoutMs = 1000): PoolEndpoint => ({
-  lane: "jev",
+const classifierEndpoint = (model: string, timeoutMs = 1000): PoolEndpoint => ({
+  lane: "classifier",
+  backend: "direct",
   provider: { type: "typesafe", baseUrl: "https://x.example", apiKey: "k" },
   model,
   timeoutMs,
@@ -74,7 +76,7 @@ function stubAdapter(
 function pool(
   endpoints: PoolEndpoint[],
   script: (endpoint: PoolEndpoint, index: number) => AttemptResult,
-  lanes: Array<PoolEndpoint["lane"]> = ["llm", "jev"],
+  lanes: Array<PoolEndpoint["lane"]> = ["chat", "classifier"],
   now?: () => number,
 ) {
   const adapter = stubAdapter(script);
@@ -91,7 +93,7 @@ function pool(
 describe("reviewer pool", () => {
   it("returns the primary verdict without touching backups", async () => {
     let calls = 0;
-    const engine = pool([llmEndpoint("a"), llmEndpoint("b")], () => {
+    const engine = pool([chatEndpoint("a"), chatEndpoint("b")], () => {
       calls++;
       return { kind: "answered", result: answered("allow", "m") };
     });
@@ -106,7 +108,7 @@ describe("reviewer pool", () => {
 
   it("advances in order on retryable, marks backup verdicts uncached, and audits each hop", async () => {
     const { events, log } = recordingLog();
-    const engine = pool([llmEndpoint("a"), jevEndpoint("b"), llmEndpoint("c")], (_e, i) =>
+    const engine = pool([chatEndpoint("a"), classifierEndpoint("b"), chatEndpoint("c")], (_e, i) =>
       i < 2
         ? {
             kind: "retryable",
@@ -137,7 +139,7 @@ describe("reviewer pool", () => {
       modelId: "m0",
       detail: "denied",
     };
-    const engine = pool([llmEndpoint("a"), llmEndpoint("b")], () => ({
+    const engine = pool([chatEndpoint("a"), chatEndpoint("b")], () => ({
       kind: "terminal",
       result: failure,
     }));
@@ -162,8 +164,8 @@ describe("reviewer pool", () => {
       },
     };
     const engine = createReviewerPool({
-      endpoints: [llmEndpoint("a"), llmEndpoint("b")],
-      adapters: { llm: ticking, jev: ticking },
+      endpoints: [chatEndpoint("a"), chatEndpoint("b")],
+      adapters: { chat: ticking, classifier: ticking },
       now: () => elapsed,
     });
     const result = await engine.review(ctx(log));
@@ -183,7 +185,7 @@ describe("reviewer pool", () => {
       modelId: "m1",
       detail: "m1",
     };
-    const engine = pool([llmEndpoint("a"), llmEndpoint("b")], (_e, i) =>
+    const engine = pool([chatEndpoint("a"), chatEndpoint("b")], (_e, i) =>
       i === 0
         ? { kind: "retryable", modelId: "m0", reason: "timeout", finalize: () => failure }
         : { kind: "terminal", result: failure },
@@ -219,8 +221,8 @@ describe("reviewer pool", () => {
     // 12s→10s, then 7s→7s; remaining 2s meets the floor, so all three run
     // with trimmed budgets and the last failure (index 2) finalizes.
     const result = await createReviewerPool({
-      endpoints: [llmEndpoint("a", 10_000), llmEndpoint("b", 10_000), llmEndpoint("c", 10_000)],
-      adapters: { llm: trimming, jev: trimming },
+      endpoints: [chatEndpoint("a", 10_000), chatEndpoint("b", 10_000), chatEndpoint("c", 10_000)],
+      adapters: { chat: trimming, classifier: trimming },
       walkBudgetMs: 12_000,
       now: () => elapsed,
     }).review(ctx(log));
@@ -255,8 +257,8 @@ describe("reviewer pool", () => {
       },
     };
     const racingPool = createReviewerPool({
-      endpoints: [llmEndpoint("a"), llmEndpoint("b")],
-      adapters: { llm: racing, jev: racing },
+      endpoints: [chatEndpoint("a"), chatEndpoint("b")],
+      adapters: { chat: racing, classifier: racing },
       walkBudgetMs: 60_000,
     });
     const { log } = recordingLog();
@@ -291,8 +293,8 @@ describe("reviewer pool", () => {
     // the floor and the walk finalizes on the second failure without
     // contacting the third endpoint — only the taken hop is audited.
     const result = await createReviewerPool({
-      endpoints: [llmEndpoint("a", 10_000), llmEndpoint("b", 10_000), llmEndpoint("c", 10_000)],
-      adapters: { llm: tickAdapter, jev: tickAdapter },
+      endpoints: [chatEndpoint("a", 10_000), chatEndpoint("b", 10_000), chatEndpoint("c", 10_000)],
+      adapters: { chat: tickAdapter, classifier: tickAdapter },
       walkBudgetMs: 12_000,
       now: () => elapsed,
     }).review(ctx(log));
@@ -304,24 +306,34 @@ describe("reviewer pool", () => {
   });
 
   it("defaults the budget to twice the primary timeout, floored at 30s", async () => {
+    // Primary 5s → the 30s floor beats 2×primary, and the clock makes that
+    // visible: after a 27s hop the second attempt is trimmed to the 3s left.
+    // With a 10s budget (2×primary, no floor) the walk would already have
+    // ended at the floor and the second attempt would never run.
+    let elapsed = 0;
     const seen: number[] = [];
-    const script = (endpoint: PoolEndpoint, _index: number): AttemptResult => {
-      seen.push(endpoint.timeoutMs);
-      return {
-        kind: "retryable",
-        modelId: "m",
-        reason: "timeout",
-        finalize: () => answered("defer", "m"),
-      };
+    // Unscoped from the parent on purpose: shares the file-level pin shape.
+    // eslint-disable-next-line unicorn/consistent-function-scoping
+    const script = (_endpoint: PoolEndpoint, index: number): AttemptResult => ({
+      kind: "retryable",
+      modelId: `m${index}`,
+      reason: "timeout",
+      finalize: () => answered("defer", `m${index}`),
+    });
+    const recording: LaneAdapter = {
+      attempt: async (endpoint, c, spec) => {
+        seen.push(spec.timeoutMs);
+        elapsed += 27_000;
+        return stubAdapter(script).attempt(endpoint, c, spec);
+      },
     };
     const { log } = recordingLog();
-    // Primary 5s → budget 30s floor: second endpoint keeps its own 5s.
     await createReviewerPool({
-      endpoints: [llmEndpoint("a", 5_000), llmEndpoint("b", 5_000)],
-      adapters: { llm: stubAdapter(script), jev: stubAdapter(script) },
+      endpoints: [chatEndpoint("a", 5_000), chatEndpoint("b", 5_000)],
+      adapters: { chat: recording, classifier: recording },
+      now: () => elapsed,
     }).review(ctx(log));
-    expect(seen).toEqual([5_000, 5_000]);
-    expect(WALK_BUDGET_FLOOR_MS).toBe(2_000);
+    expect(seen).toEqual([5_000, 3_000]);
   });
 
   it("passes singleEndpoint through to the adapter", async () => {
@@ -344,13 +356,13 @@ describe("reviewer pool", () => {
     };
     const { log } = recordingLog();
     await createReviewerPool({
-      endpoints: [llmEndpoint("a")],
-      adapters: { llm: adapter, jev: adapter },
+      endpoints: [chatEndpoint("a")],
+      adapters: { chat: adapter, classifier: adapter },
     }).review(ctx(log));
     first = false;
     await createReviewerPool({
-      endpoints: [llmEndpoint("a"), llmEndpoint("b")],
-      adapters: { llm: adapter, jev: adapter },
+      endpoints: [chatEndpoint("a"), chatEndpoint("b")],
+      adapters: { chat: adapter, classifier: adapter },
     }).review(ctx(log));
     // Single pool: one attempt (true). Two-endpoint pool: both attempts (false, false).
     expect(seen).toEqual([true, false, false]);

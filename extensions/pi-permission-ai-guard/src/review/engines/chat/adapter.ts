@@ -1,5 +1,5 @@
 /**
- * LLM lane adapter: one registry-model attempt behind the pool's
+ * Chat lane adapter: one registry-model attempt behind the pool's
  * three-state seam. Owns model resolution, auth, prompt building, the
  * `reviewModel` call, and the terminalize closure — the raw error never
  * leaves this module.
@@ -8,16 +8,16 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 import type { AiGuardConfig } from "#src/config/config-schema.ts";
-import {
-  type ModelCallFn,
-  type ModelRegistryLike,
-  type ResolvedRequestAuth,
-  reviewModel,
-} from "#src/model/model-review.ts";
+import type { ModelRegistryLike, ResolvedRequestAuth } from "#src/model/model-registry.ts";
 import type { ReviewOutcome } from "#src/model/model-verdict.ts";
-import { buildReviewPrompt, buildReviewSystemPrompt } from "#src/review/engines/llm/prompt.ts";
+import {
+  type ChatInstructions,
+  buildReviewPrompt,
+  buildReviewSystemPrompt,
+} from "#src/review/engines/chat/prompt.ts";
 import { PRE_CALL_MACHINERY_KINDS } from "#src/review/machinery-kinds.ts";
 import type { AttemptResult, AttemptSpec, LaneAdapter, PoolEndpoint } from "#src/review/pool.ts";
+import { withFallbackIndex } from "#src/review/pool.ts";
 import type {
   EngineCallContext,
   EngineMachineryFailure,
@@ -25,25 +25,17 @@ import type {
 } from "#src/review/reviewer-engine.ts";
 import { errorMessage } from "#src/utils.ts";
 
-export interface LlmAdapterDeps {
-  /** Shared reviewer knobs (reasoning/maxTokens only — thresholds are Jev-scoped). */
-  config: Pick<AiGuardConfig, "reasoning" | "maxTokens" | "instructions"> & {
-    instructions: string | null;
+import { type ModelCallFn, reviewModel } from "./call.ts";
+
+export interface ChatAdapterDeps {
+  /** Shared reviewer knobs (reasoning/maxTokens only — thresholds are classifier-scoped). */
+  config: {
+    reasoning: AiGuardConfig["reasoning"];
+    maxTokens: AiGuardConfig["maxTokens"];
+    instructions: ChatInstructions;
   };
   registry: ModelRegistryLike;
   modelCall: ModelCallFn;
-}
-
-/**
- * Audit identity: `provider/model`, suffixed with the fallback position.
- *
- * @param provider - The registry provider id.
- * @param model - The model id.
- * @param index - The endpoint position (0 = primary, no suffix).
- * @returns The audit identity string.
- */
-function modelIdOf(provider: string, model: string, index: number): string {
-  return `${provider}/${model}${index ? ` (fallback ${index})` : ""}`;
 }
 
 async function resolveAuth(
@@ -58,12 +50,12 @@ async function resolveAuth(
 }
 
 /**
- * Create the LLM lane adapter.
+ * Create the chat lane adapter.
  *
  * @param deps - Registry, model-call fn, and the lane-scoped config slice.
  * @returns A `LaneAdapter` attempting one registry model per call.
  */
-export function createLlmAdapter(deps: LlmAdapterDeps): LaneAdapter {
+export function createChatAdapter(deps: ChatAdapterDeps): LaneAdapter {
   const { config } = deps;
   const systemPrompt = buildReviewSystemPrompt(config.instructions);
 
@@ -73,9 +65,9 @@ export function createLlmAdapter(deps: LlmAdapterDeps): LaneAdapter {
       ctx: EngineCallContext,
       spec: AttemptSpec,
     ): Promise<AttemptResult> {
-      if (endpoint.lane !== "llm") throw new Error("llm adapter received a jev endpoint");
+      if (endpoint.lane !== "chat") throw new Error("chat adapter received a classifier endpoint");
       const { index, singleEndpoint, timeoutMs } = spec;
-      const modelId = modelIdOf(endpoint.provider, endpoint.model, index);
+      const modelId = withFallbackIndex(`${endpoint.provider}/${endpoint.model}`, index);
       let model: Model<Api> | undefined;
       try {
         model = deps.registry.find(endpoint.provider, endpoint.model);

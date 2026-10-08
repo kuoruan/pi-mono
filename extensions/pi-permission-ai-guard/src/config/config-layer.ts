@@ -28,7 +28,12 @@ import type { z } from "zod";
 
 import { errorMessage, isObjectRecord } from "#src/utils.ts";
 
-import { type AiGuardConfig, EXTENSION_ID, configSchema } from "./config-schema.ts";
+import {
+  type AiGuardConfig,
+  EXTENSION_ID,
+  configSchema,
+  uncoveredInstructionLanes,
+} from "./config-schema.ts";
 import { modeWarnings } from "./mode-table.ts";
 
 /** A single validation or read error from config loading. */
@@ -214,6 +219,8 @@ type LayerReadOutcome =
 interface LayerReadResult {
   /** The parsed layer object; absent unless the outcome is `loaded`. */
   value?: Record<string, unknown>;
+  /** The file the value came from; absent unless the outcome is `loaded`. */
+  sourcePath?: string;
   outcome: LayerReadOutcome;
 }
 
@@ -270,7 +277,59 @@ function readLayer(
   if (!expandLayerEnvRefs(parsed.value, vars, path, issues)) {
     return { outcome: "skipped" };
   }
-  return { value: parsed.value, outcome: "loaded" };
+  foldLegacyAlias(parsed.value, path, issues);
+  return { value: parsed.value, sourcePath: path, outcome: "loaded" };
+}
+
+/**
+ * Normalize a layer's classifier threshold blocks before the merge:
+ *
+ * - Fold the deprecated `typesafe` block into `classifier` and report it. Folding per layer (never on
+ *   the merged result) keeps layer precedence intact: a project's deprecated block still beats the
+ *   global layer's current key, and two layers naming the block differently merge as one field
+ *   instead of colliding on the schema's both-keys rejection.
+ * - Report the retired `timeoutMs` as ignored, in either block. Dropping the field itself is the
+ *   schema transform's job — one place strips dead knobs.
+ *
+ * Both notices describe what the file says, so they are pushed while the text
+ * is in hand. A layer writing both keys is left alone: that contradiction is
+ * the schema's to reject, and folding either one would silently pick a winner.
+ *
+ * @param layer - The parsed layer value, normalized in place.
+ * @param path - The layer file (for notice attribution).
+ * @param issues - Issues accumulator.
+ */
+function foldLegacyAlias(
+  layer: Record<string, unknown>,
+  path: string,
+  issues: ConfigIssue[],
+): void {
+  const alias = layer.typesafe;
+  if (isObjectRecord(alias) && layer.classifier === undefined) {
+    issues.push({
+      path: "typesafe",
+      message: "`typesafe` is deprecated — rename it to `classifier`",
+      sourcePath: path,
+    });
+    const { timeoutMs, ...thresholds } = alias;
+    if (timeoutMs !== undefined) {
+      issues.push({
+        path: "typesafe.timeoutMs",
+        message: "`typesafe.timeoutMs` is ignored — set the top-level `timeoutMs` instead",
+        sourcePath: path,
+      });
+    }
+    layer.classifier = thresholds;
+    delete layer.typesafe;
+  }
+  const current = layer.classifier;
+  if (isObjectRecord(current) && current.timeoutMs !== undefined) {
+    issues.push({
+      path: "classifier.timeoutMs",
+      message: "`classifier.timeoutMs` is ignored — set the top-level `timeoutMs` instead",
+      sourcePath: path,
+    });
+  }
 }
 
 /**
@@ -282,12 +341,15 @@ function readLayer(
  *
  * @param value - The string value to expand.
  * @param vars - The variable source (production passes `process.env`).
+ * @param onUnresolved - Called with the first unresolvable ref's name, so a
+ *   caller can name the variable without echoing the value it sits in.
  * @returns The expanded string, or undefined when a referenced variable
  *   has no value and no fallback (the caller skips the layer).
  */
 export function expandEnvRefs(
   value: string,
   vars: Record<string, string | undefined>,
+  onUnresolved?: (name: string) => void,
 ): string | undefined {
   // `$$` is an escape for a literal `$` — fold it first behind a
   // sentinel so `${` scanning never sees through it (else `$${A}`
@@ -318,6 +380,7 @@ export function expandEnvRefs(
     } else if (fallback !== undefined) {
       out += done(fallback);
     } else {
+      onUnresolved?.(name ?? "");
       return undefined;
     }
   }
@@ -334,7 +397,7 @@ export function expandEnvRefs(
  * @param vars - The variable source for env-ref equivalence.
  * @returns True when the leaf needs no write.
  */
-export function leafEquals(
+function leafEquals(
   previous: unknown,
   value: unknown,
   vars: Record<string, string | undefined>,
@@ -461,12 +524,17 @@ function expandLayerEnvRefs(
   let ok = true;
   descend(root, [], true, (node, path) => {
     if (typeof node !== "string" || !node.includes("${")) return;
-    const expanded = expandEnvRefs(node, vars);
+    // Name the variable, never echo the leaf: a leaf can mix a literal
+    // secret with a ref, and this message reaches the console and the UI.
+    let unresolved: string | undefined;
+    const expanded = expandEnvRefs(node, vars, (name) => {
+      unresolved = name;
+    });
     if (expanded === undefined) {
       ok = false;
       issues.push({
         path: path.join(".") || "$",
-        message: `env ref in "${node}" has no value and no fallback — set it or add :-`,
+        message: `env ref \`\${${unresolved ?? "?"}}\` has no value and no fallback — set it or add :-`,
         sourcePath,
       });
       return;
@@ -564,7 +632,7 @@ interface LeafEntry {
  * @param path - The accumulated property path.
  * @returns Leaf entries (path + value).
  */
-export function leafPaths(value: unknown, path: string[] = []): LeafEntry[] {
+function leafPaths(value: unknown, path: string[] = []): LeafEntry[] {
   const leaves: LeafEntry[] = [];
   descend(value, path, false, (node, leafPath) => leaves.push({ path: leafPath, value: node }));
   return leaves;
@@ -596,6 +664,40 @@ function flattenZodIssues(issues: readonly z.core.$ZodIssue[]): ConfigIssue[] {
     }
   }
   return out;
+}
+
+/**
+ * Attribute a merged-config notice to the file that wrote the key: the
+ * project layer wins when both did (the more specific scope), otherwise
+ * whichever one carried it.
+ *
+ * @param key - The top-level config key the notice is about.
+ * @param global - The read global layer.
+ * @param project - The read project layer.
+ * @returns The attributed layer file, or undefined when neither loaded.
+ */
+function layerThatWrote(
+  key: string,
+  global: LayerReadResult,
+  project: LayerReadResult,
+): string | undefined {
+  if (project.value?.[key] !== undefined) return project.sourcePath;
+  if (global.value?.[key] !== undefined) return global.sourcePath;
+  return project.sourcePath ?? global.sourcePath;
+}
+
+/**
+ * Whether an `instructions` value is the retired lane-implicit classifier
+ * overlay: `background`/`questions` at the top level, from before the
+ * per-lane slots. Detected by the shape's own keys, never by "neither slot
+ * key is present" — a config that means something else must not receive a
+ * migration hint that does not apply to it.
+ *
+ * @param value - The raw `instructions` value from the merged input.
+ * @returns True when the value carries the retired top-level overlay keys.
+ */
+function retiredOverlayShape(value: unknown): boolean {
+  return isObjectRecord(value) && ("background" in value || "questions" in value);
 }
 
 /**
@@ -658,8 +760,34 @@ export function loadAiGuardConfig(
 
   const parsed = configSchema.safeParse(merged);
   if (!parsed.success) {
+    // The retired lane-implicit overlay shape now fails as a bare
+    // "unknown key". The rejection is correct; name the migration so the
+    // operator learns what to write instead of guessing.
+    if (retiredOverlayShape(merged.instructions)) {
+      issues.push({
+        path: "instructions",
+        message:
+          '`instructions` no longer takes top-level `background`/`questions` — wrap them in the `classifier` slot: { "classifier": { … } }',
+        sourcePath: layerThatWrote("instructions", global, project),
+      });
+    }
     issues.push(...flattenZodIssues(parsed.error.issues));
     return { issues, outcome: "failed" };
+  }
+
+  // The notices below describe the merged shape: the deprecated alias and the
+  // retired `timeoutMs` were reported while each layer was read (see
+  // foldLegacyAlias), and the transform has dropped every dead field by now.
+  // A canonical `instructions` object may fill only some lane slots: an
+  // unlisted lane keeps the full built-in instructions. That is the
+  // fail-safe direction (less customization, never a wrong one), so it is a
+  // notice, not an error — but an uncovered lane must not pass silently.
+  for (const lane of uncoveredInstructionLanes(parsed.data)) {
+    issues.push({
+      path: "instructions",
+      message: `\`instructions\` has no \`${lane}\` slot — a ${lane} endpoint runs the pure built-in instructions`,
+      sourcePath: layerThatWrote("instructions", global, project),
+    });
   }
 
   // Ladder-owned surprise warnings (e.g. the extremes plus a breaker
@@ -701,8 +829,12 @@ export interface PersistConfigOptions {
  *
  * - Refuses the `project` target when the project is untrusted (that layer isn't honored for reads
  *   either — saving there would write a config that never applies and masquerade as success).
- * - Validates the snapshot against the zod schema before any write: an invalid snapshot refuses;
- *   unknown keys are stripped and the CANONICAL parse output is what lands in the file.
+ * - Validates the snapshot against the zod schema before any write: an invalid snapshot refuses, and
+ *   only the CANONICAL parse output is written — a new file gets it whole, an edit keeps that
+ *   file's own comments, key order, and unknown keys.
+ * - Restores `${VAR}` text where it came from (see {@link restorePlaceholders}): a leaf whose owning
+ *   layer spelled it as an env ref is written back as that ref, so a save never persists the
+ *   expanded secret — least of all into a layer that never held the ref.
  *
  * The two mutually exclusive results each live in their own helper:
  * {@link createLayerFile} (no file yet — write the snapshot whole) and
@@ -738,11 +870,19 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
   const dir = target === "global" ? getGlobalConfigDir(agentDir) : getProjectConfigDir(env.cwd);
   const createPath =
     target === "global" ? getGlobalConfigPath(agentDir) : getProjectConfigPath(env.cwd);
+  // The sibling layer's raw file feeds both gates below and the placeholder
+  // provenance each write branch restores from. It counts only when the
+  // loader would read it: the global layer always, the project layer only
+  // when the project is trusted.
+  const siblingDir =
+    target === "global" ? getProjectConfigDir(env.cwd) : getGlobalConfigDir(agentDir);
+  const sibling = target === "project" || env.trustedProject ? readRawLayer(siblingDir) : undefined;
   // Edit whichever candidate exists (jsonc-first); otherwise create .jsonc
   // (resolveLayerFile stat'ed both candidates, so a resolved path exists).
   const existing = resolveLayerFile(dir);
+  const siblingRaw = sibling?.value;
   if (!existing) {
-    return createLayerFile(createPath, canonical.data);
+    return createLayerFile(createPath, canonical.data, siblingRaw, vars);
   }
   const path = existing.path;
 
@@ -752,7 +892,30 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
   } catch (error) {
     return { path, created: false, changed: false, error: errorMessage(error) };
   }
-  return editLayerFile(path, canonical.data, text, vars);
+  return editLayerFile(path, canonical.data, text, vars, siblingRaw);
+}
+
+/**
+ * A layer's config file parsed, but NOT env-expanded: the write path needs
+ * the raw `${VAR}` texts as the placeholder provenance (see
+ * {@link restorePlaceholders}). An unreadable or malformed file reads as
+ * undefined — a layer the loader skips cannot conflict with this write, so it
+ * is the loader's problem, not the save's.
+ *
+ * @param dir - The layer's config directory.
+ * @returns The file path plus its parsed object, if any.
+ */
+function readRawLayer(dir: string): { path: string; value: Record<string, unknown> } | undefined {
+  const file = resolveLayerFile(dir);
+  if (!file) return undefined;
+  let text: string;
+  try {
+    text = readFileSync(file.path, "utf-8");
+  } catch {
+    return undefined;
+  }
+  const parsed = parseLayerText(text);
+  return parsed.ok ? { path: file.path, value: parsed.value } : undefined;
 }
 
 /**
@@ -763,12 +926,24 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
  *
  * @param path - The layer file path to create.
  * @param data - The validated config snapshot to write.
+ * @param sibling - The other layer's parsed raw file (placeholder source).
+ * @param vars - The variable source for env-ref equivalence.
  * @returns The save result (`created: true` on success).
  */
-function createLayerFile(path: string, data: AiGuardConfig): SaveConfigResult {
+function createLayerFile(
+  path: string,
+  data: AiGuardConfig,
+  sibling: Record<string, unknown> | undefined,
+  vars: Record<string, string | undefined>,
+): SaveConfigResult {
   try {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+    // Write the operator's template, not the expanded snapshot: a leaf that
+    // came from `${VAR}` text in the sibling layer goes back as that text.
+    // Stringifying the snapshot verbatim would persist the expanded secret
+    // into a file — an often-committed project config — that never held it.
+    const template = restorePlaceholders(sibling ?? {}, data, vars);
+    writeFileSync(path, `${JSON.stringify(template, null, 2)}\n`, "utf-8");
   } catch (error) {
     return { path, created: false, changed: false, error: errorMessage(error) };
   }
@@ -786,6 +961,7 @@ function createLayerFile(path: string, data: AiGuardConfig): SaveConfigResult {
  * @param data - The validated config snapshot to apply.
  * @param text - The file's current text.
  * @param vars - The variable source for env-ref equivalence.
+ * @param sibling - The other layer's parsed raw file (placeholder source).
  * @returns The save result (`changed: false` when already identical).
  */
 function editLayerFile(
@@ -793,6 +969,7 @@ function editLayerFile(
   data: AiGuardConfig,
   text: string,
   vars: Record<string, string | undefined>,
+  sibling: Record<string, unknown> | undefined,
 ): SaveConfigResult {
   // Validity gate: never edit a file the loader itself would skip.
   const parsed = parseLayerText(text);
@@ -804,6 +981,11 @@ function editLayerFile(
         : `${file} root is not a JSON object`;
     return { path, created: false, changed: false, error: message };
   }
+  // Placeholder provenance: THIS file's own raw text wins where it has the
+  // leaf, else the sibling layer's — never the expanded snapshot value. A
+  // leaf this file does not have yet (a new key, a whole new file) must still
+  // land as the `${VAR}` text its owning layer spelled.
+  const provenance = deepMerge(sibling ?? {}, parsed.value);
   // Leaf-by-leaf diff: apply each changed leaf sequentially against the
   // running text, so jsonc-parser edits never overlap. Leaf equality
   // (including env-ref equivalence) lives in {@link leafEquals}.
@@ -816,7 +998,7 @@ function editLayerFile(
     }
     // Write back with placeholders restored: an equivalent-but-expanded
     // leaf must not overwrite the on-disk `${VAR}` text with the secret.
-    const writeValue = previous === MISSING ? value : restorePlaceholders(previous, value, vars);
+    const writeValue = restorePlaceholders(readPath(provenance, leafPath), value, vars);
     let edits;
     try {
       edits = modify(running, leafPath, writeValue, {
@@ -838,6 +1020,23 @@ function editLayerFile(
     }
     running = applyEdits(running, edits);
     changed = true;
+  }
+
+  // The deprecated alias is folded away by the schema, so the snapshot has no
+  // `typesafe` leaf and the loop above never touches it. Leaving it in place
+  // would make the written file self-contradictory on the next load (both
+  // keys is a schema error), so the save migrates it out.
+  if (readPath(parsed.value, ["typesafe"]) !== MISSING) {
+    // `modify` deletes only the FIRST matching key while the loader reads the
+    // LAST, and JSONC allows the key twice. Delete until none remain: a copy
+    // left behind would sit beside the `classifier` key this save writes, and
+    // the final gate would refuse with a "shape conflict" nobody can act on.
+    for (;;) {
+      running = applyEdits(running, modify(running, ["typesafe"], undefined, {}));
+      changed = true;
+      const current = parseLayerText(running);
+      if (!current.ok || readPath(current.value, ["typesafe"]) === MISSING) break;
+    }
   }
 
   if (!changed) {
@@ -863,6 +1062,22 @@ function editLayerFile(
     const saved = readPath(finalParsed.value, leafPath);
     if (saved !== MISSING && leafEquals(saved, value, vars)) {
       continue;
+    }
+    // Anything unmatched here that is a ref is ref-caused: the variable is
+    // gone, or the on-disk ref resolves to something other than the snapshot
+    // (the value was edited after load). Both keep the on-disk text (see
+    // {@link restorePlaceholders}), so name the real conflict instead of
+    // blaming shadowed keys.
+    if (typeof saved === "string" && saved.includes("${")) {
+      return {
+        path,
+        created: false,
+        changed: false,
+        error:
+          expandEnvRefs(saved, vars) === undefined
+            ? `refusing to write — ${saved} no longer resolves; set the variable (or edit the value) and save again`
+            : `refusing to write — ${saved} no longer matches the saved value; edit the file's ref or the config, then save again`,
+      };
     }
     return {
       path,

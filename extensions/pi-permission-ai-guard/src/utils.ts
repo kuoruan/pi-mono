@@ -82,6 +82,15 @@ const GENERIC_ASSIGNMENT_PATTERN =
 const FORMAT_CHARACTERS = /[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]+/gu;
 
 /**
+ * URL userinfo: the credentials in `scheme://user:pass@host` (also the
+ * bare-token form `scheme://token@host`) carry no separator a generic
+ * assignment pattern could key on, so they get their own pass. The match
+ * stops at the `@`, keeping the scheme and host readable while the
+ * credentials go away.
+ */
+const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s?#@]+@/gi;
+
+/**
  * Remove invisible characters that can obscure prompt-injection payloads.
  *
  * @param text - Text from which to remove zero-width characters.
@@ -175,6 +184,7 @@ export function redactSecrets(text: string): string {
     out = out.replaceAll(pattern, "[REDACTED]");
   }
   out = out.replaceAll(GENERIC_ASSIGNMENT_PATTERN, "$1$2[REDACTED]");
+  out = out.replaceAll(URL_USERINFO_PATTERN, "$1[REDACTED]@");
   return out;
 }
 

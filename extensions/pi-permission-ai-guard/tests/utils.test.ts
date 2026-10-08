@@ -210,6 +210,25 @@ describe("redactSecrets", () => {
     expect(redactSecrets(input)).toBe("AWS_ACCESS_KEY_ID=[REDACTED] && aws s3 ls");
   });
 
+  it("redacts URL userinfo credentials", () => {
+    // Credentials in a URL have no assignment separator, and a token-only
+    // userinfo has no colon either.
+    expect(redactSecrets("clone https://user:s3cret@example.com/repo.git")).toBe(
+      "clone https://[REDACTED]@example.com/repo.git",
+    );
+    expect(redactSecrets("remote add origin https://ghp_Token1234@github.com/x/y")).toBe(
+      "remote add origin https://[REDACTED]@github.com/x/y",
+    );
+  });
+
+  it("leaves an @ inside a URL path or query alone", () => {
+    // Userinfo ends at the first `/`, `?` or `#`, so an address later in the
+    // URL is not mistaken for credentials.
+    expect(redactSecrets("open https://example.com/?email=a@b.com")).toBe(
+      "open https://example.com/?email=a@b.com",
+    );
+  });
+
   it("redacts aws_secret_access_key assignments", () => {
     const input = "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
     expect(redactSecrets(input)).toBe("aws_secret_access_key = [REDACTED]");

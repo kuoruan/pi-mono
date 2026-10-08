@@ -5,23 +5,109 @@
   "properties": {
     "provider": {
       "anyOf": [
-        { "type": "string", "minLength": 1 },
+        {
+          "type": "string",
+          "minLength": 1
+        },
         {
           "type": "object",
           "properties": {
-            "type": { "const": "typesafe" },
-            "baseUrl": { "type": "string", "minLength": 1 },
-            "apiKey": { "type": "string", "minLength": 1 }
+            "type": {
+              "const": "typesafe"
+            },
+            "baseUrl": {
+              "type": "string",
+              "minLength": 1
+            },
+            "apiKey": {
+              "type": "string",
+              "minLength": 1
+            }
           },
           "required": ["type"],
           "additionalProperties": false,
-          "description": "Direct TypeSafe connection (Jev reviewer). Both baseUrl and apiKey are optional: unset values fall back to TYPESAFE_BASE_URL / TYPESAFE_API_KEY, then the SDK built-in default URL."
+          "description": "Direct TypeSafe connection (classifier reviewer). Both baseUrl and apiKey are optional: unset values fall back to TYPESAFE_BASE_URL / TYPESAFE_API_KEY, then the SDK built-in default URL."
         }
       ]
     },
     "model": {
       "type": "string",
       "minLength": 1
+    },
+    "modelType": {
+      "type": "string",
+      "enum": ["chat", "classifier"],
+      "default": "chat",
+      "description": "Registry model type (string providers only): chat is a Pi chat model, classifier is a Pi built-in classifier via modelRegistry.classify. Rejected on direct typesafe connections."
+    },
+    "classifier": {
+      "type": "object",
+      "description": "Classifier verdict thresholds, read on both classifier backends (direct and registry) — pure policy, no transport knobs.",
+      "properties": {
+        "intentThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "Intent probability at or above which the anchor counts as authorizing the action."
+        },
+        "riskThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "Risk score at or above which the action denies; the tier follows the fixed quartile bands. Raising it widens what auto-allows in every mode."
+        },
+        "confidenceThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "Minimum answer confidence; below it the verdict defers."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 300000,
+          "description": "Accepted for backward compatibility but ignored — set the top-level timeoutMs instead."
+        }
+      },
+      "additionalProperties": false
+    },
+    "typesafe": {
+      "type": "object",
+      "description": "Deprecated alias of `classifier`; remove it. A file writing both keys is rejected. Thresholds still apply; `timeoutMs` is ignored.",
+      "properties": {
+        "intentThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "Intent probability at or above which the anchor counts as authorizing the action."
+        },
+        "riskThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "Risk score at or above which the action denies; the tier follows the fixed quartile bands. Raising it widens what auto-allows in every mode."
+        },
+        "confidenceThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "Minimum answer confidence; below it the verdict defers."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 300000,
+          "description": "Accepted for backward compatibility but ignored — set the top-level timeoutMs instead."
+        }
+      },
+      "additionalProperties": false,
+      "deprecated": true
     },
     "fallbacks": {
       "type": "array",
@@ -32,9 +118,24 @@
           {
             "type": "object",
             "properties": {
-              "provider": { "type": "string", "minLength": 1 },
-              "model": { "type": "string", "minLength": 1 },
-              "timeoutMs": { "type": "integer", "exclusiveMinimum": 0, "maximum": 300000 }
+              "provider": {
+                "type": "string",
+                "minLength": 1
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "modelType": {
+                "type": "string",
+                "enum": ["chat", "classifier"],
+                "default": "chat"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 300000
+              }
             },
             "required": ["provider", "model"],
             "additionalProperties": false
@@ -45,15 +146,30 @@
               "provider": {
                 "type": "object",
                 "properties": {
-                  "type": { "const": "typesafe" },
-                  "baseUrl": { "type": "string", "format": "uri" },
-                  "apiKey": { "type": "string", "minLength": 1 }
+                  "type": {
+                    "const": "typesafe"
+                  },
+                  "baseUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "apiKey": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 },
                 "required": ["type", "baseUrl", "apiKey"],
                 "additionalProperties": false
               },
-              "model": { "type": "string", "minLength": 1 },
-              "timeoutMs": { "type": "integer", "exclusiveMinimum": 0, "maximum": 300000 }
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 300000
+              }
             },
             "required": ["provider", "model"],
             "additionalProperties": false
@@ -167,55 +283,80 @@
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Broadcast custom safety rules: the same content is appended to every lane (chat `rules`, classifier `background`)."
         },
         {
           "type": "object",
           "properties": {
-            "background": true,
-            "questions": { "type": "object" }
+            "chat": {
+              "type": "object",
+              "properties": {
+                "rules": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "replace": {
+                  "type": "boolean",
+                  "default": false
+                }
+              },
+              "required": ["rules"],
+              "additionalProperties": false,
+              "description": "Chat-lane slot: custom safety rules. `replace: true` swaps the built-in rules for them instead of appending; the verdict contract is always appended either way."
+            },
+            "classifier": {
+              "type": "object",
+              "properties": {
+                "background": {
+                  "description": "Shared background text or structured context appended to every question.",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object"
+                    },
+                    {
+                      "type": "array"
+                    }
+                  ]
+                },
+                "questions": {
+                  "type": "object",
+                  "description": "Per-question additions keyed by question id.",
+                  "propertyNames": {
+                    "enum": ["danger_category", "intent_match", "risk"]
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object"
+                      },
+                      {
+                        "type": "array"
+                      }
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "description": "Classifier-lane slot (append-only): shared background plus per-question additions keyed by stable question id (danger_category, intent_match, risk). The built-in reviewer background, questions, and criteria are the answer contract the verdict thresholds are calibrated against, so nothing here replaces them."
+            }
           },
           "additionalProperties": false,
-          "description": "Jev-mode overlay (object providers only): shared background plus per-question additions keyed by stable question id (danger_category, intent_match, risk). LLM mode accepts only the string form."
+          "description": "Per-lane slots. A lane without a slot runs the built-in instructions; a slot whose lane no configured reviewer declares is rejected. A lane declared only by a fallback can still go unused if that fallback is later skipped — the loader reports it."
         },
         {
           "type": "null"
         }
       ],
       "default": null
-    },
-    "typesafe": {
-      "type": "object",
-      "properties": {
-        "intentThreshold": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.5,
-          "description": "Intent probability at or above which the anchor counts as authorizing the action."
-        },
-        "riskThreshold": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.5,
-          "description": "Risk score at or above which the action denies; the tier follows the fixed quartile bands. Raising it widens what auto-allows in every mode."
-        },
-        "confidenceThreshold": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.5,
-          "description": "Minimum answer confidence; below it the verdict defers."
-        },
-        "timeoutMs": {
-          "type": "integer",
-          "exclusiveMinimum": 0,
-          "maximum": 300000,
-          "description": "SDK timeout per attempt (one attempt per endpoint when fallbacks are configured). Falls back to top-level timeoutMs when omitted."
-        }
-      },
-      "additionalProperties": false
     }
   },
   "required": ["provider", "model"],

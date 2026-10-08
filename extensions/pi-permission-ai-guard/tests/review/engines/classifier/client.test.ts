@@ -1,11 +1,32 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { buildJevRequest, createTypesafeClient } from "#src/review/engines/jev/client.ts";
+import {
+  buildClassifierRequest,
+  createDirectClient,
+} from "#src/review/engines/classifier/client.ts";
+import type { ClassifierOverlay } from "#src/review/engines/classifier/instructions.ts";
 import type { AskContext } from "#src/review/request/ask.ts";
 import { buildAskContext } from "#src/review/request/ask.ts";
 import type { ReviewRequestContext } from "#src/review/request/review-request.ts";
 import type { StrippedTranscript } from "#src/review/request/transcript-stripper.ts";
 import { ev, makeDetails, payload } from "#test/fixtures.ts";
+
+/** The options the mocked SDK client was constructed with, in call order. */
+const { ctorOptions } = vi.hoisted(() => ({ ctorOptions: [] as unknown[] }));
+
+// The SDK's own client is not what this file tests, and the facade it returns
+// exposes only `systemOne` — so mocking the SDK is what makes the arguments
+// `createDirectClient` passes observable at all.
+vi.mock("@typesafe-ai/sdk", () => ({
+  TypeSafeClient: class {
+    systemOne = (): never => {
+      throw new Error("the mocked SDK client is never called");
+    };
+    constructor(options: unknown) {
+      ctorOptions.push(options);
+    }
+  },
+}));
 
 function ask(): AskContext {
   return buildAskContext(makeDetails({ value: "rm -rf /tmp/x" }), "/project");
@@ -24,9 +45,12 @@ function transcript(overrides: Partial<StrippedTranscript> = {}): StrippedTransc
   };
 }
 
-describe("buildJevRequest", () => {
+/** The lane's resolved instructions with no content. */
+const NO_INSTRUCTIONS: ClassifierOverlay = {};
+
+describe("buildClassifierRequest", () => {
   it("builds the built-in questions with the model id", () => {
-    const req = buildJevRequest(transcript(), request(), null, "jev-1.13");
+    const req = buildClassifierRequest(transcript(), request(), NO_INSTRUCTIONS, "jev-1.13");
     expect(req.model).toBe("jev-1.13");
     expect(Object.keys(req.questions).toSorted()).toEqual([
       "danger_category",
@@ -42,10 +66,10 @@ describe("buildJevRequest", () => {
   });
 
   it("puts the anchor, earlier context, and command in state", () => {
-    const req = buildJevRequest(
+    const req = buildClassifierRequest(
       transcript({ trustedIntent: ["older", "clean up temp files"], toolCalls: ["ls"] }),
       request(),
-      null,
+      NO_INSTRUCTIONS,
       "jev-1.13",
     );
     expect(req.state).toMatchObject({
@@ -67,20 +91,30 @@ describe("buildJevRequest", () => {
       "/project",
     );
     expect(toolAsk.flaggedElements).toEqual([]);
-    const req = buildJevRequest(transcript(), { ask: toolAsk, target: "mcp" }, null, "jev-1.13");
+    const req = buildClassifierRequest(
+      transcript(),
+      { ask: toolAsk, target: "mcp" },
+      NO_INSTRUCTIONS,
+      "jev-1.13",
+    );
     expect(req.state).toMatchObject({ tool_input: "preview" });
   });
 
   it("uses (none found) when there is no trusted intent", () => {
-    const req = buildJevRequest(transcript({ trustedIntent: [] }), request(), null, "jev-1.13");
+    const req = buildClassifierRequest(
+      transcript({ trustedIntent: [] }),
+      request(),
+      NO_INSTRUCTIONS,
+      "jev-1.13",
+    );
     expect(req.state).toMatchObject({ authorization_anchor: "(none found)" });
   });
 
-  it("appends a string shorthand as background to every question", () => {
-    const req = buildJevRequest(
+  it("appends the shared background to every question", () => {
+    const req = buildClassifierRequest(
       transcript(),
       request(),
-      "Deploys go through railway up.",
+      { background: "Deploys go through railway up." },
       "jev-1.13",
     );
     for (const q of Object.values(req.questions)) {
@@ -88,11 +122,39 @@ describe("buildJevRequest", () => {
     }
   });
 
-  it("overlays a per-question string only on that question", () => {
-    const req = buildJevRequest(
+  it("keeps the built-in reviewer role leading every question", () => {
+    // The role sentence defines the "authorization anchor" the intent_match
+    // criteria and the verdict thresholds are calibrated against — it is
+    // answer-contract scaffolding, so a user background appends after it
+    // rather than replacing it.
+    const roleMarker = "You are reviewing one tool call";
+    const req = buildClassifierRequest(
       transcript(),
       request(),
-      { questions: { intent_match: "A deploy without a service name is not authorization." } },
+      { background: "Act as our monorepo reviewer." },
+      "jev-1.13",
+    );
+    for (const q of Object.values(req.questions)) {
+      const instructions = String(q.instructions);
+      expect(instructions).toContain(roleMarker);
+      expect(instructions.indexOf(roleMarker)).toBeLessThan(
+        instructions.indexOf("Act as our monorepo reviewer."),
+      );
+    }
+    // The answer contract is untouched by the overlay: ids, types, criteria.
+    expect(req.questions.danger_category.type).toBe("choice");
+    expect(req.questions.danger_category.criteria).toHaveProperty("irreversible_destruction");
+    expect(req.questions.risk.type).toBe("score");
+    expect(req.questions.risk.criteria).toHaveLength(5);
+  });
+
+  it("overlays a per-question string only on that question", () => {
+    const req = buildClassifierRequest(
+      transcript(),
+      request(),
+      {
+        questions: { intent_match: "A deploy without a service name is not authorization." },
+      },
       "jev-1.13",
     );
     expect(String(req.questions.intent_match.instructions)).toContain("not authorization");
@@ -100,10 +162,12 @@ describe("buildJevRequest", () => {
   });
 
   it("overlays a per-question string on danger_category", () => {
-    const req = buildJevRequest(
+    const req = buildClassifierRequest(
       transcript(),
       request(),
-      { questions: { danger_category: "A deploy tool wiping its cache counts as none." } },
+      {
+        questions: { danger_category: "A deploy tool wiping its cache counts as none." },
+      },
       "jev-1.13",
     );
     expect(String(req.questions.danger_category.instructions)).toContain("wiping its cache");
@@ -111,10 +175,12 @@ describe("buildJevRequest", () => {
   });
 
   it("overlays a per-question string on risk", () => {
-    const req = buildJevRequest(
+    const req = buildClassifierRequest(
       transcript(),
       request(),
-      { questions: { risk: "Railway deploys are reversible — score accordingly." } },
+      {
+        questions: { risk: "Railway deploys are reversible — score accordingly." },
+      },
       "jev-1.13",
     );
     expect(String(req.questions.risk.instructions)).toContain("reversible");
@@ -122,7 +188,7 @@ describe("buildJevRequest", () => {
   });
 
   it("composes object overlays as structured question+context", () => {
-    const req = buildJevRequest(
+    const req = buildClassifierRequest(
       transcript(),
       request(),
       { background: { deploy_tool: "railway up", forbidden: ["kubectl"] } },
@@ -135,7 +201,7 @@ describe("buildJevRequest", () => {
   });
 
   it("keeps the shared background context when a question adds its own", () => {
-    const req = buildJevRequest(
+    const req = buildClassifierRequest(
       transcript(),
       request(),
       {
@@ -151,7 +217,7 @@ describe("buildJevRequest", () => {
   });
 
   it("appends a per-question string to the question text, keeping the background context", () => {
-    const req = buildJevRequest(
+    const req = buildClassifierRequest(
       transcript(),
       request(),
       {
@@ -169,10 +235,10 @@ describe("buildJevRequest", () => {
   it("falls back to the resolved target when the ask carries no action text", () => {
     // A degraded (forwarded) ask whose value is empty still has a resolved
     // target; the state must carry it rather than an empty command.
-    const req = buildJevRequest(
+    const req = buildClassifierRequest(
       transcript(),
       { ask: buildAskContext(makeDetails({ value: "" }), "/project"), target: "/etc/passwd" },
-      null,
+      NO_INSTRUCTIONS,
       "jev-1.13",
     );
     const state = req.state as { command: string };
@@ -181,15 +247,15 @@ describe("buildJevRequest", () => {
 
   it("redacts the ask fields on their way to the service", () => {
     // The pipeline hands engines the raw projection; only the transcript
-    // arrives sanitized, so the Jev state redacts the ask itself (the LLM
+    // arrives sanitized, so the classifier state redacts the ask itself (the chat
     // prompt's twin).
     const secret = "sk-ant-api03-abcdef1234567890abcdefABCDEF1234567890";
-    const req = buildJevRequest(
+    const req = buildClassifierRequest(
       transcript(),
       request({
         ask: buildAskContext(makeDetails({ value: `export TOKEN=${secret}` }), "/project"),
       }),
-      null,
+      NO_INSTRUCTIONS,
       "jev-1.13",
     );
     const state = req.state as { command: string };
@@ -198,18 +264,16 @@ describe("buildJevRequest", () => {
   });
 });
 
-describe("createTypesafeClient", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
+describe("createDirectClient", () => {
   it("passes connection fields through without defaults", () => {
-    // No SDK defaults are shadowed here: undefined reaches the client, which
-    // applies env fallback + built-in URL itself. The SDK eagerly
-    // rejects a keyless client at construction, so supply the env fallback a
-    // configured deployment would have.
-    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
-    const client = createTypesafeClient({ baseUrl: undefined, apiKey: undefined });
-    expect(typeof client.systemOne).toBe("function");
+    // No SDK defaults are shadowed here: both fields reach the constructor
+    // as-is, `undefined` included, so the SDK applies its env fallback and
+    // built-in URL itself.
+    createDirectClient({ baseUrl: "https://x.example/base", apiKey: "live-key" });
+    createDirectClient({ baseUrl: undefined, apiKey: undefined });
+    expect(ctorOptions).toEqual([
+      { apiKey: "live-key", baseURL: "https://x.example/base" },
+      { apiKey: undefined, baseURL: undefined },
+    ]);
   });
 });

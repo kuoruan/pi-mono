@@ -22,6 +22,8 @@ export function makeUiCtx(selectResult?: string) {
       select: vi.fn<(title: string, options: string[]) => Promise<string | undefined>>(
         async () => selectResult,
       ),
+      // `custom`'s generic return is a live TUI component; these tests only
+      // need the awaitable close result, so the assertion stands in for it.
       custom: vi.fn<() => Promise<string>>(
         async () => "closed",
       ) as unknown as ExtensionUIContext["custom"],

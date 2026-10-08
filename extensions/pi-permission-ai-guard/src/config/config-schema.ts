@@ -52,20 +52,29 @@ export const REASONING_VALUES: readonly ModelThinkingLevel[] = [
 
 /**
  * The System One question ids — a config-level contract. The schema
- * validates instruction overlays against this list, and the Jev engine
+ * validates instruction overlays against this list, and the classifier engine
  * builds its questions from it; both sides share the one source so a new
  * question is one entry, not two lists that can drift.
  */
-export const JEV_QUESTION_IDS = ["danger_category", "intent_match", "risk"] as const;
+export const CLASSIFIER_QUESTION_IDS = ["danger_category", "intent_match", "risk"] as const;
 
 /** Membership check for the overlay ids (string-keyed: config keys are strings). */
-const JEV_QUESTION_ID_SET: ReadonlySet<string> = new Set(JEV_QUESTION_IDS);
+const CLASSIFIER_QUESTION_ID_SET: ReadonlySet<string> = new Set(CLASSIFIER_QUESTION_IDS);
 
 /** One of the System One question ids. */
-export type JevQuestionId = (typeof JEV_QUESTION_IDS)[number];
+export type ClassifierQuestionId = (typeof CLASSIFIER_QUESTION_IDS)[number];
+
+/**
+ * How the registry provider resolves the model — pi's model-type
+ * vocabulary (`ModelType`). Absent means chat; `classifier` selects pi's
+ * built-in classifier models via `modelRegistry.classify` instead
+ * of the direct TypeSafe connection. Closed set: the enum is this
+ * extension's honest capability surface.
+ */
+export const MODEL_TYPE_VALUES = ["chat", "classifier"] as const;
 
 /** A direct TypeSafe connection (object provider) — both fields optional. */
-export const typesafeProviderSchema = z
+export const directProviderSchema = z
   .object({
     type: z.literal("typesafe"),
     baseUrl: z.string().min(1).optional(),
@@ -73,22 +82,27 @@ export const typesafeProviderSchema = z
   })
   .strict();
 
-export type TypesafeProvider = z.infer<typeof typesafeProviderSchema>;
+export type DirectProvider = z.infer<typeof directProviderSchema>;
 
-/** One registry-resolved chat-model fallback (credentials remain in Pi's model registry). */
-export const llmFallbackSchema = z
+/**
+ * One registry-resolved fallback: a chat model by default, or a pi
+ * built-in classifier when `modelType` is `classifier`. Credentials
+ * remain in Pi's model registry in both cases.
+ */
+export const registryFallbackSchema = z
   .object({
     provider: z.string().min(1),
     model: z.string().min(1),
+    modelType: z.enum(MODEL_TYPE_VALUES).default("chat"),
     timeoutMs: z.number().int().min(1).max(300_000).optional(),
   })
   .strict();
 
 /** One explicitly configured System One fallback (no implicit reuse of primary credentials). */
-export const typesafeFallbackSchema = z
+export const directFallbackSchema = z
   .object({
-    provider: typesafeProviderSchema.extend({
-      baseUrl: z.string().url(),
+    provider: directProviderSchema.extend({
+      baseUrl: z.url(),
       apiKey: z.string().min(1),
     }),
     model: z.string().min(1),
@@ -101,31 +115,93 @@ export const typesafeFallbackSchema = z
  * or an explicitly authenticated System One endpoint (object provider).
  * The provider shape discriminates — no same-lane constraint.
  */
-export const fallbackItemSchema = z.union([llmFallbackSchema, typesafeFallbackSchema]);
+export const fallbackItemSchema = z.union([registryFallbackSchema, directFallbackSchema]);
 
 export type FallbackItem = z.infer<typeof fallbackItemSchema>;
 
-/** A Jev instruction overlay value: string, JSON object, or array (SDK EntryType). */
-const jevInstructionValueSchema = z.union([
+/** One instruction value: text, a JSON object, or an array (SDK EntryType minus null). */
+const instructionValueSchema = z.union([
   z.string().min(1),
   z.record(z.string(), z.json()),
   z.array(z.json()),
 ]);
 
 /**
- * `instructions` in Jev mode: shorthand string (shared background) or
- * `{ background?, questions? }` overlay. Unknown question ids and empty
- * objects are rejected by the cross-field checks below.
+ * The chat lane's slot: `rules` text plus an optional `replace` switch.
+ * `replace: true` swaps the built-in safety rules for `rules` instead of
+ * appending to them; the verdict contract is never up for replacement, so
+ * it stays appended either way.
  */
-const jevInstructionsSchema = z.union([
-  z.string().min(1),
-  z
-    .object({
-      background: jevInstructionValueSchema.optional(),
-      questions: z.record(z.string().min(1), jevInstructionValueSchema).optional(),
-    })
-    .strict(),
-]);
+const chatInstructionSlotSchema = z
+  .object({
+    rules: z.string().min(1),
+    replace: z.boolean().default(false),
+  })
+  .strict();
+
+/**
+ * The classifier lane's slot: shared `background` plus per-question
+ * additions. Append-only by design — the built-in reviewer background,
+ * questions, and criteria are the answer contract the verdict thresholds
+ * are calibrated against, so nothing here replaces them.
+ */
+const classifierInstructionSlotSchema = z
+  .object({
+    background: instructionValueSchema.optional(),
+    questions: z.record(z.string().min(1), instructionValueSchema).optional(),
+  })
+  .strict();
+
+/** The classifier slot's parsed shape (derived from its own schema, not re-stated). */
+type ClassifierInstructionSlot = z.output<typeof classifierInstructionSlotSchema>;
+
+/**
+ * Custom safety rules: a broadcast string (append the same content to every
+ * lane) or per-lane slots (`chat` / `classifier`). The object arm is strict,
+ * so the forms never blend; empty and shadow slots are rejected by the
+ * cross-field checks below.
+ */
+const instructionsSchema = z
+  .union([
+    z.string().min(1),
+    z
+      .object({
+        chat: chatInstructionSlotSchema.optional(),
+        classifier: classifierInstructionSlotSchema.optional(),
+      })
+      .strict(),
+  ])
+  .nullable()
+  .default(null);
+
+/** Classifier verdict thresholds — pure policy, no transport knobs. */
+const classifierThresholdsSchema = z
+  .object({
+    intentThreshold: z.number().min(0).max(1).default(0.5),
+    riskThreshold: z.number().min(0).max(1).default(0.5),
+    confidenceThreshold: z.number().min(0).max(1).default(0.5),
+  })
+  .strict();
+
+/** Classifier threshold defaults: applied to whichever key the operator wrote (or neither). */
+const CLASSIFIER_THRESHOLD_DEFAULTS = classifierThresholdsSchema.parse({});
+
+/**
+ * The retired transport knob both threshold blocks still accept: parsed so
+ * old files keep loading, never read — the primary timeout is the top-level
+ * `timeoutMs` on both lanes. The transform drops it, so no consumer ever sees
+ * a field with no effect.
+ */
+const retiredTimeoutMsSchema = z.number().int().min(1).max(300_000).optional();
+
+/**
+ * A classifier threshold block as written. The current `classifier` key and
+ * its deprecated alias `typesafe` share this shape; the transform folds the
+ * alias into `classifier`.
+ */
+const classifierBlockSchema = classifierThresholdsSchema.extend({
+  timeoutMs: retiredTimeoutMsSchema,
+});
 
 const configBaseSchema = z.object({
   model: z.string().min(1),
@@ -145,6 +221,9 @@ const configBaseSchema = z.object({
       maxToolCalls: z.number().int().min(1).max(50).default(10),
       maxCharsPerEntry: z.number().int().min(100).max(20_000).default(1000),
     })
+    // Spelled out because zod 4's `.default()` does NOT re-parse the value
+    // through the inner schema (only `prefault` does): `.default({})` would
+    // reach consumers with every field above undefined.
     .default({ maxUserMessages: 5, maxToolCalls: 10, maxCharsPerEntry: 1000 }),
 
   // Surfaces to review. Glob-style patterns where `*` matches any
@@ -164,21 +243,13 @@ const configBaseSchema = z.object({
   // same-lane constraint. An empty list preserves single-model behavior.
   fallbacks: fallbackItemSchema.array().max(5).default([]),
 
-  // Jev behavior thresholds (object providers only).
-  typesafe: z
-    .object({
-      intentThreshold: z.number().min(0).max(1).default(0.5),
-      riskThreshold: z.number().min(0).max(1).default(0.5),
-      confidenceThreshold: z.number().min(0).max(1).default(0.5),
-      // SDK timeout per attempt; with fallbacks, each endpoint is tried
-      // once. Falls back to top-level timeoutMs when omitted.
-      timeoutMs: z.number().int().min(1).max(300_000).optional(),
-    })
-    .default({
-      intentThreshold: 0.5,
-      riskThreshold: 0.5,
-      confidenceThreshold: 0.5,
-    }),
+  // Classifier verdict thresholds, read on both classifier backends (a
+  // registry primary reads them exactly as a direct one does). Both keys
+  // stay optional here so "the operator wrote it" is still observable at
+  // refine time (a default would always materialize one of them); the
+  // legacy-key fold below then fills the winner, and defaults apply to that.
+  classifier: classifierBlockSchema.optional(),
+  typesafe: classifierBlockSchema.optional(),
 
   // How the link disposes the reviewer's non-allow verdicts (the leniency
   // ladder, strictest first). Hard-tier denies (riskLevel high|critical,
@@ -215,6 +286,7 @@ const configBaseSchema = z.object({
       total: z.number().int().min(1).max(200).default(20),
       verdict: z.enum(BREAKER_VERDICT_VALUES).default("deny"),
     })
+    // Spelled out for the same zod-4 reason as `transcript` above.
     .default({ consecutive: 3, total: 20, verdict: "deny" }),
 
   // Verdict cache (session-level LRU). 0 disables; only commands that reach
@@ -226,71 +298,190 @@ const configBaseSchema = z.object({
     .object({
       maxEntries: z.number().int().min(0).max(1000).default(128),
     })
+    // Spelled out for the same zod-4 reason as `transcript` above.
     .default({ maxEntries: 128 }),
 });
 
 /**
- * Custom safety rules (`instructions`): LLM mode (string provider) takes
- * plain text replacing the built-in rules entirely, or null for the
- * built-ins; Jev mode (object provider) additionally accepts a
- * `{ background?, questions? }` overlay onto the built-ins.
- * `reasoning`/`maxTokens` are ignored in Jev mode.
+ * The validated union, before the legacy-key fold (see {@link configSchema}).
+ * `reasoning`/`maxTokens` are ignored in classifier mode.
  */
-export const configSchema = z
+const configShapeSchema = z
   .union([
     configBaseSchema.extend({
       provider: z.string().min(1),
-      instructions: z.string().min(1).nullable().default(null),
+      modelType: z.enum(MODEL_TYPE_VALUES).default("chat"),
+      instructions: instructionsSchema,
     }),
     configBaseSchema.extend({
-      provider: typesafeProviderSchema,
-      instructions: z
-        .union([z.string().min(1), jevInstructionsSchema])
-        .nullable()
-        .default(null),
+      provider: directProviderSchema,
+      // Reserved so the contradiction check below can see it: a direct
+      // connection never goes through the registry, so any modelType
+      // here is rejected, never silently dropped.
+      modelType: z.enum(MODEL_TYPE_VALUES).optional(),
+      instructions: instructionsSchema,
     }),
   ])
-  .superRefine((config, ctx) => {
-    // Overlay checks are Jev-only; object instructions on a string provider
-    // are structurally impossible (the union's LLM member takes strings only).
-    if (typeof config.provider !== "object") return;
-    if (isObjectRecord(config.instructions)) {
-      const overlay = config.instructions;
-      if (overlay.background === undefined && overlay.questions === undefined) {
+  .superRefine((config: z.output<typeof configShapeSchema>, ctx) => {
+    // modelType is registry addressing — a direct connection ignores it,
+    // so its presence means the config doesn't say what the operator
+    // thinks it says. Reject loudly (fail-safe), never silently drop.
+    if (typeof config.provider === "object" && config.modelType !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["modelType"],
+        message:
+          "modelType applies to registry (string) providers only — remove it from this direct System One config",
+      });
+    }
+    // `typesafe` is the deprecated alias of `classifier`. Both written is
+    // a contradiction the operator must resolve — never silently pick one.
+    if (config.classifier !== undefined && config.typesafe !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["typesafe"],
+        message: "typesafe is deprecated — remove it and keep only `classifier`",
+      });
+    }
+    // Lane slots: a written slot whose lane the pool never runs would
+    // silently do nothing — reject, not warn (fail-safe: a config that says
+    // what the system won't do must shout). The pool's configured lanes are
+    // the primary plus every fallback, so a classifier fallback admits the
+    // classifier slot on an otherwise-chat config.
+    if (!isObjectRecord(config.instructions)) return;
+    const overlay = config.instructions;
+    if (overlay.chat === undefined && overlay.classifier === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["instructions"],
+        message: "empty instructions — set a `chat` and/or `classifier` slot, or use a string",
+      });
+      return;
+    }
+    const lanes = configuredLanes(config);
+    for (const lane of ["chat", "classifier"] as const) {
+      if (overlay[lane] !== undefined && !lanes.includes(lane)) {
         ctx.addIssue({
           code: "custom",
-          path: ["instructions"],
-          message: "empty instructions overlay — set background and/or questions",
+          path: ["instructions", lane],
+          message: `no ${lane} reviewer in this pool — a \`${lane}\` slot would never apply`,
         });
       }
-      for (const id of Object.keys(overlay.questions ?? {})) {
-        if (!JEV_QUESTION_ID_SET.has(id)) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["instructions", "questions", id],
-            message: `unknown question id "${id}" — expected one of ${JEV_QUESTION_IDS.join(", ")}`,
-          });
-        }
+    }
+    // isObjectRecord widened the union arm to Record<string, unknown>, so the
+    // schema-validated slot needs its parsed type back.
+    const classifierSlot = overlay.classifier as ClassifierInstructionSlot | undefined;
+    if (
+      classifierSlot !== undefined &&
+      classifierSlot.background === undefined &&
+      Object.keys(classifierSlot.questions ?? {}).length === 0
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["instructions", "classifier"],
+        message: "empty classifier slot — set background and/or questions",
+      });
+    }
+    for (const id of Object.keys(classifierSlot?.questions ?? {})) {
+      if (!CLASSIFIER_QUESTION_ID_SET.has(id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["instructions", "classifier", "questions", id],
+          message: `unknown question id "${id}" — expected one of ${CLASSIFIER_QUESTION_IDS.join(", ")}`,
+        });
       }
     }
   });
 
-/** Validated extension configuration (zod schema inference). */
-export type AiGuardConfig = z.infer<typeof configSchema>;
+/**
+ * The lanes a config's reviewer pool contains, judged by
+ * {@link isClassifierMode}: the primary plus every fallback. This is the
+ * operator's configured composition (a classifier fallback the later
+ * admission gate skips can narrow it) — all the lane-slot checks need.
+ *
+ * @param config - The config (or the pre-fold shape it comes from).
+ * @returns The lane names the pool will run, primary first.
+ */
+function configuredLanes(config: {
+  provider: unknown;
+  modelType?: unknown;
+  fallbacks?: readonly { provider: unknown; modelType?: unknown }[];
+}): Array<"chat" | "classifier"> {
+  const lanes: Array<"chat" | "classifier"> = [isClassifierMode(config) ? "classifier" : "chat"];
+  for (const entry of config.fallbacks ?? []) {
+    const lane = isClassifierMode(entry) ? "classifier" : "chat";
+    if (!lanes.includes(lane)) lanes.push(lane);
+  }
+  return lanes;
+}
 
-/** The config union's TypeSafe member (object provider — the Jev engine's config). */
-export type TypesafeConfig = Extract<AiGuardConfig, { provider: TypesafeProvider }>;
+/**
+ * Lane slots an `instructions` object leaves on the built-ins: the pool's
+ * lanes minus the ones the object fills. Empty for the string and null
+ * forms (which cover / defer to both lanes) and when every lane has a slot.
+ * Consumed by the loader's notice — an uncovered lane is not an error, it
+ * just runs weaker instructions than the operator may have intended.
+ *
+ * @param config - The validated config.
+ * @returns The uncovered lane names (empty when nothing is left out).
+ */
+export function uncoveredInstructionLanes(config: AiGuardConfig): Array<"chat" | "classifier"> {
+  const overlay = config.instructions;
+  if (!isObjectRecord(overlay)) return [];
+  return configuredLanes(config).filter((lane) => overlay[lane] === undefined);
+}
 
-/** The config union's registry member (string provider — the LLM engine's config). */
-export type RegistryConfig = Extract<AiGuardConfig, { provider: string }>;
+/** Distributive omit — plain `Omit` on a union collapses it to one member. */
+type OmitLegacy<T> = T extends unknown ? Omit<T, "typesafe"> : never;
+
+export const configSchema = configShapeSchema.transform((config): AiGuardConfig => {
+  // Fold the deprecated alias into `classifier` and strip the retired
+  // `timeoutMs`, so every consumer reads one field with no dead knobs. The
+  // alias contributes thresholds only, and blocked defaults fill whichever
+  // block was written without them — a config with neither key gets the same
+  // values. A single file writing both keys never reaches this transform (the
+  // refine rejected it), and the load path folds the alias per layer before
+  // merging, so exactly one key arrives here whatever the files said.
+  const { typesafe, ...rest } = config;
+  const written = config.classifier ?? typesafe;
+  if (written === undefined) {
+    return { ...rest, classifier: CLASSIFIER_THRESHOLD_DEFAULTS };
+  }
+  const { timeoutMs: _retired, ...thresholds } = written;
+  return { ...rest, classifier: thresholds };
+});
+
+/**
+ * Validated extension configuration (zod schema inference): the legacy
+ * `typesafe` key is folded away and `classifier` is required on every member.
+ */
+export type AiGuardConfig = OmitLegacy<z.output<typeof configShapeSchema>> & {
+  classifier: z.output<typeof classifierThresholdsSchema>;
+};
+
+/** The config union's direct member (object provider — the classifier engine's config). */
+export type DirectProviderConfig = Extract<AiGuardConfig, { provider: DirectProvider }>;
+
+/**
+ * Whether the config runs the classifier lane: a direct TypeSafe connection,
+ * or a registry string provider with classifier modelType. The pool's
+ * lane selection, the instruction-overlay gate, and the lane instruction
+ * slicing all consume this — one predicate, not three shape checks.
+ *
+ * @param config - The validated config (or the pre-fold shape it comes from).
+ * @returns True when the primary reviewer is a classifier endpoint.
+ */
+export function isClassifierMode(config: { provider: unknown; modelType?: unknown }): boolean {
+  return typeof config.provider === "object" || config.modelType === "classifier";
+}
 
 /**
  * The provider's runtime shape selects the engine; the config union's
- * members carry the pairing. This predicate narrows to the TypeSafe member.
+ * members carry the pairing. This predicate narrows to the direct member.
  *
  * @param config - The validated config.
- * @returns True when the provider is a direct TypeSafe connection.
+ * @returns True when the provider is a direct connection.
  */
-export function hasTypesafeProvider(config: AiGuardConfig): config is TypesafeConfig {
+export function hasDirectProvider(config: AiGuardConfig): config is DirectProviderConfig {
   return typeof config.provider === "object";
 }
