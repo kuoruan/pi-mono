@@ -1,5 +1,146 @@
 # pi-permission-ai-guard
 
+## 0.14.0
+
+### Minor Changes
+
+- b3e0849: Reviewer classification can now run through Pi's registry, and the classifier lane's config vocabulary is aligned with it.
+
+  **Breaking changes.**
+
+  - **A chat-mode `instructions` string now appends** to the built-in safety rules instead of replacing them. Add `"replace": true` to the `chat` slot (`{ "instructions": { "chat": { "rules": "…", "replace": true } } }`) to keep the old prompt.
+  - **`typesafe.timeoutMs` no longer has any effect.** The primary reviewer's timeout is the top-level `timeoutMs` on both lanes — move the value there. `classifier.timeoutMs` is inert in the same way. Both still parse, so an existing config does not fail to load; the loader reports the ignored key, and saving folds the block into `classifier`.
+  - **The deprecated top-level `{ "background": … , "questions": … }` `instructions` shape is rejected.** Wrap it in `classifier`: `{ "instructions": { "classifier": { "background": …, "questions": { … } } } }`.
+
+  **Registry classifier backend.** Run the Jev reviewer through Pi's built-in classifier: set `"modelType": "classifier"` on a string provider (`{ "provider": "typesafe", "model": "jev-latest", "modelType": "classifier" }`, pi 0.99+) instead of configuring a direct TypeSafe connection — no API key in config, auth lives in Pi. A registry primary missing from Pi's catalog fails the session; a missing registry fallback is skipped with a warning. A status-bearing `classify` failure — including one that stopped `aborted` — classifies by that status first, so a refusal never fails over, and the endpoint's audit identity carries Pi's provider id rather than the direct backend's `typesafe/` prefix.
+
+  **`classifier` threshold block (renamed from `typesafe`).** The block is now `classifier.intentThreshold` / `riskThreshold` / `confidenceThreshold`, matching the `classifier` lane and `modelType` vocabulary, and it is pure verdict policy: the primary reviewer's timeout is the top-level `timeoutMs` on both lanes, exactly as for chat (a backup still overrides it with its own entry-level `timeoutMs`). Previously `typesafe.timeoutMs` overrode the primary timeout for a direct System One connection; the registry classifier never read it. The old `typesafe` key still parses and its thresholds still fold into `classifier`, but it is deprecated and reports a deprecation notice. It folds **per layer**, before the layers merge, so a project's deprecated block still wins over the global layer's `classifier` block and the two never collide on the schema's both-keys rejection — only a single file writing BOTH keys is rejected. The connection spelling `provider: { type: "typesafe" }` is unchanged.
+
+  **Lane-uniform `instructions`.** A **string** now appends the same content to both lanes: for chat after the built-in safety rules, for the classifier it is the shared background as before. This is the safe direction — an existing string can only make the reviewer stricter, never silently drop the built-in policy. The object form is now per-lane slots:
+
+  ```json
+  {
+    "instructions": {
+      "chat": { "rules": "Deploy through railway up.", "replace": false },
+      "classifier": {
+        "background": "Monorepo: each package owns its directory.",
+        "questions": { "risk": "Touching /migrations is at least medium risk." }
+      }
+    }
+  }
+  ```
+
+  - `chat.rules` and `classifier.background` hold each lane's text; `classifier.questions` keeps the per-question additions keyed by question id (`danger_category`, `intent_match`, `risk`).
+  - Only the `chat` slot takes `replace: true`, which swaps the built-in safety-rules block for the slot's content instead of appending to it. The classifier lane is append-only: its built-in background, questions, and criteria are the answer contract the verdict thresholds are calibrated against (the background sentence defines the "authorization anchor" the `intent_match` criteria read against), so nothing there is replaceable. The verdict output format is likewise never replaceable.
+  - The old top-level `{ background, questions }` shape is gone. Unknown keys are rejected, and so are an empty slot and a slot for a lane the configured pool never contains — including a lane declared only by a fallback that the admission gate later skips.
+  - A lane the object leaves out keeps its full built-ins, and the loader reports it as a notice: a partly covered pool (a chat primary with a classifier fallback and only a `classifier` slot) is never silent.
+
+  **Saving never writes an expanded secret.** A leaf whose owning layer spelled it as a `${VAR}` ref is written back as that ref — including when the target layer did not hold that leaf yet (a whole new file, or one new key): the save used to write the expanded value there, which could persist a secret into a layer (often a committed project config) that only ever held the placeholder. The round-trip is still verified against the loaded snapshot, so a variable that disappears between load and save refuses the write instead of persisting a value the config would not load with. Alongside it: config messages never echo the value an unresolvable ref sat in (they name the variable), and `redactSecrets` now also covers `scheme://user:pass@host` URLs.
+
+  **Internals** (a pure move — no behaviour change). The switch/terminal tables both lanes depend on (`switchableStatusReason`, `availabilityReason`, `failoverReason`, `classifyFailure`) now live in one module, `review/failure-taxonomy.ts` — the chat lane reads them through an untyped-string adapter, the classifier lane through a typed-SDK-error one, over one matrix. The chat lane's tolerant JSON verdict parser moved to `engines/chat/verdict-parser.ts`, leaving the lane-neutral `model/model-verdict.ts` with only the shared verdict vocabulary. New backend-equivalence tests drive both backends through the same seam, pinning that matrix and recording the two places where the backends genuinely disagree (pre-existing, fail-safe, previously undocumented): an unclassifiable registry failure is retryable (the facade reconstructs it as a connection error) while a direct one is terminal, and `"timed out"` wording fails over through the facade but not through a direct generic error. Two more consolidations ride along: the pool owns endpoint audit identity now (an endpoint is built with its bare `provider/model` id, and only the pool appends the failover position, where each adapter used to format its own), and the machinery-failure vocabulary moved from `review/machinery-kinds.ts` to `model/machinery-kinds.ts`, so the audit record and the ask projection no longer reach into the review pipeline's directory for a lane-neutral name. The deprecated alias key is one exported constant (`CLASSIFIER_ALIAS_KEY`) rather than the same literal re-spelled in the schema, the per-layer fold, and the save path.
+
+- 7aa1514: The classifier lane now receives the wrapper facts the chat lane already renders: `executed_unit`, `command_context`, and `matched_pattern` join the System One `state`, so a substitution, subshell, or wrapper ask is no longer reviewed on intent alone.
+
+  An ordinary ask's state is unchanged — the three keys appear only on wrapper-shaped asks. The classifier thresholds were calibrated without these facts, so a probability can move on exactly those asks. The chat lane is untouched, and a test-side lane-fact inventory now classifies every ask fact per lane so a future field cannot be silently dropped by one lane.
+
+- 258fce1: The reviewer now reads the spelling a bash rule actually matched on: `matchedSpelling` joins both lanes (`- matched spelling:` in the chat prompt, `matched_spelling` in the classifier state) and the verdict cache key. The gate resolves a typed relative path through its absolute spelling (typed `rm ./x`, matched as `rm /etc/x`), so identical typed text can target two different things: the fact is that evidence, like `executed_unit`. The policy-decided audit record carries it beside `matchedPattern`.
+
+  The peer range accepts pi-permission-system 37 through 40 (`>=27.1.1 <41.0.0`), which previously failed to install because 37 requires Pi 1.0.0 and the old `<37` ceiling refused it. A host below 40 still works: every renderer guards on the fact's presence, and the cache key normalizes an absent spelling to `null`.
+
+- f37e116: The reviewer's configured `reasoning` level now reaches the provider. The chat lane called `ModelRegistry.complete`, whose low-level `stream` only understands `reasoningEffort` — the simple-layer `reasoning` option was silently dropped, so every review ran at the model's `off` level. It now calls `ModelRegistry.streamSimple(...).result()`, which translates `reasoning` through the model's `thinkingLevelMap` (clamping an unsupported level to the nearest supported one).
+
+  **Requires pi >= 0.86** (`registry.streamSimple` was added there); the three `@earendil-works` peer floors move from `>=0.84.0` to `>=0.86.0`. A host below it fails safe at session start instead of deferring every ask as `call-failed`. The registry-classifier backend still needs pi 0.99+ (admission-gated, as before).
+
+  Behavior when `reasoning` is on (the default `off` path is unchanged):
+
+  - On budget-based providers (Anthropic, Bedrock) `maxTokens` is an answer budget: the thinking budget is added on top, bounded by the model's own `maxTokens`. On effort-based providers it stays the cap.
+  - An unsupported level is clamped to the nearest supported one instead of being dropped to `off`.
+  - A virtual-model reviewer is routed correctly instead of failing the low-level chat-model assert.
+
+### Patch Changes
+
+- 50aaa45: Saving a config can no longer write an expanded secret over an array-held `${VAR}` placeholder.
+
+  - When an env ref inside an array (`fallbacks[].provider.apiKey` and friends) could not be expanded at save time — the variable was rotated away, or simply not exported in the shell doing the save — the write fell back to the in-memory snapshot and put the **expanded secret** into the file, which is usually a committed project config. The remaining disk elements are now searched for the placeholder rather than pairing by position, so neither an element inserted ahead of it nor a reordered array hides it: the value that reaches the file is the ref, never the secret.
+  - In that situation the save is refused, with the drift named (`a ref at fallbacks no longer resolves`) rather than the unrelated duplicate-key message it used to report. A leaf with no placeholder to preserve — including an in-memory edit over a ref that still resolves — is written normally.
+
+- 81aab08: A defer on a short approval now asks for the scope instead of only reporting the shortfall.
+
+  - "Ok", "as you recommend", "rename it" names no action of its own — it points at agent text the reviewer never sees. Both lanes read such an anchor as the user's own words authorize, and nothing more.
+  - The chat lane's safety rules judge a referential anchor by what the user's words actually name, and its verdict contract requires that defer reason to ask the operator for the scope.
+  - The classifier lane's `intent_match` criteria carry the same rule; its synthesized reason for an intent gap is `confirm the scope: is this action covered by your request?`.
+  - Synthesized reasons are written for the operator, who is the one reading them: a low-confidence defer asks `is this action safe to run?`, and a danger-hit deny reads `matched a safety rule: system tampering` rather than `matched rule: system_tampering`. The calibrated readings stay available — the audit record keeps every answer in `rawReply`.
+
+- 43964db: Operator-facing notices are no longer truncated, so the reviewer's whole reason reaches the human.
+
+  - The deny/ask notice (`reviewer denied this request (risk …); <reason>`) carries the model's reason whole. A clarification the operator has to answer is never cut mid-sentence.
+  - The defer notice (the model's own reason) likewise keeps the full clarification: the dialog alone never shows what the reviewer wants clarified.
+  - A failed config load names the complete first issue instead of a 100-character summary — the operator needs the whole message to fix the file.
+  - Prompt material and the audit record keep their own size bounds; those are not the user-facing copy.
+
+- 81aab08: The reviewer's rules now lead with the category and keep the specifics as marked examples, so a correct action written another way still has a home.
+
+  - Rules that named one ecosystem's shape no longer do. `ALLOW · Read-Only Operations` names the class (listing, reading, searching, printing); the VCS and publishing rules say shared, protected, or default branch and repository metadata or hooks instead of Git and `main`/`master`; `System Tampering` covers critical system or identity files generally, naming the Windows registry as an example; loopback binding and external code execution no longer assume one flag spelling or `curl | bash`.
+  - Two general rules that each ended in "apply the strictest tier" merged into one, and the obfuscated-payload rule folded into `Visible Evidence`. No rule was dropped (general rules 9 → 7) and every DENY/ALLOW category is unchanged.
+  - The classifier's criteria keep the same generalization and match the rules' scope: `system_tampering` / `secrets_credentials` widened to identity or configuration stores, permission weakening, private keys, tokens, credential files, and shell history; `destructive_vcs` and `irreversible_destruction` carry the generalized examples. A cross-lane test fails when a category is added to only one lane.
+  - The risk rubric stopped naming tiers that lane never defines — `DENY-Unless` there is the `(intent_match, risk)` pair by design, not a category list — and levels 2 and 3 now say what they mean in the request's own vocabulary.
+  - The short-approval examples name phrases the reviewer can actually receive: `go ahead` and `do it` are bare continuations the stripper drops before the reviewer sees the anchor, so `ok` takes their place.
+  - A meaning-preserving clarity pass: out-of-scope operations name how they happen (`../`, a symlink), `Interactive actions` names them, and the defer reason is written for the operator who reads it. Most of the diff is line breaks — flowmark's semantic mode replaced a hand-maintained column wrap, words and order unchanged.
+
+  Deliberately unchanged: the payload-kind vocabulary (`bash`, `bash_external_directory`, `forwarded`), the surface names, and the loopback addresses are the host's and the protocol's facts. The three JSON sample lines are the parser contract and stay byte-identical.
+
+- 8ed1137: Release hardening across config loading, the review pipeline, the prompt material, and the audit trail. No existing configuration needs to change. Every item moves in the fail-safe direction (degrade, defer, or warn), never a wrong deny.
+
+  **Config**
+
+  - Config diagnostics are written as sentences: no dashes, and no colon where the message is embedded in a notice that already has one (`the snapshot is invalid at $.mode (message)`, `unknown key "surfces"; ignored (check for a typo)`).
+  - A top-level key the schema does not know is now reported (`unknown key "surfces"; ignored (check for a typo)`) instead of being dropped in silence. The layer still loads, so a config written for a newer version keeps working; only the typo becomes visible.
+  - Saving a config whose deprecated `typesafe` block cannot be removed leaves the file untouched and says so, naming the key: "refusing to write; `typesafe` cannot be removed from this file". The write used to retry forever.
+  - Env refs resolve against own keys only, so a `__proto__` key can no longer feed a value into the effective config. A config that contains one still loads.
+
+  **Prompt**
+
+  - The short-approval rule names the agent's own prose rather than "agent text". Tool calls are part of the prompt, so the old wording promised an absence the prompt did not keep.
+  - The trust boundary names the human's own words (what they type, and the choices they make), and says a choice authorizes the option it names and nothing wider, since the wording around it may be agent-authored. The old wording named `ask_user_question`, which the model never sees: only the answer text reaches the prompt, and one package's tool name is not the human.
+  - The short-approval clause no longer appears twice: the rule stays with the general rules, and the verdict format only says how to phrase the question the operator is asked.
+  - Wording for the authorizing person is now consistent: the authority sentences, the anchor definition, and the rendered transcript labels say the human, while transcript structure keeps "user" and the config owner is the operator. The classifier's background sentence called the anchor "the latest user request" although its state carries the trusted intent, which includes a question tool's answer, so it named a channel the answer did not come through.
+  - The defer instruction is qualified: the reason is the question the operator is asked _when the defer survives as one_. The strict and lenient modes map a defer to a deny, where nothing is asked.
+  - A defer reason names the gap, then the question that would settle it. The operator line used to be a bare question (`is this action safe to run?`) carrying no reason at all, and the chat prompt's example taught the model to parrot the classifier's own constant, so one content-free line reached the operator from both engines. The lanes now share the shape (the gap, then the ask in parentheses), not the words, and the classifier names which reading fell short. The notice is the reason alone: the host supplies the separator before it.
+
+  **Review**
+
+  - Operator notices keep one shape: a structural colon is never ours (the host renders its own level separator) and a dash separator is never ours either, so every line reads as a sentence. The longest lines were trimmed to what the operator acts on: the machinery defer drops "so it is", `/ai-guard` feedback names the layer as `(session)`/`(config)` like the footer and the picker, and the breaker, save-config, report, and registration lines lost their padding.
+
+  - A chat reply stating two different verdicts now defers to the human instead of taking the first. A self-contradictory reply must not decide.
+  - A deny without a reason notifies with the generic reason. It previously fell through to the defer branch and rendered nothing at all.
+  - Model-generated annotations are never rendered into the prompt and never reach the verdict; keeping them out of the verdict cache key is now correct by design rather than a coincidence.
+  - A question tool's result reaches the reviewer as the tool returned it: its structured payload as JSON when it carries one, its own text otherwise. Only two names are trusted: `ask_user_question` and `ask_user`, the ones whose names say _user_. Near-names such as `ask`, `ask_question`, or a model-delegation tool (`pi-ask-codex`) stay untrusted, because trusting them would let the agent's prose become the authorization anchor.
+  - The structured payload keeps the question text next to each answer, so the reviewer can tell what an answer authorizes. Nothing is re-rendered or summarized: the packages disagree on the shape, and a dropped field is authorization the reviewer cannot see.
+  - A cancelled questionnaire travels as its own payload (`cancelled: true`), so a refused or failed dialog is visible as such instead of arriving as the sentence the tool writes about it.
+  - The denied panel keeps the 50 most recent denials instead of growing for the life of the session.
+  - A reply whose first verdict object is unbalanced now defers instead of letting a later object decide the ask. The parser had only guarded the balanced case, so a malformed open brace could hand a later allow example the verdict.
+  - A provider refusal that arrives with "aborted" in its text stays terminal and is recorded as `call-failed`, not `timeout`. The defer kind is what the operator reads, and the classifier backend's error reconstruction no longer rebuilds such a refusal as a switchable timeout (or a switchable connection failure).
+
+  **Audit**
+
+  - The recorded `rawReply` is bounded (2000 characters, truncated in the middle), so a pathological reply cannot bloat the log.
+  - A policy pattern is redacted at the record factory, where every producer passes.
+  - A crashed review writes an `internal-error` record, so the log shows the failure instead of stopping at the pre-call gate.
+  - The log tail reader honors short reads: a window that only partially fills is no longer parsed as a truncated line.
+  - Suggested rules ignore patterns that were redacted on the way in.
+  - The crash record is written independently of the debug line, so a throwing debug sink no longer costs the audit trail the record that says the review crashed.
+
+- 876820e: The classifier lane's published walk budget is now real, and a failed attempt is never missing from the audit log.
+
+  - A classifier walk can no longer run past `walkBudgetMs`: the call carries the walk's remaining budget as a signal, passed into the request (pi-ai ≥0.99 forwards it) and raced locally, so a version that ignores the option still cannot outlive the budget. The direct backend aborts outright. A single-endpoint walk keeps its transport retries, which is what made this matter: each SDK retry used to get a fresh per-attempt timeout.
+  - URL userinfo redaction now swallows a password that itself contains `@` (`https://user:p@ssw0rd@host`); matching only to the first `@` left the rest of the password on the line.
+  - A failover hop is audited only once the endpoint it leads to is actually contacted, so the review log no longer records a hop that the remaining budget then cancels.
+  - A failed classifier attempt is recorded where it is observed, so a retryable failure that a backup takes over still appears as `model_call_error`. Previously only the exhaustion path recorded it, and the chat lane already recorded its own — one walk now reads the same in both lanes.
+  - Saving a config no longer expands a prototype key: `${constructor}` / `${__proto__}` read as unset (fallback or skip) instead of expanding to a JavaScript prototype member that passed the value schema.
+  - The secret redaction pattern covers the scoped OpenAI key shapes (`sk-proj-…`, `sk-svcacct-…`, `sk-admin-…`), which the older alphanumeric-only rule matched only up to the scope hyphen.
+  - A notice issued before the first session is no longer dropped silently: it warns, the same way a disposed UI context already did.
+  - A session-scoped setting change persists before the in-memory override is written, so a failed write leaves memory and the session file in agreement.
+
 ## 0.13.0
 
 ### Minor Changes
