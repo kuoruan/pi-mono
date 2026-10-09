@@ -80,7 +80,7 @@ import {
  * The live event ctx is NOT here: it re-points on tree navigation and
  * lives in a separate mutable slot (see `SessionLifecycle`).
  */
-export interface SessionInputs {
+interface SessionInputs {
   /** Model registry from the session context — resolves the reviewer model. */
   registry: ModelRegistryLike;
   /**
@@ -115,7 +115,7 @@ export interface SessionSeed extends SessionInputs {
  * permissions:ready (ready only completes a missing registration; the
  * session and the registered link are never rebuilt).
  */
-export interface SessionState extends SessionInputs {
+interface SessionState extends SessionInputs {
   /** As in `SessionSeed` — the load result travels with the session. */
   load: LoadConfigResult;
   /** Per-session circuit breaker — trips on consecutive denials. */
@@ -127,7 +127,7 @@ export interface SessionState extends SessionInputs {
 }
 
 /** Injectable collaborators the lifecycle registers the pipeline with. */
-export interface SessionLifecycleDeps {
+interface SessionLifecycleDeps {
   /** The authorizer factory (the real ReviewPipeline, or a stub in tests). */
   createPipeline: (deps: ReviewPipelineDeps) => Authorizer["authorize"];
   /** Model-call function (lazy registry resolution happens per call). */
@@ -238,7 +238,7 @@ export class SessionLifecycle {
     // notices run after the context is assigned, so they take the branch
     // below), and a dropped message is warned here exactly as it is there.
     if (!target) {
-      warn(`notify had no active session — escalation message lost: ${message}`);
+      warn(`notify had no active session, escalation message lost (${message})`);
       return;
     }
     try {
@@ -248,7 +248,7 @@ export class SessionLifecycle {
       // message must not be silent: in manual mode this notify is the
       // only channel carrying the reviewer's reasoning to a human
       // about to adjudicate.
-      warn(`notify failed (${errorMessage(e)}) — escalation message lost: ${message}`);
+      warn(`notify failed (${errorMessage(e)}), escalation message lost (${message})`);
     }
   }
 
@@ -360,8 +360,8 @@ export class SessionLifecycle {
     if (!seed.load.config) {
       this.feedbackNotify(
         seed.load.outcome === "failed"
-          ? `config not applied (${formatConfigIssues(seed.load.issues)}) — running with no auto-review; fix the config and restart the session`
-          : "no config found — running with no auto-review; add one and restart the session",
+          ? `config not applied (${formatConfigIssues(seed.load.issues)}); no auto-review until you fix it and restart the session`
+          : "no config found; no auto-review until you add one and restart the session",
         "error",
       );
     }
@@ -448,7 +448,7 @@ export class SessionLifecycle {
         registry: session.registry,
         modelCall: this.#deps.modelCall,
         onSkippedFallback: (issue) =>
-          this.feedbackNotify(`fallback skipped (${issue.path} — ${issue.message})`, "warning"),
+          this.feedbackNotify(`fallback skipped (${issue.path}, ${issue.message})`, "warning"),
       });
       const deps: ReviewPipelineDeps = {
         config,
@@ -474,14 +474,11 @@ export class SessionLifecycle {
         // service, so a duplicate means a STALE registration survived
         // disposal (the /reload dispose glitch) and still governs asks
         // with the previous session's deps.
-        this.feedbackNotify(
-          "stale ai-guard registration survived disposal — asks are governed by the previous session's pipeline (deferring to the prompt)",
-          "error",
-        );
+        this.feedbackNotify("stale ai-guard registration still governs asks", "error");
         return;
       }
       this.feedbackNotify(
-        `failed to register the reviewer — running with no auto-review (${errorMessage(e)})`,
+        `failed to register the reviewer; no auto-review (${errorMessage(e)})`,
         "error",
       );
     }

@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import { MODE_VALUES, type Mode } from "#src/config/config-schema.ts";
 import { GENERIC_DENY_REASON, type RiskLevel } from "#src/model/model-verdict.ts";
+import { escalationMessage, failOpenNotice } from "#src/review/verdict-copy.ts";
 import {
   type ModelDeferInfo,
   applyVerdictMode,
@@ -22,6 +23,7 @@ import {
   machineryTarget,
   resolveMapping,
 } from "#src/review/verdict-rule.ts";
+import { OPERATOR_COPY_SHAPE } from "#test/operator-copy.ts";
 
 type Row = [
   policy: Mode,
@@ -252,10 +254,11 @@ describe("resolveMapping — the mapping consequence rule", () => {
     expect(held.emittedReason).toBeUndefined();
     expect(held.markNoticeShown).toBe(false);
     expect(held.instructionSource).toBe("content");
-    expect(held.notice).toEqual({
-      message: "reviewer denied this request (risk low) — unsafe",
-      level: "warning",
-    });
+    const notice = held.notice!;
+    expect(notice.level).toBe("warning");
+    expect(notice.message).toContain("unsafe");
+    expect(notice.message).toContain("risk low");
+    expect(notice.message).toMatch(OPERATOR_COPY_SHAPE);
   });
 
   it("notifies a reason-less deny instead of falling through to the empty defer notice", () => {
@@ -310,10 +313,17 @@ describe("resolveMapping — the mapping consequence rule", () => {
     });
     expect(asked.annotate).toBe(true);
     expect(asked.emittedReason).toBeUndefined();
-    expect(asked.notice).toEqual({
-      message: "reviewer denied this request (risk low) — unsafe — asking you instead",
-      level: "warning",
-    });
+    const notice = asked.notice!;
+    expect(notice.level).toBe("warning");
+    expect(notice.message).toMatch(OPERATOR_COPY_SHAPE);
+    // Same facts as a held deny, told with the ask outcome: comparing against
+    // the copy builder pins the mapping without pinning the wording.
+    expect(notice.message).toBe(
+      escalationMessage({ kind: "deny", reason: "unsafe" }, "low", "asked"),
+    );
+    expect(notice.message).not.toBe(
+      escalationMessage({ kind: "deny", reason: "unsafe" }, "low", "denied"),
+    );
   });
 
   it("a defer→allow mapping marks the swallowed clarification and stays silent when benign-leaned", () => {
@@ -345,10 +355,13 @@ describe("resolveMapping — the mapping consequence rule", () => {
       noticeShown: false,
     });
     expect(neutral.markNoticeShown).toBe(true);
-    expect(neutral.notice).toEqual({
-      message: "lenient auto-approves uncertainty — soft denials still ask",
-      level: "warning",
-    });
+    const notice = neutral.notice!;
+    expect(notice.level).toBe("warning");
+    expect(notice.message).toMatch(OPERATOR_COPY_SHAPE);
+    // The copy builder pins the mapping without pinning the wording: the
+    // lenient notice names a different remaining tier than the permissive one.
+    expect(notice.message).toBe(failOpenNotice("lenient"));
+    expect(notice.message).not.toBe(failOpenNotice("permissive"));
     // Already shown: silent, and the state is not re-marked.
     const again = resolveMapping({
       original: DEFER_V,
@@ -377,10 +390,9 @@ describe("resolveMapping — the mapping consequence rule", () => {
     });
     expect(swallowed.annotate).toBe(true);
     expect(swallowed.emittedReason).toBe("unsafe");
-    expect(swallowed.notice).toEqual({
-      message: "permissive auto-approves non-allow verdicts — hard-tier denials still block",
-      level: "warning",
-    });
+    const notice = swallowed.notice!;
+    expect(notice.level).toBe("warning");
+    expect(notice.message).toBe(failOpenNotice("permissive"));
   });
 
   it("a defer→deny mapping records the synthesized teaching reason, never a suppressed marker", () => {
@@ -411,7 +423,8 @@ describe("resolveMapping — the mapping consequence rule", () => {
         mode,
         noticeShown: false,
       });
-      expect(held.notice?.message).toContain("reviewer denied this request (risk critical)");
+      expect(held.notice?.message).toContain("risk critical");
+      expect(held.notice?.message).toMatch(OPERATOR_COPY_SHAPE);
     }
   });
 });

@@ -67,7 +67,9 @@
               "expectTypeOf",
               "assert",
               "assertType",
-              "expectVerdict"
+              "expectVerdict",
+              "expectNotices",
+              "expectNotified"
             ]
           }
         ]

@@ -33,9 +33,9 @@ import type {
 
 import {
   escalationMessage,
+  failOpenNotice,
   machineryDenyReason,
   machineryDeferNotice,
-  modelDeferNotice,
   uncertainDenyReason,
   type DenyInstructionSource,
 } from "./verdict-copy.ts";
@@ -50,7 +50,7 @@ export interface ModelDeferInfo {
    * failures.
    */
   kind?: ModelCallDeferKind;
-  /** The clarification request attached to a model defer. */
+  /** The model's defer reason: the gap, then the ask. */
   reason?: string;
   /**
    * The reviewer's directional inclination on a model defer — which way it
@@ -64,7 +64,7 @@ export interface ModelDeferInfo {
  * The two deny tiers the ladder splits a deny into — hard (terminal in
  * every mode) and soft (mapped by the mode's lanes).
  */
-export type DenyTier = "hard" | "soft";
+type DenyTier = "hard" | "soft";
 
 /**
  * Which mapping tier a deny falls into.
@@ -206,14 +206,13 @@ function mapLane(
  * returned as a {@link MappingDecision.markNoticeShown} signal; the
  * caller performs the mutation.
  */
-export interface MappingDecision {
+interface MappingDecision {
   /**
-   * The `emittedReason` for the decision record's mapping annotation:
-   * deny→allow keeps the swallowed deny reason; defer→allow marks the
-   * swallowed clarification; →deny records the synthesized teaching
-   * reason the agent DID get (never a "suppressed" marker — nothing was
-   * suppressed on the way to a deny). Undefined when the mapping
-   * introduced none.
+   * The `emittedReason` for the decision record's mapping annotation: deny→allow
+   * keeps the swallowed deny reason; defer→allow marks the swallowed
+   * clarification; →deny records the synthesized teaching reason the agent DID get
+   * (never a "suppressed" marker, nothing was suppressed on the way to a deny).
+   * Undefined when the mapping introduced none.
    */
   emittedReason?: string;
   /**
@@ -222,16 +221,14 @@ export interface MappingDecision {
    */
   annotate: boolean;
   /**
-   * The operator notice this disposition owes, rendered and leveled; null
-   * when silent. Five kinds: a model deny that HOLDS or escalates
-   * (the host renders no dialog for denials — the notify line is the
-   * operator's only copy), a mapped defer (the "asking you instead"
-   * tail corrects the operator's read), the once-per-pipeline fail-open
-   * notice (the mode auto-approving against the model's explicit verdict
-   * or its neutral uncertainty), a model-defer that emitted as defer
-   * (the "reviewer asks" mirror — the dialog alone never shows what the
-   * reviewer wants clarified), and a machinery defer that emitted as
-   * defer (the cause notice — a forced defer must name its failure kind).
+   * The operator notice this disposition owes, rendered and leveled; null when
+   * silent. Five kinds: a model deny that HOLDS or escalates (the host renders no
+   * dialog for denials, so the notify line is the operator's only copy), a mapped
+   * defer (the ask tail corrects the operator's read), the once-per-pipeline
+   * fail-open notice (the mode auto-approving against the model's explicit verdict
+   * or its neutral uncertainty), a model defer that emitted as defer (its reason,
+   * which no dialog would show), and a machinery defer that emitted as defer (the
+   * cause notice).
    */
   notice: { message: string; level: "info" | "warning" } | null;
   /**
@@ -252,7 +249,7 @@ export interface MappingDecision {
  * (original vs emitted), the risk/defer classification, the lean, the
  * mode, and the once-per-pipeline notice state.
  */
-export interface MappingInput {
+interface MappingInput {
   /** The model's (or cached) verdict. */
   original: AuthorizerVerdict;
   /** The verdict the mode mapping emitted. */
@@ -312,18 +309,16 @@ export function resolveMapping(input: MappingInput): MappingDecision {
         ? "machinery"
         : "content"
       : null;
-  // A defer that emitted as defer owes its own notices: the model's
-  // clarification (mirrored — the upstream defer verdict carries no
-  // reason field, so the dialog alone would never show WHAT the reviewer
-  // wants clarified), or the machinery cause (a forced defer must name
-  // its failure kind — same doctrine as the pre-call gates). A terse
-  // model defer without a reason stays silent (the verdict itself
-  // completed; a missing reason is tolerated by design).
+  // A defer that emitted as defer owes a notice: the model's reason (the dialog
+  // alone would never show what it could not establish), or the machinery cause (a
+  // forced defer must name its failure kind, same doctrine as the pre-call gates).
+  // The model's reason is the whole line: a prefix would add a second separator to
+  // the host's own. A terse defer without a reason stays silent by design.
   const deferNotice: { message: string; level: "info" | "warning" } | null =
     emitted.kind === "defer" && original.kind === "defer"
       ? deferKind === "model-defer" && deferReason
         ? {
-            message: modelDeferNotice(deferReason),
+            message: deferReason,
             level: "info",
           }
         : deferKind !== undefined && deferKind !== "model-defer"
@@ -331,13 +326,12 @@ export function resolveMapping(input: MappingInput): MappingDecision {
           : null
       : null;
   if (emitted.kind === original.kind) {
-    // The verdict held. A model deny that holds in every mode is the reviewer's
-    // hardest call — the host renders no dialog, so the notify line is the only
-    // human-visible copy, in every mode and tier. A reason-less deny (the parser
-    // synthesizes one; a future producer might not) takes the generic reason
-    // rather than falling through to the defer notice, which renders nothing. A
-    // defer that holds still owes its own notice (the machinery cause, or the
-    // model's mirrored clarification).
+    // The verdict held. The host renders no dialog for a deny, so the notify line
+    // is the only human-visible copy, in every mode and tier. A reason-less deny
+    // (the parser synthesizes one; a future producer might not) takes the generic
+    // reason rather than falling through to the defer notice, which renders
+    // nothing. A defer that holds still owes its own notice (the machinery cause,
+    // or the model's reason).
     if (original.kind === "deny") {
       const denied = original.reason ? original : { ...original, reason: GENERIC_DENY_REASON };
       return {
@@ -367,10 +361,8 @@ export function resolveMapping(input: MappingInput): MappingDecision {
       : emitted.kind === "deny"
         ? emitted.reason
         : undefined;
-  // The changed-kind branch never owes a defer notice: deferNotice
-  // requires emitted AND original to both be defers, which a changed
-  // kind excludes by definition — the two defer notices ride the held
-  // branch above only.
+  // The changed-kind branch never owes a defer notice: deferNotice needs emitted
+  // AND original to both be defers, which a changed kind excludes by definition.
   let notice: MappingDecision["notice"] = null;
   let markNoticeShown = false;
   if (emitted.kind === "defer") {
@@ -385,11 +377,7 @@ export function resolveMapping(input: MappingInput): MappingDecision {
     // "I would allow this", confirmed — allows never notify). Once per
     // pipeline: the first occurrence teaches, the rest stay quiet.
     markNoticeShown = true;
-    const loosened =
-      mode === "lenient"
-        ? "uncertainty — soft denials still ask"
-        : "non-allow verdicts — hard-tier denials still block";
-    notice = { message: `${mode} auto-approves ${loosened}`, level: "warning" };
+    notice = { message: failOpenNotice(mode), level: "warning" };
   }
   return { annotate: true, emittedReason, notice, instructionSource, markNoticeShown };
 }

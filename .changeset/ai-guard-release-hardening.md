@@ -2,28 +2,32 @@
 "pi-permission-ai-guard": patch
 ---
 
-Release hardening across config loading, the review pipeline, the prompt material, and the audit trail. No existing configuration needs to change: every item moves in the fail-safe direction — degrade, defer, or warn, never a wrong deny.
+Release hardening across config loading, the review pipeline, the prompt material, and the audit trail. No existing configuration needs to change. Every item moves in the fail-safe direction (degrade, defer, or warn), never a wrong deny.
 
 **Config**
 
-- A top-level key the schema does not know is now reported (`unknown key "surfces" — ignored (check for a typo)`) instead of being dropped in silence. The layer still loads, so a config written for a newer version keeps working; only the typo becomes visible.
-- Saving a config whose deprecated `typesafe` block cannot be removed leaves the file untouched and says so, naming the key: "refusing to write — `typesafe` cannot be removed from this file". The write used to retry forever.
-- Env refs resolve against own keys only, so a `__proto__` key can no longer feed a value into the effective config — and a config that contains one still loads.
+- Config diagnostics are written as sentences: no dashes, and no colon where the message is embedded in a notice that already has one (`the snapshot is invalid at $.mode (message)`, `unknown key "surfces"; ignored (check for a typo)`).
+- A top-level key the schema does not know is now reported (`unknown key "surfces"; ignored (check for a typo)`) instead of being dropped in silence. The layer still loads, so a config written for a newer version keeps working; only the typo becomes visible.
+- Saving a config whose deprecated `typesafe` block cannot be removed leaves the file untouched and says so, naming the key: "refusing to write; `typesafe` cannot be removed from this file". The write used to retry forever.
+- Env refs resolve against own keys only, so a `__proto__` key can no longer feed a value into the effective config. A config that contains one still loads.
 
 **Prompt**
 
 - The short-approval rule names the agent's own prose rather than "agent text". Tool calls are part of the prompt, so the old wording promised an absence the prompt did not keep.
-- The trust boundary names the human's own words — what they type, and the choices they make — and says a choice authorizes the option it names and nothing wider, since the wording around it may be agent-authored. The old wording named `ask_user_question`, which the model never sees: only the answer text reaches the prompt, and one package's tool name is not the human.
+- The trust boundary names the human's own words (what they type, and the choices they make), and says a choice authorizes the option it names and nothing wider, since the wording around it may be agent-authored. The old wording named `ask_user_question`, which the model never sees: only the answer text reaches the prompt, and one package's tool name is not the human.
 - The short-approval clause no longer appears twice: the rule stays with the general rules, and the verdict format only says how to phrase the question the operator is asked.
-- Wording for the authorizing person is now consistent: the authority sentences, the anchor definition, and the rendered transcript labels say the human, while transcript structure keeps "user" and the config owner is the operator. The classifier's background sentence called the anchor "the latest user request" although its state carries the trusted intent — which includes a question tool's answer — so it named a channel the answer did not come through.
+- Wording for the authorizing person is now consistent: the authority sentences, the anchor definition, and the rendered transcript labels say the human, while transcript structure keeps "user" and the config owner is the operator. The classifier's background sentence called the anchor "the latest user request" although its state carries the trusted intent, which includes a question tool's answer, so it named a channel the answer did not come through.
 - The defer instruction is qualified: the reason is the question the operator is asked _when the defer survives as one_. The strict and lenient modes map a defer to a deny, where nothing is asked.
+- A defer reason names the gap, then the question that would settle it. The operator line used to be a bare question (`is this action safe to run?`) carrying no reason at all, and the chat prompt's example taught the model to parrot the classifier's own constant, so one content-free line reached the operator from both engines. The lanes now share the shape (the gap, then the ask in parentheses), not the words, and the classifier names which reading fell short. The notice is the reason alone: the host supplies the separator before it.
 
 **Review**
+
+- Operator notices keep one shape: a structural colon is never ours (the host renders its own level separator) and a dash separator is never ours either, so every line reads as a sentence. The longest lines were trimmed to what the operator acts on: the machinery defer drops "so it is", `/ai-guard` feedback names the layer as `(session)`/`(config)` like the footer and the picker, and the breaker, save-config, report, and registration lines lost their padding.
 
 - A chat reply stating two different verdicts now defers to the human instead of taking the first. A self-contradictory reply must not decide.
 - A deny without a reason notifies with the generic reason. It previously fell through to the defer branch and rendered nothing at all.
 - Model-generated annotations are never rendered into the prompt and never reach the verdict; keeping them out of the verdict cache key is now correct by design rather than a coincidence.
-- A question tool's result reaches the reviewer as the tool returned it: its structured payload as JSON when it carries one, its own text otherwise. Only two names are trusted, `ask_user_question` and `ask_user` — the ones whose names say _user_. Near-names such as `ask`, `ask_question`, or a model-delegation tool (`pi-ask-codex`) stay untrusted, because trusting them would let the agent's prose become the authorization anchor.
+- A question tool's result reaches the reviewer as the tool returned it: its structured payload as JSON when it carries one, its own text otherwise. Only two names are trusted: `ask_user_question` and `ask_user`, the ones whose names say _user_. Near-names such as `ask`, `ask_question`, or a model-delegation tool (`pi-ask-codex`) stay untrusted, because trusting them would let the agent's prose become the authorization anchor.
 - The structured payload keeps the question text next to each answer, so the reviewer can tell what an answer authorizes. Nothing is re-rendered or summarized: the packages disagree on the shape, and a dropped field is authorization the reviewer cannot see.
 - A cancelled questionnaire travels as its own payload (`cancelled: true`), so a refused or failed dialog is visible as such instead of arriving as the sentence the tool writes about it.
 - The denied panel keeps the 50 most recent denials instead of growing for the life of the session.

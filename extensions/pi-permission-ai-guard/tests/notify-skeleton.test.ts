@@ -6,21 +6,22 @@ import { describe, expect, it } from "vitest";
 import {
   approvalNotice,
   escalationMessage,
+  failOpenNotice,
   machineryDeferNotice,
   machineryDenyReason,
-  modelDeferNotice,
   uncertainDenyReason,
   withAgentInstruction,
 } from "#src/review/verdict-copy.ts";
+import { OPERATOR_COPY_SHAPE } from "#test/operator-copy.ts";
 
 /**
- * The notify skeleton, mechanically enforced: no structural colons in any
- * static notify text. The TUI prefixes its own level ("Warning: …") — a
- * colon inside our line doubles up. Detail rides in parentheses or after
- * an em-dash. Only a colon followed by whitespace is structural, so a URL
- * scheme never trips it. Scans the notify-producing sources so a copy edit
- * cannot reintroduce the shape; the builder-rendered lines (whose call sites
- * pass expressions, not literals) are covered by rendering them below.
+ * The notify skeleton, mechanically enforced: every static notify line keeps
+ * OPERATOR_COPY_SHAPE. The host prefixes its own level and separator, so a
+ * colon inside our line doubles up, and the line reads as prose rather than
+ * clauses joined by a dash. Only a colon followed by whitespace is structural,
+ * so a URL scheme never trips it. Scans the notify-producing sources so a copy
+ * edit cannot reintroduce the shape; the builder-rendered lines (whose call
+ * sites pass expressions, not literals) are rendered below.
  */
 const NOTIFY_SOURCES = [
   "#src/session/session-lifecycle.ts",
@@ -124,15 +125,15 @@ function scanInterpolation(source: string, i: number): { text: string; end: numb
   return { text: out, end: i };
 }
 
-describe("notify skeleton — no structural colons", () => {
-  it("every static notify literal is colon-free", () => {
+describe("notify skeleton", () => {
+  it("every static notify literal keeps the operator-copy shape", () => {
     const offenders: string[] = [];
     for (const f of NOTIFY_SOURCES) {
       const s = readFileSync(fileURLToPath(import.meta.resolve(f)), "utf-8");
       for (const m of s.matchAll(CALL_RE)) {
         const staticText = staticNotifyText(s, m.index! + m[0].length);
         if (staticText === undefined) continue;
-        if (/:\s/.test(staticText)) {
+        if (!OPERATOR_COPY_SHAPE.test(staticText)) {
           offenders.push(`${f}: ${JSON.stringify(staticText.slice(0, 60))}`);
         }
       }
@@ -161,20 +162,21 @@ describe("notify skeleton — no structural colons", () => {
 });
 
 describe("notify skeleton — builder-rendered lines", () => {
-  it("renders no structural colon in the operator-facing builders", () => {
+  it("renders no structural colon and no dash in the operator-facing builders", () => {
     // These reach ctx.notify() through expressions, so the source scan above
-    // cannot see them — and they carry the highest-stakes copy.
+    // cannot see them, and they carry the highest-stakes copy.
     const rendered = [
       machineryDeferNotice("timeout"),
       machineryDenyReason("timeout", "strict"),
-      modelDeferNotice("confirm the scope of this action before it runs"),
       uncertainDenyReason("strict"),
       withAgentInstruction("secrets in the command", "content"),
       approvalNotice({ kind: "reviewer" }, { kind: "fresh", latencyMs: 1200 }),
       approvalNotice({ kind: "mode", mode: "lenient" }, { kind: "cached" }),
       escalationMessage({ kind: "deny", reason: "secrets in the command" }, "high", "denied"),
       escalationMessage({ kind: "deny", reason: "secrets in the command" }, undefined, "asked"),
+      failOpenNotice("lenient"),
+      failOpenNotice("permissive"),
     ];
-    expect(rendered.filter((text) => /:\s/.test(text))).toEqual([]);
+    expect(rendered.filter((text) => !OPERATOR_COPY_SHAPE.test(text))).toEqual([]);
   });
 });

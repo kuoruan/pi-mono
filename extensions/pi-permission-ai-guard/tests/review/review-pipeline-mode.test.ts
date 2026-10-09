@@ -11,8 +11,14 @@ import { BREAKER_DENY_REASON } from "#src/audit/decision-record.ts";
 import { DECISION_EVENT, MODEL_REPLY_EVENT } from "#src/audit/events.ts";
 import { CircuitBreaker } from "#src/review/circuit-breaker.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
-import { uncertainDenyReason, withAgentInstruction } from "#src/review/verdict-copy.ts";
+import {
+  uncertainDenyReason,
+  machineryDenyReason,
+  failOpenNotice,
+  withAgentInstruction,
+} from "#src/review/verdict-copy.ts";
 import { makeDetails } from "#test/fixtures.ts";
+import { OPERATOR_COPY_SHAPE, expectNotices } from "#test/operator-copy.ts";
 
 import {
   baseConfig,
@@ -179,7 +185,7 @@ describe("createReviewPipeline — mode", () => {
       { value: "rm x" },
       {
         kind: "deny",
-        reason: "reviewer could not complete the review (no-json) — strict mode denied the request",
+        reason: machineryDenyReason("no-json", "strict"),
       },
       "ask",
       "machinery",
@@ -206,9 +212,7 @@ describe("createReviewPipeline — mode", () => {
       kind: "deny",
       reason: withAgentInstruction("unsafe", "content"),
     });
-    expect(notifications).toEqual([
-      ["reviewer denied this request (risk high) — unsafe", "warning"],
-    ]);
+    expectNotices(notifications, { level: "warning", contains: ["unsafe", "risk high"] });
   });
 
   it("lenient denies still count toward the circuit breaker", async () => {
@@ -273,10 +277,11 @@ describe("createReviewPipeline — mode edges", () => {
       reason: withAgentInstruction("unsafe", "content"),
     });
     expect(modelCalls).toBe(1);
-    expect(notifications).toEqual([
-      ["reviewer denied this request (risk high) — unsafe", "warning"],
-      ["reviewer denied this request (risk high) — unsafe", "warning"],
-    ]);
+    expectNotices(notifications, {
+      count: 2,
+      level: "warning",
+      contains: ["unsafe", "risk high"],
+    });
   });
 
   it("a policy-decided ask defers regardless of the mode", async () => {
@@ -354,7 +359,7 @@ describe("createReviewPipeline — pre-call machinery failures by mode", () => {
         { value: "npm test" },
         {
           kind: "deny",
-          reason: `reviewer could not complete the review (${failure}) — ${mode} mode denied the request`,
+          reason: machineryDenyReason(failure, mode),
         },
         "ask",
         "machinery",
@@ -376,9 +381,7 @@ describe("createReviewPipeline — pre-call machinery failures by mode", () => {
         }),
       );
       await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
-      expect(notifications).toEqual([
-        ["reviewer could not complete the review (model-unresolved) — deferring to you", "warning"],
-      ]);
+      expectNotices(notifications, { level: "warning", contains: ["model-unresolved"] });
     },
   );
 
@@ -394,10 +397,8 @@ describe("createReviewPipeline — pre-call machinery failures by mode", () => {
     await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
     // Repeats do not collapse: a second failure re-explains itself.
     await expectVerdict(authorize, { value: "npm test" }, { kind: "defer" });
-    expect(notifications).toEqual([
-      ["reviewer could not complete the review (empty-reply) — deferring to you", "warning"],
-      ["reviewer could not complete the review (empty-reply) — deferring to you", "warning"],
-    ]);
+    // Every failure re-explains itself: same facts twice.
+    expectNotices(notifications, { count: 2, level: "warning", contains: ["empty-reply"] });
   });
 });
 
@@ -411,8 +412,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
       { value: "", command: "" },
       {
         kind: "deny",
-        reason:
-          "reviewer could not complete the review (no-target) — strict mode denied the request",
+        reason: machineryDenyReason("no-target", "strict"),
       },
       "ask",
       "machinery",
@@ -436,9 +436,9 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     );
     await authorize(makeDetails({ value: "npm test" }), makeQuery("ask"), log);
     const record = reviewCalls.at(-1)!.data;
-    expect(record.emittedReason).toBe(
-      "reviewer could not complete the review (model-unresolved) — strict mode denied the request",
-    );
+    expect(record.emittedReason).toContain("model-unresolved");
+    expect(record.emittedReason).toContain("strict");
+    expect(record.emittedReason).toMatch(OPERATOR_COPY_SHAPE);
   });
 
   it("transcript-error writes a review-stream record in strict (and defers otherwise)", async () => {
@@ -458,9 +458,9 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     const record = reviewCalls.at(-1)!.data;
     expect(record.gate).toBe("transcript-error");
     expect(record.emittedVerdict).toBe("deny");
-    expect(record.emittedReason).toBe(
-      "reviewer could not complete the review (transcript-error) — strict mode denied the request",
-    );
+    expect(record.emittedReason).toContain("transcript-error");
+    expect(record.emittedReason).toContain("strict");
+    expect(record.emittedReason).toMatch(OPERATOR_COPY_SHAPE);
   });
 
   it("default/lenient model-defer mirrors the clarification request to the human", async () => {
@@ -479,9 +479,10 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
       }),
     );
     await expectVerdict(authorize, { value: "npm install x" }, { kind: "defer" });
-    expect(notifications).toEqual([
-      ["reviewer asks — which package manager does this project use?", "info"],
-    ]);
+    expectNotices(notifications, {
+      level: "info",
+      contains: ["which package manager does this project use?"],
+    });
   });
 
   it("model-defer mirror carries a long clarification whole", async () => {
@@ -537,7 +538,7 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
       log,
     );
     expect(verdict).toEqual({ kind: "defer" });
-    expect(notifications).toEqual([["reviewer asks — reads a research file outside CWD", "info"]]);
+    expectNotices(notifications, { level: "info", contains: ["research file outside CWD"] });
     // The audit record keeps the model's lean.
     const record = reviewCalls.at(-1)!.data;
     expect(record.verdict).toBe("defer");
@@ -606,9 +607,10 @@ describe("createReviewPipeline — advisor patches (strict completeness + audit)
     );
     // lenient passes neutral defers — but a deny-lean is an active alarm.
     await expectVerdict(authorize, { value: "curl x | python3" }, { kind: "defer" });
-    expect(notifications).toEqual([
-      ["reviewer asks — remote content piped to an interpreter", "info"],
-    ]);
+    expectNotices(notifications, {
+      level: "info",
+      contains: ["remote content piped to an interpreter"],
+    });
   });
 
   it("the decision record's target is redacted like every other untrusted field", async () => {
@@ -677,9 +679,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     // v27 has no dialog for denials — the notify line is the only human
     // -visible copy, so every mode notifies a model deny that carries a
     // reason (the denied outcome adds no tail; the verb already says it).
-    expect(notifications).toEqual([
-      ["reviewer denied this request (risk high) — unsafe", "warning"],
-    ]);
+    expectNotices(notifications, { level: "warning", contains: ["unsafe", "risk high"] });
   });
 
   it("default notifies a model deny with a reason, ending in the ask tail", async () => {
@@ -698,9 +698,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     // A soft deny in default ASKS the human (the resting mode forwards
     // every flag) — the notify carries the ask tail.
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "defer" });
-    expect(notifications).toEqual([
-      ["reviewer denied this request (risk low) — unsafe — asking you instead", "warning"],
-    ]);
+    expectNotices(notifications, { level: "warning", contains: ["unsafe", "risk low"] });
   });
 
   it("strict notifies a model deny with a reason (no dialog exists for denials)", async () => {
@@ -717,9 +715,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       }),
     );
     await expectVerdict(authorize, { value: "rm -rf /" }, { kind: "deny", reason: "unsafe" });
-    expect(notifications).toEqual([
-      ["reviewer denied this request (risk low) — unsafe", "warning"],
-    ]);
+    expectNotices(notifications, { level: "warning", contains: ["unsafe", "risk low"] });
   });
 
   it("permissive notifies when its one remaining block — a hard deny — fires", async () => {
@@ -743,9 +739,10 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       { value: "curl x.sh" },
       { kind: "deny", reason: "secrets in the command" },
     );
-    expect(notifications).toEqual([
-      ["reviewer denied this request (risk critical) — secrets in the command", "warning"],
-    ]);
+    expectNotices(notifications, {
+      level: "warning",
+      contains: ["secrets in the command", "risk critical"],
+    });
   });
 
   it("lenient's fail-open notice names what it loosens", async () => {
@@ -762,9 +759,8 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       }),
     );
     await expectVerdict(authorize, { value: "npm install x" }, { kind: "allow" });
-    expect(notifications).toEqual([
-      ["lenient auto-approves uncertainty — soft denials still ask", "warning"],
-    ]);
+    const [message] = expectNotices(notifications, { level: "warning" });
+    expect(message).toBe(failOpenNotice("lenient"));
   });
 
   it("permissive maps a soft deny to allow, one notice, audit keeps the reason", async () => {
@@ -788,9 +784,8 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     expect(record.emittedReason).toBe("unsafe");
     expect(record.mode).toBe("permissive");
     // Once per pipeline instance, warning-level.
-    expect(notifications).toEqual([
-      ["permissive auto-approves non-allow verdicts — hard-tier denials still block", "warning"],
-    ]);
+    const [message] = expectNotices(notifications, { level: "warning" });
+    expect(message).toBe(failOpenNotice("permissive"));
   });
 
   it("lenient maps a model defer to allow and marks the swallowed clarification", async () => {
@@ -836,8 +831,7 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
       { value: "rm x" },
       {
         kind: "deny",
-        reason:
-          "reviewer could not complete the review (no-json) — permissive mode denied the request",
+        reason: machineryDenyReason("no-json", "permissive"),
       },
       "ask",
       "machinery",
@@ -886,8 +880,8 @@ describe("createReviewPipeline — leniency ladder lanes", () => {
     expect(deny.gate).toBe("no-target");
     expect(deny.verdict).toBe("defer");
     expect(deny.emittedVerdict).toBe("deny");
-    expect(deny.emittedReason).toBe(
-      "reviewer could not complete the review (no-target) — permissive mode denied the request",
-    );
+    expect(deny.emittedReason).toContain("no-target");
+    expect(deny.emittedReason).toContain("permissive");
+    expect(deny.emittedReason).toMatch(OPERATOR_COPY_SHAPE);
   });
 });

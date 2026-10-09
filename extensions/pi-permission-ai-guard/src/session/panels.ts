@@ -76,12 +76,12 @@ export async function pickItem<T>(
 export async function openReportPanel(deps: PanelDeps, ctx: AiGuardUiContext): Promise<void> {
   const entries = deps.readDecisionLog();
   if (entries === undefined) {
-    deps.notify("no review log found — nothing to report yet", "info");
+    deps.notify("no review log found, nothing to report yet", "info");
     return;
   }
   const candidates = buildReportCandidates(entries);
   if (candidates.length === 0) {
-    deps.notify("no repeated same-context asks found in the recent review log", "info");
+    deps.notify("no repeated same-context asks in the review log", "info");
     return;
   }
   // Summary lines first (feedback channel — a direct answer to the typed
@@ -108,7 +108,7 @@ export async function openReportPanel(deps: PanelDeps, ctx: AiGuardUiContext): P
     body: [
       {
         kind: "text",
-        text: "reviewed 3+ times in one context with no terminal deny — confirm, then paste into pi-permission-system config",
+        text: "reviewed 3+ times with no terminal deny — confirm and paste into pi-permission-system config",
         tone: "muted",
       },
       { kind: "emphasis", text: picked.suggestedRule },
@@ -132,7 +132,7 @@ export async function openDeniedPanel(deps: PanelDeps, ctx: AiGuardUiContext): P
     return;
   }
   if (!ctx.hasUI) {
-    deps.notify(`pass a picker-capable UI to browse the ${history.length} deny record(s)`, "info");
+    deps.notify(`pass a picker-capable UI to browse ${history.length} deny record(s)`, "info");
     return;
   }
   // The list line is a scan index (metadata + truncated command, the pick

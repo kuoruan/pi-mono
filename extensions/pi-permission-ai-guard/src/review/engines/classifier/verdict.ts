@@ -179,7 +179,12 @@ export function synthesizeClassifierVerdict(
     return {
       verdict: { kind: "defer" },
       deferKind: "model-defer",
-      deferReason: "is this action safe to run?",
+      // The ternary names the reading that fell short; the ask is the same either
+      // way, because what the lanes share is the shape, not the words.
+      deferReason:
+        answers.dangerConfidence <= answers.riskConfidence
+          ? "could not tell whether this is dangerous (is it safe to run?)"
+          : "could not judge how much damage this could do (is it safe to run?)",
       lean: deriveLean(answers, thresholds, false),
       latencyMs,
     };
@@ -203,7 +208,9 @@ export function synthesizeClassifierVerdict(
   return {
     verdict: { kind: "defer" },
     deferKind: "model-defer",
-    deferReason: "confirm the scope: is this action covered by your request?",
+    // Deliberately not byte-equal to the chat lane's example: a lane-spanning
+    // constant is how one content-free line reached the operator from both engines.
+    deferReason: "could not tie this action to your request (did you ask for it?)",
     lean: deriveLean(answers, thresholds, true),
     latencyMs,
   };

@@ -18,6 +18,12 @@ const THRESHOLDS: ClassifierThresholds = {
   confidenceThreshold: 0.6,
 };
 
+/**
+ * A defer line names the gap, then asks in parentheses: the operator's only
+ * channel (lean stays hidden, so the reason carries both halves).
+ */
+const DEFER_REASON_SHAPE = /^.+ \(.+\?\)$/;
+
 function confident(overrides: Partial<ClassifierAnswers> = {}): ClassifierAnswers {
   return {
     dangerCategory: DANGER_NONE,
@@ -69,7 +75,25 @@ describe("synthesizeClassifierVerdict", () => {
     const out = synthesizeClassifierVerdict(confident({ dangerConfidence: 0.3 }), THRESHOLDS, 7);
     expect(out.verdict).toEqual({ kind: "defer" });
     expect(out.deferKind).toBe("model-defer");
-    expect(out.deferReason).toBeDefined();
+    expect(out.deferReason).toMatch(DEFER_REASON_SHAPE);
+  });
+
+  it("names the reading that fell short, not a fixed line", () => {
+    // Both branches ask the same thing, so the gap is where the information is:
+    // the line has to follow whichever confidence came in under the floor.
+    const dangerShort = synthesizeClassifierVerdict(
+      confident({ dangerConfidence: 0.3 }),
+      THRESHOLDS,
+      7,
+    );
+    const riskShort = synthesizeClassifierVerdict(
+      confident({ riskConfidence: 0.2 }),
+      THRESHOLDS,
+      7,
+    );
+    expect(dangerShort.deferReason).not.toBe(riskShort.deferReason);
+    expect(dangerShort.deferReason).toMatch(DEFER_REASON_SHAPE);
+    expect(riskShort.deferReason).toMatch(DEFER_REASON_SHAPE);
   });
 
   it("denies a confident danger hit regardless of check order", () => {
@@ -148,7 +172,7 @@ describe("synthesizeClassifierVerdict", () => {
     );
     expect(out.verdict).toEqual({ kind: "defer" });
     expect(out.deferKind).toBe("model-defer");
-    expect(out.deferReason).toBeDefined();
+    expect(out.deferReason).toMatch(DEFER_REASON_SHAPE);
     expect(out.lean).toBe("allow");
   });
 
@@ -211,7 +235,7 @@ describe("synthesizeClassifierVerdict", () => {
   it("defers when the risk confidence is under the floor", () => {
     const out = synthesizeClassifierVerdict(confident({ riskConfidence: 0.2 }), THRESHOLDS, 7);
     expect(out.verdict).toEqual({ kind: "defer" });
-    expect(out.deferReason).toBeDefined();
+    expect(out.deferReason).toMatch(DEFER_REASON_SHAPE);
   });
 });
 

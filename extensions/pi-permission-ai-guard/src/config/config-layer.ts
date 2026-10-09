@@ -287,7 +287,7 @@ function readLayer(
   if (found.ambiguous) {
     issues.push({
       path: "$",
-      message: `Both ${CONFIG_FILE_NAMES.join(" and ")} exist — using ${basename(path)}.`,
+      message: `Both ${CONFIG_FILE_NAMES.join(" and ")} exist; using ${basename(path)}.`,
       sourcePath: path,
     });
   }
@@ -323,7 +323,7 @@ function readLayer(
     if (CONFIG_TOP_LEVEL_KEYS.has(key)) continue;
     issues.push({
       path: key,
-      message: `unknown key \`${key}\` — ignored (check for a typo)`,
+      message: `unknown key \`${key}\`; ignored (check for a typo)`,
       sourcePath: path,
     });
   }
@@ -334,7 +334,7 @@ function readLayer(
       if (allowed.has(key)) continue;
       issues.push({
         path: `${block}.${key}`,
-        message: `unknown key \`${key}\` — ignored (check for a typo)`,
+        message: `unknown key \`${key}\`; ignored (check for a typo)`,
         sourcePath: path,
       });
     }
@@ -370,14 +370,14 @@ function foldLegacyAlias(
   if (isObjectRecord(alias) && layer.classifier === undefined) {
     issues.push({
       path: CLASSIFIER_ALIAS_KEY,
-      message: `\`${CLASSIFIER_ALIAS_KEY}\` is deprecated — rename it to \`classifier\``,
+      message: `\`${CLASSIFIER_ALIAS_KEY}\` is deprecated; rename it to \`classifier\``,
       sourcePath: path,
     });
     const { timeoutMs, ...thresholds } = alias;
     if (timeoutMs !== undefined) {
       issues.push({
         path: `${CLASSIFIER_ALIAS_KEY}.timeoutMs`,
-        message: `\`${CLASSIFIER_ALIAS_KEY}.timeoutMs\` is ignored — set the top-level \`timeoutMs\` instead`,
+        message: `\`${CLASSIFIER_ALIAS_KEY}.timeoutMs\` is ignored; set the top-level \`timeoutMs\` instead`,
         sourcePath: path,
       });
     }
@@ -388,7 +388,7 @@ function foldLegacyAlias(
   if (isObjectRecord(current) && current.timeoutMs !== undefined) {
     issues.push({
       path: "classifier.timeoutMs",
-      message: "`classifier.timeoutMs` is ignored — set the top-level `timeoutMs` instead",
+      message: "`classifier.timeoutMs` is ignored; set the top-level `timeoutMs` instead",
       sourcePath: path,
     });
   }
@@ -654,7 +654,7 @@ function expandLayerEnvRefs(
       ok = false;
       issues.push({
         path: path.join(".") || "$",
-        message: `env ref \`\${${unresolved ?? "?"}}\` has no value and no fallback — set it or add :-`,
+        message: `env ref \`\${${unresolved ?? "?"}}\` has no value and no fallback; set it or add :-`,
         sourcePath,
       });
       return;
@@ -855,7 +855,7 @@ export function loadAiGuardConfig(
     if (skipped) {
       issues.push({
         path: "$",
-        message: "project config ignored — the project is untrusted",
+        message: "project config ignored (the project is untrusted)",
         sourcePath: skipped.path,
       });
       project = { outcome: "skipped" };
@@ -889,7 +889,7 @@ export function loadAiGuardConfig(
       issues.push({
         path: "instructions",
         message:
-          '`instructions` no longer takes top-level `background`/`questions` — wrap them in the `classifier` slot: { "classifier": { … } }',
+          '`instructions` no longer takes top-level `background`/`questions`; wrap them in the `classifier` slot: { "classifier": { … } }',
         sourcePath: layerThatWrote("instructions", global, project),
       });
     }
@@ -910,7 +910,7 @@ export function loadAiGuardConfig(
   for (const lane of uncoveredInstructionLanes(parsed.data)) {
     issues.push({
       path: "instructions",
-      message: `\`instructions\` has no \`${lane}\` slot — a ${lane} endpoint runs the pure built-in instructions`,
+      message: `\`instructions\` has no \`${lane}\` slot; a ${lane} endpoint runs the pure built-in instructions`,
       sourcePath: layerThatWrote("instructions", global, project),
     });
   }
@@ -978,7 +978,7 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
       path: "",
       created: false,
       changed: false,
-      error: "the project is untrusted — project config isn't honored here",
+      error: "the project is untrusted; project config isn't honored here",
     };
   }
   const canonical = configSchema.safeParse(config);
@@ -988,7 +988,7 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
       path: "",
       created: false,
       changed: false,
-      error: normalizeText(`the snapshot is invalid — ${first?.path || "$"}: ${first?.message}`),
+      error: normalizeText(`the snapshot is invalid at ${first?.path || "$"} (${first?.message})`),
     };
   }
   const agentDir = resolveAgentDir(env);
@@ -1104,7 +1104,7 @@ function editLayerFile(
     const file = basename(path);
     const message =
       parsed.failure.kind === "parse"
-        ? `${file} is not valid JSONC — ${printParseErrorCode(parsed.failure.code)} at offset ${parsed.failure.offset}`
+        ? `${file} is not valid JSONC (${printParseErrorCode(parsed.failure.code)} at offset ${parsed.failure.offset})`
         : `${file} root is not a JSON object`;
     return { path, created: false, changed: false, error: message };
   }
@@ -1142,7 +1142,7 @@ function editLayerFile(
         path,
         created: false,
         changed: false,
-        error: "refusing to write — the target file's shape conflicts with the current config",
+        error: "refusing to write; the target file's shape conflicts with the current config",
       };
     }
     running = applyEdits(running, edits);
@@ -1176,7 +1176,7 @@ function editLayerFile(
         path,
         created: false,
         changed: false,
-        error: `refusing to write — \`${CLASSIFIER_ALIAS_KEY}\` cannot be removed from this file`,
+        error: `refusing to write; \`${CLASSIFIER_ALIAS_KEY}\` cannot be removed from this file`,
       };
     }
   }
@@ -1197,7 +1197,7 @@ function editLayerFile(
       path,
       created: false,
       changed: false,
-      error: "refusing to write — the target file's shape conflicts with the current config",
+      error: "refusing to write; the target file's shape conflicts with the current config",
     };
   }
   for (const { path: leafPath, value } of leafPaths(data)) {
@@ -1217,8 +1217,8 @@ function editLayerFile(
         changed: false,
         error:
           expandEnvRefs(saved, vars) === undefined
-            ? `refusing to write — ${saved} no longer resolves; set the variable (or edit the value) and save again`
-            : `refusing to write — ${saved} no longer matches the saved value; edit the file's ref or the config, then save again`,
+            ? `refusing to write; ${saved} no longer resolves, so set the variable (or edit the value) and save again`
+            : `refusing to write; ${saved} no longer matches the saved value, so edit the file's ref or the config, then save again`,
       };
     }
     // A structural leaf (arrays are written whole) mismatches the same way
@@ -1229,14 +1229,14 @@ function editLayerFile(
         path,
         created: false,
         changed: false,
-        error: `refusing to write — a ref at ${leafPath.join(".")} no longer resolves; set the variable (or edit the value) and save again`,
+        error: `refusing to write; a ref at ${leafPath.join(".")} no longer resolves, so set the variable (or edit the value) and save again`,
       };
     }
     return {
       path,
       created: false,
       changed: false,
-      error: "refusing to write — duplicate keys in the target file would shadow the saved values",
+      error: "refusing to write; duplicate keys in the target file would shadow the saved values",
     };
   }
   try {

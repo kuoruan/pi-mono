@@ -115,7 +115,7 @@ export interface EnumSettingSpec {
  * `RegisteredCommand` (registerCommand's options shape). Only the handler's
  * ctx is narrowed to the consumed {@link AiGuardUiContext} subset.
  */
-export type AiGuardCommand = Omit<RegisteredCommand, "name" | "sourceInfo" | "handler"> & {
+type AiGuardCommand = Omit<RegisteredCommand, "name" | "sourceInfo" | "handler"> & {
   handler: (args: string, ctx: AiGuardUiContext) => Promise<void>;
   /** Required here: the command always registers completion support. */
   getArgumentCompletions: NonNullable<RegisteredCommand["getArgumentCompletions"]>;
@@ -126,12 +126,12 @@ export type AiGuardCommand = Omit<RegisteredCommand, "name" | "sourceInfo" | "ha
  * `ExtensionShortcut` (registerShortcut's options shape), handler ctx
  * narrowed to the consumed subset like the command's.
  */
-export type AiGuardShortcut = Omit<ExtensionShortcut, "shortcut" | "extensionPath" | "handler"> & {
+type AiGuardShortcut = Omit<ExtensionShortcut, "shortcut" | "extensionPath" | "handler"> & {
   handler: (ctx: AiGuardUiContext) => void;
 };
 
 /** The settings' view of session state — {@link SessionLifecycle} satisfies this structurally. */
-export interface SettingsSessionSurface {
+interface SettingsSessionSurface {
   /** The live session's load result, or undefined when no session is active. */
   readonly session: { readonly load: LoadConfigResult } | undefined;
   /** The stable overrides object (single write path, stable identity). */
@@ -222,7 +222,7 @@ export class RuntimeSettings {
 
   /** The /ai-guard command registration object. */
   readonly command: AiGuardCommand = {
-    description: "Adjust the ai-guard reviewer's session controls and browse its audit views",
+    description: "Adjust the ai-guard reviewer's controls and browse its audit views",
     getArgumentCompletions: (prefix) => {
       const trimmed = prefix.replace(/^\s+/, "");
       const spaceAt = trimmed.indexOf(" ");
@@ -263,7 +263,7 @@ export class RuntimeSettings {
   readonly shortcut: AiGuardShortcut = {
     // Generated from the ladder table's cycle membership — the description
     // cannot drift from the cycle it describes.
-    description: `Cycle ai-guard mode: ${CYCLE_DESCRIPTION} (session-scoped)`,
+    description: `Cycle ai-guard mode: ${CYCLE_DESCRIPTION} (session)`,
     handler: (ctx) => {
       // The cycle anchors the MODE spec by name — the cycled setting must
       // not depend on spec order or count.
@@ -356,7 +356,7 @@ export class RuntimeSettings {
     );
     const picked = await pickItem(
       ctx,
-      "ai-guard settings — pick a setting to adjust or an action to run",
+      "ai-guard settings — pick a setting or an action",
       rows,
       (r) => r.row.label,
     );
@@ -421,7 +421,7 @@ export class RuntimeSettings {
         const option = this.#optionByText(spec, value);
         if (!option) {
           this.#deps.notify(
-            `invalid value "${value}" for ${word} — valid values are ${this.#options(spec)
+            `invalid value "${value}" for ${word}; valid values are ${this.#options(spec)
               .map((o) => o.text)
               .join("|")}`,
             "error",
@@ -459,7 +459,7 @@ export class RuntimeSettings {
           return;
         }
         if (target !== undefined) {
-          this.#deps.notify("save-config takes one target — global or project", "error");
+          this.#deps.notify("save-config takes one target (global or project)", "error");
           return;
         }
         // A bare save-config (the menu's save row lands here too) opens
@@ -467,7 +467,7 @@ export class RuntimeSettings {
         // value picker. The direct form works everywhere.
         if (!ctx.hasUI) {
           this.#deps.notify(
-            "save-config needs an interactive UI — use /ai-guard save-config <global|project>",
+            "save-config needs an interactive UI; use /ai-guard save-config <global|project>",
             "error",
           );
           return;
@@ -488,7 +488,7 @@ export class RuntimeSettings {
           "reset".startsWith(prefix) ? [{ value: "reset", label: "reset" }] : [],
         run: (args) => {
           if (args[0] !== "reset") {
-            this.#deps.notify("breaker takes one action — reset", "error");
+            this.#deps.notify("breaker takes one action (reset)", "error");
             return;
           }
           this.#applyBreakerReset();
@@ -579,11 +579,11 @@ export class RuntimeSettings {
       effectiveConfig(sessionConfig, this.#deps.session.overrides),
     );
     if (result.error) {
-      this.#deps.notify(`could not save to ${target} config — ${result.error}`, "error");
+      this.#deps.notify(`could not save to ${target} config (${result.error})`, "error");
       return;
     }
     if (!result.changed) {
-      this.#deps.notify(`${target} config already matches — nothing written`, "info");
+      this.#deps.notify(`${target} config already matches; nothing written`, "info");
       return;
     }
     this.#deps.notify(
@@ -591,7 +591,7 @@ export class RuntimeSettings {
       // sessions) and what it does NOT touch (this session's overrides).
       // The rarest fact — a higher layer can still shadow the saved value —
       // lives in the README's save-verbs section, not here.
-      `saved to ${target} config (${basename(result.path)}${result.created ? " (created)" : ""}) — new sessions start from it; this session keeps current overrides`,
+      `saved to ${target} config (${basename(result.path)}${result.created ? " (created)" : ""}); new sessions use it, this one keeps its overrides`,
       "info",
     );
   }
@@ -612,10 +612,7 @@ export class RuntimeSettings {
         : tier === "consecutive"
           ? " (was tripped)"
           : "";
-    this.#deps.notify(
-      `circuit breaker cleared${was} — verdict cache and overrides untouched; reviews resume immediately`,
-      "info",
-    );
+    this.#deps.notify(`circuit breaker cleared${was}; cache and overrides untouched`, "info");
   }
 
   /**
@@ -728,12 +725,12 @@ export class RuntimeSettings {
     const effective = this.#effective(spec);
     const word = this.#displayWord(spec);
     if (value === undefined) {
-      this.#deps.notify(`${word} = ${effective} (config default)`, "info");
+      this.#deps.notify(`${word} = ${effective} (config)`, "info");
     } else {
       // Selecting the highlighted value deserves a warning-level notice
       // (plain text — the emphasis is footer-only).
       const highlighted = value === spec.highlightValue;
-      this.#deps.notify(`${word} = ${value} (session override)`, highlighted ? "warning" : "info");
+      this.#deps.notify(`${word} = ${value} (session)`, highlighted ? "warning" : "info");
     }
     this.syncFooter(ctx);
   }

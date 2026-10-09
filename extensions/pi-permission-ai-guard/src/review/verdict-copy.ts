@@ -18,32 +18,19 @@ import type { RiskLevel } from "#src/model/model-verdict.ts";
  * @returns The deny teaching reason.
  */
 export function uncertainDenyReason(mode: Mode): string {
-  return `reviewer was uncertain about this request — ${mode} mode denies uncertain requests`;
+  return `reviewer was unsure, so ${mode} mode denied the request`;
 }
 
 /**
- * The human notice for a machinery-forced defer — the deferred ask lands on
- * the operator with no dialog context of its own, so the line names the
- * failure kind (doctrine symmetry with the breaker-trip notice). No
- * structural colon: the TUI's own level prefix would double it up.
+ * The human notice for a machinery-forced defer: the deferred ask lands on the
+ * operator with no dialog context of its own, so the line names the failure
+ * kind. The host's own level prefix would double a structural colon of ours.
  *
  * @param kind - The classified machinery failure kind.
  * @returns The notification message.
  */
 export function machineryDeferNotice(kind: MachineryFailureKind): string {
-  return `reviewer could not complete the review (${kind}) — deferring to you`;
-}
-
-/**
- * The human notice mirroring the model's own clarification request — the dialog
- * alone never shows WHAT the reviewer wants clarified. No structural colon: the
- * TUI's own level prefix would double it up.
- *
- * @param clarification - The model's clarification request.
- * @returns The notification message.
- */
-export function modelDeferNotice(clarification: string): string {
-  return `reviewer asks — ${clarification}`;
+  return `reviewer could not complete the review (${kind}), deferring to you`;
 }
 
 /**
@@ -59,7 +46,7 @@ export function machineryDenyReason(
   deferKind: MachineryFailureKind | undefined,
   mode: Mode,
 ): string {
-  return `reviewer could not complete the review (${deferKind ?? "unknown"}) — ${mode} mode denied the request`;
+  return `reviewer could not complete the review (${deferKind ?? "unknown"}), so ${mode} mode denied the request`;
 }
 
 /**
@@ -76,28 +63,22 @@ export function machineryDenyReason(
 export type DenyInstructionSource = "content" | "machinery";
 
 /**
- * The behavioral instruction for a content deny (the request was judged).
- * No trailing period — the host's agent-side reason render appends its
- * own, and a trailing period here would double up.
+ * The behavioral instruction for a content deny (the request was judged). No
+ * trailing period: the host's agent-side reason render appends its own.
  */
 const CONTENT_DENY_INSTRUCTION =
   "Automatic review denied this, not the user. Do not rephrase, retry, or work around it; if the user wants it, they should ask explicitly";
 
-/**
- * The behavioral instruction for a machinery deny (the review failed).
- * No trailing period — same double-up guard as the content variant.
- */
 const MACHINERY_DENY_INSTRUCTION =
-  "Automatic review failed (the reviewer, not the request). Retry later, or ask the user to request it explicitly if urgent";
+  "Automatic review failed (not the request). Retry later, or ask the user to request it if urgent";
 
 /**
  * Append the agent-facing behavioral instruction to a terminal deny reason.
- * Instruction first ("what to do — why"): the host's agent-side render
- * already fronts its own attribution sentence, and the teaching reason
- * alone says WHAT was dangerous but not what to do about it. Two
- * variants, because the correct move differs: content denies must not be
- * retried or rephrased; machinery denies were never judged and may be
- * retried later.
+ * Instruction first: the host's agent-side render already fronts its own
+ * attribution sentence, and the teaching reason says WHAT was dangerous but not
+ * what to do about it. Two variants, because the correct move differs: content
+ * denies must not be retried or rephrased; machinery denies were never judged
+ * and may be retried later.
  *
  * Applies ONLY to the returned verdict's reason — the audit record's
  * `emittedReason` and the operator notify lines keep the un-instructed
@@ -116,7 +97,7 @@ export function withAgentInstruction(
 ): string {
   const instruction =
     source === "machinery" ? MACHINERY_DENY_INSTRUCTION : CONTENT_DENY_INSTRUCTION;
-  return reason ? `${instruction} — ${reason}` : instruction;
+  return reason ? `${instruction}; ${reason}` : instruction;
 }
 
 /**
@@ -134,27 +115,23 @@ export function formatDuration(ms: number): string {
 }
 
 /** A fresh review's cost: its total model-call cost in milliseconds. */
-export interface FreshReviewCost {
+interface FreshReviewCost {
   kind: "fresh";
   latencyMs: number;
 }
 
-/** A cache hit's cost: a replay, not a measurement — it names itself. */
-export interface CachedReviewCost {
+/** A cache hit's cost: a replay, not a measurement, so it names itself. */
+interface CachedReviewCost {
   kind: "cached";
 }
 
 /**
- * What an approval notice's duration tail reports: a fresh review names
- * its total model-call cost; a cache hit names itself. A cached verdict
- * is a replay, not a measurement — reporting the stored call's latency
- * would present a stale number as this ask's cost, so the hit says
- * `(cached)` instead.
+ * What an approval notice's duration tail reports: a fresh review names its
+ * cost; a cache hit names itself.
  */
 export type ReviewCost = FreshReviewCost | CachedReviewCost;
 
-/** The reviewer's own allow: no policy mapping involved. */
-export interface ReviewerApprovalOrigin {
+interface ReviewerApprovalOrigin {
   kind: "reviewer";
 }
 
@@ -162,7 +139,7 @@ export interface ReviewerApprovalOrigin {
  * A mode mapping's approval: carries the mode so a lone approval line
  * still names the policy that let the request through.
  */
-export interface ModeApprovalOrigin {
+interface ModeApprovalOrigin {
   kind: "mode";
   mode: Mode;
 }
@@ -171,7 +148,7 @@ export interface ModeApprovalOrigin {
  * Which voice approved the request: the reviewer's own allow, or the
  * mode's mapping of a non-allow verdict.
  */
-export type ApprovalOrigin = ReviewerApprovalOrigin | ModeApprovalOrigin;
+type ApprovalOrigin = ReviewerApprovalOrigin | ModeApprovalOrigin;
 
 /**
  * Render an opt-in approval notice: the approval's voice plus its cost
@@ -212,26 +189,29 @@ export function escalationMessage(
   outcome: EscalationOutcome,
 ): string {
   const reason = verdict.kind === "deny" ? verdict.reason : undefined;
-  // No structural colons: this line can render under the TUI's own
-  // "Warning:" prefix at warning level — "Warning: [ai-guard] … risk: x"
-  // would double up. Parens carry the detail colon-free.
-  //
-  // The reason goes out whole — the operator must be able to read (and,
-  // for a clarification, answer) the model's full text, however long it
-  // runs. The audit record keeps it too.
-  //
-  // Multi-part construction: segments carry no leading spaces — the join
-  // owns the separator, so an absent segment can never leave a gap.
-  return [
-    `reviewer denied this request`,
-    riskLevel ? `(risk ${riskLevel})` : undefined,
-    reason ? `— ${reason}` : undefined,
-    // The tail appears only when the outcome diverges from the fact
-    // sentence: "denied this request" needs no "— denied" echo; "asking
-    // you instead" corrects the operator's read of the sentence (the
-    // request was NOT denied — a dialog is coming).
-    outcome === "asked" ? "— asking you instead" : undefined,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  // The host renders its own level prefix and separator, so a structural colon of
+  // ours reads as two; parentheses and a semicolon carry the detail instead. The
+  // reason goes out whole: the operator must be able to read (and, for a
+  // clarification, answer) the model's full text, however long it runs. The audit
+  // record keeps it too. The outcome tail appears only when it diverges from the
+  // fact sentence.
+  const fact = `reviewer denied this request${riskLevel ? ` (risk ${riskLevel})` : ""}`;
+  const outcomeClause = outcome === "asked" ? ", asking you to decide instead" : "";
+  return reason ? `${fact}${outcomeClause}; ${reason}` : `${fact}${outcomeClause}`;
+}
+
+/**
+ * The fail-open notice: the mode passed something the reviewer did not allow, so
+ * the line names the tier that still blocks. A loosened mode never reads as a
+ * blanket pass.
+ *
+ * @param mode - The mode that auto-approved the request.
+ * @returns The notification message.
+ */
+export function failOpenNotice(mode: Mode): string {
+  const loosened =
+    mode === "lenient"
+      ? "uncertainty; soft denials still ask"
+      : "non-allow verdicts; hard-tier denials still block";
+  return `${mode} auto-approves ${loosened}`;
 }

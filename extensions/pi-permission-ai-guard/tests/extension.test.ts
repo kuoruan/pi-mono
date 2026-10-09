@@ -18,6 +18,7 @@ import type { ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
 import type { CompletionItem } from "#src/session/command/table.ts";
 import { SETTING_ENTRY_TYPE } from "#src/session/session-settings-store.ts";
 import { makeUiCtx } from "#test/host-ctx.ts";
+import { OPERATOR_COPY_SHAPE } from "#test/operator-copy.ts";
 
 // vi.mock is hoisted ABOVE the static import above, so the mock factory
 // may only close over vi.hoisted() bindings — the spies live there.
@@ -454,10 +455,9 @@ describe("createAiGuardExtension lifecycle", () => {
     expect(mocks.registerAuthorizer).not.toHaveBeenCalled();
     expect(createPipeline).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("bad config"));
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("running with no auto-review"),
-      "error",
-    );
+    // The notice carries the loader's own issue text whole; the surrounding
+    // wording belongs to the session layer and is asserted by shape alone.
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("bad config"), "error");
 
     warnSpy.mockRestore();
   });
@@ -526,7 +526,7 @@ describe("createAiGuardExtension lifecycle", () => {
     expect(first.ui.notify).toHaveBeenCalledTimes(1);
     expect(second.ui.notify).toHaveBeenCalledTimes(1);
     expect(second.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("running with no auto-review"),
+      expect.stringMatching(OPERATOR_COPY_SHAPE),
       "error",
     );
   });
@@ -577,8 +577,9 @@ describe("createAiGuardExtension lifecycle", () => {
     // grade: the guard is absent and the operator must see it.
     const ctx = makeSessionCtx();
     expect(() => pi.fire("session_start", {}, ctx)).not.toThrow();
+    // The thrown message reaches the operator whole, rather than a summary.
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("failed to register the reviewer"),
+      expect.stringContaining("registration failed"),
       "error",
     );
   });
@@ -596,10 +597,7 @@ describe("createAiGuardExtension lifecycle", () => {
     // In v27 every node owns its service: a duplicate means a stale
     // registration survived disposal (/reload glitch) and still governs
     // asks — rare but never benign, error-grade through notify.
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("stale ai-guard registration survived disposal"),
-      "error",
-    );
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(OPERATOR_COPY_SHAPE), "error");
   });
 
   it("does not downgrade a similar-but-different 'already registered' error", () => {
@@ -612,12 +610,9 @@ describe("createAiGuardExtension lifecycle", () => {
     const ctx = makeSessionCtx();
     pi.fire("session_start", {}, ctx);
 
-    // Different name → the generic registration-failure copy, not the
-    // stale-registration one.
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("failed to register the reviewer"),
-      "error",
-    );
+    // Different name → the generic registration-failure copy, which carries
+    // the thrown message; the stale copy is static and cannot.
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("other-link"), "error");
   });
 });
 

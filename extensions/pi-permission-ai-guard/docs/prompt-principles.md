@@ -64,3 +64,7 @@ Three words, three jobs — never collapse them into one:
 - **operator** — the person who reads the notices: the second person of defer/deny copy ("what the operator is asked", "the operator rules on the paths").
 
 The rendered transcript's labels carry the same words as the rule that defines them — "Latest request from the human (the authorization anchor)". A literal-minded model looks for the anchor using the rule's vocabulary, so rule and label must not disagree.
+
+## 12. The defer line names the gap, then the ask
+
+A defer reason is the operator's only channel; `lean` stays hidden, because surfacing it would anchor the human's decision. So one line carries both halves: what the reviewer could not establish, then the one thing that would settle it in parentheses (`could not tie this action to your request (did you ask for it?)`). The line reaches `notify` with no prefix of ours, because the host renders its own level separator before our text; a leading label would need a second separator to attach, and a colon there doubles the host's. Both lanes obey that shape; they deliberately do **not** share words. A lane-spanning constant, or an example generic enough to be parroted, is how one content-free line (`is this action safe to run?`) reached the operator from both engines, and a bare question hands the work back without any finding. The shape is the contract the operator reads, whichever engine deferred.

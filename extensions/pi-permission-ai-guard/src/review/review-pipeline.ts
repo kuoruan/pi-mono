@@ -211,7 +211,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // by design: specific config beats the general mode).
       if (verdict.kind === "defer") {
         deps.notify(
-          `circuit breaker tripped — too many reviewer denials, deferring to you`,
+          `circuit breaker tripped (too many reviewer denials), deferring to you`,
           "warning",
         );
       }
@@ -228,7 +228,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         // notifyLevel gating this is deliberate: `warning` silences
         // per-request noise but a total trip stays visible at `error`.
         deps.notify(
-          `circuit breaker tripped — total tier reached, blocking all reviews until /ai-guard breaker reset or restart`,
+          `circuit breaker tripped (total tier reached), blocking all reviews until /ai-guard breaker reset or restart`,
           "error",
         );
       }
@@ -489,7 +489,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
       // crashed.
       bestEffort(() =>
         deps.notify(
-          `reviewer crashed — deferring to you (${message})`,
+          `reviewer crashed, deferring to you (${message})`,
           // Error-grade, like the breaker's total trip: the review
           // function is DOWN and recovery needs the operator's hand.
           "error",

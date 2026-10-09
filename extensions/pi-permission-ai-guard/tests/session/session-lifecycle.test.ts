@@ -15,6 +15,7 @@ import type { ReviewPipelineDeps } from "#src/review/review-pipeline.ts";
 import type { AiGuardUiContext } from "#src/session/command/ui-context.ts";
 import { SessionLifecycle, readSessionId } from "#src/session/session-lifecycle.ts";
 import type { SessionSeed } from "#src/session/session-lifecycle.ts";
+import { OPERATOR_COPY_SHAPE } from "#test/operator-copy.ts";
 
 // vi.mock is hoisted ABOVE the static imports above, so the mock factory
 // may only close over vi.hoisted() bindings — the spies live there.
@@ -402,8 +403,8 @@ describe("SessionLifecycle — notify bridge", () => {
     // The pipeline's notify dep calls through the ctx stored on the
     // session (never destructured — the lazy getters stay intact), and the
     // seam owns the prefix — copy writers stay bare.
-    calls[0]!.notify!("reviewer denied this request", "warning");
-    expect(notify).toHaveBeenCalledWith("[ai-guard] reviewer denied this request", "warning");
+    calls[0]!.notify!("a denial", "warning");
+    expect(notify).toHaveBeenCalledWith("[ai-guard] a denial", "warning");
   });
 
   it("with a dialog-capable UI the escalation goes to notify, not the footer", async () => {
@@ -415,15 +416,9 @@ describe("SessionLifecycle — notify bridge", () => {
         ctx: makeCtx(notify, setStatus),
       }),
     );
-    calls[0]!.notify!(
-      "reviewer could not complete the review (empty-reply) — deferring to you",
-      "warning",
-    );
+    calls[0]!.notify!("a machinery defer", "warning");
     expect(setStatus).not.toHaveBeenCalled();
-    expect(notify).toHaveBeenCalledWith(
-      "[ai-guard] reviewer could not complete the review (empty-reply) — deferring to you",
-      "warning",
-    );
+    expect(notify).toHaveBeenCalledWith("[ai-guard] a machinery defer", "warning");
   });
 
   it("deps.notify before any session warns instead of dropping it silently", () => {
@@ -432,9 +427,9 @@ describe("SessionLifecycle — notify bridge", () => {
     // The fail-safe start notices take this path: with no ctx the message has
     // no channel at all, so the warn is the only trace it existed.
     lifecycle.feedbackNotify("guard absent", "warning");
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("no active session — escalation message lost: guard absent"),
-    );
+    const lost = String(warnSpy.mock.calls[0]![0]);
+    expect(lost).toContain("guard absent");
+    expect(lost).toMatch(OPERATOR_COPY_SHAPE);
     warnSpy.mockRestore();
   });
 
@@ -457,7 +452,9 @@ describe("SessionLifecycle — notify bridge", () => {
     // and never takes the verdict path down with it.
     stale = true;
     expect(() => calls[0]!.notify!("x", "warning")).not.toThrow();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("escalation message lost: x"));
+    const lost = String(warnSpy.mock.calls.at(-1)![0]);
+    expect(lost).toContain("x");
+    expect(lost).toMatch(OPERATOR_COPY_SHAPE);
     warnSpy.mockRestore();
   });
 });
@@ -525,7 +522,7 @@ describe("SessionLifecycle — notify level gate", () => {
       }),
     );
     // Ambient (pipeline): silenced.
-    calls[0]!.notify!("reviewer denied this request (risk high) — x", "warning");
+    calls[0]!.notify!("an ambient warning", "warning");
     expect(notify).not.toHaveBeenCalled();
     // Feedback (settings surface): a synchronous answer to an explicit
     // user action — never gated, prefix intact.

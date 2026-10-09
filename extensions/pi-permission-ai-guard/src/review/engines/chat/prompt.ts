@@ -199,9 +199,10 @@ Reply with ONLY one JSON object — no markdown, no prose, no other text.
   resembles a danger pattern, "allow" when the action is visible-and-benign and only the
   authorization link is unclear.
   Omit when you truly cannot tell; unfamiliarity alone is not a deny-lean.
-- On defer, the reason is what the operator is asked when the defer survives as one — so
-  write it to them in the second person, naming the one thing that would close the gap
-  (e.g. \`confirm the scope: is this action covered by your request?\`).
+- On defer, the reason is the question the operator answers when the defer survives:
+  name what you could not establish, then the one thing that would settle it (e.g.
+  \`deleting build output is not covered by any request (is that in scope?)\`). A bare
+  question ("is this safe?") tells them nothing.
 - riskLevel is required for deny and optional for defer.
   A deny under a DENY — Always category is critical; under DENY — Unless, use high,
   medium, or low by severity.`;

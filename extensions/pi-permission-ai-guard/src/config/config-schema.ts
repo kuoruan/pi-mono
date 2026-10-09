@@ -372,7 +372,7 @@ const configShapeSchema = z
         code: "custom",
         path: ["modelType"],
         message:
-          "modelType applies to registry (string) providers only — remove it from this direct System One config",
+          "modelType applies to registry (string) providers only; remove it from this direct System One config",
       });
     }
     // The alias key is the deprecated spelling of `classifier`. Both written
@@ -381,7 +381,7 @@ const configShapeSchema = z
       ctx.addIssue({
         code: "custom",
         path: [CLASSIFIER_ALIAS_KEY],
-        message: `${CLASSIFIER_ALIAS_KEY} is deprecated — remove it and keep only \`classifier\``,
+        message: `${CLASSIFIER_ALIAS_KEY} is deprecated; remove it and keep only \`classifier\``,
       });
     }
     // Lane slots: a written slot whose lane the pool never runs would
@@ -395,7 +395,7 @@ const configShapeSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["instructions"],
-        message: "empty instructions — set a `chat` and/or `classifier` slot, or use a string",
+        message: "empty instructions; set a `chat` and/or `classifier` slot, or use a string",
       });
       return;
     }
@@ -405,7 +405,7 @@ const configShapeSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["instructions", lane],
-          message: `no ${lane} reviewer in this pool — a \`${lane}\` slot would never apply`,
+          message: `no ${lane} reviewer in this pool; a \`${lane}\` slot would never apply`,
         });
       }
     }
@@ -420,7 +420,7 @@ const configShapeSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["instructions", "classifier"],
-        message: "empty classifier slot — set background and/or questions",
+        message: "empty classifier slot; set background and/or questions",
       });
     }
     for (const id of Object.keys(classifierSlot?.questions ?? {})) {
@@ -428,7 +428,7 @@ const configShapeSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["instructions", "classifier", "questions", id],
-          message: `unknown question id "${id}" — expected one of ${CLASSIFIER_QUESTION_IDS.join(", ")}`,
+          message: `unknown question id "${id}"; expected one of ${CLASSIFIER_QUESTION_IDS.join(", ")}`,
         });
       }
     }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { configSchema } from "#src/config/config-schema.ts";
 import { createReviewPipeline } from "#src/review/review-pipeline.ts";
+import { failOpenNotice } from "#src/review/verdict-copy.ts";
 import { makeDetails, payload } from "#test/fixtures.ts";
 
 import {
@@ -106,13 +107,11 @@ describe("opt-in approval notices", () => {
       kind: "allow",
     });
     expect(notifications).toHaveLength(2);
-    expect(notifications[0]).toEqual([
-      "permissive auto-approves non-allow verdicts — hard-tier denials still block",
-      "warning",
-    ]);
-    expect(notifications[1]![0]).toMatch(
-      /^mode \(permissive\) auto-approved this request \([\d.]+m?s\)$/,
-    );
+    expect(notifications[0]![0]).toBe(failOpenNotice("permissive"));
+    expect(notifications[0]![1]).toBe("warning");
+    // The approval notice names the mode and a cost, whatever the latency was.
+    expect(notifications[1]![0]).toContain("permissive");
+    expect(notifications[1]![0]).toMatch(/[\d.]+m?s/);
     expect(notifications[1]![1]).toBe("info");
     // The stored deny replays from cache and maps again — the tail names
     // the replay instead of restating the first call's latency.
