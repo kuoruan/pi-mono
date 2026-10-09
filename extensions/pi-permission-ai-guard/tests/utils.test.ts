@@ -221,6 +221,14 @@ describe("redactSecrets", () => {
     );
   });
 
+  it("redacts a userinfo password that itself contains @", () => {
+    // The userinfo may hold `@` of its own; matching only to the first one
+    // would leave the rest of the password on the line.
+    expect(redactSecrets("clone https://user:p@ssw0rd@example.com/repo.git")).toBe(
+      "clone https://[REDACTED]@example.com/repo.git",
+    );
+  });
+
   it("leaves an @ inside a URL path or query alone", () => {
     // Userinfo ends at the first `/`, `?` or `#`, so an address later in the
     // URL is not mistaken for credentials.
@@ -242,17 +250,37 @@ describe("redactSecrets", () => {
     expect(out).toContain("[REDACTED]");
   });
 
-  it("redacts a bare sk-ant- key without assignment", () => {
-    const input = "Authorization: sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF";
+  it("redacts a bare sk-ant- key without any assignment label", () => {
+    // No `key=` / `Authorization:` context: only the sk-ant- pattern itself
+    // can redact this, so the assertion is about that pattern.
+    const input =
+      "GET https://api.anthropic.com?k=sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF";
     const out = redactSecrets(input);
     expect(out).not.toContain("sk-ant-api03-1234567890abcdefABCDEF1234567890abcdefABCDEF");
     expect(out).toContain("[REDACTED]");
   });
 
-  it("redacts generic sk- keys with >=20 chars after sk-", () => {
-    const input = "curl -H 'Authorization: sk-projabcdefghijklmnop1234' https://api";
-    expect(redactSecrets(input)).toContain("[REDACTED]");
-    expect(redactSecrets(input)).not.toContain("sk-projabcdefghijklmnop1234");
+  it("redacts generic sk- keys, including the scoped OpenAI prefixes", () => {
+    // A legacy bare key plus the current `sk-proj-…` / `sk-svcacct-…` shapes:
+    // the scope hyphen used to end the match after four characters, leaving
+    // the rest of the key in cleartext.
+    for (const key of [
+      "sk-abcdefghijklmnopqrstuvwx",
+      "sk-proj-abcdefghijklmnopqrstuvwx",
+      "sk-svcacct-abcdefghijklmnopqrstuvwx",
+    ]) {
+      // No `key: value` label in the context: the assignment pattern must not
+      // be what redacts this, or the assertion proves nothing about the key
+      // pattern itself.
+      const out = redactSecrets(`GET https://api.example.com?k=${key}`);
+      expect(out).toContain("[REDACTED]");
+      expect(out).not.toContain(key);
+    }
+  });
+
+  it("does NOT redact hyphenated prose that merely contains sk-", () => {
+    const input = "risk-assessment-of-a-critical-system is the topic";
+    expect(redactSecrets(input)).toBe(input);
   });
 
   it("does NOT redact short sk- prefixes like 'skip'", () => {

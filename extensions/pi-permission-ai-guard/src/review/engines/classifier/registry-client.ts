@@ -19,7 +19,10 @@
  *   emitted empty — so a registry backend's audit `rawReply` shows those absent where a direct
  *   backend fills them.
  * - Options: SDK `timeout` → `timeoutMs`; SDK `retry.maxRetries` → `maxRetries` (multi-endpoint pools
- *   disable retries — same as direct).
+ *   disable retries — same as direct); SDK `signal` both rides along in the request and bounds the
+ *   call with a race — pi-ai ≥0.99 forwards it to the provider, while the race keeps the walk's
+ *   remaining budget true on a version that ignores it and skips the request outright once the
+ *   budget is spent.
  * - Errors: `classify()` never rejects — a non-`stop` result throws a reconstructed SDK error here
  *   (`APIError` with the parsed status, `APITimeoutError` on timeout/abort wording or an aborted
  *   stop) so the adapter's `instanceof` failure classification works unchanged.
@@ -159,6 +162,46 @@ export function classifierError(message: string): Error {
 }
 
 /**
+ * Await `work`, but throw the walk's timeout the moment `signal` fires. The
+ * signal also rides along in the request wherever pi-ai forwards it (≥0.99):
+ * this race is what keeps the budget true on a version that ignores it, and it
+ * skips the request outright when the budget is already spent. A rejection from
+ * the abandoned work is swallowed (the outcome is already decided here).
+ *
+ * @param work - Deferred classify call; not called at all when the signal already fired.
+ * @param signal - The walk-budget signal, when the caller passed one.
+ * @returns The classify result, or a throw when the signal fires first.
+ */
+function raceWithAbort<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work();
+  if (signal.aborted) return Promise.reject(new APITimeoutError(0));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(new APITimeoutError(0));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    const settle = (value: T): void => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    const fail = (error: unknown): void => {
+      signal.removeEventListener("abort", onAbort);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    let pending: Promise<T>;
+    try {
+      pending = work();
+    } catch (error) {
+      // A synchronous throw (context mapping, auth lookup) must not leave the
+      // listener behind on a signal that can live for the whole walk.
+      fail(error);
+      return;
+    }
+    pending.then(settle, fail);
+  });
+}
+
+/**
  * Create the registry-backed facade: `systemOne(request, options)` runs
  * the request (built by the adapter from the same state and questions
  * the direct backend sends) through pi's classifier, then projects back
@@ -170,10 +213,15 @@ export function classifierError(message: string): Error {
 export function createRegistryClassifierClient(deps: RegistryModelDeps): ClassifierClientLike {
   return {
     async systemOne(request, options) {
-      const result = await deps.classify(deps.model, toClassifierContext(request), {
-        timeoutMs: options?.timeout,
-        maxRetries: options?.retry?.maxRetries,
-      });
+      const result = await raceWithAbort(
+        () =>
+          deps.classify(deps.model, toClassifierContext(request), {
+            timeoutMs: options?.timeout,
+            maxRetries: options?.retry?.maxRetries,
+            signal: options?.signal,
+          }),
+        options?.signal,
+      );
       if (result.stopReason !== "stop") {
         // An `aborted` stop usually means a timeout — but a status-bearing
         // message wins: a refusal cut short must stay terminal, exactly as

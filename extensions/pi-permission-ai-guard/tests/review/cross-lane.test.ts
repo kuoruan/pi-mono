@@ -8,7 +8,7 @@ import type { AssistantMessage, ClassifierResult, Model } from "@earendil-works/
 import { APIError } from "@typesafe-ai/sdk";
 import { describe, expect, it } from "vitest";
 
-import { FALLBACK_EVENT } from "#src/audit/events.ts";
+import { FALLBACK_EVENT, MODEL_CALL_ERROR_EVENT } from "#src/audit/events.ts";
 import type { ConfigIssue } from "#src/config/config-layer.ts";
 import { configSchema } from "#src/config/config-schema.ts";
 import {
@@ -142,8 +142,11 @@ describe("cross-lane failover", () => {
     expect(result.outcome.verdict.kind).toBe("allow");
     expect(result.modelId).toBe("anthropic/backup (fallback 1)");
     expect(result.cacheable).toBe(false);
-    expect(events.map((e) => e.event)).toEqual([FALLBACK_EVENT]);
-    expect(events[0]?.details).toMatchObject({ failedEndpoint: 0, reason: "http-429" });
+    // The classifier lane records the failed attempt where it is observed, so
+    // it appears even though the backup then succeeds — the chat lane's catch
+    // does the same, and an audit reader sees one failed attempt in both.
+    expect(events.map((e) => e.event)).toEqual([MODEL_CALL_ERROR_EVENT, FALLBACK_EVENT]);
+    expect(events[1]?.details).toMatchObject({ failedEndpoint: 0, reason: "http-429" });
   });
 
   it("fails over from an chat primary to a classifier backup", async () => {

@@ -178,6 +178,17 @@ describe("RuntimeSettings — command", () => {
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("ai-guard", undefined);
   });
 
+  it("a failed persist leaves the override unwritten (memory never runs ahead of disk)", async () => {
+    const { settings, overrides, appendEntry } = makeSettings();
+    appendEntry.mockImplementation(() => {
+      throw new Error("session file is read-only");
+    });
+    await expect(settings.command.handler("mode lenient", makeUiCtx())).rejects.toThrow(
+      "read-only",
+    );
+    expect(overrides.mode).toBeUndefined();
+  });
+
   it("unknown setting or invalid value notifies an error and changes nothing", async () => {
     const { settings, overrides, appendEntry, notify } = makeSettings();
     const ctx = makeUiCtx();

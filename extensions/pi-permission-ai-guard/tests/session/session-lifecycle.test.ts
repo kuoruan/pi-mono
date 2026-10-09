@@ -397,6 +397,18 @@ describe("SessionLifecycle — notify bridge", () => {
     ).not.toThrow();
   });
 
+  it("deps.notify before any session warns instead of dropping it silently", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { lifecycle } = makeLifecycle();
+    // The fail-safe start notices take this path: with no ctx the message has
+    // no channel at all, so the warn is the only trace it existed.
+    lifecycle.feedbackNotify("guard absent", "warning");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("no active session — escalation message lost: guard absent"),
+    );
+    warnSpy.mockRestore();
+  });
+
   it("deps.notify survives a disposed ctx and warns (best-effort, never throws)", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { lifecycle, calls } = makeLifecycle();

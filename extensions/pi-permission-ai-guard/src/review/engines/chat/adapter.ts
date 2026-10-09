@@ -65,7 +65,7 @@ export function createChatAdapter(deps: ChatAdapterDeps): LaneAdapter {
       spec: AttemptSpec,
     ): Promise<AttemptResult> {
       if (endpoint.lane !== "chat") throw new Error("chat adapter received a classifier endpoint");
-      const { hasFailover, timeoutMs } = spec;
+      const { hasFailover, attemptTimeoutMs } = spec;
       const modelId = endpoint.id;
       let model: Model<Api> | undefined;
       try {
@@ -113,7 +113,7 @@ export function createChatAdapter(deps: ChatAdapterDeps): LaneAdapter {
         },
         systemPrompt,
         buildReviewPrompt(ctx.transcript, ctx.request),
-        timeoutMs,
+        attemptTimeoutMs,
         // A walk with backups is the retry: only a single-endpoint walk
         // keeps the transport's own retry behavior.
         hasFailover ? 0 : 1,

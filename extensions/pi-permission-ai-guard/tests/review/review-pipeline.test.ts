@@ -165,11 +165,12 @@ describe("createReviewPipeline — guard clauses", () => {
     const verdict = await authorize(makeDetails({ value: "ls" }), throwingQuery, noLog);
 
     expect(verdict).toEqual({ kind: "defer" });
-    // Structure pinned, copy unpinned: the crash must surface at error
-    // grade with a non-empty message — the exact wording is free to evolve.
+    // The crash must surface at error grade and carry its own cause — that
+    // text is the only thing telling the operator which failure this was. The
+    // framing around it stays free to evolve.
     expect(notifications).toHaveLength(1);
     expect(notifications[0][1]).toBe("error");
-    expect(notifications[0][0]).toEqual(expect.any(String));
+    expect(notifications[0][0]).toContain("policy exploded");
   });
 });
 
@@ -354,8 +355,9 @@ describe("createReviewPipeline — verdicts", () => {
     // The review stream is always on — never carry raw model text there.
     expect(raw).not.toContain(credential);
     // …but the redacted text must still BE there (kept-but-redacted, not
-    // dropped entirely — the defer-failure raw reply is the replay material).
-    expect(raw).toBeTruthy();
+    // dropped entirely — the defer-failure raw reply is the replay material),
+    // so the marker is what proves the text survived, not merely non-empty.
+    expect(raw).toContain("[REDACTED]");
   });
 });
 

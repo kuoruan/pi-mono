@@ -51,7 +51,8 @@ function attemptContext(log: AuthorizerLog) {
  */
 const spec = (hasFailover: boolean): AttemptSpec => ({
   hasFailover,
-  timeoutMs: 5_000,
+  attemptTimeoutMs: 5_000,
+  walkRemainingMs: 30_000,
 });
 
 const endpoint = (model = "jev-1.13", timeoutMs = 15000): PoolEndpoint => ({
@@ -102,16 +103,25 @@ describe("classifier adapter disposition", () => {
   });
 
   it("answers danger and low-confidence outcomes without failover signal", async () => {
-    for (const overrides of [
-      { danger_category: { type: "choice", choice: "secrets_credentials", confidence: 0.9 } },
-      { risk: { type: "score", score: 0.4, confidence: 0.1 } },
-    ]) {
+    for (const [overrides, expected] of [
+      // Danger denies outright; an unsure confidence defers for the operator.
+      [
+        { danger_category: { type: "choice", choice: "secrets_credentials", confidence: 0.9 } },
+        { verdict: { kind: "deny" } },
+      ],
+      [
+        { risk: { type: "score", score: 0.4, confidence: 0.1 } },
+        { verdict: { kind: "defer" }, deferKind: "model-defer" },
+      ],
+    ] as const) {
       const attempt = await adapter({ systemOne: async () => response(overrides) }).attempt(
         endpoint(),
         attemptContext(makeMergedRecordingLog().log),
         spec(true),
       );
       expect(attempt.kind).toBe("answered");
+      if (attempt.kind !== "answered") continue;
+      expect(attempt.result.outcome).toMatchObject(expected);
     }
   });
 
@@ -159,6 +169,19 @@ describe("classifier adapter disposition", () => {
     },
   );
 
+  it("records the failed attempt even when a backup supersedes it", async () => {
+    // The pool only calls `finalize` on exhaustion: a retryable failure a
+    // backup takes over must still reach the audit log, as it does in chat.
+    const { events, log } = makeMergedRecordingLog();
+    const attempt = await adapter(throwing(httpError(503))).attempt(
+      endpoint(),
+      attemptContext(log),
+      spec(true),
+    );
+    expect(attempt.kind).toBe("retryable");
+    expect(events.map((e) => e.event)).toEqual(["ai_guard.model_call_error"]);
+  });
+
   it("reports terminal defer on unexpected local exceptions", async () => {
     const attempt = await adapter(throwing(new Error("unexpected parsing bug"))).attempt(
       endpoint(),
@@ -195,10 +218,42 @@ describe("classifier adapter disposition", () => {
       attemptContext(makeMergedRecordingLog().log),
       {
         hasFailover: true,
-        timeoutMs: 2000,
+        attemptTimeoutMs: 500,
+        walkRemainingMs: 60_000,
       },
     );
-    expect(requests).toEqual([{ model: "backup-model", timeout: 2000 }]);
+    // The trimmed attempt budget reaches the SDK — not the endpoint's own
+    // 2000, which is what an equal-value spec could not tell apart.
+    expect(requests).toEqual([{ model: "backup-model", timeout: 500 }]);
+  });
+
+  it("bounds the whole call with the walk's remaining budget", async () => {
+    // SDK retries each get a fresh `timeout`, so only the signal can keep a
+    // single-endpoint walk (which keeps those retries) inside the budget the
+    // pool advertises — and it must carry the walk's number, not a constant.
+    const seen: Array<AbortSignal | undefined> = [];
+    const probe: ClassifierClientLike = {
+      systemOne: async (_request, options) => {
+        seen.push(options?.signal);
+        return response();
+      },
+    };
+    const a = adapter(probe);
+    const ctx = attemptContext(makeMergedRecordingLog().log);
+    await a.attempt(endpoint(), ctx, {
+      hasFailover: false,
+      attemptTimeoutMs: 15_000,
+      walkRemainingMs: 60_000,
+    });
+    expect(seen[0]).toBeInstanceOf(AbortSignal);
+    expect(seen[0]?.aborted).toBe(false);
+    await a.attempt(endpoint(), ctx, {
+      hasFailover: false,
+      attemptTimeoutMs: 15_000,
+      walkRemainingMs: 1,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(seen[1]?.aborted).toBe(true);
   });
 });
 

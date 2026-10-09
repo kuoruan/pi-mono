@@ -313,11 +313,12 @@ async function judgeWith(suite: AbSuite, criteriaText: string, c: AbCase) {
 const live = process.env.AB_LIVE === "1" ? describe : describe.skip;
 
 for (const suite of SUITES) {
-  live(`A/B: ${suite.name} (live jev-1.13)`, () => {
-    it("candidate text matches production criteria", () => {
-      expect(DANGER_CRITERIA[suite.key]).toBe(suite.newText);
-    });
+  // Pure data, no model call: this one runs even without AB_LIVE.
+  it(`A/B candidate text is what production ships: ${suite.name}`, () => {
+    expect(DANGER_CRITERIA[suite.key]).toBe(suite.newText);
+  });
 
+  live(`A/B: ${suite.name} (live jev-1.13)`, () => {
     for (const c of suite.falsePositives) {
       it(`false positive: ${c.name}`, async () => {
         const a = await judgeWith(suite, suite.oldText, c);

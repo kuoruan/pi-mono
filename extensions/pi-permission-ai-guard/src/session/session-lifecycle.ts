@@ -228,9 +228,16 @@ export class SessionLifecycle {
    * @param level - The notification level.
    */
   #safeNotify(message: string, level?: NotifyLevel): void {
+    const target = this.#eventCtx;
+    // Before the first session there is no UI context to notify through: the
+    // reachable producers are command/panel feedback (the fail-safe start
+    // notices run after the context is assigned, so they take the branch
+    // below), and a dropped message is warned here exactly as it is there.
+    if (!target) {
+      warn(`notify had no active session — escalation message lost: ${message}`);
+      return;
+    }
     try {
-      const target = this.#eventCtx;
-      if (!target) return;
       target.ui.notify(`${NOTIFY_PREFIX} ${message}`, level);
     } catch (e) {
       // The disposed-runner window is expected, but a lost escalation

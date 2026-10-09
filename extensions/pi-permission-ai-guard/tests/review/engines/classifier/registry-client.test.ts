@@ -1,3 +1,5 @@
+import { getEventListeners } from "node:events";
+
 import type { ClassifierAnswer } from "@earendil-works/pi-ai";
 import { APIConnectionError, APIError, APITimeoutError } from "@typesafe-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
@@ -119,6 +121,46 @@ describe("createRegistryClassifierClient", () => {
     expect(classify.mock.calls[0]?.[2]).toMatchObject({ timeoutMs: 5_000, maxRetries: 0 });
     expect(response.answers.intent_match).toMatchObject({ type: "noul", noul: 0.8 });
     expect(response.usage).toMatchObject({ input_tokens: 3, output_tokens: 1 });
+  });
+
+  it("abandons the classify call when the walk budget signal fires", async () => {
+    // pi's classify takes no signal: the remaining budget is enforced by
+    // abandoning the call, whose answer can no longer affect the walk.
+    const classify = vi.fn<RegistryClassify>(() => new Promise(() => {}));
+    const controller = new AbortController();
+    const pending = registryFacade(classify).systemOne(built, { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toBeInstanceOf(APITimeoutError);
+  });
+
+  it("rejects without calling the backend when the budget is already spent", async () => {
+    const classify = vi.fn<RegistryClassify>(async () => classifierReply());
+    await expect(
+      registryFacade(classify).systemOne(built, { signal: AbortSignal.abort() }),
+    ).rejects.toBeInstanceOf(APITimeoutError);
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it("forwards the walk budget signal into the request too", async () => {
+    // pi-ai forwards the signal to the provider; the race is what covers a
+    // version that ignores it, not a substitute for passing it.
+    const classify = vi.fn<RegistryClassify>(async () => classifierReply());
+    const controller = new AbortController();
+    await registryFacade(classify).systemOne(built, { signal: controller.signal });
+    expect(classify.mock.calls[0]?.[2]).toMatchObject({ signal: controller.signal });
+  });
+
+  it("drops the abort listener when the classify call throws synchronously", async () => {
+    // A synchronous throw (context mapping, auth lookup) must not leave a
+    // listener behind on a signal that can outlive the attempt.
+    const classify = vi.fn<RegistryClassify>(() => {
+      throw new Error("sync boom");
+    });
+    const controller = new AbortController();
+    await expect(
+      registryFacade(classify).systemOne(built, { signal: controller.signal }),
+    ).rejects.toThrow("sync boom");
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
   });
 
   it("throws a classified error when stopReason is error", async () => {

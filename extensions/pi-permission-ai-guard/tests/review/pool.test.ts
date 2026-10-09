@@ -192,6 +192,7 @@ describe("reviewer pool", () => {
   it("caps the walk at the budget and trims per-endpoint timeouts", async () => {
     let elapsed = 0;
     const seenTimeouts: number[] = [];
+    const seenWalk: number[] = [];
     // Unscoped from the parent on purpose: shares the file-level pin shape.
     // eslint-disable-next-line unicorn/consistent-function-scoping
     const script = (_endpoint: PoolEndpoint): AttemptResult => ({
@@ -201,9 +202,10 @@ describe("reviewer pool", () => {
     });
     const trimming: LaneAdapter = {
       attempt: async (endpoint, c, spec) => {
-        seenTimeouts.push(spec.timeoutMs);
+        seenTimeouts.push(spec.attemptTimeoutMs);
+        seenWalk.push(spec.walkRemainingMs);
         // The budget trims, never extends: endpoint 10s stays 10s.
-        expect(spec.timeoutMs).toBeLessThanOrEqual(endpoint.timeoutMs);
+        expect(spec.attemptTimeoutMs).toBeLessThanOrEqual(endpoint.timeoutMs);
         elapsed += 5_000;
         return stubAdapter(script).attempt(endpoint, c, spec);
       },
@@ -222,6 +224,9 @@ describe("reviewer pool", () => {
     expect(result.outcome.verdict.kind).toBe("defer");
     expect(result.modelId).toBe("anthropic/c (fallback 2)");
     expect(seenTimeouts).toEqual([10_000, 7_000, 2_000]);
+    // The walk budget itself, as the lane sees it: what the SDK retries are
+    // bounded by, not the per-attempt timeout above it.
+    expect(seenWalk).toEqual([12_000, 7_000, 2_000]);
   });
 
   it("keeps concurrent reviews isolated from each other", async () => {
@@ -298,6 +303,42 @@ describe("reviewer pool", () => {
     expect(events[0]?.details).toMatchObject({ failedEndpoint: 0, nextEndpoint: 1 });
   });
 
+  it("audits a hop only for an endpoint the walk actually contacts", async () => {
+    // The clock moves on every read, so a hop audited at the failure and the
+    // following floor check saw different budgets — that recorded a failover
+    // to an endpoint the walk then skipped. With 4.5s of budget and 1s per
+    // read, the second iteration has 1.5s left and finalizes instead. The
+    // assertion is the invariant, not the walk's shape: reading the clock
+    // once per iteration leaves more budget, so how far the walk gets is an
+    // artifact of this clock, not a contract.
+    let t = 0;
+    let calls = 0;
+    const adapter = stubAdapter((endpoint) => {
+      calls++;
+      return {
+        kind: "retryable",
+        reason: "http-503",
+        finalize: () => answered("defer", endpoint.id),
+      };
+    });
+    const { events, log } = makeMergedRecordingLog();
+    const result = await createReviewerPool({
+      endpoints: [chatEndpoint("a"), chatEndpoint("b"), chatEndpoint("c")],
+      adapters: { chat: adapter, classifier: adapter },
+      walkBudgetMs: 4_500,
+      now: () => (t += 1_000),
+    }).review(ctx(log));
+    if (isMachineryFailure(result)) throw new Error("unexpected machinery");
+    expect(result.outcome.verdict.kind).toBe("defer");
+    expect(events.map((event) => event.details)).toMatchObject([
+      { failedEndpoint: 0, nextEndpoint: 1 },
+    ]);
+    for (const event of events) {
+      const { nextEndpoint } = event.details as { nextEndpoint: number };
+      expect(nextEndpoint).toBeLessThan(calls);
+    }
+  });
+
   it("defaults the budget to twice the primary timeout, floored at 30s", async () => {
     // Primary 5s → the 30s floor beats 2×primary, and the clock makes that
     // visible: after a 27s hop the second attempt is trimmed to the 3s left.
@@ -314,7 +355,7 @@ describe("reviewer pool", () => {
     });
     const recording: LaneAdapter = {
       attempt: async (endpoint, c, spec) => {
-        seen.push(spec.timeoutMs);
+        seen.push(spec.attemptTimeoutMs);
         elapsed += 27_000;
         return stubAdapter(script).attempt(endpoint, c, spec);
       },

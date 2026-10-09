@@ -719,9 +719,11 @@ export class RuntimeSettings {
    */
   #apply(spec: EnumSettingSpec, value: string | undefined, ctx: AiGuardUiContext): void {
     if (!this.#guardSessionConfig()) return;
-    this.#writeOverride(spec, value);
-    // Persist into the session file so the override survives resume.
+    // Persist into the session file first so the override survives resume:
+    // a failed write must not leave memory ahead of disk (the value would be
+    // notified and footer-synced as if it had stuck).
     persistSetting(this.#deps.appendEntry, spec.name, value ?? null);
+    this.#writeOverride(spec, value);
     const effective = this.#effective(spec);
     const word = this.#displayWord(spec);
     if (value === undefined) {

@@ -25,7 +25,7 @@ import { makeDetails } from "#test/fixtures.ts";
 
 import { errorClassifierReply, registryFacade } from "./stubs.ts";
 
-const spec: AttemptSpec = { hasFailover: true, timeoutMs: 5_000 };
+const spec: AttemptSpec = { hasFailover: true, attemptTimeoutMs: 5_000, walkRemainingMs: 30_000 };
 
 function attemptContext() {
   return {

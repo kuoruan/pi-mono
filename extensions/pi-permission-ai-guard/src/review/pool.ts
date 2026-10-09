@@ -107,10 +107,17 @@ export interface AttemptSpec {
    */
   hasFailover: boolean;
   /**
-   * The attempt budget: the endpoint's own `timeoutMs` trimmed against
-   * the remaining walk budget, never extended.
+   * This attempt's request timeout: the endpoint's own `timeoutMs` trimmed
+   * against the remaining walk budget (`walkRemainingMs`), never extended.
    */
-  timeoutMs: number;
+  attemptTimeoutMs: number;
+  /**
+   * What is left of the whole walk's budget (`walkBudgetMs` minus the time
+   * spent so far). A lane whose transport retries each get their own
+   * timeout has to bound them with this: `attemptTimeoutMs` alone caps one
+   * attempt, not their sum.
+   */
+  walkRemainingMs: number;
 }
 
 /** A lane adapter: attempt one endpoint, report the three-state disposition. */
@@ -131,11 +138,33 @@ export interface LaneAdapter {
 }
 
 /**
+ * The failure the walk may still finalize: kept with its own endpoint and
+ * position, since a floor stop ends the walk from the position it actually
+ * failed at — not the loop index it stopped on.
+ */
+interface PendingFailure {
+  attempt: Extract<AttemptResult, { kind: "retryable" }>;
+  endpoint: PoolEndpoint;
+  index: number;
+}
+
+/**
+ * A hop the walk is about to audit: recorded when an endpoint fails
+ * retryably, written once the endpoint it led to is known to run.
+ */
+interface HopRecord {
+  failedEndpoint: number;
+  nextEndpoint: number;
+  modelId: string;
+  reason: string;
+}
+
+/**
  * Floor for attempting another endpoint: below this remaining budget the
  * pool stops the walk and finalizes the last failure instead of firing a
  * request doomed to be cut off.
  */
-export const WALK_BUDGET_FLOOR_MS = 2_000;
+const WALK_BUDGET_FLOOR_MS = 2_000;
 
 /**
  * Default fallback timeout: matches the proxy-wide convention (LiteLLM
@@ -222,55 +251,50 @@ export function createReviewerPool(deps: ReviewerPoolDeps): ReviewerEngine {
     async review(ctx: EngineCallContext): Promise<EngineAttemptResult> {
       const startedAt = now();
       const deadline = startedAt + walkBudgetMs;
-      // Per-walk state only: concurrent reviews never share it. The pending
-      // failure remembers its own endpoint and position — a floor-stop
-      // finalizes it, and the identity stamping needs the position it
-      // actually failed at (not the current loop index).
-      let lastRetryable:
-        | {
-            attempt: Extract<AttemptResult, { kind: "retryable" }>;
-            endpoint: PoolEndpoint;
-            index: number;
-          }
-        | undefined;
+      // Per-walk state only: concurrent reviews never share it.
+      let pendingFailure: PendingFailure | undefined;
       const settle = (
         terminal: EngineAttemptResult,
         endpoint: PoolEndpoint,
         index: number,
       ): EngineAttemptResult => settleWalk(terminal, endpoint, index, startedAt, now);
+      let pendingHop: HopRecord | undefined;
       for (const [index, endpoint] of endpoints.entries()) {
         const remaining = deadline - now();
         // Below the floor no useful attempt fits: finalize the last
         // failure instead of firing a request doomed to be cut off.
         // Index 0 always runs (nothing to finalize yet). The remaining
         // budget never extends an endpoint's own timeout.
-        if (lastRetryable && remaining < WALK_BUDGET_FLOOR_MS)
+        if (pendingFailure && remaining < WALK_BUDGET_FLOOR_MS)
           return settle(
-            lastRetryable.attempt.finalize(),
-            lastRetryable.endpoint,
-            lastRetryable.index,
+            pendingFailure.attempt.finalize(),
+            pendingFailure.endpoint,
+            pendingFailure.index,
           );
+        // A hop is audited once the endpoint it led to is known to run: the
+        // floor stop above can still cancel it, and the walk's own clock reads
+        // cannot be compared across the two iterations.
+        if (pendingHop) {
+          // No URL, credential or upstream error body enters the review log.
+          ctx.log.review(FALLBACK_EVENT, { requestId: ctx.requestId, ...pendingHop });
+          pendingHop = undefined;
+        }
         const attempt = await adapters[endpoint.lane].attempt(endpoint, ctx, {
           hasFailover: endpoints.length > 1,
-          timeoutMs: Math.min(endpoint.timeoutMs, Math.max(remaining, 0)),
+          attemptTimeoutMs: Math.min(endpoint.timeoutMs, Math.max(remaining, 0)),
+          walkRemainingMs: Math.max(remaining, 0),
         });
         if (attempt.kind !== "retryable") return settle(attempt.result, endpoint, index);
-        lastRetryable = { attempt, endpoint, index };
+        pendingFailure = { attempt, endpoint, index };
         // Retryable on the last endpoint: it owns the terminal record
         // (debug emission included) — no further hop to audit.
         if (index + 1 >= endpoints.length) return settle(attempt.finalize(), endpoint, index);
-        // The hop is audited only when the next endpoint actually runs:
-        // a floor-stop below finalizes without contacting it.
-        if (deadline - now() >= WALK_BUDGET_FLOOR_MS) {
-          // No URL, credential or upstream error body enters the review log.
-          ctx.log.review(FALLBACK_EVENT, {
-            requestId: ctx.requestId,
-            failedEndpoint: index,
-            nextEndpoint: index + 1,
-            modelId: withFallbackIndex(endpoint.id, index),
-            reason: attempt.reason,
-          });
-        }
+        pendingHop = {
+          failedEndpoint: index,
+          nextEndpoint: index + 1,
+          modelId: withFallbackIndex(endpoint.id, index),
+          reason: attempt.reason,
+        };
       }
       // The primary endpoint is always present, so the loop always returns.
       throw new Error("unreachable: no reviewer endpoints");

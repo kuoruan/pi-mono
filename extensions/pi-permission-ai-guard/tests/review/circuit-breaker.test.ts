@@ -42,17 +42,22 @@ describe("CircuitBreaker", () => {
     expect(s.trippedTier(cb)).toBeDefined();
   });
 
-  it("does not count a breaker short-circuit or cache hit (caller responsibility)", () => {
-    // The breaker only counts model verdicts via recordVerdict. If the caller
-    // short-circuits (breaker trip or cache hit) without calling recordVerdict,
-    // totals don't move. This is the no-double-count invariant.
+  it("counts each real verdict once, reaching the total tier at exactly 20", () => {
+    // The total has no reader, so it is pinned through the trip point: exactly
+    // 17 further denies must be what reaches the hard tier of 20 — one phantom
+    // increment would trip it on the 16th (the consecutive counter is reset
+    // each round so only the total can be what trips).
     const s = new CircuitBreaker();
-    s.recordVerdict("deny");
-    s.recordVerdict("deny");
-    s.recordVerdict("deny");
-    expect(s.trippedTier(cb)).toBeDefined(); // trip → total still 3
+    for (let i = 0; i < 3; i++) s.recordVerdict("deny");
+    expect(s.trippedTier(cb)).toBeDefined();
     s.resetConsecutive();
-    expect(s.trippedTier(cb)).toBeUndefined(); // consecutive 0, total 3 < 20
+    for (let i = 0; i < 16; i++) {
+      s.recordVerdict("deny");
+      s.resetConsecutive();
+    }
+    expect(s.trippedTier(cb)).toBeUndefined();
+    s.recordVerdict("deny");
+    expect(s.trippedTier(cb)).toBeDefined();
   });
 
   it("defer does not change counters", () => {

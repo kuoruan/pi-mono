@@ -68,7 +68,8 @@ const registry = defaultRegistry({
  */
 const spec = (hasFailover: boolean): AttemptSpec => ({
   hasFailover,
-  timeoutMs: 5_000,
+  attemptTimeoutMs: 5_000,
+  walkRemainingMs: 30_000,
 });
 
 const endpoint = (model = "primary", timeoutMs = 5000): PoolEndpoint => ({
@@ -91,12 +92,14 @@ const allow = () => reply('{"verdict":"allow"}');
 
 describe("chat adapter disposition", () => {
   it("answers valid verdicts (allow, deny, defer, malformed) without failover signal", async () => {
-    for (const text of [
-      '{"verdict":"allow"}',
-      '{"verdict":"deny","reason":"unsafe","riskLevel":"high"}',
-      '{"verdict":"defer","reason":"need context"}',
-      "not JSON",
-    ]) {
+    for (const [text, kind] of [
+      ['{"verdict":"allow"}', "allow"],
+      ['{"verdict":"deny","reason":"unsafe","riskLevel":"high"}', "deny"],
+      ['{"verdict":"defer","reason":"need context"}', "defer"],
+      // No verdict at all defers — never allow. Without this row a parser
+      // that failed open would still satisfy the loop.
+      ["not JSON", "defer"],
+    ] as const) {
       const attempt = await adapter(async () => reply(text)).attempt(
         endpoint(),
         attemptContext(makeMergedRecordingLog().log),
@@ -104,6 +107,7 @@ describe("chat adapter disposition", () => {
       );
       expect(attempt.kind).toBe("answered");
       if (attempt.kind !== "answered") continue;
+      expect(attempt.result.outcome.verdict.kind).toBe(kind);
       expect(attempt.result.modelId).toBe("anthropic/primary");
       expect(attempt.result.cacheable).toBeUndefined();
     }

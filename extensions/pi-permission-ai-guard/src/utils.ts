@@ -27,8 +27,11 @@ const SECRET_PATTERNS: RegExp[] = [
   // keys still warrant redaction).
   /sk-ant-[a-zA-Z0-9_-]{40,}/g,
   // Generic OpenAI / "sk-" keys (require ≥20 chars after sk- to avoid matching "skip").
-  // Must come AFTER the sk-ant- pattern so Anthropic keys are caught first.
-  /sk-[a-zA-Z0-9]{20,}/g,
+  // The body allows `-`/`_` because current keys nest a scope segment
+  // (`sk-proj-…`, `sk-svcacct-…`, `sk-admin-…`); the lookbehind keeps prose
+  // like "risk-assessment-of-…" from being mangled. Must come AFTER the
+  // sk-ant- pattern so Anthropic keys are caught by their own rule first.
+  /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}/g,
   // GitHub tokens: ghp_/gho_/ghu_/ghs_/ghr_ (exactly 36 chars per GitHub spec).
   /gh[pousr]_[A-Za-z0-9]{36}/g,
   // GitHub fine-grained PAT (github_pat_ + ≥60 chars, per Quell).
@@ -84,11 +87,13 @@ const FORMAT_CHARACTERS = /[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]
 /**
  * URL userinfo: the credentials in `scheme://user:pass@host` (also the
  * bare-token form `scheme://token@host`) carry no separator a generic
- * assignment pattern could key on, so they get their own pass. The match
- * stops at the `@`, keeping the scheme and host readable while the
- * credentials go away.
+ * assignment pattern could key on, so they get their own pass. The userinfo
+ * class allows `@` and matches greedily, so a password containing one
+ * (`user:p@ssw0rd@host`) is swallowed whole instead of up to the first `@`;
+ * it cannot cross `/`, `?` or `#`, so a path like `example.com/@user` is left
+ * alone. The scheme and host survive, the credentials go away.
  */
-const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s?#@]+@/gi;
+const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s?#]*@/gi;
 
 /**
  * Remove invisible characters that can obscure prompt-injection payloads.
@@ -232,7 +237,7 @@ export function shortHash(str: string): string {
  * @returns The value when non-empty, else `null`.
  */
 export function normalizeEmpty(value: string | undefined | null): string | null {
-  return value && value.length > 0 ? value : null;
+  return value || null;
 }
 
 /**

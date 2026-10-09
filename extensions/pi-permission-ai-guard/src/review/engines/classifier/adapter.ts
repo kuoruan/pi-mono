@@ -95,14 +95,18 @@ export function createClassifierAdapter(deps: ClassifierAdapterDeps): LaneAdapte
     ): Promise<AttemptResult> {
       if (endpoint.lane !== "classifier")
         throw new Error("classifier adapter received a chat endpoint");
-      const { hasFailover, timeoutMs } = spec;
+      const { hasFailover, attemptTimeoutMs, walkRemainingMs } = spec;
       const modelId = endpoint.id;
       const startedAt = now();
       try {
         const response = await clientFor(endpoint).systemOne(
           buildClassifierRequest(ctx.transcript, ctx.request, config.instructions, endpoint.model),
           {
-            timeout: timeoutMs,
+            timeout: attemptTimeoutMs,
+            // SDK retries each get a fresh `timeout`, so only a signal bounds
+            // their sum: without it a single-endpoint walk (which keeps those
+            // retries) could outlive the budget the pool advertises.
+            signal: AbortSignal.timeout(walkRemainingMs),
             // With backups in the walk the pool's next hop is the retry:
             // each SDK retry would spend the shared walk budget again.
             ...(hasFailover ? { retry: { maxRetries: 0 } } : {}),
@@ -117,17 +121,18 @@ export function createClassifierAdapter(deps: ClassifierAdapterDeps): LaneAdapte
         return { kind: "answered", result: { outcome, modelId } };
       } catch (error) {
         const reason = failoverReason(error);
+        const deferKind = classifyFailure(error);
+        // Recorded where the failure is observed, not where the walk ends: a
+        // retryable failure that a backup supersedes never reaches `finalize`,
+        // and the chat lane's own catch records that attempt too.
+        emitCallFailure(ctx, deferKind, error);
         // One terminal-defer builder serves both exits: `finalize` runs on
         // exhaustion (backup verdicts stay uncached like the chat lane),
         // the terminal path ships immediately (primary keeps its default).
-        const terminalDefer = (): EngineReviewResult => {
-          const deferKind = classifyFailure(error);
-          emitCallFailure(ctx, deferKind, error);
-          return {
-            outcome: { verdict: { kind: "defer" }, deferKind, latencyMs: now() - startedAt },
-            modelId,
-          };
-        };
+        const terminalDefer = (): EngineReviewResult => ({
+          outcome: { verdict: { kind: "defer" }, deferKind, latencyMs: now() - startedAt },
+          modelId,
+        });
         if (reason) {
           return { kind: "retryable", reason, finalize: terminalDefer };
         }
