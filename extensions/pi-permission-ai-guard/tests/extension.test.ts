@@ -459,6 +459,34 @@ describe("createAiGuardExtension lifecycle", () => {
     warnSpy.mockRestore();
   });
 
+  it("strips terminal control sequences from config issue text", () => {
+    // Issue text carries config-file content (a key name, a rejected value)
+    // and reaches the operator's terminal twice: the per-issue warn and the
+    // fail-safe notify. An embedded ESC must not survive either — the same
+    // reason untrusted text is sanitized before it is shown anywhere else.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const esc = "\u001b[31m";
+    const { pi } = installExtension(undefined, {
+      loadConfig: () => ({
+        config: undefined,
+        issues: [{ path: `u${esc}nknown`, message: `bad ${esc}config` }],
+        outcome: "failed" as const,
+      }),
+    });
+
+    const ctx = makeSessionCtx();
+    pi.fire("session_start", {}, ctx);
+
+    const warned = warnSpy.mock.calls.flat().join("\n");
+    expect(warned).toContain("unknown");
+    expect(warned).not.toContain(esc);
+    const notified = JSON.stringify(ctx.ui.notify.mock.calls);
+    expect(notified).toContain("bad");
+    expect(notified).not.toContain("\\u001b");
+
+    warnSpy.mockRestore();
+  });
+
   it("a fail-safe start names the config issue whole", () => {
     const longMessage = "x".repeat(300);
     const { pi } = installExtension(undefined, {

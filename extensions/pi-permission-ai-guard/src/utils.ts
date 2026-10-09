@@ -95,6 +95,15 @@ const FORMAT_CHARACTERS = /[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]
  */
 const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^/\s?#]*@/gi;
 
+/** A run of whitespace — how every collapsed-text site splits and joins. */
+export const WHITESPACE_RUN = /\s+/g;
+
+/** Wording a provider uses when a call timed out or was cut short. */
+export const TIMEOUT_PHRASE = /timed out|timeout|aborted/i;
+
+/** The wider abort wording — see {@link classifyAbortish}. */
+const ABORTISH_PHRASE = /timeout|abort/i;
+
 /**
  * Remove invisible characters that can obscure prompt-injection payloads.
  *
@@ -164,8 +173,28 @@ const STRIP_CONTROL_PATTERN =
  * @returns Sanitized text with zero-width and terminal control chars removed, whitespace collapsed.
  */
 export function normalizeText(text: string): string {
-  return stripZeroWidthChars(text).replace(STRIP_CONTROL_PATTERN, "").replace(/\s+/g, " ").trim();
+  return stripZeroWidthChars(text)
+    .replace(STRIP_CONTROL_PATTERN, "")
+    .replace(WHITESPACE_RUN, " ")
+    .trim();
 }
+
+/**
+ * Render an enum-style identifier as words (`resource_abuse_dos` →
+ * `resource abuse dos`).
+ *
+ * @param id - The identifier.
+ * @returns The same words, space separated.
+ */
+export function underscoresToWords(id: string): string {
+  return id.replaceAll("_", " ");
+}
+
+/**
+ * The placeholder every redaction writes. Exported so consumers can recognize
+ * redacted text — a permission rule built on one would allow a placeholder.
+ */
+export const REDACTED_PLACEHOLDER = "[REDACTED]";
 
 /**
  * Redact common secret/credential patterns from text, replacing values with
@@ -186,10 +215,10 @@ export function normalizeText(text: string): string {
 export function redactSecrets(text: string): string {
   let out = text;
   for (const pattern of SECRET_PATTERNS) {
-    out = out.replaceAll(pattern, "[REDACTED]");
+    out = out.replaceAll(pattern, REDACTED_PLACEHOLDER);
   }
-  out = out.replaceAll(GENERIC_ASSIGNMENT_PATTERN, "$1$2[REDACTED]");
-  out = out.replaceAll(URL_USERINFO_PATTERN, "$1[REDACTED]@");
+  out = out.replaceAll(GENERIC_ASSIGNMENT_PATTERN, `$1$2${REDACTED_PLACEHOLDER}`);
+  out = out.replaceAll(URL_USERINFO_PATTERN, `$1${REDACTED_PLACEHOLDER}@`);
   return out;
 }
 
@@ -325,6 +354,45 @@ export function errorMessage(error: unknown): string {
 }
 
 /**
+ * Run a best-effort side effect: a throw is swallowed.
+ *
+ * For writes the caller cannot recover from and must not be cancelled by. The
+ * notify and log sinks are injected and can throw, and by the time they run the
+ * outcome is already decided — so each write stands on its own. Never use it
+ * where a failure has to become a value: those sites return a sentinel instead
+ * (`safeStringify`, `errorMessage`, the parsers).
+ *
+ * @param run - The side effect to attempt.
+ */
+export function bestEffort(run: () => void): void {
+  try {
+    run();
+  } catch {
+    // Swallowed on purpose: the caller has already committed to its outcome.
+  }
+}
+
+/**
+ * Run a value-producing step, treating a throw as absence.
+ *
+ * Only for sites whose failure sentinel is `undefined` — an unreadable file, an
+ * unreadable field, a registry entry that vanished. Keep the `try`/`catch` when
+ * the sentinel is a specific value (`null`, `String(x)`), when a `finally` has
+ * to run, or when the failure must become a domain outcome (a refusal, a
+ * defer): those need the catch body, not a generic absence.
+ *
+ * @param run - The step to attempt.
+ * @returns Its value, or `undefined` when it threw.
+ */
+export function attempt<T>(run: () => T): T | undefined {
+  try {
+    return run();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Classify an abort-family error: a DOMException timeout/abort or an
  * error whose message names timeout/abort/aborted.
  *
@@ -338,6 +406,6 @@ export function classifyAbortish(error: unknown): "timeout" | undefined {
   ) {
     return "timeout";
   }
-  if (/timeout|abort/i.test(errorMessage(error))) return "timeout";
+  if (ABORTISH_PHRASE.test(errorMessage(error))) return "timeout";
   return undefined;
 }

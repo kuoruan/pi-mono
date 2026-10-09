@@ -511,7 +511,6 @@ describe("RuntimeSettings — completions", () => {
     // Save verbs and the panels take no argument: no second-token offers.
     expect(completions("report ")).toBeNull();
     expect(completions("denied ")).toBeNull();
-    expect(completions("report ")).toBeNull();
   });
 });
 

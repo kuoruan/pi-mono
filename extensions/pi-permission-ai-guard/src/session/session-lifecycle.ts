@@ -67,7 +67,13 @@ import { type DenyRecord, type ReviewPipelineDeps } from "#src/review/review-pip
 import type { ReviewerEngine } from "#src/review/reviewer-engine.ts";
 import { VerdictCache } from "#src/review/verdict-cache.ts";
 import type { AiGuardUiContext } from "#src/session/command/ui-context.ts";
-import { errorMessage, isObjectRecord } from "#src/utils.ts";
+import {
+  attempt,
+  errorMessage,
+  isObjectRecord,
+  normalizeEmpty,
+  normalizeText,
+} from "#src/utils.ts";
 
 /**
  * Host-provided per-session services — immutable once the session starts.
@@ -160,11 +166,9 @@ function isDuplicateAuthorizerError(error: unknown, linkName: string): boolean {
  * @returns The session id, or null when the host has none.
  */
 export function readSessionId(sessionManager: SessionManagerLike): string | null {
-  try {
-    return sessionManager.getSessionId() || null;
-  } catch {
-    return null;
-  }
+  // A host that throws here has no session id to offer — the same answer as
+  // returning an empty one.
+  return attempt(() => normalizeEmpty(sessionManager.getSessionId())) ?? null;
 }
 
 /**
@@ -481,6 +485,10 @@ export class SessionLifecycle {
  * First config-load issue, whole — the operator has to be able to read what
  * the config failed on. Callers guarantee a non-empty list.
  *
+ * Sanitized here as well: the text is config-file content on its way to a
+ * terminal, and this is the other place it is rendered (`warn()` is the
+ * first).
+ *
  * @param issues - The load result's issues.
  * @returns A parenthetical naming the failure.
  */
@@ -488,5 +496,5 @@ function formatConfigIssues(issues: LoadConfigResult["issues"]): string {
   const [first, ...rest] = issues;
   if (!first) return "unknown error";
   const tail = rest.length > 0 ? ` (+${rest.length} more)` : "";
-  return `${first.path}: ${first.message}${tail}`;
+  return normalizeText(`${first.path}: ${first.message}${tail}`);
 }

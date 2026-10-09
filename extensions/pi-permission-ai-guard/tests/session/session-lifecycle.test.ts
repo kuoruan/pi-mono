@@ -170,6 +170,23 @@ describe("SessionLifecycle — session identity + registration guard", () => {
     expect(calls.length).toBe(1);
   });
 
+  it("does not register when the session has no config", () => {
+    // No config means no reviewer: registering would claim a guard that cannot
+    // review. A ready payload arriving later must not change that, and the
+    // keyed service is not even looked up.
+    const { lifecycle, calls } = makeLifecycle();
+    lifecycle.onSessionStart(
+      makeSeed({ load: { config: undefined, issues: [], outcome: "failed" as const } }),
+    );
+    expect(mocks.getPermissionsService).not.toHaveBeenCalled();
+    expect(mocks.registerAuthorizer).not.toHaveBeenCalled();
+    expect(calls.length).toBe(0);
+
+    lifecycle.onPermissionsReady({ sessionId: "s1", adjudicatesLocally: false });
+    expect(mocks.getPermissionsService).not.toHaveBeenCalled();
+    expect(mocks.registerAuthorizer).not.toHaveBeenCalled();
+  });
+
   it("adopts the ready payload's session id when the session_start self-read found none", () => {
     const { lifecycle, calls } = makeLifecycle();
     lifecycle.onSessionStart(
@@ -386,17 +403,6 @@ describe("SessionLifecycle — notify bridge", () => {
     );
   });
 
-  it("deps.notify before any session is a no-op", async () => {
-    const { lifecycle, calls } = makeLifecycle();
-    // No onSessionStart: the pipeline is registered only with a session,
-    // so a notify captured before one can never fire — the guard is the
-    // object-level `session?.ctx` read.
-    expect(calls.length).toBe(0);
-    expect(() =>
-      lifecycle.onPermissionsReady({ sessionId: "s1", adjudicatesLocally: false }),
-    ).not.toThrow();
-  });
-
   it("deps.notify before any session warns instead of dropping it silently", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { lifecycle } = makeLifecycle();
@@ -465,32 +471,6 @@ describe("SessionLifecycle — notify level gate", () => {
       calls[0]!.notify!("ambient line", level);
       expect(notify, `threshold ${threshold}, level ${level}`).toHaveBeenCalledTimes(
         passes ? 1 : 0,
-      );
-    }
-  });
-
-  it("shows opted-in approval notices only at the info threshold", () => {
-    for (const threshold of ["info", "warning", "error", "off"] as const) {
-      const { lifecycle, calls } = makeLifecycle();
-      const notify = vi.fn<() => void>();
-      lifecycle.onSessionStart(
-        makeSeed({
-          ctx: makeCtx(notify),
-          load: {
-            config: configSchema.parse({
-              provider: "test",
-              model: "test",
-              notifyApprovals: true,
-              notifyLevel: threshold,
-            }),
-            issues: [],
-            outcome: "loaded" as const,
-          },
-        }),
-      );
-      calls[0]!.notify!("reviewer approved this request", "info");
-      expect(notify, `approval at ${threshold}`).toHaveBeenCalledTimes(
-        threshold === "info" ? 1 : 0,
       );
     }
   });

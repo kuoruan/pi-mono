@@ -26,12 +26,14 @@ import {
 } from "jsonc-parser";
 import type { z } from "zod";
 
-import { errorMessage, isObjectRecord } from "#src/utils.ts";
+import { attempt, errorMessage, isObjectRecord, normalizeText } from "#src/utils.ts";
 
 import {
   type AiGuardConfig,
   CLASSIFIER_ALIAS_KEY,
+  CONFIG_TOP_LEVEL_KEYS,
   EXTENSION_ID,
+  NESTED_CONFIG_KEYS,
   configSchema,
   uncoveredInstructionLanes,
 } from "./config-schema.ts";
@@ -112,6 +114,12 @@ const CREATE_FILE_NAME = CONFIG_FILE_NAMES[0];
 /** Sentinel distinguishing "path absent" from a legitimately undefined value. */
 const MISSING = Symbol("missing");
 
+/** Delete passes for the deprecated alias before a save refuses (a file may carry it twice). */
+const ALIAS_DELETE_MAX_PASSES = 8;
+
+/** An env-ref variable name: what `${…}` may name. */
+const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
  * Resolve the agent config directory.
  *
@@ -190,6 +198,30 @@ function resolveLayerFile(dir: string): LayerFile | undefined {
 }
 
 /**
+ * Copy a parsed JSON value onto plain own-key objects.
+ *
+ * Jsonc-parser materializes a `"__proto__"` key as the parsed object's
+ * prototype, and a layer file is untrusted input (a repository ships the
+ * project layer). Normalizing at the single parse boundary
+ * ({@link parseLayerText}) keeps the loader, the schema, and the save gates on
+ * the file's own data.
+ *
+ * @param value - A value from `parseJsonc`.
+ * @returns The same data with own keys only, on plain prototypes.
+ */
+function ownTree(value: Record<string, unknown>): Record<string, unknown>;
+function ownTree(value: unknown): unknown;
+function ownTree(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(ownTree);
+  if (!isObjectRecord(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    out[key] = ownTree(value[key]);
+  }
+  return out;
+}
+
+/**
  * Parse a layer file's text as tolerant JSONC with an object root — the
  * single parse-and-validity implementation. Each side renders its own
  * verdict (issue-and-skip on read, refuse on write) over this fact.
@@ -207,7 +239,7 @@ function parseLayerText(text: string): ReadLayerResult {
   if (!isObjectRecord(parsed)) {
     return { ok: false, failure: { kind: "root" } };
   }
-  return { ok: true, value: parsed };
+  return { ok: true, value: ownTree(parsed) };
 }
 
 /**
@@ -283,6 +315,29 @@ function readLayer(
   // are both known, and an unresolvable ref skips just this layer.
   if (!expandLayerEnvRefs(parsed.value, vars, path, issues)) {
     return { outcome: "skipped" };
+  }
+  // zod drops unknown top-level keys silently; a typo in a safety-relevant
+  // name (`surfaces`, `modes`) would otherwise leave the operator running the
+  // default they meant to change. Report it — never fail the layer.
+  for (const key of Object.keys(parsed.value)) {
+    if (CONFIG_TOP_LEVEL_KEYS.has(key)) continue;
+    issues.push({
+      path: key,
+      message: `unknown key \`${key}\` — ignored (check for a typo)`,
+      sourcePath: path,
+    });
+  }
+  for (const [block, allowed] of NESTED_CONFIG_KEYS) {
+    const value = parsed.value[block];
+    if (!isObjectRecord(value)) continue;
+    for (const key of Object.keys(value)) {
+      if (allowed.has(key)) continue;
+      issues.push({
+        path: `${block}.${key}`,
+        message: `unknown key \`${key}\` — ignored (check for a typo)`,
+        sourcePath: path,
+      });
+    }
   }
   foldLegacyAlias(parsed.value, path, issues);
   return { value: parsed.value, sourcePath: path, outcome: "loaded" };
@@ -378,7 +433,7 @@ export function expandEnvRefs(
     const fallbackAt = expr.indexOf(":-");
     const name = fallbackAt < 0 ? expr : expr.slice(0, fallbackAt);
     const fallback = fallbackAt < 0 ? undefined : expr.slice(fallbackAt + 2);
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    if (!ENV_NAME_PATTERN.test(name)) {
       out += "${" + expr + "}";
       continue;
     }
@@ -448,7 +503,9 @@ function leafEquals(
     const previousKeys = Object.keys(previous);
     return (
       previousKeys.length === Object.keys(value).length &&
-      previousKeys.every((key) => key in value && leafEquals(previous[key], value[key], vars))
+      previousKeys.every(
+        (key) => Object.hasOwn(value, key) && leafEquals(previous[key], value[key], vars),
+      )
     );
   }
   return (
@@ -669,7 +726,9 @@ function deepMerge(
 function readPath(root: Record<string, unknown>, path: readonly string[]): unknown {
   let current: unknown = root;
   for (const key of path) {
-    if (!isObjectRecord(current) || !(key in current)) {
+    // Own keys only: prototype-inherited keys are not config, and `modify`
+    // (the save path) can only see own keys.
+    if (!isObjectRecord(current) || !Object.hasOwn(current, key)) {
       return MISSING;
     }
     current = current[key];
@@ -834,7 +893,10 @@ export function loadAiGuardConfig(
         sourcePath: layerThatWrote("instructions", global, project),
       });
     }
-    issues.push(...flattenZodIssues(parsed.error.issues));
+    // Schema errors lead: the failure notice prints only the first issue, and a
+    // cosmetic typo found while reading a layer must not headline a real schema
+    // failure.
+    issues.unshift(...flattenZodIssues(parsed.error.issues));
     return { issues, outcome: "failed" };
   }
 
@@ -926,7 +988,7 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
       path: "",
       created: false,
       changed: false,
-      error: `the snapshot is invalid — ${first?.path || "$"}: ${first?.message}`,
+      error: normalizeText(`the snapshot is invalid — ${first?.path || "$"}: ${first?.message}`),
     };
   }
   const agentDir = resolveAgentDir(env);
@@ -972,12 +1034,9 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
 function readRawLayer(dir: string): RawLayer | undefined {
   const file = resolveLayerFile(dir);
   if (!file) return undefined;
-  let text: string;
-  try {
-    text = readFileSync(file.path, "utf-8");
-  } catch {
-    return undefined;
-  }
+  // An unreadable file is an absent layer, not a load failure of its own.
+  const text = attempt(() => readFileSync(file.path, "utf-8"));
+  if (text === undefined) return undefined;
   const parsed = parseLayerText(text);
   return parsed.ok ? { path: file.path, value: parsed.value } : undefined;
 }
@@ -1099,11 +1158,26 @@ function editLayerFile(
     // LAST, and JSONC allows the key twice. Delete until none remain: a copy
     // left behind would sit beside the `classifier` key this save writes, and
     // the final gate would refuse with a "shape conflict" nobody can act on.
-    for (;;) {
+    //
+    // Bounded: an alias no `modify` can delete (a prototype-inherited key)
+    // would make the loop spin forever — refuse instead.
+    let removed = false;
+    for (let pass = 0; pass < ALIAS_DELETE_MAX_PASSES; pass++) {
       running = applyEdits(running, modify(running, [CLASSIFIER_ALIAS_KEY], undefined, {}));
       changed = true;
       const current = parseLayerText(running);
-      if (!current.ok || readPath(current.value, [CLASSIFIER_ALIAS_KEY]) === MISSING) break;
+      if (!current.ok || readPath(current.value, [CLASSIFIER_ALIAS_KEY]) === MISSING) {
+        removed = true;
+        break;
+      }
+    }
+    if (!removed) {
+      return {
+        path,
+        created: false,
+        changed: false,
+        error: `refusing to write — \`${CLASSIFIER_ALIAS_KEY}\` cannot be removed from this file`,
+      };
     }
   }
 

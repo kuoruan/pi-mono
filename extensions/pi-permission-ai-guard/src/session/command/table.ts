@@ -6,6 +6,12 @@
  */
 import type { AiGuardUiContext } from "./ui-context.ts";
 
+/** The lower-to-upper boundary in a camelCase name (`maxRetries` → `max-Retries`). */
+const CAMEL_BOUNDARY = /([a-z0-9])([A-Z])/g;
+
+/** A run of underscores — collapsed to a single dash in a command verb. */
+const UNDERSCORE_RUN = /[_]+/g;
+
 /** One pickable row of the settings menu: its label and its dispatch args. */
 export interface MenuRow {
   readonly label: string;
@@ -46,10 +52,7 @@ export type SettingOption = {
  * @returns The kebab-case command verb.
  */
 export function verbWord(name: string): string {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-    .replace(/[_]+/g, "-")
-    .toLowerCase();
+  return name.replace(CAMEL_BOUNDARY, "$1-$2").replace(UNDERSCORE_RUN, "-").toLowerCase();
 }
 
 /**

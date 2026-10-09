@@ -23,6 +23,7 @@ import { type ModelCallFn, createModelCall } from "#src/review/engines/chat/call
 import { type ReviewPipelineDeps, createReviewPipeline } from "#src/review/review-pipeline.ts";
 import { RuntimeSettings, type EnumSettingSpec } from "#src/session/runtime-settings.ts";
 import { SessionLifecycle } from "#src/session/session-lifecycle.ts";
+import { normalizeText } from "#src/utils.ts";
 
 /**
  * Optional overrides for testing. In production (default export) all
@@ -151,7 +152,13 @@ export function createAiGuardExtension(
     settings.restore(ctx.sessionManager);
     settings.syncFooter(ctx);
     for (const issue of result.issues) {
-      warn(`config issue at ${issue.sourcePath ?? "(merged)"} — ${issue.path}: ${issue.message}`);
+      // The message carries config-file text (a key name, a rejected value)
+      // straight to a terminal, so the control sequences go before it does.
+      warn(
+        normalizeText(
+          `config issue at ${issue.sourcePath ?? "(merged)"} — ${issue.path}: ${issue.message}`,
+        ),
+      );
     }
   });
 

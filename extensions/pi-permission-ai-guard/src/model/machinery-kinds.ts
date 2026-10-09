@@ -9,8 +9,8 @@
  *   produced no verdict — empty reply, unparseable text, timeout, provider error, or the model's
  *   own defer.
  * - **Pre-call** kinds (owned here, as values): the review never opened — the model could not
- *   resolve, auth failed, the transcript could not be stripped, or the ask yielded no review
- *   target.
+ *   resolve, auth failed, the transcript could not be stripped, the ask yielded no review target,
+ *   or the pipeline itself threw.
  *
  * The pre-call values are single-sourced as an object constant so every
  * spelling site references one name: the kind strings flow into verdict
@@ -37,6 +37,8 @@ export const PRE_CALL_MACHINERY_KINDS = {
   transcriptError: "transcript-error",
   /** The ask qualified for review but no review target could be extracted. */
   noTarget: "no-target",
+  /** The pipeline threw outside its wrapped paths — nothing was judged. */
+  internalError: "internal-error",
 } as const;
 
 /** One of the pre-call machinery-failure kinds. */

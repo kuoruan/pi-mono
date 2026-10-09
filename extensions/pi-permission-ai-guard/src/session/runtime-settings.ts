@@ -45,6 +45,7 @@ import type { BreakerTier } from "#src/review/circuit-breaker.ts";
 import type { CommandEntry, SettingOption } from "#src/session/command/table.ts";
 import { displayPhrase, verbWord } from "#src/session/command/table.ts";
 import type { AiGuardUiContext } from "#src/session/command/ui-context.ts";
+import { WHITESPACE_RUN } from "#src/utils.ts";
 
 import {
   openDeniedPanel,
@@ -240,7 +241,7 @@ export class RuntimeSettings {
     },
     handler: async (args, ctx) => {
       if (!this.#guardSessionConfig()) return;
-      const tokens = args.trim().split(/\s+/).filter(Boolean);
+      const tokens = args.trim().split(WHITESPACE_RUN).filter(Boolean);
       const first = tokens[0];
       if (first === undefined) {
         await this.#menu(ctx);

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  attempt,
+  bestEffort,
   encodeActionTextForPrompt,
   isObjectRecord,
   normalizeAndRedactText,
@@ -8,6 +10,31 @@ import {
   redactSecrets,
   truncateMiddle,
 } from "#src/utils.ts";
+
+describe("bestEffort / attempt", () => {
+  it("bestEffort swallows a throw and keeps going", () => {
+    let ran = 0;
+    bestEffort(() => {
+      ran++;
+      throw new Error("sink down");
+    });
+    expect(ran).toBe(1);
+  });
+
+  it("attempt returns the value, and undefined only for a throw", () => {
+    expect(attempt(() => "ok")).toBe("ok");
+    // Falsy is a value: the call sites branch on `=== undefined` / `?? null`, so
+    // an empty string or a zero must not collapse into absence.
+    expect(attempt(() => "")).toBe("");
+    expect(attempt(() => 0)).toBe(0);
+    expect(attempt(() => null)).toBeNull();
+    expect(
+      attempt(() => {
+        throw new Error("gone");
+      }),
+    ).toBeUndefined();
+  });
+});
 
 describe("normalizeText", () => {
   it("collapses whitespace to single spaces", () => {

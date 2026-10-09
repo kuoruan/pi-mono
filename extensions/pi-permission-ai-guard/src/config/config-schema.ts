@@ -210,6 +210,38 @@ const classifierBlockSchema = classifierThresholdsSchema.extend({
  */
 export const CLASSIFIER_ALIAS_KEY = "typesafe";
 
+/**
+ * The safe-knob blocks, hoisted so their key sets can be exported (see
+ * {@link NESTED_CONFIG_KEYS}): zod strips unknown keys silently, and a typo in
+ * one of these names would leave the operator running a default they meant to
+ * change.
+ */
+const transcriptSchema = z.object({
+  maxUserMessages: z.number().int().min(1).max(50).default(5),
+  maxToolCalls: z.number().int().min(1).max(50).default(10),
+  maxCharsPerEntry: z.number().int().min(100).max(20_000).default(1000),
+});
+
+const circuitBreakerSchema = z.object({
+  consecutive: z.number().int().min(1).max(50).default(3),
+  total: z.number().int().min(1).max(200).default(20),
+  verdict: z.enum(BREAKER_VERDICT_VALUES).default("deny"),
+});
+
+const cacheSchema = z.object({
+  maxEntries: z.number().int().min(0).max(1000).default(128),
+});
+
+/**
+ * The blocks whose inner keys the loader checks, one level deep. The loader
+ * reports an unknown key inside them instead of letting zod drop it.
+ */
+export const NESTED_CONFIG_KEYS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["transcript", new Set(Object.keys(transcriptSchema.shape))],
+  ["circuitBreaker", new Set(Object.keys(circuitBreakerSchema.shape))],
+  ["cache", new Set(Object.keys(cacheSchema.shape))],
+]);
+
 const configBaseSchema = z.object({
   model: z.string().min(1),
   reasoning: z.enum(REASONING_VALUES).default("off"),
@@ -222,12 +254,7 @@ const configBaseSchema = z.object({
   maxTokens: z.number().int().min(16).max(32768).default(4096),
 
   // Transcript stripping: how much context to keep for the model review.
-  transcript: z
-    .object({
-      maxUserMessages: z.number().int().min(1).max(50).default(5),
-      maxToolCalls: z.number().int().min(1).max(50).default(10),
-      maxCharsPerEntry: z.number().int().min(100).max(20_000).default(1000),
-    })
+  transcript: transcriptSchema
     // Spelled out because zod 4's `.default()` does NOT re-parse the value
     // through the inner schema (only `prefault` does): `.default({})` would
     // reach consumers with every field above undefined.
@@ -287,12 +314,7 @@ const configBaseSchema = z.object({
   // Circuit breaker (session-level, fail-safe). `consecutive` is recoverable
   // (resets on trip so the model gets another chance); `total` is a hard
   // session cap (never resets, so once tripped it stays tripped).
-  circuitBreaker: z
-    .object({
-      consecutive: z.number().int().min(1).max(50).default(3),
-      total: z.number().int().min(1).max(200).default(20),
-      verdict: z.enum(BREAKER_VERDICT_VALUES).default("deny"),
-    })
+  circuitBreaker: circuitBreakerSchema
     // Spelled out for the same zod-4 reason as `transcript` above.
     .default({ consecutive: 3, total: 20, verdict: "deny" }),
 
@@ -301,10 +323,7 @@ const configBaseSchema = z.object({
   // invalidates entries when the conversation moves on. Defaults to 128:
   // repeated commands (git status, ls, pnpm test) hit the cache on the second
   // call — zero model cost, zero latency.
-  cache: z
-    .object({
-      maxEntries: z.number().int().min(0).max(1000).default(128),
-    })
+  cache: cacheSchema
     // Spelled out for the same zod-4 reason as `transcript` above.
     .default({ maxEntries: 128 }),
 });
@@ -313,22 +332,36 @@ const configBaseSchema = z.object({
  * The validated union, before the legacy-key fold (see {@link configSchema}).
  * `reasoning`/`maxTokens` are ignored in classifier mode.
  */
+const registryShapeSchema = configBaseSchema.extend({
+  provider: z.string().min(1),
+  modelType: z.enum(MODEL_TYPE_VALUES).default("chat"),
+  instructions: instructionsSchema,
+});
+
+const directShapeSchema = configBaseSchema.extend({
+  provider: directProviderSchema,
+  // Reserved so the contradiction check below can see it: a direct
+  // connection never goes through the registry, so any modelType
+  // here is rejected, never silently dropped.
+  modelType: z.enum(MODEL_TYPE_VALUES).optional(),
+  instructions: instructionsSchema,
+});
+
+/**
+ * Every top-level key a layer may set. The loader reports anything else: zod
+ * drops unknown keys silently, and a typo in a safety-relevant name
+ * (`surfaces`, `modes`) would leave the operator running the default they meant
+ * to change. The deprecated alias is accepted here too — the loader folds and
+ * reports it itself.
+ */
+export const CONFIG_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([
+  ...Object.keys(registryShapeSchema.shape),
+  ...Object.keys(directShapeSchema.shape),
+  CLASSIFIER_ALIAS_KEY,
+]);
+
 const configShapeSchema = z
-  .union([
-    configBaseSchema.extend({
-      provider: z.string().min(1),
-      modelType: z.enum(MODEL_TYPE_VALUES).default("chat"),
-      instructions: instructionsSchema,
-    }),
-    configBaseSchema.extend({
-      provider: directProviderSchema,
-      // Reserved so the contradiction check below can see it: a direct
-      // connection never goes through the registry, so any modelType
-      // here is rejected, never silently dropped.
-      modelType: z.enum(MODEL_TYPE_VALUES).optional(),
-      instructions: instructionsSchema,
-    }),
-  ])
+  .union([registryShapeSchema, directShapeSchema])
   .superRefine((config: z.output<typeof configShapeSchema>, ctx) => {
     // modelType is registry addressing — a direct connection ignores it,
     // so its presence means the config doesn't say what the operator
@@ -479,16 +512,18 @@ export type DirectProviderConfig = Extract<AiGuardConfig, { provider: DirectProv
  * @returns True when the primary reviewer is a classifier endpoint.
  */
 export function isClassifierMode(config: { provider: unknown; modelType?: unknown }): boolean {
-  return typeof config.provider === "object" || config.modelType === "classifier";
+  return isDirectProviderShape(config.provider) || config.modelType === "classifier";
 }
 
 /**
- * The provider's runtime shape selects the engine; the config union's
- * members carry the pairing. This predicate narrows to the direct member.
+ * Whether a provider field carries the direct-connection block rather than a
+ * registry id. One shape rule for the two sites that discriminate on it —
+ * `isClassifierMode` and the endpoint builder. Presumes a schema-validated
+ * config: an object here is the block, never null or an array.
  *
- * @param config - The validated config.
- * @returns True when the provider is a direct connection.
+ * @param provider - A config's `provider` field.
+ * @returns True for the direct-connection block.
  */
-export function hasDirectProvider(config: AiGuardConfig): config is DirectProviderConfig {
-  return typeof config.provider === "object";
+export function isDirectProviderShape(provider: unknown): provider is DirectProvider {
+  return typeof provider === "object";
 }

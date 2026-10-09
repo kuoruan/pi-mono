@@ -60,6 +60,19 @@ describe("loadAiGuardConfig", () => {
     expect(result.outcome).toBe("loaded");
   });
 
+  it("ignores config keys that arrive on the layer file's prototype", () => {
+    // jsonc-parser materializes `"__proto__"` as the parsed object's
+    // PROTOTYPE rather than as own data. A layer file is untrusted input (a
+    // repository ships the project layer), so a key reachable only through the
+    // prototype must not be able to set `mode`.
+    vol.fromJSON({
+      "/project/.pi/extensions/pi-permission-ai-guard/config.json":
+        '{"__proto__":{"mode":"permissive"},"provider":"anthropic","model":"claude-haiku-4-5"}',
+    });
+    const result = loadAiGuardConfig(env({ trustedProject: true }));
+    expect(result.config?.mode).toBe("default");
+  });
+
   it("reports the deprecated `typesafe` key as an issue while still loading", () => {
     vol.fromJSON({
       "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
@@ -75,6 +88,55 @@ describe("loadAiGuardConfig", () => {
     expect(result.config?.classifier.intentThreshold).toBe(0.9);
     // ...but the migration is announced, not silent.
     expect(result.issues.some((i) => i.message.includes("deprecated"))).toBe(true);
+  });
+
+  it("reports an unknown top-level key without failing the load", () => {
+    // zod drops unknown keys silently, and a typo in a safety-relevant name
+    // (`surfaces`, `modes`) would leave the operator running the default they
+    // meant to change.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: { type: "typesafe" },
+        model: "jev-1.13",
+        surfces: ["bash"],
+      }),
+    });
+
+    const result = loadAiGuardConfig(env());
+    expect(result.outcome).toBe("loaded");
+    expect(result.issues.some((i) => i.path === "surfces")).toBe(true);
+  });
+
+  it("reports an unknown key inside a safe-knob block without failing the load", () => {
+    // Those blocks are zod-strip, not strict: `maxUserMesages` silently leaves
+    // the operator running the default they meant to change, so the notice has
+    // to reach one level in.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: { type: "typesafe" },
+        model: "jev-1.13",
+        transcript: { maxUserMesages: 3 },
+      }),
+    });
+
+    const result = loadAiGuardConfig(env());
+    expect(result.outcome).toBe("loaded");
+    expect(result.issues.some((i) => i.path === "transcript.maxUserMesages")).toBe(true);
+  });
+
+  it("leads a failed load with the schema error, not a typo notice", () => {
+    // The failure notice prints only the first issue, so a cosmetic typo
+    // reported while reading a layer must not headline a real schema failure.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: { type: "nonsense" },
+        surfces: ["bash"],
+      }),
+    });
+
+    const result = loadAiGuardConfig(env());
+    expect(result.outcome).toBe("failed");
+    expect(result.issues[0]?.path).not.toBe("surfces");
   });
 
   it("warns that the legacy `typesafe.timeoutMs` is ignored", () => {
@@ -1326,6 +1388,55 @@ describe("persistConfigLayer", () => {
       riskThreshold: 0.5,
       confidenceThreshold: 0.5,
     });
+  });
+
+  it("returns instead of stalling when the deprecated alias sits on the file's prototype", () => {
+    // `"__proto__"` is not an own key: jsonc-parser parses it into the parsed
+    // object's PROTOTYPE, so the alias is visible to `in` while `modify` — and
+    // therefore the delete loop — cannot reach it. Reading with `in` made the
+    // alias-removal loop delete nothing and repeat forever, hanging the save.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json":
+        '{"__proto__":{"typesafe":{"intentThreshold":0.6}},"mode":"strict"}',
+    });
+    const result = persistConfigLayer({ target: "global", env: env(), config: fullConfig });
+    expect(result.error).toBeUndefined();
+    expect(result.changed).toBe(true);
+  });
+
+  it("removes every copy when the file declares the deprecated alias twice", () => {
+    // The delete loop exists for this case: `modify` removes only the FIRST
+    // matching key (the loader reads the last), so one pass is not enough.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json":
+        '{"provider":"anthropic","model":"claude-haiku-4-5","typesafe":{"intentThreshold":0.6},"typesafe":{"riskThreshold":0.5}}',
+    });
+    const result = persistConfigLayer({ target: "global", env: env(), config: fullConfig });
+    expect(result.error).toBeUndefined();
+    const written = parseJsonc(
+      vol.readFileSync("/agent/extensions/pi-permission-ai-guard/config.json", "utf-8") as string,
+    );
+    expect("typesafe" in written).toBe(false);
+  });
+
+  it("refuses rather than spinning when the alias survives the delete budget", () => {
+    // `modify` removes one copy per pass. The budget covers every realistic
+    // file (JSONC allows the key twice); a file that still carries it after
+    // that many passes is one this loop cannot clean, and a refusal — which
+    // the operator can act on — beats an extension that never returns.
+    const aliases = Array.from({ length: 9 }, () => '"typesafe":{"intentThreshold":0.6}').join(",");
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": `{"mode":"strict",${aliases}}`,
+    });
+    const result = persistConfigLayer({ target: "global", env: env(), config: fullConfig });
+    expect(result.error).toMatch(/typesafe` cannot be removed/);
+    expect(result.changed).toBe(false);
+    // Nothing was written: the file still carries every copy.
+    const onDisk = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(onDisk).toBe(`{"mode":"strict",${aliases}}`);
   });
 
   it("writes the sibling layer's `${VAR}` text into a newly created file", () => {
