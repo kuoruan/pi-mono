@@ -88,7 +88,8 @@ interface KitLike {
 export default function sandboxedBash(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     const raw = (globalThis as Record<symbol | string, unknown>)[Symbol.for(KIT_KEY)] as
-      KitLike | undefined;
+      | KitLike
+      | undefined;
     // Version/shape mismatch degrades to "absent" — never throw; render
     // decoration is not worth breaking a session over.
     if (!raw || raw.version !== 1 || !raw.tools.includes("bash")) {

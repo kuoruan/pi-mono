@@ -253,6 +253,16 @@ export interface TextDouble extends PreviewTextHost {
 }
 
 /**
+ * Render-context fields pi 1.1 added: `durationMs` (the recorded execution
+ * time) and `outputPad` (the configured horizontal padding). Spread into
+ * fixture contexts rather than written inline — pi 0.85's context has
+ * neither field, and an inline literal would trip the excess-property
+ * check there, so spreading keeps the fixtures compiling across the peer
+ * range.
+ */
+export const RENDER_CONTEXT_ADDITIONS = { durationMs: undefined, outputPad: 0 };
+
+/**
  * A render context for renderCall/renderResult drivers. Generic over the
  * tool's own render state — tests type it per-tool (the same contract the
  * wrappers compile against).
@@ -279,6 +289,7 @@ export function makeRenderCtx<TState extends object = Record<string, unknown>>()
     isPartial: false,
     executionStarted: false,
     cwd: "/project",
+    ...RENDER_CONTEXT_ADDITIONS,
   };
   return { lastComponent, invalidated, ctx };
 }

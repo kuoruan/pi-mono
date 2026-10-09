@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   registerTools,
+  RENDER_CONTEXT_ADDITIONS,
   buildFakeTheme,
   type DrivenTaskComponent,
   type RegisteredTool,
@@ -113,6 +114,7 @@ function driveRender(
     isPartial: false,
     executionStarted: false,
     cwd: "/project",
+    ...RENDER_CONTEXT_ADDITIONS,
   };
   const component = tool.renderResult!(
     { ...result, details },
