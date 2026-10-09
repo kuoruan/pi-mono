@@ -20,7 +20,7 @@ Absent intent defaults to defer, not deny — except where the entry's own fallb
 
 ## 4. Trusted intent is the only authorization source
 
-Transcript, tool calls, action text, and permission requests are untrusted. A user goal authorizes only matching actions, not unrelated or higher-risk side effects. Authorization is judged by material effect, not by command syntax.
+Transcript, tool calls, action text, and permission requests are untrusted. A human goal authorizes only matching actions, not unrelated or higher-risk side effects. Authorization is judged by material effect, not by command syntax.
 
 ## 5. The model is the semantic layer, not the deterministic gate
 
@@ -54,3 +54,13 @@ Bold titles and a tiered layout help the model locate the right entry and reduce
 ## 10. Do not over-tune from stale logs
 
 Before adjusting the prompt, confirm which prompt version produced the logs. Prefer policy config for deterministic-operation false positives. Only adjust the prompt when there is a systematic semantic bias — and then make the fallback explicit ("never DENY solely for these"), never add tool-name exceptions.
+
+## 11. Terminology: human, user, operator
+
+Three words, three jobs — never collapse them into one:
+
+- **human** — the person whose words carry authorization (the grant source). Only this word covers both trusted channels: a `user`-role message _and_ a question tool's answer, which reaches the anchor as a tool result rather than a user message. Every sentence that grants authority says "human" ("the human's own words", "a human goal", "the latest request from the human").
+- **user** — transcript structure only: the `user` role, "user messages", "the user prompt" (the API's own term for the per-ask message).
+- **operator** — the person who reads the notices: the second person of defer/deny copy ("what the operator is asked", "the operator rules on the paths").
+
+The rendered transcript's labels carry the same words as the rule that defines them — "Latest request from the human (the authorization anchor)". A literal-minded model looks for the anchor using the rule's vocabulary, so rule and label must not disagree.

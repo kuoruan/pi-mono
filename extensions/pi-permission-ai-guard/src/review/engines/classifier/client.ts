@@ -31,12 +31,12 @@ export interface DirectConnection {
 
 /**
  * The built-in reviewer role: every question's first background layer.
- * Not user configuration — it tells the classifier it is a permission reviewer
+ * Not operator configuration — it tells the classifier it is a permission reviewer
  * (the chat path's system prompt equivalent), so intent/scope read
  * against the authorization anchor rather than free-floating.
  */
 const CLASSIFIER_REVIEWER_BACKGROUND =
-  "You are reviewing one tool call for an AI coding agent. Judge it against the authorization anchor (the latest user request) and the working directory in state.";
+  "You are reviewing one tool call for an AI coding agent. Judge it against the authorization anchor (the latest request from the human) and the working directory in state.";
 
 /** The built-in questions in the SDK's request shapes. */
 export interface ClassifierQuestions extends Questions {
@@ -132,13 +132,13 @@ export function buildClassifierRequest(
   model: string,
 ): SystemOneRequest<ClassifierQuestions> {
   // Three layers, applied in order: the built-in reviewer role, the
-  // user's shared background, then the question's own override (each
+  // operator's shared background, then the question's own override (each
   // layer adds rather than replacing).
   const perQuestion = instructions.questions ?? {};
   const bg = instructions.background;
 
   const q = (id: ClassifierQuestionId, base: string): ClassifierQuestionEntry => {
-    // The built-in role always leads: the user's background appends after it.
+    // The built-in role always leads: the operator's background appends after it.
     const withRole = applyOverlay(base, CLASSIFIER_REVIEWER_BACKGROUND);
     const withBg = bg === undefined ? withRole : applyOverlay(withRole, bg);
     const extra = perQuestion[id];
@@ -163,7 +163,7 @@ export function buildClassifierRequest(
         criteria: {
           true: "The action is the anchor's direct object, a necessary step of it, or routine workspace activity inside the task it describes.",
           false:
-            "The action serves a different goal, exceeds the anchor's scope, or no anchor authorizes it. A short approval names no scope of its own — it points at agent text, which is not in state.",
+            "The action serves a different goal, exceeds the anchor's scope, or no anchor authorizes it. A short approval names no scope of its own — it points at the agent's own prose, which is not in state.",
         },
       },
       risk: {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { buildAskContext, openAsk, resolveReviewTarget } from "#src/review/request/ask.ts";
 import { bashPayload, ev, makeDetails, payload } from "#test/fixtures.ts";
@@ -568,8 +568,7 @@ describe("buildAskContext — 9-kind dispatch", () => {
     expect(ask.request.surface).toBe("bash");
   });
 
-  it("carries annotations through (slot reserved, currently empty upstream)", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("keeps model annotations on the ask payload", () => {
     const details = makeDetails({
       surface: "bash",
       value: "ls",
@@ -580,18 +579,11 @@ describe("buildAskContext — 9-kind dispatch", () => {
         [{ source: "test-annotator", text: "advisory" }],
       ),
     });
-    const driftState = { warned: false };
-    const ask = buildAskContext(details, cwd, driftState);
+    const ask = buildAskContext(details, cwd);
+    // The field is part of the payload contract. Whether it can reach the
+    // verdict is pinned where rendering happens ("never renders model-generated
+    // annotations into the security prompt"); this test only owns the payload.
     expect(ask.annotations).toEqual([{ source: "test-annotator", text: "advisory" }]);
-    // The cache keys without annotations — when they stop being empty the
-    // one-time integrity warning must fire (assumption break is detectable),
-    // once per injected state, and the state records it.
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("annotator is registered"));
-    expect(driftState.warned).toBe(true);
-    buildAskContext(details, cwd, driftState);
-    expect(warnSpy).toHaveBeenCalledTimes(1); // warn-once holds per state
-    warnSpy.mockRestore();
   });
 });
 
@@ -601,11 +593,10 @@ describe("openAsk — the composed ask-opening seam", () => {
   it("returns the complete review context for a reviewable ask", () => {
     const details = makeDetails({ surface: "bash", value: "ls" });
     const result = openAsk(details, { surfaces: ["bash"] }, cwd);
-    expect(result).toEqual({
-      surface: "bash",
-      target: "ls",
-      ask: buildAskContext(details, cwd),
-    });
+    // Independent facts, not a recomputation of the projection under test.
+    expect(result).toMatchObject({ surface: "bash", target: "ls", ask: { kind: "bash" } });
+    // The complete projection: a field added or dropped here changes this set.
+    expect(Object.keys(result!).toSorted()).toEqual(["ask", "surface", "target"]);
   });
 
   it("returns the tagged reason for a surface-unmatched ask", () => {

@@ -15,6 +15,7 @@ import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-age
 import {
   isObjectRecord,
   normalizeAndRedactText,
+  safeStringify,
   textFromContent,
   truncateMiddle,
 } from "#src/utils.ts";
@@ -76,6 +77,8 @@ type Message = {
   content?: unknown;
   /** Tool name (set on toolResult entries). */
   toolName?: string;
+  /** Tool-specific structured payload (question tools put the answers here). */
+  details?: unknown;
 };
 
 /**
@@ -153,20 +156,28 @@ function toolCallsFromAssistant(content: unknown, maxChars: number): string[] {
 }
 
 /**
- * Check if a user message is an ask_user_question tool result
- * (contains the user's structured answers — trusted intent).
+ * The pi question tools whose results speak for the human. Exact names only:
+ * the catalog is full of near-names that delegate to *another model*
+ * (`ask`, `ask_question`, `ask_smarter_model`, `pi-ask-codex`), and trusting
+ * one of those would hand the agent's own prose the authorization anchor.
+ * pi's own MCP tools (`mcp__<server>__<tool>`) can never collide with these.
+ */
+const TRUSTED_ASK_TOOLS = new Set(["ask_user_question", "ask_user"]);
+
+/**
+ * Check if a tool result came from one of the pi question tools.
  *
  * @param message - The message to check.
- * @returns True if the message is an ask_user_question tool result.
+ * @returns True if the message is a trusted question tool's result.
  */
-function isAskUserQuestionResult(message: Message): boolean {
-  return message.toolName === "ask_user_question";
+function isTrustedAskTool(message: Message): boolean {
+  return typeof message.toolName === "string" && TRUSTED_ASK_TOOLS.has(message.toolName);
 }
 
 /**
  * Strip a transcript from SessionManager.buildContextEntries().
- * Collects trusted intent (user messages) and untrusted tool calls,
- * discarding assistant text and tool results entirely.
+ * Collects trusted intent (user messages and question-tool answers) and
+ * untrusted tool calls, discarding assistant text and every other tool result.
  *
  * Uses `buildContextEntries()` so pi applies compaction path handling
  * (omitting pre-compaction summarized entries, representing the latest
@@ -286,11 +297,19 @@ export function stripTranscript(
     }
 
     if (role === "toolResult") {
-      // ask_user_question results are trusted (user's structured answers)
-      if (isAskUserQuestionResult(message)) {
-        pushTrustedIntent(textFromContent(message.content));
+      // A question tool's result is the human speaking → attach it as it
+      // stands: its structured payload when there is one, else its text. Never
+      // re-render or summarize it — the packages disagree on the shape, and
+      // anything dropped here is authorization the reviewer cannot see. Every
+      // other tool result is untrusted and token-heavy → strip entirely.
+      if (isTrustedAskTool(message)) {
+        const payload = message.details ?? message.content;
+        if (payload === undefined) {
+          strippedCount++;
+          continue;
+        }
+        pushTrustedIntent(safeStringify(payload));
       } else {
-        // Other tool results are untrusted and token-heavy → strip entirely
         strippedCount++;
       }
       continue;

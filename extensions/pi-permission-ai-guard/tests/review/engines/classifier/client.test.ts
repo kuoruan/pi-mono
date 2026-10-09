@@ -110,6 +110,23 @@ describe("buildClassifierRequest", () => {
     expect(req.state).toMatchObject({ authorization_anchor: "(none found)" });
   });
 
+  it("takes a question tool's answer as the anchor", () => {
+    // The stripper puts a question tool's payload into trusted intent, so the
+    // anchor the classifier judges is the same one the chat lane judges — even
+    // though the answer arrived as a tool result, not a user message.
+    const answer = JSON.stringify({
+      answers: [{ questionIndex: 0, question: "怎么处理？", kind: "option", answer: "授权你改" }],
+      cancelled: false,
+    });
+    const req = buildClassifierRequest(
+      transcript({ trustedIntent: ["older", answer] }),
+      request(),
+      NO_INSTRUCTIONS,
+      "jev-1.13",
+    );
+    expect(req.state).toMatchObject({ authorization_anchor: answer, earlier_context: ["older"] });
+  });
+
   it("appends the shared background to every question", () => {
     const req = buildClassifierRequest(
       transcript(),

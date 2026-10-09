@@ -26,6 +26,8 @@
  */
 
 /** Bare-continuation phrases: normalized form (lowercase, no punctuation). */
+import { WHITESPACE_RUN } from "#src/utils.ts";
+
 const BARE_CONTINUATION_PHRASES = new Set([
   // English: CONTINUE verbs only. AgentBigBrain's prefix patterns ("continue
   // working on X") are real requests, so only their bare cores are listed.
@@ -98,6 +100,12 @@ const BARE_CONTINUATION_PHRASES = new Set([
   "接下來",
 ]);
 
+/** Punctuation and symbols — dropped when a continuation is normalized to words. */
+const NON_WORD_CHARS = /[^\p{L}\p{N}\s]/gu;
+
+/** A leading list number in a per-item reply (`2. do it`). */
+const LEADING_LIST_NUMBER = /^\d+\s+/;
+
 /**
  * Normalize a message for continuation matching: trim, strip punctuation, collapse
  * whitespace, lowercase ASCII. CJK characters are preserved (unlike instar's
@@ -107,12 +115,7 @@ const BARE_CONTINUATION_PHRASES = new Set([
  * @returns The normalized form, possibly empty.
  */
 function normalizeContinuation(text: string): string {
-  return text
-    .trim()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+  return text.trim().replace(NON_WORD_CHARS, " ").replace(WHITESPACE_RUN, " ").trim().toLowerCase();
 }
 
 /**
@@ -137,6 +140,6 @@ export function isBareContinuation(text: string): boolean {
   if (norm.length > 48) return false;
   // Strip one leading decision ordinal ("1: proceed", "2. continue") so
   // decision-surface replies match.
-  const bare = norm.replace(/^\d+\s+/, "");
+  const bare = norm.replace(LEADING_LIST_NUMBER, "");
   return BARE_CONTINUATION_PHRASES.has(bare);
 }

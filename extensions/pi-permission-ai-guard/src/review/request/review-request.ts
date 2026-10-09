@@ -44,7 +44,7 @@ type KeyedRequestFacts = "value" | "commandContext" | "executedUnit";
 
 /** Every other AskContext field — excluded by doctrine, one entry each. */
 export const EXCLUDED_ASK_FIELDS: Record<Exclude<keyof AskContext, KeyedAskFields>, string> = {
-  annotations: "model advisories — excluded while assumed absent; build-side warn trips when not",
+  annotations: "model advisories — not rendered, not keyed",
 };
 
 /** Every other upstream request fact — excluded by doctrine, one entry each. */
@@ -93,10 +93,10 @@ export function reviewRequestCacheMaterial(request: ReviewRequestContext): strin
     target: normalizeEmpty(request.target),
     fullCommand: normalizeEmpty(ask.fullCommand),
     flaggedElements: ask.flaggedElements.map(normalizeEmpty),
-    commandContext: ask.request.commandContext,
+    commandContext: normalizeEmpty(ask.request.commandContext),
     executedUnit: normalizeEmpty(ask.request.executedUnit),
     canonicalBoundary: normalizeEmpty(ask.canonicalBoundary),
-    workingDirectory: ask.workingDirectory,
+    workingDirectory: normalizeEmpty(ask.workingDirectory),
     readPath: normalizeEmpty(ask.readPath),
     resolvedAlias: normalizeEmpty(ask.resolvedAlias),
     toolInputPreview: normalizeEmpty(ask.toolInputPreview),

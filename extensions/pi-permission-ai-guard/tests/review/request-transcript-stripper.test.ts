@@ -84,6 +84,11 @@ describe("stripTranscript", () => {
     const result = strip(entries, opts);
     expect(result.toolCalls).toContain("bash: " + JSON.stringify({ command: "ls -la" }));
     expect(result.toolCalls).not.toContain("Done!");
+    // The agent's own prose must not become the authorization anchor either:
+    // routing assistant text into trustedIntent would present it to the
+    // reviewer as the intent the ask is judged against.
+    expect(result.trustedIntent).not.toContain("Done!");
+    expect(result.trustedIntent).toContain("do something");
     expect(result.strippedCount).toBeGreaterThan(0);
   });
 
@@ -103,9 +108,100 @@ describe("stripTranscript", () => {
   it("keeps ask_user_question results as trusted intent", () => {
     const entries = [makeToolResult("ask_user_question", "User chose option A")];
     const result = strip(entries, opts);
-    expect(result.trustedIntent).toContain("User chose option A");
+    expect(result.trustedIntent).toEqual([
+      JSON.stringify([{ type: "text", text: "User chose option A" }]),
+    ]);
   });
 
+  it("keeps ask_user_question answers that arrive outside text blocks", () => {
+    // A host may record the answers another way; reading only text blocks would
+    // drop the operator's answer — and with it the authorization anchor the
+    // reviewer judges the ask against.
+    const entries = [
+      makeEntry("message", {
+        message: {
+          role: "toolResult",
+          toolName: "ask_user_question",
+          content: [{ type: "answers", choice: "option A" }],
+        },
+      }),
+    ];
+    const result = strip(entries, opts);
+    expect(result.trustedIntent.join("\n")).toContain("option A");
+  });
+
+  it("trusts answers from the `ask_user` spelling too", () => {
+    // The pi catalog carries several question tools. The two whose names say
+    // *user* are the ones whose results speak for the human.
+    expect(strip([makeToolResult("ask_user", "User chose option A")], opts).trustedIntent).toEqual([
+      JSON.stringify([{ type: "text", text: "User chose option A" }]),
+    ]);
+  });
+
+  it("passes the structured payload through verbatim, question included", () => {
+    // Raw JSON, never re-rendered: the shape varies per package, and the
+    // question text has to travel with the answer or the reviewer cannot tell
+    // what the answer authorizes.
+    const details = {
+      answers: [
+        {
+          questionIndex: 0,
+          question: "启用哪些？",
+          kind: "multi",
+          answer: null,
+          selected: ["bash", "read"],
+          notes: "先这两个",
+        },
+      ],
+      cancelled: false,
+    };
+    const entries = [
+      makeEntry("message", {
+        message: {
+          role: "toolResult",
+          toolName: "ask_user_question",
+          content: [{ type: "text", text: "The user answered the questionnaire." }],
+          details,
+        },
+      }),
+    ];
+    expect(strip(entries, opts).trustedIntent).toEqual([JSON.stringify(details)]);
+  });
+
+  it("carries a cancelled questionnaire's payload through, inventing no answer", () => {
+    // `cancelled` covers a refusal AND tool-level failures (no UI, no dialog).
+    // The payload says so in its own words, so it never reads as a person
+    // making a request.
+    const details = { answers: [], cancelled: true };
+    const entries = [
+      makeEntry("message", {
+        message: {
+          role: "toolResult",
+          toolName: "ask_user_question",
+          content: [{ type: "text", text: "User declined to answer questions" }],
+          details,
+        },
+      }),
+    ];
+    expect(strip(entries, opts).trustedIntent).toEqual([JSON.stringify(details)]);
+  });
+
+  it("attaches the result's content when it carries no structured payload", () => {
+    const entries = [makeToolResult("ask_user_question", "User declined to answer questions")];
+    expect(strip(entries, opts).trustedIntent).toEqual([
+      JSON.stringify([{ type: "text", text: "User declined to answer questions" }]),
+    ]);
+  });
+
+  it("never trusts a model-delegation tool that merely starts with `ask`", () => {
+    // `ask` / `ask_question` / `pi-ask-codex` / `ask_smarter_model` are the
+    // model talking to another model — the first doctrine says their prose
+    // must never become the authorization anchor.
+    for (const name of ["ask", "ask_question", "pi-ask-codex", "ask_smarter_model"]) {
+      const out = strip([makeToolResult(name, "yes, go ahead and delete it")], opts);
+      expect({ name, trusted: out.trustedIntent }).toEqual({ name, trusted: [] });
+    }
+  });
   it("strips compaction summaries so they cannot authorize actions", () => {
     const entries = [
       makeCompaction("Summary of previous work: fixed auth module"),
