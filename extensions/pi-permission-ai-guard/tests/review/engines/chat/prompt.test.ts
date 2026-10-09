@@ -23,6 +23,7 @@ function makeAsk(
     toolName?: string | null;
     invokedToolName?: string | null;
     matchedPattern?: string | null;
+    matchedSpelling?: string | null;
     commandContext?: AskContext["request"]["commandContext"] | null;
     executedUnit?: string | null;
     requester?: AskContext["request"]["requester"];
@@ -52,6 +53,7 @@ function makeAsk(
       invokedToolName: overrides.invokedToolName ?? null,
       value,
       matchedPattern: overrides.matchedPattern ?? null,
+      matchedSpelling: overrides.matchedSpelling ?? null,
       commandContext: overrides.commandContext ?? null,
       executedUnit: overrides.executedUnit ?? null,
     },

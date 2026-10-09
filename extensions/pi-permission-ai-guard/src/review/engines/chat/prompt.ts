@@ -269,6 +269,9 @@ function buildPermissionRequestSection(request: ReviewRequestContext): string {
   if (ask.request.matchedPattern) {
     lines.push(`- matched rule: ${normalizeAndRedactText(ask.request.matchedPattern)}`);
   }
+  if (ask.request.matchedSpelling) {
+    lines.push(`- matched spelling: ${encodeActionTextForPrompt(ask.request.matchedSpelling)}`);
+  }
   if (ask.request.commandContext) {
     lines.push(
       `- command context: ${encodeActionTextForPrompt(underscoresToWords(ask.request.commandContext))}`,

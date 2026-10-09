@@ -132,6 +132,44 @@ describe("reviewRequestCacheMaterial", () => {
     expect(reviewRequestCacheMaterial(base)).not.toBe(reviewRequestCacheMaterial(withWrapper));
   });
 
+  it("distinguishes cache material by matchedSpelling (the gate's resolved target)", () => {
+    const typed = {
+      ask: buildAskContext(makeDetails({ value: "rm ./x", command: "rm ./x" }), "/p"),
+      target: "rm ./x",
+    };
+    // The same typed text, matched by the rule through its absolute spelling:
+    // the action targets something else, so it must not share a verdict.
+    const spelled = {
+      ask: buildAskContext(
+        makeDetails({
+          value: "rm ./x",
+          command: "rm ./x",
+          payload: payload("bash", {
+            surface: "bash",
+            value: "rm ./x",
+            matchedSpelling: "rm /etc/x",
+          }),
+        }),
+        "/p",
+      ),
+      target: "rm ./x",
+    };
+    expect(reviewRequestCacheMaterial(typed)).not.toBe(reviewRequestCacheMaterial(spelled));
+
+    // Absent and null both mean "the typed text decided" — an older
+    // pi-permission-system has no such field — so neither re-partitions the
+    // cache.
+    const absent = {
+      ...typed,
+      ask: { ...typed.ask, request: { ...typed.ask.request, matchedSpelling: undefined } },
+    } as unknown as typeof typed;
+    const explicitNull = {
+      ...typed,
+      ask: { ...typed.ask, request: { ...typed.ask.request, matchedSpelling: null } },
+    } as unknown as typeof typed;
+    expect(reviewRequestCacheMaterial(absent)).toBe(reviewRequestCacheMaterial(explicitNull));
+  });
+
   it("normalizes empty-string and absent fields to the same cache key", () => {
     // An empty value and an absent value mean the same thing ("this ask carried
     // no such fact") and must not be cache-distinct. `JSON.stringify` keeps ""
@@ -234,7 +272,7 @@ describe("cache-identity exclusion doctrine (compile-time tripwires)", () => {
 });
 
 describe("cache-identity key set (single source pinned)", () => {
-  it("materializes exactly the twelve decision-relevant facts — no silent additions or drops", () => {
+  it("materializes exactly the thirteen decision-relevant facts — no silent additions or drops", () => {
     // The exclusion doctrine makes tripwires one-way: adding an excluded
     // field breaks the compile, but DROPPING a keyed field from the
     // material would compile silently. This pins the key set at runtime:
@@ -252,6 +290,7 @@ describe("cache-identity key set (single source pinned)", () => {
       "flaggedElements",
       "fullCommand",
       "kind",
+      "matchedSpelling",
       "readPath",
       "resolvedAlias",
       "target",

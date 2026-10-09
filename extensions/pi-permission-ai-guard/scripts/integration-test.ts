@@ -389,6 +389,7 @@ function bashPayload(value: string, surface = "bash"): PromptPayload {
       invokedToolName: null,
       value,
       matchedPattern: null,
+      matchedSpelling: null,
       commandContext: null,
       executedUnit: null,
     },

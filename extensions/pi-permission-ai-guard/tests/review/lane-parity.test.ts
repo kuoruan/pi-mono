@@ -50,6 +50,7 @@ const S = {
   target: "SENTINEL-target",
   executedUnit: "SENTINEL-executed-unit",
   matchedPattern: "SENTINEL-matched-pattern",
+  matchedSpelling: "SENTINEL-matched-spelling",
   commandContext: "command_substitution",
   toolInputPreview: "SENTINEL-tool-input",
   readPath: "SENTINEL-read-path",
@@ -76,6 +77,7 @@ function baseContext(): ReviewRequestContext {
         invokedToolName: null,
         value: "",
         matchedPattern: null,
+        matchedSpelling: null,
         commandContext: null,
         executedUnit: null,
       },
@@ -214,6 +216,12 @@ const CASES: Record<InventoryFactKey, FactCase> = {
     chat: S.matchedPattern,
     classifier: S.matchedPattern,
   },
+  matchedSpelling: {
+    context: ctx({ request: { matchedSpelling: S.matchedSpelling } }),
+    sentinel: S.matchedSpelling,
+    chat: S.matchedSpelling,
+    classifier: S.matchedSpelling,
+  },
   // The words/raw fork: chat renders prose, the classifier keeps the fact id.
   commandContext: {
     context: ctx({ request: { commandContext: S.commandContext } }),
@@ -286,5 +294,25 @@ describe("classifier wrapper-fact keys", () => {
     expect(state).not.toHaveProperty("executed_unit");
     expect(state).not.toHaveProperty("matched_pattern");
     expect(state).not.toHaveProperty("command_context");
+  });
+});
+
+describe("classifier spelling-fact key", () => {
+  it("carries the matched spelling under its documented state key", () => {
+    const state = buildClassifierRequest(
+      transcript(),
+      ctx({ request: { matchedSpelling: S.matchedSpelling } }),
+      NO_INSTRUCTIONS,
+      "model",
+    ).state as Record<string, unknown>;
+
+    expect(state.matched_spelling).toBe(S.matchedSpelling);
+  });
+
+  it("omits the key when the typed text decided", () => {
+    const state = buildClassifierRequest(transcript(), ctx({}), NO_INSTRUCTIONS, "model")
+      .state as Record<string, unknown>;
+
+    expect(state).not.toHaveProperty("matched_spelling");
   });
 });

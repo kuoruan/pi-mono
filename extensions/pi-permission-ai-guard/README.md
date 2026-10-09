@@ -47,7 +47,7 @@ With no backups, chat reviewers retry provider failures once inside `timeoutMs`;
 
 Two extensions, two config files: **pi-permission-system** owns the policy and the chain (its config names the link); **this extension** declares the reviewer model and behavior.
 
-1. Install [pi-permission-system](https://github.com/gotgenes/pi-packages) (>= 27.1.1) and configure its permission policy — see its [Quick Start](https://github.com/gotgenes/pi-packages/blob/main/packages/pi-permission-system/README.md#quick-start).
+1. Install [pi-permission-system](https://github.com/gotgenes/pi-packages) (>= 27.1.1; 37+ requires pi >= 1.0.0, enforced by its own peers) and configure its permission policy — see its [Quick Start](https://github.com/gotgenes/pi-packages/blob/main/packages/pi-permission-system/README.md#quick-start).
 
    ```bash
    pi install npm:@gotgenes/pi-permission-system

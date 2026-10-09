@@ -187,6 +187,10 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
           state: policyResult.state,
           origin: policyResult.origin,
           matchedPattern: policyResult.matchedPattern ?? null,
+          // `?? null` is the wide-peer-range guard: pi-permission-system < 40
+          // has no such field, and an absent fact must key the same as "typed
+          // text decided".
+          matchedSpelling: policyResult.matchedSpelling ?? null,
         }),
       );
       return { kind: "defer" };

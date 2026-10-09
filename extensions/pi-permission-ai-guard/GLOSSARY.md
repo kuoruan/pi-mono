@@ -84,6 +84,9 @@ _Avoid_: provider-layer calls
 **Pi version floor**:
 The runtime Pi version each lane needs — chat `≥ 0.86` (`streamSimple`), registry-classifier `≥ 0.99` (`classify`/`findOfType`, admission-gated). The source targets the 0.99 type surface for maintainers; Pi erases types at load, so a 0.86 host runs the chat lane unaffected.
 
+**pi-permission-system floor**:
+The host extension this one links into: peer `≥ 27.1.1 < 41.0.0`. Its own `≥ 37` requires Pi `≥ 1.0.0`, enforced by its own peer range, so the effective floor is a pair and is independent of this extension's Pi floor. The source type-checks against the dev version (40.x) alone: a host below it simply lacks the newer ask facts, which every renderer guards on truthiness and the cache key normalizes to `null`. The ceiling is deliberate — upstream ships breaking majors roughly weekly.
+
 **Lane fact inventory**:
 The cross-lane contract for ask facts (`tests/review/lane-facts.ts`): every `AskContext` / `PromptRequestFacts` field classified per lane as rendered (with its name and encoder) or excluded (with a reason). Exhaustive by construction, so a new upstream fact stops compilation until both lanes decide. It pins presence, not presentation — the lanes fork deliberately on some encodings (chat words vs classifier raw `commandContext`; chat-redacted vs verbatim cwd).
 

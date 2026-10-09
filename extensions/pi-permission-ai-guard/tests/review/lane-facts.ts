@@ -105,6 +105,10 @@ export const LANE_REQUEST_FACTS: Record<keyof PromptRequestFacts, LaneFact> = {
     chat: { rendered: true, name: "matched rule", encode: "redact" },
     classifier: { rendered: true, name: "matched_pattern", encode: "redact" },
   },
+  matchedSpelling: {
+    chat: { rendered: true, name: "matched spelling", encode: "action" },
+    classifier: { rendered: true, name: "matched_spelling", encode: "redact" },
+  },
   commandContext: {
     chat: { rendered: true, name: "command context", encode: "words" },
     classifier: { rendered: true, name: "command_context", encode: "raw" },

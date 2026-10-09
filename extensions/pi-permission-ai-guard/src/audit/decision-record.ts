@@ -77,6 +77,8 @@ export interface PolicyGateFacts {
   origin: PermissionCheckResult["origin"];
   /** The matched rule pattern, or null if none. */
   matchedPattern: string | null;
+  /** The command spelling the matched rule matched, or null when the typed text decided. */
+  matchedSpelling: string | null;
 }
 
 /** A short-circuit debug record (supplementary to the decision gates). */
@@ -205,6 +207,8 @@ export const DecisionRecord = {
       policyOrigin: policy.origin,
       matchedPattern:
         policy.matchedPattern === null ? null : normalizeAndRedactText(policy.matchedPattern),
+      matchedSpelling:
+        policy.matchedSpelling === null ? null : normalizeAndRedactText(policy.matchedSpelling),
       deferKind: `policy-${policy.state}`,
     };
   },

@@ -119,6 +119,9 @@ function buildState(request: ReviewRequestContext, transcript: StrippedTranscrip
   if (ask.request.matchedPattern) {
     state.matched_pattern = normalizeAndRedactText(ask.request.matchedPattern);
   }
+  if (ask.request.matchedSpelling) {
+    state.matched_spelling = normalizeAndRedactText(ask.request.matchedSpelling);
+  }
   if (ask.request.commandContext) state.command_context = ask.request.commandContext;
   return state;
 }

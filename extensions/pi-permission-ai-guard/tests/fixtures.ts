@@ -42,6 +42,7 @@ export function payload(
       toolName: null,
       invokedToolName: null,
       matchedPattern: null,
+      matchedSpelling: null,
       commandContext: null,
       executedUnit: null,
       ...request,

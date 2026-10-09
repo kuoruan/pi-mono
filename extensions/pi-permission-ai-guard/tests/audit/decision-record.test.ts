@@ -27,6 +27,7 @@ const allGates: Array<{ name: string; record: DecisionRecordEntry }> = [
       state: "allow",
       origin: ORIGIN,
       matchedPattern: "ls *",
+      matchedSpelling: null,
     }),
   },
   { name: "breaker", record: DecisionRecord.breaker(base, "deny") },
@@ -76,9 +77,12 @@ describe("DecisionRecord — per-gate shape", () => {
       state: "deny",
       origin: ORIGIN,
       matchedPattern: `curl -H "Authorization: Bearer ${token}"`,
+      matchedSpelling: `curl -H "Authorization: Bearer ${token}"`,
     });
     expect(r.matchedPattern).not.toContain(token);
     expect(r.matchedPattern).toContain("[REDACTED]");
+    expect(r.matchedSpelling).not.toContain(token);
+    expect(r.matchedSpelling).toContain("[REDACTED]");
   });
 
   it("policyDecided derives deferReason from policyState", () => {
@@ -86,6 +90,7 @@ describe("DecisionRecord — per-gate shape", () => {
       state: "deny",
       origin: ORIGIN,
       matchedPattern: null,
+      matchedSpelling: null,
     });
     expect(r.gate).toBe("policy-decided");
     expect(r.modelCalled).toBe(false);
@@ -93,6 +98,7 @@ describe("DecisionRecord — per-gate shape", () => {
     expect(r.policyState).toBe("deny");
     expect(r.policyOrigin).toBe(ORIGIN);
     expect(r.matchedPattern).toBe(null);
+    expect(r.matchedSpelling).toBe(null);
     expect(r.deferKind).toBe("policy-deny"); // derived, not passed
   });
 
