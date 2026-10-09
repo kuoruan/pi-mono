@@ -81,6 +81,9 @@ Two independent axes. **TypeSafe** is the transport/provider surface (SDK client
 The chat lane's route through `ModelRegistry.streamSimple` — the agent's own call path. Never the provider layer directly.
 _Avoid_: provider-layer calls
 
+**Pi version floor**:
+The runtime Pi version each lane needs — chat `≥ 0.86` (`streamSimple`), registry-classifier `≥ 0.99` (`classify`/`findOfType`, admission-gated). The source targets the 0.99 type surface for maintainers; Pi erases types at load, so a 0.86 host runs the chat lane unaffected.
+
 **Full review**:
 The JSON-verdict review: the model receives a stripped transcript plus the permission request and returns a verdict, reason, and risk level. A tolerant parser extracts the JSON from prose-wrapped replies.
 
