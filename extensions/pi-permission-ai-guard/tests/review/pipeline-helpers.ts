@@ -258,8 +258,8 @@ export const defaultRegistry = (
   }> = {},
 ): ModelRegistryLike => ({
   // Unit tests drive the pipeline through the `modelCall` seam, never
-  // the registry — `complete` is unreachable here.
-  complete: () => {
+  // the registry — `streamSimple` is unreachable here.
+  streamSimple: () => {
     throw new Error("unreachable in unit tests");
   },
   find: () => fakeModel,

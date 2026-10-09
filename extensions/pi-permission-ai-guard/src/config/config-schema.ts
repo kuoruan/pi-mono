@@ -246,11 +246,12 @@ const configBaseSchema = z.object({
   model: z.string().min(1),
   reasoning: z.enum(REASONING_VALUES).default("off"),
   timeoutMs: z.number().int().min(1).max(300_000).default(15_000),
-  // Reviewer reply budget: for a plain chat model 512 is plenty, but a
-  // reasoning upstream (e.g. an alias onto a thinking model) spends the
-  // budget on thinking blocks first — too small a cap truncates the reply
-  // mid-think and surfaces as the empty-reply machinery failure. 4096
-  // leaves headroom for both.
+  // Reviewer answer budget. For a plain chat model 512 is plenty. With
+  // reasoning on the provider families differ: budget-based ones (Anthropic,
+  // Bedrock) add the thinking budget on top of this, while effort-based ones
+  // (OpenAI-compatible) share this cap with thinking — a too-small cap there
+  // truncates the reply mid-think and surfaces as the empty-reply machinery
+  // failure. 4096 keeps the stricter, effort-based case safe.
   maxTokens: z.number().int().min(16).max(32768).default(4096),
 
   // Transcript stripping: how much context to keep for the model review.

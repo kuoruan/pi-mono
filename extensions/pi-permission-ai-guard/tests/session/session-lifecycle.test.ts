@@ -69,7 +69,7 @@ function makeSeed(overrides: Partial<SessionSeed> = {}): SessionSeed {
     },
     registry: {
       find: () => undefined,
-      complete: () => {
+      streamSimple: () => {
         throw new Error("unreachable in unit tests");
       },
       // The failing arm of the auth union needs its `error`; supplying it
@@ -297,6 +297,29 @@ describe("SessionLifecycle — session identity + registration guard", () => {
     // made the registration throw.
     lifecycle.onSessionStart(makeSeed());
     expect(mocks.registerAuthorizer).toHaveBeenCalledTimes(2);
+  });
+
+  it("a host below the streamSimple floor fails safe with an upgrade notice", () => {
+    const { lifecycle } = makeLifecycle();
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    // Simulate pi < 0.86: the registry facade has no `streamSimple` (the
+    // chat lane's only correct call path). Registration must fail safe at
+    // session start, never register a guard that would defer every ask.
+    const registry = {
+      find: () => undefined,
+      getApiKeyAndHeaders: async () => ({ ok: false as const, error: "no key" }),
+    };
+    lifecycle.onSessionStart(
+      makeSeed({
+        registry: registry as unknown as SessionSeed["registry"],
+        ctx: makeCtx(notify),
+      }),
+    );
+    expect(mocks.registerAuthorizer).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("registry.streamSimple missing"),
+      "error",
+    );
   });
 });
 

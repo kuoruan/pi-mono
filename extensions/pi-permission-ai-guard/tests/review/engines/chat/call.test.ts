@@ -1,4 +1,10 @@
-import type { AssistantMessage, Model, Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type {
+  AssistantMessage,
+  AssistantMessageEventStream,
+  Model,
+  Context,
+  SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 import type { AuthorizerLog } from "@gotgenes/pi-permission-system";
 import { describe, expect, it, vi } from "vitest";
 
@@ -329,22 +335,34 @@ describe("reviewModel — riskLevel passthrough", () => {
 });
 
 describe("createModelCall", () => {
-  it("delegates to registry.complete with model, context, and options", async () => {
+  it("delegates to registry.streamSimple().result() with model, context, and options", async () => {
     // An opaque marker: this test pins pass-through identity, not the reply shape.
     const reply = { ok: true } as unknown as AssistantMessage;
-    const complete = vi.fn<() => Promise<AssistantMessage>>(async () => reply);
+    const result = vi.fn<() => Promise<AssistantMessage>>(async () => reply);
+    const streamSimple = vi.fn<() => AssistantMessageEventStream>(
+      () => ({ result }) as unknown as AssistantMessageEventStream,
+    );
     const registry = {
       find: () => undefined,
       getApiKeyAndHeaders: async () => ({ ok: false as const, error: "unused" }),
-      complete,
+      streamSimple,
     } satisfies ChatRegistryLike;
     const run = createModelCall(() => registry);
     const model = { provider: "test" } as Model<any>;
     const context = { messages: [] };
-    const options = { maxTokens: 1 };
+    // signal + maxRetries must survive the call: the walk budget and the
+    // hasFailover retry contract both ride on them. reasoning is the whole
+    // point of the switch — the option the low-level `complete` path dropped.
+    const options = {
+      maxTokens: 1,
+      maxRetries: 0,
+      signal: new AbortController().signal,
+      reasoning: "medium" as const,
+    };
     await expect(run(model, context, options)).resolves.toBe(reply);
-    expect(complete).toHaveBeenCalledTimes(1);
-    expect(complete).toHaveBeenCalledWith(model, context, options);
+    expect(streamSimple).toHaveBeenCalledTimes(1);
+    expect(streamSimple).toHaveBeenCalledWith(model, context, options);
+    expect(result).toHaveBeenCalledTimes(1);
   });
 
   it("throws when registry is undefined", async () => {

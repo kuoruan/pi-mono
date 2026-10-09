@@ -193,7 +193,7 @@
       "minimum": 16,
       "maximum": 32768,
       "default": 4096,
-      "description": "Reviewer reply budget in tokens. Thinking blocks count against it on reasoning upstreams; too small a cap truncates the reply mid-think (the empty-reply machinery failure)."
+      "description": "Reviewer answer budget in tokens. With reasoning on, budget-based providers (Anthropic, Bedrock) add the thinking budget on top, while effort-based providers (OpenAI-compatible) share this cap with thinking; too small a cap truncates the reply mid-think (the empty-reply machinery failure)."
     },
     "mode": {
       "type": "string",

@@ -309,7 +309,7 @@ function buildHarness(
   const nullRegistry: ModelRegistryLike = {
     find: () => undefined,
     getApiKeyAndHeaders: async () => ({ ok: false as const, error: "no registry" }),
-    complete: async () => {
+    streamSimple: () => {
       throw new Error("no registry");
     },
   };
@@ -325,15 +325,13 @@ function buildHarness(
             getApiKeyAndHeaders: async () => ({ ok: true, apiKey }),
             // Integration harness: stand in for the agent's registry by delegating
             // to the real provider (dev-only; pi-ai >= 0.86 brands the provider input).
-            complete: (m, context, options) =>
+            streamSimple: (m, context, options) =>
               // The harness only runs the anthropic/openai providers, both Simple.
-              providerInstance
-                .streamSimple(
-                  m,
-                  normalizeContext(context),
-                  options as SimpleStreamOptions | undefined,
-                )
-                .result(),
+              providerInstance.streamSimple(
+                m,
+                normalizeContext(context),
+                options as SimpleStreamOptions | undefined,
+              ),
           };
     return buildReviewerPool(config, {
       registry,

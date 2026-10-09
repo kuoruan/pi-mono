@@ -94,8 +94,9 @@ export function createAiGuardExtension(
     // The authorizer factory defaults to the real ReviewPipeline. Tests
     // inject a stub to exercise lifecycle timing without the model stack.
     createPipeline: dependencies.createPipeline ?? createReviewPipeline,
-    // Model calls go through `ModelRegistry.complete` — the agent's own
-    // call path, never the provider layer directly.
+    // Model calls go through `ModelRegistry.streamSimple` — the agent's own
+    // call path, never the provider layer directly. `complete` is avoided on
+    // purpose: its low-level `stream` drops the simple-layer `reasoning` option.
     modelCall: dependencies.modelCall ?? createModelCall(() => lifecycle.session?.registry),
   });
 

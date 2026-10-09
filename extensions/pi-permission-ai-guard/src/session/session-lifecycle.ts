@@ -437,6 +437,13 @@ export class SessionLifecycle {
       // unresolvable endpoint throws here → caught below → fail-safe
       // session start (no auto-review), never a per-ask surprise.
       const config = session.load.config;
+      // Hard host floor: `registry.streamSimple` (pi >= 0.86) is the chat
+      // lane's only correct call path. A host below the floor lacks the
+      // method entirely; fail safe at session start with a clear cause
+      // instead of letting every ask silently defer as `call-failed`.
+      if (typeof session.registry.streamSimple !== "function") {
+        throw new Error("registry.streamSimple missing — ai-guard needs pi >= 0.86; upgrade pi");
+      }
       const engine: ReviewerEngine = buildReviewerPool(config, {
         registry: session.registry,
         modelCall: this.#deps.modelCall,

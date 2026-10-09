@@ -149,6 +149,9 @@ function makeSessionCtx(
       find: () => undefined,
       getProvider: () => undefined,
       getApiKeyAndHeaders: async () => ({ ok: false }),
+      streamSimple: () => {
+        throw new Error("unreachable in unit tests");
+      },
     },
     sessionManager: {
       getSessionId: () => "s1",

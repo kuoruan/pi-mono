@@ -22,6 +22,7 @@ import {
   type AssistantMessage,
   type Context,
   type Model,
+  type ModelsSimpleStreamOptions,
   type SimpleStreamOptions,
   contentText,
 } from "@earendil-works/pi-ai";
@@ -41,11 +42,20 @@ import { parseTextFallback } from "#src/review/engines/chat/verdict-parser.ts";
 import { availabilityReason } from "#src/review/failure-taxonomy.ts";
 import { classifyAbortish, normalizeAndRedactText, truncateMiddle } from "#src/utils.ts";
 
-/** One model-call round trip: (model, context, options) → the full reply. */
+/**
+ * One model-call round trip: (model, context, options) → the full reply.
+ *
+ * The options type is the registry's own `ModelsSimpleStreamOptions` rather
+ * than a hand-written `SimpleStreamOptions`. That is the bug this seam used
+ * to carry: a simple-layer options bag (with `reasoning`) handed to a
+ * lower-level `reasoningEffort` signature is structurally assignable, so the
+ * transport silently dropped `reasoning` with no compile error. Naming the
+ * registry's parameter keeps the seam honest about which layer it feeds.
+ */
 export type ModelCallFn = (
   model: Model<Api>,
   context: Context,
-  options?: SimpleStreamOptions,
+  options?: ModelsSimpleStreamOptions,
 ) => Promise<AssistantMessage>;
 
 /**
@@ -84,19 +94,32 @@ export interface ModelCallContext extends AuditCorrelation {
   auth: ModelCallAuth;
   /** Reasoning level ("off" omits the option). */
   reasoning: AiGuardConfig["reasoning"];
-  /** Reply budget — thinking blocks count against it on reasoning upstreams. */
+  /**
+   * Reviewer answer budget. On budget-based reasoning providers (Anthropic,
+   * Bedrock) pi-ai adds the thinking budget on top, so the outbound cap can
+   * exceed this (bounded by the model's own `maxTokens`); effort-based
+   * providers use it as the cap. See README's `maxTokens` row.
+   */
   maxTokens: number;
 }
 
 /**
- * Build the model completer on top of `ModelRegistry.complete` — the
+ * Build the model completer on top of `ModelRegistry.streamSimple` — the
  * agent's own call path (raw `Context` in, auth + transcript normalization
- * handled inside the registry). Never the provider layer: pi-ai brands the
- * provider input, so a direct `getProvider().streamSimple()` call breaks
- * whenever upstream tightens it.
+ * handled inside the registry).
+ *
+ * Deliberately not `complete`, which delegates to the provider's low-level
+ * `stream` and therefore only understands `reasoningEffort`, silently
+ * discarding the simple-layer `reasoning` option and pinning every review
+ * to the provider's `off` level. And deliberately not the provider layer
+ * (`getProvider().streamSimple()`): pi-ai brands the provider input, so
+ * that call breaks whenever upstream tightens it.
+ *
+ * `registry.streamSimple` requires pi >= 0.86 (the registry facade gained it
+ * there); the peer dependency floor matches.
  *
  * @param getRegistry - Function returning the model registry (or undefined if unavailable).
- * @returns A `ModelCallFn` that completes a model call via `registry.complete`.
+ * @returns A `ModelCallFn` that completes a model call via `registry.streamSimple`.
  */
 export function createModelCall(getRegistry: () => ModelRegistryLike | undefined): ModelCallFn {
   return async (model, context, options) => {
@@ -104,7 +127,7 @@ export function createModelCall(getRegistry: () => ModelRegistryLike | undefined
     if (!registry) {
       throw new Error("No model registry available");
     }
-    return registry.complete(model, context, options);
+    return registry.streamSimple(model, context, options).result();
   };
 }
 

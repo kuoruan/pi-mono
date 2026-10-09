@@ -78,7 +78,7 @@ The review-outcome producer seam. One pooled supervisor walks an ordered, hetero
 Two independent axes. **TypeSafe** is the transport/provider surface (SDK client, wire shapes, provider value, env fallbacks). **Jev** is the model strategy (question set, calibration, overlay, verdict synthesis).
 
 **Model call path**:
-The chat lane's route through `ModelRegistry.complete` — the agent's own call path. Never the provider layer directly.
+The chat lane's route through `ModelRegistry.streamSimple` — the agent's own call path. Never the provider layer directly.
 _Avoid_: provider-layer calls
 
 **Full review**:
