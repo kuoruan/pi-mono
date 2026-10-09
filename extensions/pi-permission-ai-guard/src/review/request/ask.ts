@@ -105,7 +105,7 @@ export interface AskContext {
    * path) this is exact. For `bash_external_directory` (possibly many flagged
    * paths) this is the alias of the first external-path entry that carries
    * one, not per-path attribution — a known, bounded limitation (see
-   * CONTEXT.md: `allow` is capped to `defer` on this surface regardless).
+   * GLOSSARY.md: `allow` is capped to `defer` on this surface regardless).
    */
   readonly resolvedAlias?: string;
   /** Canonical boundary from `details.accessIntent.boundaryValue` (path surfaces). */
@@ -318,7 +318,7 @@ function matchSurface(configured: readonly string[], surface: string): boolean {
  *
  * Note: `external_directory`/`path` allows are capped to `defer` by the host's
  * bounded-delegation checkpoint regardless of target correctness (see
- * CONTEXT.md "Ask eligibility") — the link's value there is limited to a
+ * GLOSSARY.md "Ask eligibility") — the link's value there is limited to a
  * confident `deny`.
  *
  * @param details - The permission ask details.

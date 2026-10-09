@@ -54,7 +54,7 @@ Thread the resolved selection/roots through the existing ToolServices seam:
 
 ## Why this was deferred, not done in the first pass
 
-- The explicit-snapshot discipline (CONTEXT.md: "nobody re-reads the singleton mid-render" — wrappers pass `resolveDiffPalette`'s return value down) already confines the ambient-read risk to the derivation inputs. No known bug has been attributed to these reads.
+- The explicit-snapshot discipline (GLOSSARY.md: "nobody re-reads the singleton mid-render" — wrappers pass `resolveDiffPalette`'s return value down) already confines the ambient-read risk to the derivation inputs. No known bug has been attributed to these reads.
 - The threading cost concentrates in the theme stack's depth: `hlBlock` reads the selection far below the wrapper that knows it. Making it a parameter means changing `hlBlock`'s interface, every caller, and the highlight cache key — a wide seam for a hypothetical payoff.
 - ADR 0006 does not mandate the singletons; it also does not forbid them.
 

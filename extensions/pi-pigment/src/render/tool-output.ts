@@ -1,7 +1,7 @@
 /**
  * The result-BODY rendering vocabulary: the output memo (identity-keyed
  * derive), the collapsed-view window authority
- * (CONTEXT.md: one window concept, the budgets + tail grammar), and the
+ * (GLOSSARY.md: one window concept, the budgets + tail grammar), and the
  * execution clock the Took footer reads. The TUI contract (render
  * context, per-tool states) and the assembly inputs stay in
  * tool-services; wrappers import their slice by intent — a wrapper's

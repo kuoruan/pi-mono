@@ -17,8 +17,8 @@ A pnpm monorepo for PI Agent extension packages.
 ├── .oxlintrc.json          # oxlint linter config (rules + overrides)
 ├── .node-version           # Node.js version pin (22)
 ├── .npmrc                  # pnpm settings (auto-install-peers, peer-dependency strictness)
-├── CONTEXT.md              # Workspace-level domain language
-├── CONTEXT-MAP.md          # Index of contexts in the repo
+├── GLOSSARY.md             # Workspace-level domain language
+├── GLOSSARY-MAP.md         # Index of contexts in the repo
 ├── package.json            # Workspace root (private, devDependencies, scripts)
 ├── pnpm-workspace.yaml     # Workspace packages + catalog (shared dep versions)
 └── vitest.config.ts        # Root vitest projects-mode config (runs all packages)
