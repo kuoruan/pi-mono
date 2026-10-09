@@ -84,6 +84,9 @@ _Avoid_: provider-layer calls
 **Pi version floor**:
 The runtime Pi version each lane needs — chat `≥ 0.86` (`streamSimple`), registry-classifier `≥ 0.99` (`classify`/`findOfType`, admission-gated). The source targets the 0.99 type surface for maintainers; Pi erases types at load, so a 0.86 host runs the chat lane unaffected.
 
+**Lane fact inventory**:
+The cross-lane contract for ask facts (`tests/review/lane-facts.ts`): every `AskContext` / `PromptRequestFacts` field classified per lane as rendered (with its name and encoder) or excluded (with a reason). Exhaustive by construction, so a new upstream fact stops compilation until both lanes decide. It pins presence, not presentation — the lanes fork deliberately on some encodings (chat words vs classifier raw `commandContext`; chat-redacted vs verbatim cwd).
+
 **Full review**:
 The JSON-verdict review: the model receives a stripped transcript plus the permission request and returns a verdict, reason, and risk level. A tolerant parser extracts the JSON from prose-wrapped replies.
 

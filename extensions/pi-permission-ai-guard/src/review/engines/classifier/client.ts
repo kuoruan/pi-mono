@@ -113,6 +113,13 @@ function buildState(request: ReviewRequestContext, transcript: StrippedTranscrip
     state.canonical_boundary = normalizeAndRedactText(ask.canonicalBoundary);
   }
   if (ask.resolvedAlias) state.resolved_alias = normalizeAndRedactText(ask.resolvedAlias);
+  if (ask.request.executedUnit) {
+    state.executed_unit = normalizeAndRedactText(ask.request.executedUnit);
+  }
+  if (ask.request.matchedPattern) {
+    state.matched_pattern = normalizeAndRedactText(ask.request.matchedPattern);
+  }
+  if (ask.request.commandContext) state.command_context = ask.request.commandContext;
   return state;
 }
 
