@@ -514,6 +514,183 @@ describe("loadAiGuardConfig", () => {
     expect(disk).not.toContain("live-fb-key");
   });
 
+  it("keeps an array placeholder when the element ahead of it is deleted and the variable vanished", () => {
+    // The ref-holding element is no longer at the snapshot entry's index: the
+    // operator deleted the element ahead of it. Pairing by position then
+    // missed the placeholder and wrote the expanded secret, so the remaining
+    // disk elements are searched for it instead.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "m",
+        fallbacks: [
+          {
+            provider: { type: "typesafe", baseUrl: "https://x.ai/api", apiKey: "plain-literal" },
+            model: "fb2",
+          },
+          {
+            provider: {
+              type: "typesafe",
+              baseUrl: "https://x.ai/api",
+              apiKey: "${TEST_AI_GUARD_FB_KEY}",
+            },
+            model: "fb",
+          },
+        ],
+      }),
+    });
+    const loaded = loadAiGuardConfig(env(), { TEST_AI_GUARD_FB_KEY: "live-fb-key" });
+    expect(loaded.config).toBeDefined();
+    const saved = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...loaded.config!, fallbacks: [loaded.config!.fallbacks![1]] },
+      vars: {},
+    });
+    expect(saved.error).toContain("no longer resolves");
+    expect(saved.changed).toBe(false);
+    const disk = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(disk).not.toContain("live-fb-key");
+    expect(disk).toContain("${TEST_AI_GUARD_FB_KEY}");
+  });
+
+  it("keeps an array placeholder when the elements are reordered and the variable vanished", () => {
+    // Content matching is order-insensitive, so the ref element is still
+    // matched when it leads — but the snapshot entry it pairs with can only be
+    // identified by holding an unresolvable ref, never by position.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "m",
+        fallbacks: [
+          {
+            provider: { type: "typesafe", baseUrl: "https://x.ai/api", apiKey: "plain-literal" },
+            model: "fb2",
+          },
+          {
+            provider: {
+              type: "typesafe",
+              baseUrl: "https://x.ai/api",
+              apiKey: "${TEST_AI_GUARD_FB_KEY}",
+            },
+            model: "fb",
+          },
+        ],
+      }),
+    });
+    const loaded = loadAiGuardConfig(env(), { TEST_AI_GUARD_FB_KEY: "live-fb-key" });
+    expect(loaded.config).toBeDefined();
+    const saved = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: {
+        ...loaded.config!,
+        fallbacks: [loaded.config!.fallbacks![1], loaded.config!.fallbacks![0]],
+      },
+      vars: {},
+    });
+    expect(saved.error).toContain("no longer resolves");
+    expect(saved.changed).toBe(false);
+    const disk = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(disk).not.toContain("live-fb-key");
+    expect(disk).toContain("${TEST_AI_GUARD_FB_KEY}");
+  });
+
+  it("keeps an array placeholder whose variable vanished instead of writing the secret", () => {
+    // Loading expanded the ref; saving runs with the variable gone (rotated,
+    // or simply not exported in this shell). No disk element then equals the
+    // snapshot entry, and the array branch used to fall back to the snapshot
+    // value — writing the expanded secret over the operator's placeholder.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "m",
+        fallbacks: [
+          {
+            provider: {
+              type: "typesafe",
+              baseUrl: "https://x.ai/api",
+              apiKey: "${TEST_AI_GUARD_FB_KEY}",
+            },
+            model: "fb",
+          },
+        ],
+      }),
+    });
+    const loaded = loadAiGuardConfig(env(), { TEST_AI_GUARD_FB_KEY: "live-fb-key" });
+    expect(loaded.config?.fallbacks?.[0]).toBeDefined();
+
+    const saved = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: { ...loaded.config!, model: "m2" },
+      vars: {},
+    });
+    // Nothing leaks and nothing is written: the payload carries the ref, and
+    // the final gate refuses because it cannot confirm a ref it can no longer
+    // expand — naming the drift, not a duplicate key that does not exist.
+    expect(saved.error).toContain("a ref at fallbacks no longer resolves");
+    expect(saved.changed).toBe(false);
+    const disk = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(disk).not.toContain("live-fb-key");
+    expect(disk).toContain("${TEST_AI_GUARD_FB_KEY}");
+  });
+
+  it("writes an edited array leaf when the disk ref still resolves", () => {
+    // The counterpart guard to the leak test above: the fallback only fires
+    // for a ref that no longer expands, so with the ref resolving, the disk
+    // text cannot explain the difference and a real edit is never traded
+    // away for the placeholder.
+    vol.fromJSON({
+      "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
+        provider: "anthropic",
+        model: "m",
+        fallbacks: [
+          {
+            provider: {
+              type: "typesafe",
+              baseUrl: "https://x.ai/api",
+              apiKey: "${TEST_AI_GUARD_FB_KEY}",
+            },
+            model: "fb",
+          },
+        ],
+      }),
+    });
+    const loaded = loadAiGuardConfig(env(), { TEST_AI_GUARD_FB_KEY: "live-fb-key" });
+    const saved = persistConfigLayer({
+      target: "global",
+      env: env(),
+      config: {
+        ...loaded.config!,
+        fallbacks: [
+          {
+            provider: { type: "typesafe", baseUrl: "https://x.ai/api", apiKey: "edited-key" },
+            model: "fb",
+          },
+        ],
+      },
+      vars: { TEST_AI_GUARD_FB_KEY: "live-fb-key" },
+    });
+    expect(saved.error).toBeUndefined();
+    expect(saved.changed).toBe(true);
+    const disk = vol.readFileSync(
+      "/agent/extensions/pi-permission-ai-guard/config.json",
+      "utf-8",
+    ) as string;
+    expect(disk).toContain("edited-key");
+    expect(disk).not.toContain("${TEST_AI_GUARD_FB_KEY}");
+  });
+
   it("keeps array placeholders when a snapshot entry is prepended", () => {
     vol.fromJSON({
       "/agent/extensions/pi-permission-ai-guard/config.json": JSON.stringify({
@@ -629,6 +806,13 @@ describe("loadAiGuardConfig", () => {
     });
     it("returns undefined for a missing variable without fallback", () => {
       expect(expandEnvRefs("${MISSING}", vars)).toBeUndefined();
+    });
+    it("treats a prototype key as unset, never as a variable", () => {
+      // `${constructor}` used to expand to "function Object() { [native
+      // code] }", which then passed the min(1) schema check as a value.
+      expect(expandEnvRefs("${constructor}", vars)).toBeUndefined();
+      expect(expandEnvRefs("${__proto__}", vars)).toBeUndefined();
+      expect(expandEnvRefs("${constructor:-fb}", vars)).toBe("fb");
     });
   });
 

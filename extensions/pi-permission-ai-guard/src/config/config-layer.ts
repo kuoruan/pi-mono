@@ -160,6 +160,12 @@ type ReadLayerResult =
   | { ok: true; value: Record<string, unknown>; failure?: never }
   | { ok: false; failure: LayerParseFailure; value?: never };
 
+/** A raw layer file: its path plus the parsed, still-unexpanded value. */
+interface RawLayer {
+  path: string;
+  value: Record<string, unknown>;
+}
+
 /**
  * Locate the layer's config file. Discovery order: `config.jsonc` first,
  * then `config.json` (dual presence is ambiguous — `.jsonc` wins via the
@@ -338,7 +344,8 @@ function foldLegacyAlias(
  * expands to the variable's value, `${NAME:-fallback}` uses the fallback
  * when the variable is unset or empty, and `$$` escapes to a literal `$`.
  * Anything else is literal — `$NAME` (no braces), `${NAME:?…}`, and
- * command substitution are NOT supported by design.
+ * command substitution are NOT supported by design. Refs do not nest either:
+ * `${A:-${B}}` is read up to the first `}`, so the inner ref stays literal.
  *
  * @param value - The string value to expand.
  * @param vars - The variable source (production passes `process.env`).
@@ -371,26 +378,49 @@ export function expandEnvRefs(
     const fallbackAt = expr.indexOf(":-");
     const name = fallbackAt < 0 ? expr : expr.slice(0, fallbackAt);
     const fallback = fallbackAt < 0 ? undefined : expr.slice(fallbackAt + 2);
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name ?? "")) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
       out += "${" + expr + "}";
       continue;
     }
-    const found = vars[name as string];
+    // Own properties only: a prototype key (`${constructor}`, `${__proto__}`)
+    // is not a variable, so an unset ref must read as unset — skip the layer
+    // or take the fallback — instead of expanding the prototype member.
+    const found = Object.hasOwn(vars, name) ? vars[name] : undefined;
     if (found !== undefined && found !== "") {
       out += found;
     } else if (fallback !== undefined) {
       out += done(fallback);
     } else {
-      onUnresolved?.(name ?? "");
+      onUnresolved?.(name);
       return undefined;
     }
   }
 }
 
 // ── Leaf provenance: how a save knows what a leaf looked like on disk ──
-// One concept, four predicates — `readRawLayer` → `restorePlaceholders` →
-// `leafEquals`, all walking with `descend`'s read/write split. Read them
-// together; none is meaningful alone.
+// One concept and the predicates built on it — `readRawLayer` →
+// `restorePlaceholders` → `leafEquals`, all walking with `descend`'s
+// read/write split, plus the `refEquivalent` rule the last two share. Read
+// them together; none is meaningful alone.
+
+/**
+ * Whether an on-disk string IS the placeholder for a snapshot value: the one
+ * rule {@link leafEquals} and {@link restorePlaceholders} both decide with —
+ * skip the leaf, or put the ref (never its expansion) back into the file.
+ * Keeping it in one place is what stops the two from drifting apart.
+ *
+ * @param diskText - The string as it appears on disk (refs intact).
+ * @param snapshotValue - The expanded in-memory value it must stand for.
+ * @param vars - The variable source for the equivalence.
+ * @returns True when expanding the disk text yields exactly that value.
+ */
+function refEquivalent(
+  diskText: string,
+  snapshotValue: unknown,
+  vars: Record<string, string | undefined>,
+): boolean {
+  return expandEnvRefs(diskText, vars) === snapshotValue;
+}
 
 /**
  * Whether a disk leaf counts as equal to a snapshot leaf: identical, or
@@ -423,8 +453,26 @@ function leafEquals(
   }
   return (
     isDeepStrictEqual(previous, value) ||
-    (typeof previous === "string" && expandEnvRefs(previous, vars) === value)
+    (typeof previous === "string" && refEquivalent(previous, value, vars))
   );
+}
+
+/**
+ * Does this subtree hold an env ref that no longer resolves? The signal that a
+ * disk element's placeholder — not its value — is what a mismatched snapshot
+ * entry came from, so restoring the disk text cannot drop a real edit.
+ *
+ * @param node - The subtree to scan.
+ * @param vars - The variable source.
+ * @returns True when at least one `${VAR}` no longer resolves.
+ */
+function hasUnresolvedRef(node: unknown, vars: Record<string, string | undefined>): boolean {
+  if (typeof node === "string") {
+    return node.includes("${") && expandEnvRefs(node, vars) === undefined;
+  }
+  if (Array.isArray(node)) return node.some((item) => hasUnresolvedRef(item, vars));
+  if (isObjectRecord(node)) return Object.values(node).some((item) => hasUnresolvedRef(item, vars));
+  return false;
 }
 
 /**
@@ -433,10 +481,12 @@ function leafEquals(
  * in-memory snapshot (refs already expanded): without restoration a
  * changed array leaf would write back expanded secrets, destroying the
  * placeholders. Elements resolving to the snapshot value revert to the
- * on-disk text; everything else keeps the snapshot value. A ref whose
- * variable vanished since load (env drift) also reverts to the on-disk
- * text — the placeholder is the operator's intent, and the integrity
- * gate refuses the write if it no longer matches the snapshot.
+ * on-disk text; an element whose on-disk counterpart can no longer expand
+ * (env drift) is paired with that counterpart — wherever it sits — and
+ * reverts to its text too: the placeholder is the operator's intent, and the
+ * integrity gate refuses the write if the restoration no longer matches the
+ * snapshot. Only an element with nothing to preserve keeps the snapshot
+ * value.
  *
  * @param previous - The subtree read from disk.
  * @param value - The snapshot subtree.
@@ -449,7 +499,7 @@ function restorePlaceholders(
   vars: Record<string, string | undefined>,
 ): unknown {
   if (typeof previous === "string") {
-    if (expandEnvRefs(previous, vars) === value) return previous;
+    if (refEquivalent(previous, value, vars)) return previous;
     // Env drift (or an edited value over a placeholder): never write the
     // snapshot's expanded secret over a ref the operator left on disk.
     if (previous.includes("${")) return previous;
@@ -460,7 +510,14 @@ function restorePlaceholders(
     // each element's on-disk placeholder. Each disk element is spent once.
     const unused = [...previous];
     return value.map((item) => {
-      const hit = unused.findIndex((candidate) => leafEquals(candidate, item, vars));
+      let hit = unused.findIndex((candidate) => leafEquals(candidate, item, vars));
+      // No content match. The disk element is what the snapshot entry came
+      // from when its ref no longer expands — the disk text is still what the
+      // operator meant, and the snapshot value would write the expanded
+      // secret over it. The match above consumed every resolvable ref, so this
+      // only ever pairs with an unresolvable one; an element with nothing to
+      // preserve keeps the item, so a real edit still wins.
+      if (hit === -1) hit = unused.findIndex((candidate) => hasUnresolvedRef(candidate, vars));
       if (hit === -1) return item;
       const [matched] = unused.splice(hit, 1);
       return restorePlaceholders(matched, item, vars);
@@ -912,7 +969,7 @@ export function persistConfigLayer(options: PersistConfigOptions): SaveConfigRes
  * @param dir - The layer's config directory.
  * @returns The file path plus its parsed object, if any.
  */
-function readRawLayer(dir: string): { path: string; value: Record<string, unknown> } | undefined {
+function readRawLayer(dir: string): RawLayer | undefined {
   const file = resolveLayerFile(dir);
   if (!file) return undefined;
   let text: string;
@@ -950,6 +1007,10 @@ function createLayerFile(
     // Stringifying the snapshot verbatim would persist the expanded secret
     // into a file — an often-committed project config — that never held it.
     const template = restorePlaceholders(sibling ?? {}, data, vars);
+    // No integrity gate here, unlike the edit branch: a ref the sibling holds
+    // goes into the new file exactly as the operator wrote it, and the loader
+    // names the missing variable on the next read — refusing to create the
+    // file would leave a first-time setup with nothing to fix.
     writeFileSync(path, `${JSON.stringify(template, null, 2)}\n`, "utf-8");
   } catch (error) {
     return { path, created: false, changed: false, error: errorMessage(error) };
@@ -1084,6 +1145,17 @@ function editLayerFile(
           expandEnvRefs(saved, vars) === undefined
             ? `refusing to write — ${saved} no longer resolves; set the variable (or edit the value) and save again`
             : `refusing to write — ${saved} no longer matches the saved value; edit the file's ref or the config, then save again`,
+      };
+    }
+    // A structural leaf (arrays are written whole) mismatches the same way
+    // when one of its refs no longer resolves — there is no duplicate key to
+    // find, so name the drift instead of the shadowing cause below.
+    if (hasUnresolvedRef(saved, vars)) {
+      return {
+        path,
+        created: false,
+        changed: false,
+        error: `refusing to write — a ref at ${leafPath.join(".")} no longer resolves; set the variable (or edit the value) and save again`,
       };
     }
     return {

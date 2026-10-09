@@ -14,26 +14,28 @@ import { describe, expect, it } from "vitest";
 
 import {
   BREAKER_VERDICT_VALUES,
+  CLASSIFIER_QUESTION_IDS,
   MODEL_TYPE_VALUES,
   MODE_VALUES,
+  NOTIFY_LEVEL_VALUES,
   REASONING_VALUES,
   configSchema,
 } from "#src/config/config-schema.ts";
 import { isObjectRecord } from "#src/utils.ts";
 
+/** The schema shape this test reads: enough of draft-07 to walk it. */
+interface SchemaNode {
+  default?: unknown;
+  description?: string;
+  enum?: unknown[];
+  properties?: Record<string, SchemaNode>;
+  anyOf?: SchemaNode[];
+  propertyNames?: { enum?: unknown[] };
+}
+
 const schemaJson = JSON.parse(
   readFileSync(new URL("../../schemas/ai-guard.schema.json", import.meta.url), "utf-8"),
-) as {
-  properties: Record<
-    string,
-    {
-      default?: unknown;
-      description?: string;
-      enum?: unknown[];
-      properties?: Record<string, { enum?: unknown[]; default?: unknown }>;
-    }
-  >;
-};
+) as { properties: Record<string, SchemaNode> };
 
 /**
  * Collect leaf paths and values from a materialized config object, as a
@@ -112,13 +114,6 @@ function readmeDefaults(readme: string): Record<string, string> {
     if (key && claimed !== undefined) out[key] = claimed;
   }
   return out;
-}
-
-/** A JSON-schema node, as far as the default walk needs to see it. */
-interface SchemaNode {
-  default?: unknown;
-  properties?: Record<string, SchemaNode>;
-  anyOf?: SchemaNode[];
 }
 
 /**
@@ -255,6 +250,11 @@ describe("config surface drift", () => {
     expect(schemaJson.properties.mode.enum).toEqual([...MODE_VALUES]);
     expect(schemaJson.properties.reasoning.enum).toEqual([...REASONING_VALUES]);
     expect(schemaJson.properties.modelType.enum).toEqual([...MODEL_TYPE_VALUES]);
+    expect(schemaJson.properties.notifyLevel.enum).toEqual([...NOTIFY_LEVEL_VALUES]);
+    expect(
+      schemaJson.properties.instructions.anyOf![1]!.properties!.classifier!.properties!.questions!
+        .propertyNames!.enum,
+    ).toEqual([...CLASSIFIER_QUESTION_IDS]);
     expect(schemaJson.properties.circuitBreaker.properties!.verdict.enum).toEqual([
       ...BREAKER_VERDICT_VALUES,
     ]);
