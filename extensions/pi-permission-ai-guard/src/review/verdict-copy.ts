@@ -35,6 +35,18 @@ export function machineryDeferNotice(kind: MachineryFailureKind): string {
 }
 
 /**
+ * The human notice mirroring the model's own clarification request — the dialog
+ * alone never shows WHAT the reviewer wants clarified. No structural colon: the
+ * TUI's own level prefix would double it up.
+ *
+ * @param clarification - The model's clarification request.
+ * @returns The notification message.
+ */
+export function modelDeferNotice(clarification: string): string {
+  return `reviewer asks — ${clarification}`;
+}
+
+/**
  * The deny reason for a machinery-failure denial: the agent sees why the
  * review could not complete instead of a silent deny. Mode-parameterized
  * so audit readers see which policy produced the deny.

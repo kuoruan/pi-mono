@@ -137,6 +137,43 @@ describe("buildReportCandidates", () => {
     expect(buildReportCandidates(entries)).toHaveLength(0);
   });
 
+  it("offers no rule built on a redacted target", () => {
+    // Targets are redacted before they reach the log, so a group can carry the
+    // placeholder. A rule templated from it would propose allowing a string
+    // that matches nothing and hides what the rule was meant to cover.
+    const entries = [1, 2, 3].map((i) =>
+      model({
+        requestId: `r${i}`,
+        target: 'curl -H "Authorization: Bearer [REDACTED]" https://example.test',
+        contextHash: "ctxh1",
+      }),
+    );
+    expect(buildReportCandidates(entries)).toHaveLength(0);
+  });
+
+  it("excludes groups whose mode escalated a defer into an allow", () => {
+    // The reviewer declined to decide and the mode auto-approved: the operator
+    // never saw it, so a rule from such a group would allow what the reviewer
+    // refused to judge.
+    const entries = [
+      model({ requestId: "r1", target: "ls", contextHash: "ctxh1" }),
+      model({ requestId: "r2", target: "ls", contextHash: "ctxh1" }),
+      model({
+        requestId: "r3",
+        target: "ls",
+        contextHash: "ctxh1",
+        verdict: "defer",
+        emittedVerdict: "allow",
+      }),
+    ];
+    expect(buildReportCandidates(entries)).toHaveLength(0);
+
+    // One more genuine occurrence and the group is a candidate again — so the
+    // exclusion above is about the escalated record, not about the count.
+    const withThird = [...entries, model({ requestId: "r4", target: "ls", contextHash: "ctxh1" })];
+    expect(buildReportCandidates(withThird)).toHaveLength(1);
+  });
+
   it("excludes groups whose mode escalated a defer into a deny", () => {
     const entries = [
       model({ requestId: "r1", target: "ls", contextHash: "ctxh1" }),

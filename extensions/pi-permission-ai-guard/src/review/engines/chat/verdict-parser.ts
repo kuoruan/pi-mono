@@ -191,29 +191,50 @@ function tryExtractBalanced(text: string, start: number): string | null {
  * If the first balanced object fails to parse, the recovery depends on whether
  * it looks like a verdict attempt:
  *
- * - A malformed verdict-shaped candidate (e.g. `{verdict: "deny", reason: "x"}` with unquoted keys,
- *   which `parseJsonWithRepair` does not fix) stops the search and returns `null` — so a broken
- *   verdict is never overridden by an unrelated later object (prevents a deny→allow flip when the
- *   model wraps a malformed deny and then includes an allow example in its reasoning).
+ * - A verdict-shaped fragment that cannot become an object stops the search and returns `null`,
+ *   balanced or not: unquoted keys, a cut-off quote, or a lost closing brace. A broken verdict is
+ *   never overridden by an unrelated later object (prevents a deny→allow flip when the model wraps
+ *   a malformed deny and then includes an allow example in its reasoning).
  * - Non-verdict-shaped brace noise (e.g. `{var}`, `{bad}`, template/markdown fragments) keeps
  *   scanning — preserving recovery when the model mentions config syntax before the real verdict
  *   JSON.
+ * - A reply stating two different verdicts also returns `null`: a self-contradictory reply must not
+ *   let the first object decide the ask.
  *
  * Returns `null` if no parseable object is found.
  *
  * @param text - The text to search.
- * @returns The first parseable JSON object, or `null` if none is found (or a
- *   malformed verdict attempt short-circuits the search).
+ * @returns The first parseable JSON object, or `null` if none is found (or the search
+ *   short-circuits).
  */
 function extractFirstJsonObject(text: string): unknown | null {
   let start = 0;
+  let found: unknown | null = null;
+  let foundVerdict: string | undefined;
   while (start < text.length) {
     const nextBrace = findNextCharOutsideString(text, start, "{");
-    if (nextBrace < 0) return null;
+    if (nextBrace < 0) return found;
     const candidate = tryExtractBalanced(text, nextBrace);
+    // A cut-off verdict never reaches the parse below, so catch it here: its lost
+    // closing brace must not let a later allow example decide the ask.
+    if (candidate === null && looksLikeVerdictAttempt(text.slice(nextBrace))) return null;
     if (candidate !== null) {
       try {
-        return parseJsonWithRepair(candidate);
+        const parsed = parseJsonWithRepair(candidate);
+        const kind = verdictKindOf(parsed);
+        if (found === null) {
+          found = parsed;
+          foundVerdict = kind;
+        } else if (
+          // Two disagreeing verdicts make the reply self-contradictory, and
+          // letting the first win would let an allow printed before the real
+          // deny decide the ask. `null` means unresolved (a defer).
+          foundVerdict !== undefined &&
+          kind !== undefined &&
+          kind !== foundVerdict
+        ) {
+          return null;
+        }
       } catch {
         // A malformed verdict attempt defers rather than being overridden by
         // an unrelated later object; other brace noise keeps scanning.
@@ -222,7 +243,19 @@ function extractFirstJsonObject(text: string): unknown | null {
     }
     start = nextBrace + 1;
   }
-  return null;
+  return found;
+}
+
+/**
+ * The `verdict` string a parsed object declares, when it declares one.
+ *
+ * @param value - A parsed JSON value.
+ * @returns The declared verdict kind, or undefined for anything else.
+ */
+function verdictKindOf(value: unknown): string | undefined {
+  if (!isObjectRecord(value)) return undefined;
+  const verdict = value.verdict;
+  return typeof verdict === "string" ? verdict : undefined;
 }
 
 /**

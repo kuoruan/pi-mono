@@ -94,6 +94,15 @@ describe("classifierError", () => {
     expect(classifierError("No API key for provider")).toBeInstanceOf(APIConnectionError);
   });
 
+  it("keeps a status-less refusal out of the timeout class", () => {
+    // The adapter classifies the rebuilt error by TYPE first, so a policy
+    // answer that happens to say "aborted" must not be rebuilt as a timeout —
+    // it stays terminal.
+    const err = classifierError("request aborted by content policy");
+    expect(err).not.toBeInstanceOf(APITimeoutError);
+    expect(failoverReason(err)).toBeUndefined();
+  });
+
   it("reads a status before timeout wording, so a refusal stays terminal", () => {
     // The message carries both signals. Status-first is the shared rule, so
     // this is the provider's refusal — never a switchable timeout that routes

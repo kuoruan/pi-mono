@@ -3,19 +3,30 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  approvalNotice,
+  escalationMessage,
+  machineryDeferNotice,
+  machineryDenyReason,
+  modelDeferNotice,
+  uncertainDenyReason,
+  withAgentInstruction,
+} from "#src/review/verdict-copy.ts";
+
 /**
  * The notify skeleton, mechanically enforced: no structural colons in any
  * static notify text. The TUI prefixes its own level ("Warning: …") — a
  * colon inside our line doubles up. Detail rides in parentheses or after
- * an em-dash; a URL scheme ("https://…") is not structural. Scans the
- * notify-producing sources so a copy edit cannot reintroduce the shape.
+ * an em-dash. Only a colon followed by whitespace is structural, so a URL
+ * scheme never trips it. Scans the notify-producing sources so a copy edit
+ * cannot reintroduce the shape; the builder-rendered lines (whose call sites
+ * pass expressions, not literals) are covered by rendering them below.
  */
 const NOTIFY_SOURCES = [
   "#src/session/session-lifecycle.ts",
   "#src/review/review-pipeline.ts",
   "#src/session/runtime-settings.ts",
   "#src/session/panels.ts",
-  "#src/review/verdict-copy.ts",
 ] as const;
 
 /** The notify call prefixes whose first argument this test scans. */
@@ -121,7 +132,7 @@ describe("notify skeleton — no structural colons", () => {
       for (const m of s.matchAll(CALL_RE)) {
         const staticText = staticNotifyText(s, m.index! + m[0].length);
         if (staticText === undefined) continue;
-        if (/:\s/.test(staticText) && !staticText.includes("http")) {
+        if (/:\s/.test(staticText)) {
           offenders.push(`${f}: ${JSON.stringify(staticText.slice(0, 60))}`);
         }
       }
@@ -146,5 +157,24 @@ describe("notify skeleton — no structural colons", () => {
     // A dynamic first argument is skipped entirely (not a literal).
     const dynamic = "deps.notify(message(level))";
     expect(staticNotifyText(dynamic, dynamic.indexOf("(") + 1)).toBeUndefined();
+  });
+});
+
+describe("notify skeleton — builder-rendered lines", () => {
+  it("renders no structural colon in the operator-facing builders", () => {
+    // These reach ctx.notify() through expressions, so the source scan above
+    // cannot see them — and they carry the highest-stakes copy.
+    const rendered = [
+      machineryDeferNotice("timeout"),
+      machineryDenyReason("timeout", "strict"),
+      modelDeferNotice("confirm the scope of this action before it runs"),
+      uncertainDenyReason("strict"),
+      withAgentInstruction("secrets in the command", "content"),
+      approvalNotice({ kind: "reviewer" }, { kind: "fresh", latencyMs: 1200 }),
+      approvalNotice({ kind: "mode", mode: "lenient" }, { kind: "cached" }),
+      escalationMessage({ kind: "deny", reason: "secrets in the command" }, "high", "denied"),
+      escalationMessage({ kind: "deny", reason: "secrets in the command" }, undefined, "asked"),
+    ];
+    expect(rendered.filter((text) => /:\s/.test(text))).toEqual([]);
   });
 });

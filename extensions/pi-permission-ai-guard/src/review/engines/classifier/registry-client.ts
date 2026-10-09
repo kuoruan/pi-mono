@@ -16,8 +16,8 @@
  *   score rubrics pass through unchanged.
  * - Answers: pi-ai's `bool{probability}` projects back to SDK `noul{noul}`; choice maps
  *   field-for-field, while score's `legend`/`probabilities` have no pi-ai counterpart and are
- *   emitted empty — so a registry backend's audit `rawReply` shows those absent where a direct
- *   backend fills them.
+ *   emitted empty — so a registry backend's audit `rawReply` (recorded for defers alone; a clean
+ *   verdict is omitted) shows those absent where a direct backend fills them.
  * - Options: SDK `timeout` → `timeoutMs`; SDK `retry.maxRetries` → `maxRetries` (multi-endpoint pools
  *   disable retries — same as direct); SDK `signal` both rides along in the request and bounds the
  *   call with a race — pi-ai ≥0.99 forwards it to the provider, while the race keeps the walk's
@@ -48,6 +48,8 @@ import type {
   ClassifierSystemOneResponse,
 } from "#src/review/engines/classifier/client.ts";
 import type { ClassifierQuestionEntry } from "#src/review/engines/classifier/instructions.ts";
+import { mentionsRefusal } from "#src/review/failure-taxonomy.ts";
+import { TIMEOUT_PHRASE } from "#src/utils.ts";
 
 /** Pi-ai's `classify` plus model lookup — the facade's registry surface. */
 export interface RegistryModelDeps {
@@ -157,7 +159,13 @@ const STATUS_PATTERN = /\((\d{3})\)/;
 export function classifierError(message: string): Error {
   const status = STATUS_PATTERN.exec(message)?.[1];
   if (status !== undefined) return APIError.fromResponse(Number(status), message, new Headers());
-  if (/timed out|timeout|aborted/i.test(message)) return new APITimeoutError(0);
+  // A refusal can carry "aborted" in its wording, and the adapter classifies
+  // this error by TYPE first — before any wording guard — so a refusal must not
+  // be rebuilt as a timeout or a connection failure: both are switchable, and
+  // failing over past a policy answer asks a second model the refused question.
+  // An untyped error leaves the wording guards to decide (terminal).
+  if (mentionsRefusal(message)) return new Error(message);
+  if (TIMEOUT_PHRASE.test(message)) return new APITimeoutError(0);
   return new APIConnectionError(message);
 }
 

@@ -14,7 +14,7 @@ import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 import { describe, expect, it } from "vitest";
 
 import { MODE_VALUES, type Mode } from "#src/config/config-schema.ts";
-import type { RiskLevel } from "#src/model/model-verdict.ts";
+import { GENERIC_DENY_REASON, type RiskLevel } from "#src/model/model-verdict.ts";
 import {
   type ModelDeferInfo,
   applyVerdictMode,
@@ -256,6 +256,25 @@ describe("resolveMapping — the mapping consequence rule", () => {
       message: "reviewer denied this request (risk low) — unsafe",
       level: "warning",
     });
+  });
+
+  it("notifies a reason-less deny instead of falling through to the empty defer notice", () => {
+    // The parser synthesizes a reason for every deny, so no current producer
+    // reaches here without one — but a reason-less deny must not render nothing
+    // at all: a silent deny is a deny the human never sees.
+    const reasonless = { kind: "deny" } as unknown as AuthorizerVerdict;
+    const denied = resolveMapping({
+      original: reasonless,
+      emitted: reasonless,
+      riskLevel: "low",
+      deferKind: undefined,
+      deferReason: undefined,
+      deferLean: undefined,
+      mode: "default",
+      noticeShown: false,
+    });
+    expect(denied.notice).toMatchObject({ level: "warning" });
+    expect(denied.notice?.message).toContain(GENERIC_DENY_REASON);
   });
 
   it("an allow that holds is fully silent", () => {

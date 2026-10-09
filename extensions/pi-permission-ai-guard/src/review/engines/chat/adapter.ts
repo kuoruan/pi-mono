@@ -22,7 +22,7 @@ import type {
   EngineMachineryFailure,
   EngineReviewResult,
 } from "#src/review/reviewer-engine.ts";
-import { errorMessage } from "#src/utils.ts";
+import { attempt, errorMessage } from "#src/utils.ts";
 
 import { type ModelCallFn, reviewModel } from "./call.ts";
 
@@ -67,12 +67,7 @@ export function createChatAdapter(deps: ChatAdapterDeps): LaneAdapter {
       if (endpoint.lane !== "chat") throw new Error("chat adapter received a classifier endpoint");
       const { hasFailover, attemptTimeoutMs } = spec;
       const modelId = endpoint.id;
-      let model: Model<Api> | undefined;
-      try {
-        model = deps.registry.find(endpoint.provider, endpoint.model);
-      } catch {
-        model = undefined;
-      }
+      const model = attempt(() => deps.registry.find(endpoint.provider, endpoint.model));
       if (!model) {
         // A vanished registry entry is an availability failure when a
         // backup remains; terminal machinery when it is the last resort.

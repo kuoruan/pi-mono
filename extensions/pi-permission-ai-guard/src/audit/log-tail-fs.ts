@@ -36,7 +36,19 @@ export function readTailLinesFromFile(path: string, lineCount: number): string[]
     const fd = openSync(path, "r");
     try {
       const buffer = Buffer.alloc(chunkBytes);
-      readSync(fd, buffer, 0, chunkBytes, start);
+      // Fill the window, honoring readSync's byte count: `Buffer.alloc` leaves
+      // zeros behind, and a short read would decode them as a line of NULs —
+      // a fabricated record.
+      let filled = 0;
+      while (filled < chunkBytes) {
+        const got = readSync(fd, buffer, filled, chunkBytes - filled, start + filled);
+        if (got <= 0) break;
+        filled += got;
+      }
+      // An unfilled window means the file moved under the read (it shrank):
+      // the bytes held are not the tail, so claim nothing rather than report
+      // stale records as recent ones.
+      if (filled < chunkBytes) return undefined;
       const lines = buffer.toString("utf8").split("\n");
       // A trailing newline yields one phantom empty element after split;
       // drop it so the window counts real lines (otherwise the last live

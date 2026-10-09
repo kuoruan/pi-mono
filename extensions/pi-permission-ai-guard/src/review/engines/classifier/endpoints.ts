@@ -11,6 +11,7 @@
 import type { ClassifierModel } from "@earendil-works/pi-ai";
 
 import type { ConfigIssue } from "#src/config/config-layer.ts";
+import { isDirectProviderShape } from "#src/config/config-schema.ts";
 import type { ModelRegistryLike } from "#src/model/model-registry.ts";
 import type { ClassifierPoolEndpoint, ClassifierProvider } from "#src/review/pool.ts";
 
@@ -69,24 +70,23 @@ export function resolveClassifierEntry(
 ): ClassifierPoolEndpoint[] {
   // Two spellings, one built here: a registry endpoint is named by Pi's
   // provider id, the direct backend by the SDK protocol (`typesafe`).
-  const endpoint: ClassifierPoolEndpoint =
-    typeof target.provider === "object"
-      ? {
-          lane: "classifier",
-          backend: "direct",
-          provider: target.provider,
-          model: target.model,
-          timeoutMs: target.timeoutMs,
-          id: `typesafe/${target.model}`,
-        }
-      : {
-          lane: "classifier",
-          backend: "registry",
-          provider: target.provider,
-          model: target.model,
-          timeoutMs: target.timeoutMs,
-          id: `${target.provider}/${target.model}`,
-        };
+  const endpoint: ClassifierPoolEndpoint = isDirectProviderShape(target.provider)
+    ? {
+        lane: "classifier",
+        backend: "direct",
+        provider: target.provider,
+        model: target.model,
+        timeoutMs: target.timeoutMs,
+        id: `typesafe/${target.model}`,
+      }
+    : {
+        lane: "classifier",
+        backend: "registry",
+        provider: target.provider,
+        model: target.model,
+        timeoutMs: target.timeoutMs,
+        id: `${target.provider}/${target.model}`,
+      };
   if (endpoint.backend !== "registry") return [endpoint];
   // No admission means the caller wants pure routing (every endpoint
   // admitted as written) — the structural gate is opt-in.

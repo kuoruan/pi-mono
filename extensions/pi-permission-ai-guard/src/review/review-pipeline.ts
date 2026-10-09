@@ -14,6 +14,7 @@ import {
   cacheLookup,
   coverage,
   modelReply,
+  sanitizeRawReply,
   shortCircuit,
 } from "#src/audit/decision-record.ts";
 import {
@@ -27,7 +28,7 @@ import type { AiGuardConfig } from "#src/config/config-schema.ts";
 import { effectiveOverride, type SessionOverrides } from "#src/config/session-overrides.ts";
 import { PRE_CALL_MACHINERY_KINDS } from "#src/model/machinery-kinds.ts";
 import type { NotifyFn } from "#src/notice.ts";
-import { type DriftWarnState, openAsk } from "#src/review/request/ask.ts";
+import { openAsk } from "#src/review/request/ask.ts";
 import {
   reviewRequestCacheMaterial,
   type ReviewRequestContext,
@@ -36,7 +37,7 @@ import {
   type SessionManagerLike,
   stripTranscript,
 } from "#src/review/request/transcript-stripper.ts";
-import { errorMessage, normalizeAndRedactText, shortHash } from "#src/utils.ts";
+import { bestEffort, errorMessage, normalizeAndRedactText, shortHash } from "#src/utils.ts";
 
 import { accountModelOutcome, type CircuitBreaker, consumeTrip } from "./circuit-breaker.ts";
 import { releaseMachineryGate, releaseVerdictGate } from "./disposition.ts";
@@ -44,6 +45,12 @@ import { isMachineryFailure, type ReviewerEngine } from "./reviewer-engine.ts";
 import type { VerdictCache } from "./verdict-cache.ts";
 import { withAgentInstruction } from "./verdict-copy.ts";
 import { applyVerdictMode, type ModelDeferInfo } from "./verdict-rule.ts";
+
+/**
+ * How many model-gate denials the session keeps for its denied panel. The panel
+ * shows the newest handful; the cap bounds memory in a long session.
+ */
+const DENY_HISTORY_MAX = 50;
 
 /**
  * One model-gate deny recorded for the session's denied panel — what the
@@ -112,8 +119,6 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
   // forgetting it's on.
   const noticeState = { shown: false };
 
-  const driftState: DriftWarnState = { warned: false };
-
   const authorize: Authorizer["authorize"] = async (details, query, log) => {
     const { config } = deps;
     // Session-scoped override (/ai-guard, ctrl+alt+g) wins over the config
@@ -125,7 +130,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // surface-unmatched is expected config behavior (silent defer; outside
     // this link's jurisdiction). no-target is an unexpected ask — the
     // REVIEW FAILED to open, so it follows the machinery lane.
-    const opened = openAsk(details, config, deps.cwd, driftState);
+    const opened = openAsk(details, config, deps.cwd);
     if ("reason" in opened) {
       if (opened.reason === PRE_CALL_MACHINERY_KINDS.noTarget) {
         log.debug(
@@ -365,15 +370,15 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // Raw replies are verbose AND unnecessary for clean verdicts (the
     // structured record + sentinel suffice) — only defer failures keep the
     // original text, so a broken parse can be replayed. The raw reply may
-    // re-quote prompt content — redact ONCE here (the single point), and
-    // feed both the debug event and the decision record (models can
-    // parrot credentials).
-    const deferReplyRedacted =
+    // re-quote prompt content — sanitize ONCE here (the single point: redact,
+    // then bound the length) and feed both the debug event and the decision
+    // record (models can parrot credentials).
+    const deferReplySanitized =
       reviewOutcome.verdict.kind === "defer" && reviewOutcome.rawReply !== undefined
-        ? normalizeAndRedactText(reviewOutcome.rawReply)
+        ? sanitizeRawReply(reviewOutcome.rawReply)
         : undefined;
-    if (deferReplyRedacted !== undefined) {
-      log.debug(MODEL_REPLY_EVENT, modelReply(requestId, modelId, deferReplyRedacted));
+    if (deferReplySanitized !== undefined) {
+      log.debug(MODEL_REPLY_EVENT, modelReply(requestId, modelId, deferReplySanitized));
     }
 
     // The fresh defer context, built once: applyVerdictMode routes it and
@@ -411,7 +416,7 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         transcript.strippedCount,
         reviewOutcome,
         contextHash,
-        deferReplyRedacted,
+        deferReplySanitized,
       ),
       reviewOutcome.verdict,
       emitted,
@@ -433,6 +438,9 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // the target rides through the record's redacted form (a credential in
     // the command must not echo to the terminal via the panel's notify).
     if (reviewOutcome.verdict.kind === "deny") {
+      // The denied panel reads the newest handful of these; a long session with
+      // many denials must not grow the array without bound.
+      if (deps.denyHistory.length >= DENY_HISTORY_MAX) deps.denyHistory.shift();
       deps.denyHistory.push({
         requestId,
         surface,
@@ -473,19 +481,31 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     try {
       return await authorize(details, query, log);
     } catch (e) {
-      // The cause has to reach the operator: a silent defer is
-      // indistinguishable from a review that raised no objection. Best-effort
-      // — the notify bridge is itself one of the things that can throw here.
-      try {
+      const message = normalizeAndRedactText(errorMessage(e));
+      // A crashed review must not look like one that raised no objection: the
+      // cause reaches the operator, and the audit trail gets a record. A gate
+      // may already have recorded a decision for this requestId (the same group
+      // in the report) — the second record is what tells the reader the run then
+      // crashed.
+      bestEffort(() =>
         deps.notify(
-          `reviewer crashed — deferring to you (${normalizeAndRedactText(errorMessage(e))})`,
+          `reviewer crashed — deferring to you (${message})`,
           // Error-grade, like the breaker's total trip: the review
           // function is DOWN and recovery needs the operator's hand.
           "error",
-        );
-      } catch {
-        // No channel left; the defer still holds.
-      }
+        ),
+      );
+      bestEffort(() =>
+        log.debug(
+          SHORT_CIRCUIT_EVENT,
+          shortCircuit(details.requestId, undefined, PRE_CALL_MACHINERY_KINDS.internalError, {
+            error: message,
+          }),
+        ),
+      );
+      bestEffort(() =>
+        log.review(DECISION_EVENT, DecisionRecord.internalError(details.requestId, undefined)),
+      );
       return { kind: "defer" };
     }
   };

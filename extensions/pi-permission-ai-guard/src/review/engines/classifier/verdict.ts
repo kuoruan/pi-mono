@@ -1,5 +1,6 @@
 import type { ReviewOutcome, RiskLevel, VerdictLean } from "#src/model/model-verdict.ts";
 import { GENERIC_DENY_REASON } from "#src/model/model-verdict.ts";
+import { underscoresToWords } from "#src/utils.ts";
 
 import { DANGER_NONE } from "./questions.ts";
 
@@ -102,6 +103,10 @@ const DANGER_TIER: Readonly<Record<string, RiskLevel>> = {
  * high <0.75, critical at or above. Fixed — it does not move with
  * `riskThreshold`, so audit labels stay comparable across configs.
  *
+ * The tier names deliberately read one notch stricter than the rubric's own
+ * labels (raw 1 reads `medium` where the rubric says "Low risk"): the audit
+ * tier is a severity claim, and an audit must never read as a downgrade.
+ *
  * @param riskScore - The normalized 0–1 risk score.
  * @returns The audit tier.
  */
@@ -163,7 +168,7 @@ export function synthesizeClassifierVerdict(
     return {
       verdict: {
         kind: "deny",
-        reason: `matched a safety rule: ${answers.dangerCategory.replaceAll("_", " ")}`,
+        reason: `matched a safety rule: ${underscoresToWords(answers.dangerCategory)}`,
       },
       latencyMs,
       riskLevel: DANGER_TIER[answers.dangerCategory] ?? "high",

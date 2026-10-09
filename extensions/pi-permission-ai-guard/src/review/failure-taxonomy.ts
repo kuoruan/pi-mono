@@ -24,7 +24,7 @@
 import { APIConnectionError, APIError, APITimeoutError, APIUserAbortError } from "@typesafe-ai/sdk";
 
 import type { AvailabilityReason, ModelCallDeferKind } from "#src/model/model-verdict.ts";
-import { classifyAbortish } from "#src/utils.ts";
+import { attempt, classifyAbortish, errorMessage, isObjectRecord } from "#src/utils.ts";
 
 /** HTTP statuses that switch backends (failover, not same-backend retry). */
 const SWITCHABLE_STATUS: ReadonlySet<number> = new Set([402, 404, 408, 409, 410, 425, 429]);
@@ -54,7 +54,20 @@ const CONNECTION_CODES = new Set([
 /** Auth/policy/invalid-request signals: never route around a provider's refusal. */
 const REFUSAL_STATUS = /\b(?:400|401|403|405|406|407|411|412|413|414|415|422|423|424|451)\b/;
 const REFUSAL_PHRASE =
-  /\b(?:unauthori[sz]ed|forbidden|access denied|permission denied|policy blocked|content blocked|invalid (?:request|api key)|authentication failed)\b/i;
+  /\b(?:unauthori[sz]ed|forbidden|access denied|permission denied|content policy|policy violation|policy blocked|content blocked|invalid (?:request|api key)|authentication failed)\b/i;
+
+/**
+ * Does the error's own text carry a refusal signal?
+ *
+ * A refusal wrapped with "aborted" or a quota hint must stay terminal — failing
+ * over to the next provider could turn it into an allow.
+ *
+ * @param message - The error text to test.
+ * @returns True for an auth, policy, or invalid-request signal.
+ */
+export function mentionsRefusal(message: string): boolean {
+  return REFUSAL_STATUS.test(message) || REFUSAL_PHRASE.test(message);
+}
 
 /** Timeout signals (matched against trimmed input). */
 const TIMEOUT_RULE = /^(?:request |operation )?(?:timed out|timeout|aborted)\b/i;
@@ -75,14 +88,8 @@ const CONNECTION_RULE =
  * @returns The field value, or undefined when absent/unreadable.
  */
 function errorField(error: unknown, key: string): unknown {
-  try {
-    if (typeof error === "object" && error !== null && key in error) {
-      return (error as Record<string, unknown>)[key];
-    }
-  } catch {
-    // A throwing getter is not a status — ignore it.
-  }
-  return undefined;
+  // A throwing getter is not a status — read it as absent.
+  return attempt(() => (isObjectRecord(error) ? error[key] : undefined));
 }
 
 /**
@@ -110,10 +117,10 @@ export function availabilityReason(error: unknown): AvailabilityReason | undefin
   if (nestedStatus !== undefined) return switchableStatusReason(nestedStatus);
   const code = errorField(error, "code") ?? errorField(nested, "code");
   if (typeof code === "string" && CONNECTION_CODES.has(code)) return "connection";
-  const message = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+  const message = errorMessage(error);
   // A wrapped 403 can also mention quota or a 429 in its body. Refuse to
   // route around any explicit auth, policy or invalid-request HTTP status.
-  if (REFUSAL_STATUS.test(message) || REFUSAL_PHRASE.test(message)) return undefined;
+  if (mentionsRefusal(message)) return undefined;
   // Provider errors often resolve into AssistantMessage.errorMessage without
   // a typed status. Match a prefixed status or an explicit status field;
   // unrelated numbers in error bodies must not become HTTP status codes.
@@ -139,6 +146,10 @@ export function availabilityReason(error: unknown): AvailabilityReason | undefin
  */
 export function classifyFailure(error: unknown): ModelCallDeferKind {
   if (error instanceof APITimeoutError || error instanceof APIUserAbortError) return "timeout";
+  // An untyped refusal can carry "aborted" in the same sentence — the shape
+  // `failoverReason` guards against too. The kind is operator-facing, so a
+  // policy answer must not be reported as a timeout.
+  if (mentionsRefusal(errorMessage(error))) return "call-failed";
   return classifyAbortish(error) ?? "call-failed";
 }
 
@@ -154,5 +165,10 @@ export function failoverReason(error: unknown): AvailabilityReason | undefined {
   if (error instanceof APIError) return switchableStatusReason(error.status);
   if (error instanceof APITimeoutError) return "timeout";
   if (error instanceof APIConnectionError) return "connection";
+  // Untyped SDK errors carry no status class, so a refusal can reach here with
+  // "aborted" in the same sentence — check the refusal guard first, or the pool
+  // fails over past it.
+  const message = errorMessage(error);
+  if (mentionsRefusal(message)) return undefined;
   return classifyAbortish(error) === "timeout" ? "timeout" : undefined;
 }

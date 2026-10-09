@@ -24,7 +24,11 @@
  *    contextHash cannot prove same-context — the whole group is excluded, conservatively.
  * 3. No occurrence ended in a terminal deny — an operator refusal (blocked/denied) or the reviewer's
  *    own refusal anywhere disqualifies the group (an allow rule would cover the refused ask too).
+ * 4. The templated pattern holds no redaction placeholder — a rule built on one would allow a string
+ *    that matches nothing, and hide what it was meant to cover.
  */
+
+import { REDACTED_PLACEHOLDER, WHITESPACE_RUN } from "#src/utils.ts";
 
 import type { LogEntry } from "./decision-log-reader.ts";
 import { DECISION_EVENT } from "./events.ts";
@@ -70,7 +74,7 @@ const SAFE_BASH_WORD = /^[A-Za-z0-9][A-Za-z0-9+._:-]{0,63}$/;
  *   original target when templating is not provably safe.
  */
 export function templateBashTarget(target: string): string {
-  const words = target.trim().split(/\s+/).filter(Boolean);
+  const words = target.trim().split(WHITESPACE_RUN).filter(Boolean);
   if (words.length === 0) return target;
   return words.every((w) => SAFE_BASH_WORD.test(w)) ? words.join(" ") : target;
 }
@@ -125,8 +129,15 @@ export function buildReportCandidates(
       group = { occurrences: [], refused: false };
       groups.set(key, group);
     }
-    if (refused(e)) group.refused = true;
-    else group.occurrences.push(e);
+    if (refused(e)) {
+      group.refused = true;
+    } else if (e.verdict === "defer" && e.emittedVerdict === "allow") {
+      // A mode auto-approved the ask: the operator never saw it, so it is not
+      // an occurrence. Unlike a refusal it does not disqualify the group.
+      continue;
+    } else {
+      group.occurrences.push(e);
+    }
   }
 
   const candidates: ReportCandidate[] = [];
@@ -144,6 +155,7 @@ export function buildReportCandidates(
 
     const [surface, target] = key.split("\u0000");
     const pattern = surface === "bash" ? templateBashTarget(target ?? "") : (target ?? "");
+    if (pattern.includes(REDACTED_PLACEHOLDER)) continue;
     candidates.push({
       surface: surface ?? "?",
       target: target ?? "?",

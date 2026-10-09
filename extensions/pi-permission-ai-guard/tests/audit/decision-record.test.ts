@@ -9,6 +9,7 @@ import {
   modelReply,
   shortCircuit,
 } from "#src/audit/decision-record.ts";
+import { PRE_CALL_MACHINERY_KINDS } from "#src/model/machinery-kinds.ts";
 
 const base: DecisionBase = { requestId: "req-1", surface: "bash", target: "ls -la" };
 
@@ -67,6 +68,19 @@ describe("DecisionRecord — shared schema (property test)", () => {
 });
 
 describe("DecisionRecord — per-gate shape", () => {
+  it("redacts a policy pattern before it reaches the record", () => {
+    // The pattern comes from the policy engine's own matcher and can embed the
+    // ask's text, so the record factory redacts it once (ADR 0004).
+    const token = `ghp_${"a".repeat(36)}`;
+    const r = DecisionRecord.policyDecided(base, {
+      state: "deny",
+      origin: ORIGIN,
+      matchedPattern: `curl -H "Authorization: Bearer ${token}"`,
+    });
+    expect(r.matchedPattern).not.toContain(token);
+    expect(r.matchedPattern).toContain("[REDACTED]");
+  });
+
   it("policyDecided derives deferReason from policyState", () => {
     const r = DecisionRecord.policyDecided(base, {
       state: "deny",
@@ -256,6 +270,41 @@ describe("DecisionRecord — per-gate shape", () => {
     expect(modelDefer.rawReply).toBe('{"verdict":"defer"}');
   });
 
+  it("bounds the raw reply it records", () => {
+    // The record goes to the review log, so an unbounded reply is an unbounded
+    // log line (ADR 0010 bounds what the logs accumulate). Mid-truncation keeps
+    // the tail, so a defer stays replayable.
+    const huge = `{"verdict":"defer"}${"x".repeat(50_000)}`;
+    const bounded = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      { verdict: { kind: "defer" }, latencyMs: 10, deferKind: "no-json", rawReply: huge },
+      "ctxh1",
+    );
+    const recorded = String(bounded.rawReply);
+    // The documented bound, as a literal: the changeset and the README promise
+    // "2000 characters", so a constant change has to break this test and force
+    // the docs to move with it.
+    expect(recorded.length).toBe(2000);
+    expect(recorded).toContain("[...truncated...]");
+
+    // A reply inside the bound is untouched.
+    const short = DecisionRecord.model(
+      base,
+      "anthropic/haiku",
+      2,
+      {
+        verdict: { kind: "defer" },
+        latencyMs: 10,
+        deferKind: "no-json",
+        rawReply: "garbage",
+      },
+      "ctxh1",
+    );
+    expect(short.rawReply).toBe("garbage");
+  });
+
   it("model passes through riskLevel + latencyMs + strippedCount", () => {
     const r = DecisionRecord.model(
       base,
@@ -367,5 +416,18 @@ describe("DecisionRecord.model — contextHash", () => {
       "ab12cd",
     );
     expect(record.contextHash).toBe("ab12cd");
+  });
+
+  it("records an internal error as its own machinery kind", () => {
+    // The audit trail's proof that a review crashed rather than passed: no
+    // model was called, and the defer kind names the machinery failure.
+    const record = DecisionRecord.internalError("req-9", "bash");
+    expect(record).toMatchObject({
+      requestId: "req-9",
+      surface: "bash",
+      gate: PRE_CALL_MACHINERY_KINDS.internalError,
+      deferKind: PRE_CALL_MACHINERY_KINDS.internalError,
+      modelCalled: false,
+    });
   });
 });

@@ -190,10 +190,18 @@ describe("parseTextFallback — balanced JSON extraction", () => {
     expect(result.verdict).toEqual({ kind: "allow" });
   });
 
-  it("extracts first JSON object when multiple exist", () => {
+  it("defers when the reply states two different verdicts", () => {
+    // Order must not decide the verdict: the model sometimes prints a shape
+    // before its answer, so the first object must not outrank a stated deny.
     const text = '{"verdict":"deny","reason":"first"} then {"verdict":"allow"}';
     const result = parseTextFallback(text, 100);
-    expect(result.verdict).toEqual({ kind: "deny", reason: "first" });
+    expect(result.verdict.kind).toBe("defer");
+  });
+
+  it("does not take a well-formed allow when the reply then states a deny", () => {
+    const text = '{"verdict":"allow"} — correction: {"verdict":"deny","reason":"secrets"}';
+    const result = parseTextFallback(text, 100);
+    expect(result.verdict.kind).toBe("defer");
   });
 
   it("handles JSON with braces inside string values", () => {
@@ -246,5 +254,15 @@ describe("parseTextFallback — balanced JSON extraction", () => {
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferKind).toBe("no-json");
     expect(result.rawReply).toBe(text);
+  });
+
+  it("defers when an unbalanced verdict attempt precedes a later object", () => {
+    // The guard above only ran for a brace-balanced candidate: a cut-off deny
+    // (its closing brace lost) skipped `tryExtractBalanced` outright and let a
+    // later allow example decide the ask — a broken deny flipping to an allow.
+    const text = '{"verdict":"deny","reason":"x" {"verdict":"allow"}';
+    const result = parseTextFallback(text, 100);
+    expect(result.verdict).toEqual({ kind: "defer" });
+    expect(result.deferKind).toBe("no-json");
   });
 });

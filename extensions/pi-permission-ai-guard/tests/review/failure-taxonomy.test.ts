@@ -89,6 +89,16 @@ describe("failoverReason (typed classifier-lane input)", () => {
     expect(failoverReason(new APIConnectionError("socket hang up"))).toBe("connection");
     expect(failoverReason(new APIUserAbortError())).toBeUndefined();
   });
+
+  it("never routes around an untyped refusal, whatever else the message says", () => {
+    // This lane's provider can refuse without an SDK type. An "aborted" in the
+    // same sentence must not turn a refusal into a switchable timeout: failover
+    // would hand the ask to the next provider, which may answer allow.
+    expect(failoverReason(new Error("request aborted by content policy"))).toBeUndefined();
+    expect(failoverReason(new Error("403 aborted by the gateway"))).toBeUndefined();
+    // The guard is narrow: a plain abort still switches.
+    expect(failoverReason(new Error("the request was aborted"))).toBe("timeout");
+  });
 });
 
 describe("classifyFailure (terminal defer kind)", () => {
@@ -105,6 +115,12 @@ describe("classifyFailure (terminal defer kind)", () => {
   it("falls back to call-failed past aborts", () => {
     expect(classifyFailure(new Error("unexpected parsing bug"))).toBe("call-failed");
     expect(classifyFailure(httpError(403))).toBe("call-failed");
+  });
+
+  it("does not label an untyped refusal a timeout", () => {
+    // `failoverReason` already treats this as terminal; the defer kind is what
+    // the operator reads, so a policy answer must not read as a timeout.
+    expect(classifyFailure(new Error("request aborted by content policy"))).toBe("call-failed");
   });
 });
 

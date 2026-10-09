@@ -6,6 +6,8 @@
  * decision-log-reader.test.ts; this pins the adapter's half).
  */
 
+import * as nodeFs from "node:fs";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readTailLinesFromFile } from "#src/audit/log-tail-fs.ts";
@@ -48,6 +50,34 @@ describe("readTailLinesFromFile", () => {
 
   it("returns undefined for a missing file (the caller's friendly message)", () => {
     expect(readTailLinesFromFile("/logs/no-such-log.jsonl", 5000)).toBe(undefined);
+  });
+
+  it("fills the window across reads instead of decoding zero padding", () => {
+    // readSync may deliver fewer bytes than asked. `Buffer.alloc` leaves zeros
+    // behind, and those decode as a line of NULs — a fabricated record.
+    numberedLog(3);
+    const realReadSync = nodeFs.readSync;
+    const spy = vi
+      .spyOn(nodeFs, "readSync")
+      .mockImplementation(((
+        fd: number,
+        buffer: NodeJS.ArrayBufferView,
+        offset: number,
+        length: number,
+        position: number,
+      ) =>
+        realReadSync(
+          fd,
+          buffer as Buffer,
+          offset,
+          Math.min(length, 6),
+          position,
+        )) as typeof realReadSync);
+    try {
+      expect(readTailLinesFromFile(LOG_PATH, 5000)).toEqual(["line-0", "line-1", "line-2"]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("drops the leading partial line when the chunk starts mid-line", () => {

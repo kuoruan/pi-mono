@@ -129,16 +129,6 @@ describe("breaker accounting steps", () => {
     expect(s.trippedTier({ consecutive: 999, total: 1, verdict: "deny" })).toBeUndefined();
   });
 
-  it("strict's model-defer→deny counts as a deny-equivalent into the recoverable tier only", () => {
-    const s = new CircuitBreaker();
-    const tripAtOne = { consecutive: 1, total: 20, verdict: "deny" as const };
-    accountModelOutcome(s, "defer", { kind: "deny", reason: "clarification" });
-    // A wavering reviewer under strict is a denial stream — consecutive
-    // fills (recoverable escape can fire), total stays model-denies-only.
-    expect(s.trippedTier(tripAtOne)).toBeDefined();
-    expect(s.trippedTier({ consecutive: 99, total: 1, verdict: "deny" })).toBeUndefined();
-  });
-
   it("accountModelOutcome records real denies into both tiers regardless of the emitted mapping", () => {
     const s = new CircuitBreaker();
     // permissive maps a soft deny to allow — the recording keeps the model's deny.

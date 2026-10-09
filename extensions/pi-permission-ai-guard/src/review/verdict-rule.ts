@@ -23,6 +23,7 @@ import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import type { Mode } from "#src/config/config-schema.ts";
 import { MODE_TABLE, type ModeLanes } from "#src/config/mode-table.ts";
+import { GENERIC_DENY_REASON } from "#src/model/model-verdict.ts";
 import type {
   ModelCallDeferKind,
   RiskLevel,
@@ -34,6 +35,7 @@ import {
   escalationMessage,
   machineryDenyReason,
   machineryDeferNotice,
+  modelDeferNotice,
   uncertainDenyReason,
   type DenyInstructionSource,
 } from "./verdict-copy.ts";
@@ -321,7 +323,7 @@ export function resolveMapping(input: MappingInput): MappingDecision {
     emitted.kind === "defer" && original.kind === "defer"
       ? deferKind === "model-defer" && deferReason
         ? {
-            message: `reviewer asks — ${deferReason}`,
+            message: modelDeferNotice(deferReason),
             level: "info",
           }
         : deferKind !== undefined && deferKind !== "model-defer"
@@ -329,21 +331,18 @@ export function resolveMapping(input: MappingInput): MappingDecision {
           : null
       : null;
   if (emitted.kind === original.kind) {
-    // The verdict held. A model deny that holds in every mode is the
-    // reviewer's hardest call — the host renders no dialog for denials (the
-    // reason goes to the agent and the audit log alone), so the notify
-    // line is the only human-visible copy. Every mode notifies a deny
-    // that carries a model reason, regardless of tier. The reason check
-    // is doctrine, not live defense: the parser synthesizes
-    // GENERIC_DENY_REASON for a reason-less deny, so today this never
-    // evaluates false — but the contract is "deny WITH a reason", and a
-    // future deny producer (e.g. a persisted cache) could reach here
-    // without one. A defer that holds still owes its own notice (the
-    // machinery cause, or the model's mirrored clarification).
-    if (original.kind === "deny" && original.reason) {
+    // The verdict held. A model deny that holds in every mode is the reviewer's
+    // hardest call — the host renders no dialog, so the notify line is the only
+    // human-visible copy, in every mode and tier. A reason-less deny (the parser
+    // synthesizes one; a future producer might not) takes the generic reason
+    // rather than falling through to the defer notice, which renders nothing. A
+    // defer that holds still owes its own notice (the machinery cause, or the
+    // model's mirrored clarification).
+    if (original.kind === "deny") {
+      const denied = original.reason ? original : { ...original, reason: GENERIC_DENY_REASON };
       return {
         annotate: false,
-        notice: { message: escalationMessage(original, riskLevel, "denied"), level: "warning" },
+        notice: { message: escalationMessage(denied, riskLevel, "denied"), level: "warning" },
         instructionSource,
         markNoticeShown: false,
       };

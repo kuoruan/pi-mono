@@ -71,17 +71,25 @@ function makeReply(
   } satisfies AssistantMessage;
 }
 
-const timeoutCompleteSimple = async (
+/**
+ * A completer that never answers on its own: it settles only when the call's
+ * AbortSignal fires. Without the signal wired the promise never settles, so a
+ * test using it proves the per-call timeout is attached.
+ *
+ * @param _model - Unused; the resolved model.
+ * @param _ctx - Unused; the call context.
+ * @param opts - Options the call passes through (its `signal`).
+ * @returns A promise that rejects when the signal aborts.
+ */
+const signalOnlyCompleteSimple = async (
   _model: Model<any>,
   _ctx: Context,
   opts?: SimpleStreamOptions,
 ): Promise<AssistantMessage> => {
+  const signal = opts?.signal;
+  if (!signal) throw new Error("completer settled without a cancel signal");
   return new Promise((_resolve, reject) => {
-    const timer = setTimeout(() => reject(new DOMException("timeout", "TimeoutError")), 1000);
-    opts?.signal?.addEventListener("abort", () => {
-      clearTimeout(timer);
-      reject(new DOMException("aborted", "AbortError"));
-    });
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
 };
 
@@ -235,7 +243,9 @@ describe("reviewModel", () => {
   });
 
   it("defers on timeout", async () => {
-    const ctx = makeContext(timeoutCompleteSimple);
+    // The completer settles only when the signal fires, so this asserts the
+    // 50 ms per-call timeout reaches the call — not that some timer ran.
+    const ctx = makeContext(signalOnlyCompleteSimple);
     const result = await reviewModel(ctx, "test", "test", 50);
     expect(result.verdict).toEqual({ kind: "defer" });
     expect(result.deferKind).toBe("timeout");

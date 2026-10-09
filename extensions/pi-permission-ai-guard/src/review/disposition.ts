@@ -186,17 +186,20 @@ export function releaseVerdictGate(
       "info",
     );
   }
+  // resolveMapping sets the source exactly on the deny path; guessing a default
+  // here would grade a machinery deny with the content instruction ("do not
+  // retry") instead of "retry later".
+  let finalVerdict = emitted;
+  if (emitted.kind === "deny") {
+    const source = decision.instructionSource;
+    if (source === null) throw new Error("mapping decision lost its deny instruction source");
+    finalVerdict = { kind: "deny", reason: withAgentInstruction(emitted.reason, source) };
+  }
   const released: VerdictRelease = {
     record: decision.annotate
       ? mapped(record, ctx.mode, emitted.kind, decision.emittedReason)
       : record,
-    verdict:
-      emitted.kind === "deny"
-        ? {
-            kind: "deny",
-            reason: withAgentInstruction(emitted.reason, decision.instructionSource ?? "content"),
-          }
-        : emitted,
+    verdict: finalVerdict,
   };
   return { ...released, markNoticeShown: decision.markNoticeShown };
 }

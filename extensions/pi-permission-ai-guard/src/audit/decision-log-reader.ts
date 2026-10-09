@@ -22,7 +22,7 @@
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import type { VerdictKind } from "#src/model/model-verdict.ts";
-import { isObjectRecord } from "#src/utils.ts";
+import { bestEffort, isObjectRecord } from "#src/utils.ts";
 
 /**
  * A parsed log line — a loose union of the record shapes this link and
@@ -110,19 +110,15 @@ export function readLogLines(
   const entries: LogEntry[] = [];
   for (const line of lines) {
     if (!line.trim()) continue;
-    try {
-      // Parse-boundary cast: the output is unknown and consumers narrow by
-      // `event` (the loose LogEntry union) — the tolerance policy of this
-      // module, not a shape guarantee. Valid JSON that is not an object (a
-      // bare `null`, a number) is no record either: it joins the corrupt
-      // lines rather than reaching consumers as a crash.
+    // The parse boundary is a cast: consumers narrow by `event` (the loose
+    // LogEntry union), so valid JSON that is not an object is no record either —
+    // and one corrupt line must not cost the caller the rest of the tail.
+    bestEffort(() => {
       const parsed = JSON.parse(line);
       if (isObjectRecord(parsed)) {
         entries.push(parsed as unknown as LogEntry);
       }
-    } catch {
-      // Corrupt line — skip; the log is append-only and best-effort.
-    }
+    });
   }
   return entries;
 }
