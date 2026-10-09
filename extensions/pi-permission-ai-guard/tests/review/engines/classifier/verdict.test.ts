@@ -42,7 +42,10 @@ describe("synthesizeClassifierVerdict", () => {
       THRESHOLDS,
       42,
     );
-    expect(out.verdict).toEqual({ kind: "deny", reason: "matched rule: credential_exfiltration" });
+    expect(out.verdict).toEqual({
+      kind: "deny",
+      reason: "matched a safety rule: credential exfiltration",
+    });
     // Unknown categories fail safe to high.
     expect(out.riskLevel).toBe("high");
   });
@@ -55,7 +58,10 @@ describe("synthesizeClassifierVerdict", () => {
       THRESHOLDS,
       7,
     );
-    expect(out.verdict).toEqual({ kind: "deny", reason: "matched rule: credential_exfiltration" });
+    expect(out.verdict).toEqual({
+      kind: "deny",
+      reason: "matched a safety rule: credential exfiltration",
+    });
     expect(out.riskLevel).toBe("high");
   });
 
@@ -63,8 +69,7 @@ describe("synthesizeClassifierVerdict", () => {
     const out = synthesizeClassifierVerdict(confident({ dangerConfidence: 0.3 }), THRESHOLDS, 7);
     expect(out.verdict).toEqual({ kind: "defer" });
     expect(out.deferKind).toBe("model-defer");
-    expect(out.deferReason).toContain("danger_category");
-    expect(out.deferReason).toContain("unsure about this action");
+    expect(out.deferReason).toBeDefined();
   });
 
   it("denies a confident danger hit regardless of check order", () => {
@@ -73,7 +78,10 @@ describe("synthesizeClassifierVerdict", () => {
       THRESHOLDS,
       7,
     );
-    expect(out.verdict).toEqual({ kind: "deny", reason: "matched rule: system_tampering" });
+    expect(out.verdict).toEqual({
+      kind: "deny",
+      reason: "matched a safety rule: system tampering",
+    });
   });
 
   it("defers neutral when low confidence but no danger signal", () => {
@@ -140,18 +148,7 @@ describe("synthesizeClassifierVerdict", () => {
     );
     expect(out.verdict).toEqual({ kind: "defer" });
     expect(out.deferKind).toBe("model-defer");
-    expect(out.lean).toBe("allow");
-  });
-
-  it("defers naming intent when intent falls short and risk is low", () => {
-    const out = synthesizeClassifierVerdict(
-      confident({ intentMatch: 0.2, riskScore: 0.3 }),
-      THRESHOLDS,
-      7,
-    );
-    expect(out.verdict).toEqual({ kind: "defer" });
-    expect(out.deferKind).toBe("model-defer");
-    expect(out.deferReason).toContain("intent_match");
+    expect(out.deferReason).toBeDefined();
     expect(out.lean).toBe("allow");
   });
 
@@ -211,11 +208,10 @@ describe("synthesizeClassifierVerdict", () => {
     expect(out.lean).toBeUndefined();
   });
 
-  it("names the axis whose confidence is under the floor", () => {
+  it("defers when the risk confidence is under the floor", () => {
     const out = synthesizeClassifierVerdict(confident({ riskConfidence: 0.2 }), THRESHOLDS, 7);
     expect(out.verdict).toEqual({ kind: "defer" });
-    expect(out.deferReason).toContain("risk");
-    expect(out.deferReason).toContain("unsure about this action");
+    expect(out.deferReason).toBeDefined();
   });
 });
 

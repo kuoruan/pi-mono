@@ -112,12 +112,6 @@ export function riskLevelFromScore(riskScore: number): RiskLevel {
   return "low";
 }
 
-/** The answers that carry a calibrated confidence, in report order. */
-const KEY_CONFIDENCES = [
-  { axis: "danger_category", key: "dangerConfidence" },
-  { axis: "risk", key: "riskConfidence" },
-] as const;
-
 /**
  * The reviewer's directional inclination on an unresolved verdict: which
  * way it would decide if forced. Only the danger direction counts —
@@ -167,18 +161,20 @@ export function synthesizeClassifierVerdict(
 ): ReviewOutcome {
   if (answers.dangerCategory !== DANGER_NONE) {
     return {
-      verdict: { kind: "deny", reason: `matched rule: ${answers.dangerCategory}` },
+      verdict: {
+        kind: "deny",
+        reason: `matched a safety rule: ${answers.dangerCategory.replaceAll("_", " ")}`,
+      },
       latencyMs,
       riskLevel: DANGER_TIER[answers.dangerCategory] ?? "high",
     };
   }
-  const weakest = KEY_CONFIDENCES.reduce((a, b) => (answers[a.key] <= answers[b.key] ? a : b));
-  const minConfidence = answers[weakest.key];
+  const minConfidence = Math.min(answers.dangerConfidence, answers.riskConfidence);
   if (minConfidence < thresholds.confidenceThreshold) {
     return {
       verdict: { kind: "defer" },
       deferKind: "model-defer",
-      deferReason: `unsure about this action (${weakest.axis} confidence ${minConfidence.toFixed(2)} < ${thresholds.confidenceThreshold.toFixed(2)})`,
+      deferReason: "is this action safe to run?",
       lean: deriveLean(answers, thresholds, false),
       latencyMs,
     };
@@ -202,7 +198,7 @@ export function synthesizeClassifierVerdict(
   return {
     verdict: { kind: "defer" },
     deferKind: "model-defer",
-    deferReason: `unsure this matches your request (intent_match ${answers.intentMatch.toFixed(2)} < ${thresholds.intentThreshold.toFixed(2)})`,
+    deferReason: "confirm the scope: is this action covered by your request?",
     lean: deriveLean(answers, thresholds, true),
     latencyMs,
   };

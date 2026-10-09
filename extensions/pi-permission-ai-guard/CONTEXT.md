@@ -109,7 +109,7 @@ The retry carries no provider-layer retry — three requests is the hard ceiling
 - **Deny lines** — a model deny that holds or escalates notifies in every mode (the host renders no dialog for denials — the line is the operator's only copy; since v28 the agent-side render names this link as the refuser, so the reason reads as policy, not user instruction). A mode-softened deny ends `— asking you instead`; a deny that holds needs no tail; `permissive` swallows soft denies whole (zero-interruption contract — the one-time fail-open notice covers it).
 - **Approval lines** — opt-in via `notifyApprovals` (off by default; `path`/`external_directory` never announce — the host caps their allows to defer). Fresh reviews carry a duration tail with the review's total cost (`(1.2s)` — `latencyMs`, which already accumulates the empty-reply retry and the pool's whole-walk failover cover); cache replays say `(cached)` — a replay measures nothing, so restating the stored call's latency would lie.
 - **Agent instructions** — the deny verdict the chain returns carries an appended behavioral instruction (identity: automatic review, not a human click; the legitimate path: stop pursuing / retry later). Two variants: content denies (the review judged the request — do not rephrase, retry, or work around; the user re-requests explicitly) and machinery denies (the review failed — retry later is legitimate). The instruction rides ONLY the returned verdict's reason: the audit `emittedReason` and the operator notify lines keep the un-instructed teaching reason.
-- **Reason text** — model reasons go out whole with a 200-char defensive ceiling (`NOTIFY_REASON_CEILING`; the prompt anchors reasons at ~150 characters); the audit record keeps the full text regardless.
+- **Reason text** — model reasons go out whole, with no notify ceiling: sanitization and redaction happen at the parser, so nothing downstream truncates. The prompt anchors reasons at ~150 characters; the audit record keeps the full text regardless.
 - **Silence lanes** — machinery denies stay silent (fail-closed needs no announcement); machinery defers and deferring breaker trips always name their cause. The `off`/`warning` blindness is operator-owned and documented; a non-default `notifyLevel` renders a footer fragment so a silenced pane stays visible.
 
 **Ask context**: The structured projection of a permission ask the full review feeds the model — a `kind`-dispatched projection of the facts that can change a verdict, with evidence pre-resolved into named fields so no consumer does string-keyed lookups. Built once by `buildAskContext`; the prompt renderer and the verdict cache both read its typed fields, so neither re-parses the upstream `PromptPayload` (ADR 0011: every consumer is a renderer over the payload, and ai-guard is one).
@@ -149,7 +149,7 @@ The safety rules prompt (`SAFETY_RULES` in `src/review/engines/chat/prompt.ts`) 
 
 ### 1. Semantic, not literal
 
-Rules describe abstract concepts ("credential stores, private keys"), not environment-specific paths or tool names. A few generic examples (`curl|bash`, `chmod +s`) are fine as anchors, but they never act as the default gate — the category description does. Redundant qualifiers ("of unverified package" when the verb already implies it) are removed.
+Rules describe abstract concepts ("credential stores, private keys"), not environment-specific paths or tool names. A few generic examples ("piping a download into a shell", `chmod +s`) are fine as anchors, but they never act as the default gate — the category description does. Redundant qualifiers ("of unverified package" when the verb already implies it) are removed.
 
 ### 2. Three-tier precedence: DENY-Always > DENY-Unless > ALLOW
 
@@ -157,11 +157,11 @@ Rules describe abstract concepts ("credential stores, private keys"), not enviro
 - **DENY-Unless**: allow only with matching intent; otherwise the fallback the entry itself specifies (deny or defer).
 - **ALLOW**: allow only when matching the current task context.
 
-Each entry's fallback is stated by the entry, not by the section heading — different entries in the same section can have different fallbacks (Deletions → DENY, Unknown Commands → DEFER).
+Each entry's fallback is stated by the entry, not by the section heading — different entries in the same section can have different fallbacks (Deletions → DENY, Unknown Commands → DEFER). The routing layer states the intent requirement once for the whole tier; an entry that mentions intent is stating its own fallback ("needs matching intent, otherwise DENY"), not restating the rule.
 
 ### 3. Uncertain → DEFER, not → DENY
 
-Absent intent defaults to defer, not deny. "(none found)" is insufficient evidence, not proof of absence. Unfamiliarity alone is not dangerous. Non-destructive observation (navigation, read-only diagnostics, page selection) without intent defers; it is never denied solely for being that action.
+Absent intent defaults to defer, not deny — except where the entry's own fallback is DENY (Deletions, principle 2). "(none found)" is insufficient evidence, not proof of absence. Unfamiliarity alone is not dangerous. Non-destructive observation (navigation, read-only diagnostics, page selection) without intent defers; it is never denied solely for being that action.
 
 ### 4. Trusted intent is the only authorization source
 
@@ -173,7 +173,7 @@ Deterministic interception is done by the policy engine; the model adds semantic
 
 ### 6. Judge by behavior, not by category label
 
-The same operation can fall into different tiers depending on what it actually does. Page script execution is classified by payload effect (DOM inspection → ALLOW; mutations/extractions → DENY-Unless; fetching and running remote code → DENY-Always). Avoid absolute exclusions ("is not X"); use "judge by what it does".
+The same operation can fall into different tiers depending on what it actually does. Page script execution is classified by payload effect (DOM inspection → ALLOW; mutations/extractions → DENY-Unless; fetched remote code stays DENY-Always, under External Code Execution). Avoid excluding a whole action class ("page scripts are read-only"); route each action by what it does. "is not this category" between sibling categories is the routing form, not an exclusion.
 
 ### 7. Concise, but never at the cost of semantics
 
@@ -185,11 +185,13 @@ The same operation can fall into different tiers depending on what it actually d
 
 ### 8. Structure serves navigability
 
-Bold titles and a tiered layout help the model locate the right entry and reduce misclassification. General rules are split into distinct concepts rather than fused in one paragraph — each evidence-handling concern (material-effect judgment, obfuscated payloads, structured-fact weighting) and each surface-routing concern (loopback binding, chain evaluation) stands as its own entry. Section titles must be unambiguous — a heading that asserts a single fallback breaks when entries under it have different fallbacks.
+- **Line breaks come from `flowmark`, not from hand-wrapping.** `python3 scripts/reflow-prompt.py` reflows every prose literal in place with flowmark's semantic mode (one sentence per line, sentences wrapped to 88 columns); `--check` reports without writing. The script refuses to write unless the result is provably whitespace-only — word tokens and logical units (headings, bullets, JSON lines, in order) are both compared — so a literal with non-prose lines reports instead of writing. This is a script rather than a formatter run because the prompt lives in a TS template literal and no formatter rewrites string contents: oxfmt and Prettier both leave them verbatim, since rewriting a string would change a runtime value.
+
+Bold titles and a tiered layout help the model locate the right entry and reduce misclassification. General rules are split into distinct concepts rather than fused in one paragraph — each evidence-handling concern (material-effect judgment, which also covers obfuscated payloads, and structured-fact weighting) and each surface-routing concern (loopback binding; the strictest-tier rule that covers chains and multi-category actions) stands as its own entry. Merge two general rules only when they state the same requirement — the inputs they name may differ — and fold the duplicate into one, never dropping it. Section titles must be unambiguous — a heading that asserts a single fallback breaks when entries under it have different fallbacks.
 
 ### 9. Precise wording, no ambiguity
 
-- "fetching **and** running" (not "or") — fetch alone does not trigger DENY-Always.
+- "executing fetched remote code" (not "fetching" alone) — fetch by itself does not trigger DENY-Always.
 - "ALLOW with intent, otherwise DEFER" (not "ALLOW/DEFER").
 - "is not this category" (not "is EXEMPT").
 - Cross-tier annotations use a consistent style across entries.

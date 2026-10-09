@@ -18,11 +18,13 @@ import {
 } from "#src/review/build-pool.ts";
 import { createChatAdapter } from "#src/review/engines/chat/adapter.ts";
 import type { ModelCallFn } from "#src/review/engines/chat/call.ts";
+import { buildReviewSystemPrompt } from "#src/review/engines/chat/prompt.ts";
 import { createClassifierAdapter } from "#src/review/engines/classifier/adapter.ts";
 import type {
   ClassifierClientLike,
   ClassifierSystemOneResponse,
 } from "#src/review/engines/classifier/client.ts";
+import { DANGER_CRITERIA, DANGER_NONE } from "#src/review/engines/classifier/questions.ts";
 import { createReviewerPool } from "#src/review/pool.ts";
 import { buildAskContext } from "#src/review/request/ask.ts";
 import { isMachineryFailure } from "#src/review/reviewer-engine.ts";
@@ -659,5 +661,19 @@ describe("registry backend resolution", () => {
     expect(calls).toBe(1);
     if (isMachineryFailure(result)) throw new Error(`machinery: ${result.kind}`);
     expect(result.outcome.verdict.kind).toBe("allow");
+  });
+});
+
+describe("lane parity", () => {
+  it("offers the same number of always-deny categories in both lanes", () => {
+    const alwaysDeny =
+      buildReviewSystemPrompt({ rules: null, replace: false })
+        .split("\n## ")
+        .find((block) => block.startsWith("DENY — Always")) ?? "";
+    const chatCategories = alwaysDeny.split("\n").filter((line) => line.startsWith("- **")).length;
+    const classifierCategories = Object.keys(DANGER_CRITERIA).filter(
+      (key) => key !== DANGER_NONE,
+    ).length;
+    expect(chatCategories).toBe(classifierCategories);
   });
 });
