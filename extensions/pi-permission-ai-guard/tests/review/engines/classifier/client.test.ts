@@ -153,10 +153,9 @@ describe("buildClassifierRequest", () => {
   });
 
   it("keeps the built-in reviewer role leading every question", () => {
-    // The role sentence defines the "authorization anchor" the intent_match
-    // criteria and the verdict thresholds are calibrated against — it is
-    // answer-contract scaffolding, so a user background appends after it
-    // rather than replacing it.
+    // The role sentence is answer-contract scaffolding: a user background
+    // appends after it rather than replacing it, and the anchor the criteria
+    // read is the request's `authorization_anchor` state key, not this text.
     const roleMarker = "You are reviewing one tool call";
     const req = buildClassifierRequest(
       transcript(),
