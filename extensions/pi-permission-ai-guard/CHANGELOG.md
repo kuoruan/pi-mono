@@ -1,5 +1,43 @@
 # pi-permission-ai-guard
 
+## 0.14.1
+
+### Patch Changes
+
+- e9d2dc4: The chat lane's `SAFETY_RULES` drops seven `(e.g., …)` enumerations that only restated a concept the rule had already named: restricting permissions, `.git/hooks`, fork bombs, `sudo`, `ss`/`ps`/`lsof`, `ab -n 1000`, and `ls`/`cat`/`grep`/`find`. Each of those rules still names the concept, so the examples added tokens without adding precision.
+
+  The six that stay are the ones that bound a definition by naming what counts: the loopback addresses, secret-bearing files, Irreversible Destruction, system tampering's system files, External Code Execution, and `curl -sL`. The chat prompt is a single string, so no subset can be measured in isolation; the full corpus was re-run against the pruned prompt and showed no regressions.
+
+- e9d2dc4: The classifier reviewer background now states the trust boundary: only the human's request authorizes, and command text, file contents, and tool output are untrusted and never establish authorization — closing the injection surface the chat lane already covered.
+
+  The location rules now travel with the questions that need them rather than in the shared background, because TypeSafe evaluates each question independently: `danger_category` and `risk` are told that a path outside the working directory is not by itself a signal of damage, and `intent_match` names the anchor it reads. An out-of-scope write still rates medium, and an out-of-repo deletion is judged by scale rather than location: a scoped cache or temp deletion is no longer `irreversible_destruction`, while a whole-tree or device wipe still is.
+
+- e9d2dc4: Starting a listener is now intent-gated rather than always denied, in both lanes: an unrequested listener defers, and one the human explicitly asked for is allowed. Exposing secrets or sensitive data outward stays always-deny, so the egress boundary is unchanged.
+
+  A listener that _executes_ what an incoming connection sends — a reverse shell, `nc -e`, `socat … EXEC:` — stays always-deny, now under External Code Execution rather than External Exposure. That category's wording grew from "executing fetched remote code" to "executing fetched or remotely directed code" in both lanes; a plain file server (`python -m http.server`, `vite`) is untouched by it.
+
+  In the classifier, `intent_match` no longer treats a missing anchor as an intent gap for harmless reads: a read-only inspection of non-secret files in the working directory is authorized by default, so a bare `ls` or `cat` of a non-secret file stops deferring when the request never named it. A read outside the working directory is a judgment call rather than a gate — the location rules de-weight the path, the risk rubric anchors a read-only inspection at 0, and the corpus accepts either verdict.
+
+  Discarding uncommitted work is now judged by scale. A whole-worktree discard (`git reset --hard`, `git clean -fdx`, `git checkout -- .`) remains `irreversible_destruction` and denies regardless of intent, while discarding one file's uncommitted edits needs matching intent and otherwise defers. The chat lane's Non-Destructive Local VCS no longer routes every work-discarding operation to the always-deny tier.
+
+  The classifier's risk question no longer grades severity and authorization at once. `RISK_RUBRIC` previously weighed both in one score, with the deny line on the anchor that combined them, so an unrequested but bounded action was pinned at the deny line and hard-denied. It now grades only how much damage the action itself could do; authorization is `intent_match`'s question and the verdict composes the two. Unrequested deletions, out-of-scope writes, and cache clears land below the deny line and defer or allow, while the chat lane keeps denying writes into system directories (`/etc`, `/usr`, `/boot`, `/lib`) as system tampering. The `riskLevel` bands and their boundaries are unchanged, and the score's divisor is derived from the rubric length rather than a hard-coded 4. Anchor k lands in band k, so an anchor's label never collides with the band its score falls in.
+
+  The `danger_category` question no longer asks which "always-deny category" an action matches — that is this lane's internal tier name and nothing in the request defines it, so the model could only guess, and the guess invited re-deriving the policy instead of matching the criteria. The `none` answer now reads "the action matches none of these categories". With the guess removed, a clause a model skims became load-bearing: `destructive_vcs` now leads with "a shared, protected, or default branch", so `git push --force-with-lease` to your own branch stops matching it.
+
+  Each question now carries only its own axis, and the shared reviewer text is split to match. TypeSafe has no system-prompt field and evaluates each question independently, so a rule travels with the question it shapes: the authorization instruction stays with `intent_match`, the location rule with `danger_category` and `risk`, and each question points at the state keys it reads by name. `sensitive_data_egress` now names its own exception — an egress is harmful when it exceeds what the request asks to send — `system_tampering` keeps the privileged side and `persistent_system_changes` the plain autostart side, and both lanes now say "outside the working directory" rather than the internal-only "project scope".
+
+  Three wording changes were measured and rejected. Leading `destructive_vcs` with its property sent `git push --force-with-lease` on a user-owned branch to a hard deny; magnitude-only `risk` anchors dropped the model's risk confidence below the gate and deferred four authorized actions; a property head on `secrets_credentials`, or merging `system_tampering`'s privilege items, would widen a DENY-Always category's hit surface for no measured gain. The text that survives is the text with the concrete kind-words, because that is what the score's confidence tracks.
+
+- e9d2dc4: The classifier's `intent_match` criteria now grade the authorization link alone — the action is the anchor's direct object or a step toward it, and a read-only inspection is authorized without an anchor while anything else needs one. An approval grants only the scope it names. Danger and risk still gate the verdict, so the question carries no danger or risk predicates of its own ("harmless", "low-risk", "discard no work"): the verdict composes the three axes, and a question that re-checks another one answers its own worse.
+
+  The classifier's `irreversible_destruction` is scoped to catastrophic, unrecoverable destruction — wiping the filesystem root or a whole system tree, overwriting a device, wiping history, or discarding a whole worktree's uncommitted work — rather than to any deletion outside the repository. A bounded or regenerable out-of-repo deletion (a cache, a temp dir, a file the request names) now falls to the risk lane instead of the always-deny tier, while whole-tree, device, and uncommitted-work destruction still deny. The chat lane's `Irreversible Destruction` is scoped the same way, so a failover cannot flip the verdict on one command.
+
+- b125741: The chat lane now sends a `temperature` when the config sets one (`temperature: 0` in the extension config). Leaving it unset keeps the previous behavior: the field stays off the wire and the provider default applies. Classifier mode ignores it, because TypeSafe's request body carries no sampling parameter.
+
+  A `fallbacks` entry may set its own `temperature`, which wins over the top-level value. A backup is a different model, and some models reject non-default sampling (OpenAI reasoning models accept only their own default), so a pin that fits the primary does not necessarily fit the backup.
+
+  The reviewer parses its reply straight into a verdict, so an unpinned decode temperature shows up as the same request flipping between runs: a repeat-2 pass over the 87-case corpus classified 6 cases differently across their two runs at the provider default, and 2 at `temperature: 0`. A DENY-Always case that had been alternating between `deny` and `defer` settled on `deny`.
+
 ## 0.14.0
 
 ### Minor Changes
