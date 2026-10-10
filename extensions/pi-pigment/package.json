@@ -1,6 +1,6 @@
 {
   "name": "pi-pigment",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Pigment for your pi: syntax highlighting for diffs, shell, grep and listings in your theme's colors — ships the Shiki bundle, imports TextMate (.tmTheme) themes",
   "keywords": [
     "diff",
