@@ -5,6 +5,7 @@
   "reasoning": "off",
   "timeoutMs": 15000,
   "maxTokens": 4096,
+  "temperature": 0,
   "surfaces": ["bash", "mcp", "skill"],
   "instructions": null,
   "mode": "default",

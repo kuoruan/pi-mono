@@ -11,6 +11,7 @@ interface LaneTarget {
   provider: string;
   model: string;
   timeoutMs: number;
+  temperature: number | undefined;
 }
 
 /**
@@ -18,7 +19,7 @@ interface LaneTarget {
  * Every config entry reaches a registry-backed lane — there is no
  * alternative chat transport.
  *
- * @param target - The registry addressing plus the resolved timeout.
+ * @param target - The registry addressing plus the resolved timeout and temperature.
  * @returns The chat endpoint.
  */
 export function buildChatEndpoint(target: LaneTarget): ChatPoolEndpoint {
@@ -27,6 +28,7 @@ export function buildChatEndpoint(target: LaneTarget): ChatPoolEndpoint {
     provider: target.provider,
     model: target.model,
     timeoutMs: target.timeoutMs,
+    temperature: target.temperature,
     id: `${target.provider}/${target.model}`,
   };
 }

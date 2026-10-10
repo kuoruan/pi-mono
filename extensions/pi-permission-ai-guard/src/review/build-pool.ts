@@ -75,6 +75,7 @@ export function resolvePoolEndpoints(
     entry: { provider: string | ClassifierProvider; model: string },
     position: number,
     timeoutMs: number,
+    temperature: number | undefined,
   ): PoolEndpoint[] =>
     isClassifierMode(entry)
       ? resolveClassifierEntry(
@@ -87,6 +88,7 @@ export function resolvePoolEndpoints(
             provider: entry.provider as string,
             model: entry.model,
             timeoutMs,
+            temperature,
           }),
         ];
 
@@ -94,7 +96,7 @@ export function resolvePoolEndpoints(
   // lanes; per-endpoint tuning lives on fallback entries. A classifier
   // primary has no override of its own.
   return [
-    ...resolveEntry(config, 0, config.timeoutMs),
+    ...resolveEntry(config, 0, config.timeoutMs, config.temperature),
     ...config.fallbacks.flatMap((entry: FallbackItem, position): PoolEndpoint[] =>
       // Fallback default is discounted: backups are usually cheap fast
       // models that need no primary-sized window. Explicit entries win.
@@ -102,6 +104,8 @@ export function resolvePoolEndpoints(
         entry,
         position + 1,
         entry.timeoutMs ?? Math.min(config.timeoutMs, FALLBACK_TIMEOUT_DEFAULT_MS),
+        // Only a registry entry carries a sampling field.
+        ("temperature" in entry ? entry.temperature : undefined) ?? config.temperature,
       ),
     ),
   ];

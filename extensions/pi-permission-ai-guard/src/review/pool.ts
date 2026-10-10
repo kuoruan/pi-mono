@@ -53,6 +53,8 @@ export interface ChatPoolEndpoint {
   provider: string;
   model: string;
   timeoutMs: number;
+  /** The resolved sampling temperature; `undefined` leaves the field off the wire. */
+  temperature: number | undefined;
   /**
    * The endpoint's bare audit identity (`provider/model`), built where the
    * endpoint is. The pool appends the walk position.

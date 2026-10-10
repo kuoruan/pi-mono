@@ -95,6 +95,11 @@ export const registryFallbackSchema = z
     model: z.string().min(1),
     modelType: z.enum(MODEL_TYPE_VALUES).default("chat"),
     timeoutMs: z.number().int().min(1).max(300_000).optional(),
+    // Overrides the top-level `temperature` for this entry. A backup is a
+    // different model, and some models reject non-default sampling (OpenAI
+    // reasoning models accept only their own default), so a pin that fits
+    // the primary cannot be assumed to fit the backup.
+    temperature: z.number().min(0).max(2).optional(),
   })
   .strict();
 
@@ -253,6 +258,12 @@ const configBaseSchema = z.object({
   // truncates the reply mid-think and surfaces as the empty-reply machinery
   // failure. 4096 keeps the stricter, effort-based case safe.
   maxTokens: z.number().int().min(16).max(32768).default(4096),
+
+  // Chat-lane sampling temperature. Unset omits the field, so the provider
+  // default applies — what every build before this key did. Set it to 0 to
+  // make two reviews of one request agree: the verdict is read straight off
+  // the reply, so decode variance surfaces as a flip between runs.
+  temperature: z.number().min(0).max(2).optional(),
 
   // Transcript stripping: how much context to keep for the model review.
   transcript: transcriptSchema

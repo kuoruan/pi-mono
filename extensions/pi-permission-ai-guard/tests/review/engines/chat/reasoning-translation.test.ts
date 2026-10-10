@@ -92,6 +92,7 @@ async function captureRequest(reasoning: ModelCallContext["reasoning"]) {
     auth: { apiKey: "k" },
     reasoning,
     maxTokens: 2048,
+    temperature: undefined,
     log: { review: () => {}, debug: () => {} },
     requestId: "req",
   };

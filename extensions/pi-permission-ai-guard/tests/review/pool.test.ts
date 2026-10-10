@@ -32,6 +32,7 @@ const chatEndpoint = (model: string, timeoutMs = 1000): PoolEndpoint => ({
   provider: "anthropic",
   model,
   timeoutMs,
+  temperature: undefined,
   // The lane's bare audit identity — the pool appends the walk position.
   id: `anthropic/${model}`,
 });

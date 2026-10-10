@@ -72,11 +72,16 @@ const spec = (hasFailover: boolean): AttemptSpec => ({
   walkRemainingMs: 30_000,
 });
 
-const endpoint = (model = "primary", timeoutMs = 5000): PoolEndpoint => ({
+const endpoint = (
+  model = "primary",
+  timeoutMs = 5000,
+  temperature: number | undefined = undefined,
+): PoolEndpoint => ({
   lane: "chat",
   provider: "anthropic",
   model,
   timeoutMs,
+  temperature,
   id: `anthropic/${model}`,
 });
 
@@ -91,6 +96,26 @@ const httpError = (status: number) => Object.assign(new Error("provider failure"
 const allow = () => reply('{"verdict":"allow"}');
 
 describe("chat adapter disposition", () => {
+  it("forwards the endpoint's resolved temperature into the call context", async () => {
+    const seen: (number | undefined)[] = [];
+    const modelCall: ModelCallFn = async (_model, _context, options) => {
+      seen.push(options?.temperature);
+      return reply('{"verdict":"allow"}');
+    };
+    // The endpoint owns the value — the adapter config has no temperature —
+    // so the pool's per-entry, else top-level, resolution is what reaches
+    // the wire. 0 is a real choice and has to travel; unset has to not act
+    // like one.
+    for (const pinned of [endpoint("primary", 5000, 0), endpoint()]) {
+      await adapter(modelCall).attempt(
+        pinned,
+        attemptContext(makeMergedRecordingLog().log),
+        spec(true),
+      );
+    }
+    expect(seen).toEqual([0, undefined]);
+  });
+
   it("answers valid verdicts (allow, deny, defer, malformed) without failover signal", async () => {
     for (const [text, kind] of [
       ['{"verdict":"allow"}', "allow"],

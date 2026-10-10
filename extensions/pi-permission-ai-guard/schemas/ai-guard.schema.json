@@ -135,6 +135,12 @@
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 300000
+              },
+              "temperature": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "Overrides the top-level temperature for this entry, which wins because a backup is a different model."
               }
             },
             "required": ["provider", "model"],
@@ -194,6 +200,12 @@
       "maximum": 32768,
       "default": 4096,
       "description": "Reviewer answer budget in tokens. With reasoning on, budget-based providers (Anthropic, Bedrock) add the thinking budget on top, while effort-based providers (OpenAI-compatible) share this cap with thinking; too small a cap truncates the reply mid-think (the empty-reply machinery failure)."
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2,
+      "description": "Chat-lane sampling temperature. Unset leaves the field off the wire, so the provider default applies. 0 makes two reviews of one request agree; leave it unset for a model that rejects non-default sampling, such as an OpenAI reasoning model. Ignored in classifier mode."
     },
     "mode": {
       "type": "string",

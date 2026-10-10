@@ -27,7 +27,10 @@ import { attempt, errorMessage } from "#src/utils.ts";
 import { type ModelCallFn, reviewModel } from "./call.ts";
 
 export interface ChatAdapterDeps {
-  /** Shared reviewer knobs (reasoning/maxTokens only — thresholds are classifier-scoped). */
+  /**
+   * Shared reviewer knobs (reasoning/maxTokens only — thresholds are
+   * classifier-scoped, and the sampling temperature rides the endpoint).
+   */
   config: {
     reasoning: AiGuardConfig["reasoning"];
     maxTokens: AiGuardConfig["maxTokens"];
@@ -103,6 +106,7 @@ export function createChatAdapter(deps: ChatAdapterDeps): LaneAdapter {
           auth: { apiKey: auth.apiKey, headers: auth.headers },
           reasoning: config.reasoning,
           maxTokens: config.maxTokens,
+          temperature: endpoint.temperature,
           log: ctx.log,
           requestId: ctx.requestId,
         },

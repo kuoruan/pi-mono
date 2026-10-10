@@ -15,11 +15,14 @@ import { describe, expect, it } from "vitest";
 import {
   BREAKER_VERDICT_VALUES,
   CLASSIFIER_QUESTION_IDS,
+  CONFIG_TOP_LEVEL_KEYS,
   MODEL_TYPE_VALUES,
   MODE_VALUES,
   NOTIFY_LEVEL_VALUES,
   REASONING_VALUES,
   configSchema,
+  directFallbackSchema,
+  registryFallbackSchema,
 } from "#src/config/config-schema.ts";
 import { isObjectRecord } from "#src/utils.ts";
 
@@ -30,6 +33,7 @@ interface SchemaNode {
   enum?: unknown[];
   properties?: Record<string, SchemaNode>;
   anyOf?: SchemaNode[];
+  items?: { oneOf?: SchemaNode[] };
   propertyNames?: { enum?: unknown[] };
 }
 
@@ -244,6 +248,27 @@ describe("config surface drift", () => {
     // nothing: every claimed default must name exactly one zod path.
     expect(unresolved).toEqual([]);
     expect(mismatched).toEqual([]);
+  });
+
+  it("the JSON schema carries every top-level key and no extras", () => {
+    // Defaults and enums were pinned; keys were not, so a new key could ship
+    // in the loader and stay invisible to every editor reading this schema.
+    expect(Object.keys(schemaJson.properties).toSorted()).toEqual(
+      [...CONFIG_TOP_LEVEL_KEYS].toSorted(),
+    );
+  });
+
+  it("the JSON schema's fallback arms carry the same keys as the zod arms", () => {
+    const arms = schemaJson.properties.fallbacks?.items?.oneOf ?? [];
+    expect(arms).toHaveLength(2);
+    expect(Object.keys(arms[0]?.properties ?? {}).toSorted()).toEqual(
+      Object.keys(registryFallbackSchema.shape).toSorted(),
+    );
+    // The direct arm deliberately has no sampling field: System One is the
+    // classifier lane, whose request body carries none.
+    expect(Object.keys(arms[1]?.properties ?? {}).toSorted()).toEqual(
+      Object.keys(directFallbackSchema.shape).toSorted(),
+    );
   });
 
   it("JSON-schema enums match the zod enums", () => {

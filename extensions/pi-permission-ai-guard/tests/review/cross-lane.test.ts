@@ -109,6 +109,7 @@ describe("cross-lane failover", () => {
           provider: "anthropic",
           model: "backup",
           timeoutMs: 5000,
+          temperature: undefined,
           id: "anthropic/backup",
         },
       ],
@@ -161,6 +162,7 @@ describe("cross-lane failover", () => {
           provider: "anthropic",
           model: "primary",
           timeoutMs: 5000,
+          temperature: undefined,
           id: "anthropic/primary",
         },
         {
@@ -222,6 +224,25 @@ describe("cross-lane failover", () => {
     const [, implicit, explicit] = resolvePoolEndpoints(config);
     expect(implicit?.timeoutMs).toBe(10_000);
     expect(explicit?.timeoutMs).toBe(3_000);
+  });
+
+  it("resolves a fallback's own temperature over the top-level pin", () => {
+    const config = configSchema.parse({
+      provider: "anthropic",
+      model: "primary",
+      temperature: 0,
+      fallbacks: [
+        // A backup on a model that rejects non-default sampling needs its
+        // own value, which is why the pin is per-entry. Omitting it inherits
+        // the top-level pin rather than restoring the provider default.
+        { provider: "openai", model: "implicit" },
+        { provider: "openai", model: "explicit", temperature: 1 },
+      ],
+    });
+    const resolved = resolvePoolEndpoints(config).map((endpoint) =>
+      endpoint.lane === "chat" ? endpoint.temperature : "classifier",
+    );
+    expect(resolved).toEqual([0, 0, 1]);
   });
 
   it("buildReviewerPool assembles a mixed config without throwing", () => {
@@ -358,6 +379,7 @@ describe("cross-lane failover", () => {
           provider: "anthropic",
           model: "primary",
           timeoutMs: 5000,
+          temperature: undefined,
           id: "anthropic/primary",
         },
         {

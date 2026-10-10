@@ -101,6 +101,11 @@ export interface ModelCallContext extends AuditCorrelation {
    * providers use it as the cap. See README's `maxTokens` row.
    */
   maxTokens: number;
+  /**
+   * Sampling temperature. `undefined` omits the field, so the provider
+   * default applies — the behavior of every build that predates the key.
+   */
+  temperature: number | undefined;
 }
 
 /**
@@ -179,6 +184,10 @@ async function executeCall(
     // Non-off values pass through as the reasoning level.
     if (ctx.reasoning && ctx.reasoning !== "off") {
       options.reasoning = ctx.reasoning;
+    }
+    // Absent, not 0: an unpinned temperature is not a choice of zero.
+    if (ctx.temperature !== undefined) {
+      options.temperature = ctx.temperature;
     }
     const reply = await ctx.modelCall(ctx.model, context, options);
     return { ok: true, reply, latencyMs: Date.now() - startedAt };

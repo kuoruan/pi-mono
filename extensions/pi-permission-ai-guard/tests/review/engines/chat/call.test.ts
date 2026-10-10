@@ -30,7 +30,8 @@ const fakeModel = { provider: "test", id: "test-model" } as Model<any>;
  * Build a ModelCallContext with defaults from baseConfig.
  *
  * @param modelCall - The model completer function to inject.
- * @param overrides - Optional overrides for apiKey, headers, reasoning, log, requestId.
+ * @param overrides - Optional overrides for apiKey, headers, reasoning, temperature, log,
+ *   requestId.
  * @returns A `ModelCallContext` for testing.
  */
 function makeContext(
@@ -39,6 +40,7 @@ function makeContext(
     apiKey?: string;
     headers?: Record<string, string>;
     reasoning?: AiGuardConfig["reasoning"];
+    temperature?: number;
     log?: AuthorizerLog;
     requestId?: string;
   } = {},
@@ -49,6 +51,7 @@ function makeContext(
     auth: { apiKey: overrides.apiKey, headers: overrides.headers },
     reasoning: overrides.reasoning ?? baseConfig.reasoning,
     maxTokens: baseConfig.maxTokens,
+    temperature: overrides.temperature,
     log: overrides.log ?? { review: () => {}, debug: () => {} },
     requestId: overrides.requestId ?? "test-req",
   };
@@ -154,6 +157,18 @@ describe("reviewModel", () => {
     expect(result.deferKind).toBe("empty-reply");
     // A fast empty reply retried and stayed empty — attempts reflects it.
     expect(result.attempts).toBe(2);
+  });
+
+  it("passes temperature through only when it is set", async () => {
+    const seen: (number | undefined)[] = [];
+    const modelCall: ModelCallFn = async (_model, _context, options) => {
+      seen.push(options?.temperature);
+      return makeReply([{ type: "text", text: '{"verdict":"allow"}' }], "stop");
+    };
+    await reviewModel(makeContext(modelCall, { temperature: 0 }), "test", "test", 15000);
+    await reviewModel(makeContext(modelCall), "test", "test", 15000);
+    // 0 is a real choice and has to reach the wire; unset has to stay off it.
+    expect(seen).toEqual([0, undefined]);
   });
 
   it("retries a fast empty reply and adopts the second attempt's verdict", async () => {
