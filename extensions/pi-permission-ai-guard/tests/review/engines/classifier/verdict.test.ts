@@ -118,10 +118,9 @@ describe("synthesizeClassifierVerdict", () => {
     expect(out.lean).toBeUndefined();
   });
 
-  it("labels the deny by quartile bands: 0.6 high, 0.8 critical", () => {
+  it("labels the deny by the band it landed in", () => {
     // riskLevel is a fixed rubric reading, independent of riskThreshold:
-    // 0.5–0.75 reads high, 0.75+ reads critical. Tier follows the label
-    // through denyTier, so both block in every mode at the default 0.5.
+    // [0.5, 0.75) reads high, [0.75, 1) reads critical.
     const high = synthesizeClassifierVerdict(
       confident({ intentMatch: 0.2, riskScore: 0.6 }),
       THRESHOLDS,
@@ -247,13 +246,13 @@ describe("projectClassifierAnswers", () => {
       risk: { type: "score", score: 3, confidence: 0.9 },
     });
     expect(answers.riskScore).toBe(0.75);
-    // Raw 3 reads critical on the quartile bands.
+    // Raw 3 bottoms out in the critical band.
     const out = synthesizeClassifierVerdict(answers, THRESHOLDS, 1);
     expect(out.verdict.kind).toBe("deny");
     expect(out.riskLevel).toBe("critical");
   });
 
-  it("maps quartile bands independent of the threshold", () => {
+  it("maps the quartile bands independent of the threshold", () => {
     expect(riskLevelFromScore(0)).toBe("low");
     expect(riskLevelFromScore(0.24)).toBe("low");
     expect(riskLevelFromScore(0.25)).toBe("medium");

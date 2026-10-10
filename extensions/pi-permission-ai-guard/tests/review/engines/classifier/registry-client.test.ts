@@ -48,7 +48,7 @@ describe("toClassifierContext", () => {
     // The flattened instructions carry the question text (plus the built-in
     // background), and the criteria survive the noul→bool projection as text.
     expect(ctx.questions.intent_match?.instructions).toContain(
-      "The authorization anchor authorizes this action.",
+      "Does `authorization_anchor` authorize this action?",
     );
     expect(ctx.questions.intent_match?.criteria).toEqual({
       true: expect.stringMatching(/\S/),

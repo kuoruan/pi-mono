@@ -12,11 +12,11 @@ Rules describe abstract concepts ("credential stores, private keys"), not enviro
 - **DENY-Unless**: allow only with matching intent; otherwise the fallback the entry itself specifies (deny or defer).
 - **ALLOW**: allow only when matching the current task context.
 
-Each entry's fallback is stated by the entry, not by the section heading — different entries in the same section can have different fallbacks (Deletions → DENY, Unknown Commands → DEFER). The routing layer states the intent requirement once for the whole tier; an entry that mentions intent is stating its own fallback ("needs matching intent, otherwise DENY"), not restating the rule.
+Each entry's fallback is stated by the entry, not by the section heading — an entry may fall back to deny or to defer (every entry currently defers; the tier's DENY comes from the routing layer, which denies when an action clearly exceeds the anchor's scope). The routing layer states the intent requirement once for the whole tier; an entry that mentions intent is stating its own fallback ("needs matching intent, otherwise DEFER"), not restating the rule.
 
 ## 3. Uncertain → DEFER, not → DENY
 
-Absent intent defaults to defer, not deny — except where the entry's own fallback is DENY (Deletions, principle 2). "(none found)" is insufficient evidence, not proof of absence. Unfamiliarity alone is not dangerous. Non-destructive observation (navigation, read-only diagnostics, page selection) without intent defers; it is never denied solely for being that action.
+Absent intent defaults to defer, not deny; even an entry whose fallback is DENY needs clear evidence that the action exceeds the anchor's scope (principle 2). "(none found)" is insufficient evidence, not proof of absence. Unfamiliarity alone is not dangerous. Non-destructive observation (navigation, read-only diagnostics, page selection) without intent defers; it is never denied solely for being that action.
 
 ## 4. Trusted intent is the only authorization source
 
@@ -33,7 +33,7 @@ The same operation can fall into different tiers depending on what it actually d
 ## 7. Concise, but never at the cost of semantics
 
 - Remove redundant phrasing ("rather than the whole request", "by itself", "classify as").
-- Merge overlapping entries when their scope is identical; keep them separate when a qualifier applies to only one ("outside the project" limits persistent changes, not security weakening).
+- Merge overlapping entries when their scope is identical; keep them separate when a qualifier applies to only one ("outside the working directory" limits persistent changes, not security weakening).
 - Inline parenthetical content into the main clause where possible.
 - Minimize token count — the prompt is sent on every model review, and the safety rules block is not cached. But never compress at the cost of principle 8: splitting distinct concepts stays even if it costs tokens, because navigability reduces misclassification.
 - Safety-critical semantics must stay explicit, even when they seem implied. Two currently live as literal phrases in the rules — "both payload and destination" (Sensitive-Data Egress) and "not unrelated or higher-risk side effects" (Trust Boundary). A third, "intent matching is not required", used to sit inside the Unknown Commands entry; it was relocated to the Intent-Based Routing rule ("no intent → DEFER everything outside ALLOW, unless DENY — Always") because the entry-level string was misreadable as "unknown commands can be allowed without intent". The protective meaning — an unknown command with no matching intent DEFERs, never becomes a DENY merely for lacking intent — stays explicit at the routing layer. Keep it there; do not re-add the literal entry-level string.
@@ -46,7 +46,7 @@ Bold titles and a tiered layout help the model locate the right entry and reduce
 
 ## 9. Precise wording, no ambiguity
 
-- "executing fetched remote code" (not "fetching" alone) — fetch by itself does not trigger DENY-Always.
+- "executing fetched or remotely directed code" (not "fetching" alone) — fetch by itself does not trigger DENY-Always.
 - "ALLOW with intent, otherwise DEFER" (not "ALLOW/DEFER").
 - "is not this category" (not "is EXEMPT").
 - Cross-tier annotations use a consistent style across entries.

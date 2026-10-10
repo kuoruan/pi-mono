@@ -2,12 +2,12 @@ import type { ReviewOutcome, RiskLevel, VerdictLean } from "#src/model/model-ver
 import { GENERIC_DENY_REASON } from "#src/model/model-verdict.ts";
 import { underscoresToWords } from "#src/utils.ts";
 
-import { DANGER_NONE } from "./questions.ts";
+import { DANGER_NONE, RISK_RUBRIC } from "./questions.ts";
 
 /**
  * The built-in answers as 0–1 probabilities/confidences: `noul` arrives
  * as a probability already, the 0–4 `score` is normalized by
- * {@link projectClassifierAnswers}, so the table below speaks one scale.
+ * {@link projectClassifierAnswers}, so every answer speaks one scale.
  */
 export interface ClassifierAnswers {
   dangerCategory: string;
@@ -76,7 +76,11 @@ export function projectClassifierAnswers(
     dangerCategory: danger.choice,
     dangerConfidence: danger.confidence ?? 0,
     intentMatch: intent.noul,
-    riskScore: risk.score / 4,
+    // The score is the probability-weighted level index, so its range is the
+    // rubric's own level count minus one (TypeSafe requires at least two
+    // levels). Derive the divisor rather than hard-coding it: a hard-coded 4
+    // silently mis-scales every band if the rubric gains or loses a level.
+    riskScore: risk.score / (RISK_RUBRIC.length - 1),
     riskConfidence: risk.confidence ?? 0,
   };
 }
@@ -92,20 +96,35 @@ const DANGER_TIER: Readonly<Record<string, RiskLevel>> = {
   system_tampering: "critical",
   persistent_system_changes: "critical",
   external_code_execution: "critical",
-  external_exposure: "critical",
   destructive_vcs: "critical",
   resource_abuse_dos: "critical",
 };
 
 /**
- * Map a normalized risk score (0–1) to its audit tier. The quartile bands
- * are the 0–4 rubric's own scale (raw / 4): low <0.25, medium <0.5,
- * high <0.75, critical at or above. Fixed — it does not move with
- * `riskThreshold`, so audit labels stay comparable across configs.
+ * Map a normalized risk score (0–1) to its audit tier. Fixed — it does not
+ * move with `riskThreshold`, so audit labels stay comparable across configs.
+ * The bands are quartiles of the 0–4 rubric's own span, and the rubric's
+ * anchors are named for damage, not for tiers — so anchor text and audit tier
+ * are separate vocabularies and a log line can never read as contradicting
+ * itself:
  *
- * The tier names deliberately read one notch stricter than the rubric's own
- * labels (raw 1 reads `medium` where the rubric says "Low risk"): the audit
- * tier is a severity claim, and an audit must never read as a downgrade.
+ * | raw | score band  | tier     | rubric anchor             |
+ * | --- | ----------- | -------- | ------------------------- |
+ * | 0   | [0, 0.25)   | low      | No damage                 |
+ * | 1   | [0.25, 0.5) | medium   | Bounded damage            |
+ * | 2   | [0.5, 0.75) | high     | Costly or hard to reverse |
+ * | 3   | [0.75, 1)   | critical | Severe                    |
+ * | 4   | 1.0         | critical | Catastrophic              |
+ *
+ * Anchor k lands in band k, so the top band holds the last two anchors — four
+ * bands and five anchors cannot line up one-to-one.
+ *
+ * The band boundaries are load-bearing, not cosmetic: {@link denyTier} makes
+ * high|critical hard and low|medium soft, so at the default `riskThreshold`
+ * (0.5) a deny starts at the "Costly or hard to reverse" rung — band high, hence
+ * hard — and no risk-lane deny can land in the soft tier, where permissive
+ * would allow it. Lowering the threshold below 0.5 would put the "Bounded
+ * damage" rung at the line, where its medium band softens the deny.
  *
  * @param riskScore - The normalized 0–1 risk score.
  * @returns The audit tier.
@@ -150,9 +169,9 @@ function deriveLean(
  * intent + risk below the deny line → allow;
  * otherwise the DENY-Unless lane — a risk score at or above the deny line
  * denies, labeled by the fixed quartile bands ({@link riskLevelFromScore}).
- * The tier follows the label through denyTier: with the default threshold
+ * The tier follows the label through denyTier: at the default threshold
  * (0.5) every risk-lane deny reads high/critical and blocks in every mode;
- * lowering the threshold below 0.5 reopens a soften-able low/medium band.
+ * a lower threshold reopens a soften-able low/medium band.
  *
  * @param answers - The calibrated answers.
  * @param thresholds - The intent/risk/confidence thresholds.

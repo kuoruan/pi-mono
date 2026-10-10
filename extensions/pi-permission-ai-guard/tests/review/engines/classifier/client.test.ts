@@ -5,6 +5,7 @@ import {
   createDirectClient,
 } from "#src/review/engines/classifier/client.ts";
 import type { ClassifierOverlay } from "#src/review/engines/classifier/instructions.ts";
+import { DANGER_CRITERIA, DANGER_NONE } from "#src/review/engines/classifier/questions.ts";
 import type { AskContext } from "#src/review/request/ask.ts";
 import { buildAskContext } from "#src/review/request/ask.ts";
 import type { ReviewRequestContext } from "#src/review/request/review-request.ts";
@@ -49,6 +50,11 @@ function transcript(overrides: Partial<StrippedTranscript> = {}): StrippedTransc
 const NO_INSTRUCTIONS: ClassifierOverlay = {};
 
 describe("buildClassifierRequest", () => {
+  // The criteria and instructions copy is freely iterable, so pin the
+  // load-bearing structure — question ids, answer types, criteria shape —
+  // rather than the prose. The one exception is the DANGER_CRITERIA form
+  // invariant below: it forbids an exclusion clause, so any legal reword
+  // passes and only a convention violation fails.
   it("builds the built-in questions with the model id", () => {
     const req = buildClassifierRequest(transcript(), request(), NO_INSTRUCTIONS, "jev-1.13");
     expect(req.model).toBe("jev-1.13");
@@ -63,6 +69,13 @@ describe("buildClassifierRequest", () => {
       true: expect.any(String),
       false: expect.any(String),
     });
+  });
+
+  it("keeps the no-hit answer reachable in the criteria map", () => {
+    // The allow path turns on `dangerCategory !== DANGER_NONE`. Renaming the
+    // map's key without the constant would turn every clean review into a
+    // deny, and a test that reads the constant on both sides cannot see it.
+    expect(DANGER_CRITERIA).toHaveProperty(DANGER_NONE);
   });
 
   it("puts the anchor, earlier context, and command in state", () => {
@@ -292,5 +305,19 @@ describe("createDirectClient", () => {
       { apiKey: "live-key", baseURL: "https://x.example/base" },
       { apiKey: undefined, baseURL: undefined },
     ]);
+  });
+});
+
+describe("DANGER_CRITERIA form", () => {
+  it("states every category by positive inclusion, never by exclusion", () => {
+    // The single-choice answer contract has no sibling category to route
+    // "not this category" to, so an exclusion only pollutes
+    // the distribution. Exemptions belong in positive qualifiers. This test
+    // freezes that convention — the case that established it lives only in a
+    // merged changeset.
+    const offenders = Object.entries(DANGER_CRITERIA)
+      .filter(([, criteria]) => criteria.includes("not this category"))
+      .map(([category]) => category);
+    expect(offenders).toEqual([]);
   });
 });
