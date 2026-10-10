@@ -1,16 +1,16 @@
 /**
- * The tool-wrapper factory: one place owns the skeleton every wrapper shares
- * — execute delegation, the error frame, text extraction, and lastComponent
+ * The tool-renderer factory: one place owns the skeleton every renderer
+ * shares — the error frame, text extraction, timing, and lastComponent
  * acquisition — so each tool module shrinks to its genuinely varying render
- * logic. `this`-safety: the SDK originals are always invoked with
- * method-call syntax (`orig.renderCall?.(...)`) so any internal receiver
+ * logic. `this`-safety: the origin renderers are always invoked with
+ * method-call syntax (`orig?.renderCall?.(...)`) so any internal receiver
  * binding survives.
  */
 
 import type {
   AgentToolResult,
   Theme,
-  ToolDefinition,
+  ToolRenderers,
   ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
@@ -39,8 +39,9 @@ import {
 
 /**
  * A renderResult implementation the factory calls with extracted text. The
- * frame's view carries the scheme and the pi theme (the render vocabulary —
- * the SDK's Theme class is structurally assignable, so wrappers never cast).
+ * frame's view carries the scheme and the pi theme (the render vocabulary:
+ * spec bodies never cast — only the `orig` delegation seam coerces the
+ * SDK's own Theme class and generic ctx).
  */
 export type RenderResultBody<TState extends object> = (args: {
   text: PreviewTextHost;
@@ -52,16 +53,16 @@ export type RenderResultBody<TState extends object> = (args: {
   /** The render options (expanded, isPartial). */
   options: ToolRenderResultOptions;
   /**
-   * The measured execution time, from the render-state clock
-   * ({@link armTiming}/{@link stopTiming}): undefined while the result
-   * streams, and on a row replayed from the session (whose clock was
-   * never armed).
+   * The execution duration: pi's recorded `ctx.durationMs` when the host
+   * supplies it, else our render-state clock ({@link armTiming}/
+   * {@link stopTiming}). Undefined while the result streams, and on a row
+   * replayed from the session whose result carried no duration.
    */
-  tookMs: number | undefined;
+  durationMs: number | undefined;
   /**
-   * The wrapped SDK tool's own renderResult — for wrappers that delegate
+   * The origin renderers' own renderResult — for renderers that delegate
    * output rendering wholesale (bash: the command is ours, the output is
-   * the SDK's native display).
+   * pi's native display).
    */
   origRenderResult: (
     result: AgentToolResult<unknown>,
@@ -77,7 +78,7 @@ export interface HeaderLineSpec<TState extends object> {
   prefix: string;
   /**
    * The styled header body (the byte-parity format*Call formatter). The
-   * render args stay unknown at the boundary — the wrapper knows its
+   * render args stay unknown at the boundary — the renderer knows its
    * input shape (argsOf); the ctx carries what ls (cwd) and read
    * (cwd + expanded) read into their formatters; the view carries the
    * session's piRoot for read's docs classification.
@@ -111,25 +112,21 @@ export type RenderCallBody<TState extends object> = (args: {
   renderArgs: unknown;
 }) => Component;
 
-/** The wrapper's per-tool configuration. */
-export interface WrapperSpec<TState extends object> {
+/** The renderer's per-tool configuration. */
+export interface RendererSpec<TState extends object> {
   /** The renderCall body (undefined delegates to the SDK original). */
   renderCall?: RenderCallBody<TState>;
   /**
    * A call-header line the factory renders wholesale: the factory owns
    * the renderHeaderLine skeleton (text/prefix/view/ctx/services/body),
    * the spec supplies the key prefix and the body formatter. Takes
-   * precedence over renderCall; no wrapper sets both.
+   * precedence over renderCall; no renderer sets both.
    */
   renderHeader?: HeaderLineSpec<TState>;
   /** The renderResult body (the factory handles the error frame around it). */
   renderResult?: RenderResultBody<TState>;
-  /** A custom execute (write/edit stash diffs into details). */
-  execute?: (
-    ...args: Parameters<ToolDefinition["execute"]>
-  ) => ReturnType<ToolDefinition["execute"]>;
   /**
-   * Settle a final frame regardless of outcome — for wrappers whose
+   * Settle a final frame regardless of outcome — for renderers whose
    * delegated SDK renderer owns resources that its own (bypassed)
    * renderResult would have released (the shell tools' timing
    * interval). Runs on every non-pending frame, before any branch
@@ -156,7 +153,7 @@ export interface WrapperSpec<TState extends object> {
    *   background, no padding). A self tool must paint every background itself (the native edit tool
    *   does this: its call component is its own Box with a bgFn it flips per call state).
    *
-   * Every wrapper declares "default" EXPLICITLY: the factory spreads
+   * Every renderer declares "default" EXPLICITLY: the factory spreads
    * the SDK origin's definition first, and an inherited "self" would
    * silently strip the frame background from our plain-Text renders
    * (the edit error-frame bug this field fixes). Pin the contract
@@ -194,36 +191,39 @@ export function renderPlainTextFallback(
 }
 
 /**
- * Build a tool wrapper around `orig`: the factory owns the skeleton, the
- * spec supplies the per-tool variance. `TState` types the wrapper's render
- * state — the runtime shape is the TUI's `{}` either way; the generic only
- * tightens what the spec bodies may read and write.
+ * Build a tool's renderer triple around `orig`: the factory owns the
+ * skeleton, the spec supplies the per-tool variance. `TState` types the
+ * renderer's render state — the runtime shape is the TUI's `{}` either
+ * way; the generic only tightens what the spec bodies may read and write.
  *
- * @param orig - The SDK tool to wrap.
+ * The factory owns NO execution: it returns only the renderer slots, so a
+ * caller (the resolver) can hand them to the TUI without touching the
+ * tool's definition. The `orig` triple is the delegation target — the
+ * renderers `next()` yields (pi's built-in ones when no later resolver
+ * overrides them).
+ *
+ * @param name - The tool name (the error frame's label).
+ * @param orig - The renderers this renderer delegates to/falls back to.
  * @param services - Assembly services (text factory).
  * @param spec - The per-tool render bodies.
- * @returns The wrapped tool.
+ * @returns The renderer triple.
  */
-export function createToolWrapper<TState extends object = Record<string, unknown>>(
-  orig: ToolDefinition,
+export function createToolRenderer<TState extends object = Record<string, unknown>>(
+  name: string,
+  orig: ToolRenderers | undefined,
   services: ToolServices,
-  spec: WrapperSpec<TState>,
-): ToolDefinition {
+  spec: RendererSpec<TState>,
+): ToolRenderers {
   const { textFactory } = services;
 
   return {
-    ...orig,
     // Override the SDK origin's shell claim when the spec prescribes one
     // (edit: "self" → "default" so the Box owns the frame's background).
-    ...(spec.renderShell !== undefined ? { renderShell: spec.renderShell } : {}),
-
-    // Only write/edit own an execute — the rest keep `orig`'s, so the
-    // signature follows the host across SDK versions without naming it.
-    ...(spec.execute !== undefined ? { execute: spec.execute } : {}),
+    renderShell: spec.renderShell ?? orig?.renderShell,
 
     renderCall(args: unknown, theme: Theme, ctx: RenderContext<TState>): Component {
       const text = getWidthAwareText(ctx.lastComponent, textFactory);
-      // pi's renderCall timing contract, applied to every wrapper: the live
+      // pi's renderCall timing contract, applied to every renderer: the live
       // execution arms the clock, and a resumed row renders with
       // executionStarted false, so it never gets one.
       armTiming(ctx.state as ExecutionTimingState, ctx.executionStarted);
@@ -247,7 +247,7 @@ export function createToolWrapper<TState extends object = Record<string, unknown
           ctx,
           renderArgs: args,
         });
-      return orig.renderCall?.(args, theme, ctx as never) ?? text;
+      return orig?.renderCall?.(args, theme, ctx as never) ?? text;
     },
 
     renderResult(
@@ -266,16 +266,26 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       // Stop the clock before any branch renders: the error frame reads the
       // duration too, and the first settled frame fixes endedAt (repeated
       // renders of one row must read one value — it is part of the frame
-      // cache key).
-      const tookMs = stopTiming(ctx.state as ExecutionTimingState, options.isPartial, ctx.isError);
-      // Every FINAL frame settles wrapper resources through the spec
+      // cache key). stopTiming's side effect (fixing endedAt) is required
+      // regardless — the native shell renderer reads the same state fields.
+      const measured = stopTiming(
+        ctx.state as ExecutionTimingState,
+        options.isPartial,
+        ctx.isError,
+      );
+      // Prefer pi's recorded execution duration when the host supplies it
+      // (1.1.0 live frames, and replayed rows whose result carried it);
+      // fall back to our render-state clock on 1.0.1, on HTML export, and
+      // while partial — the places pi leaves `durationMs` undefined.
+      const durationMs = ctx.durationMs ?? measured;
+      // Every FINAL frame settles renderer resources through the spec
       // hook (the shell timing interval: the native renderer arms it
       // while partial output streams and clears it only on the frames
       // it renders itself — the error frame below bypasses that
       // render, and a success path that replaces the renderer must not
       // depend on it either). Pending frames keep their ticking timer
       // (that live invalidate IS the display). The factory never names
-      // the resource — the wrapper owns it.
+      // the resource — the renderer owns it.
       if (status !== "pending") {
         spec.onSettled?.(ctx);
       }
@@ -283,22 +293,22 @@ export function createToolWrapper<TState extends object = Record<string, unknown
       if (status === "error") {
         const message = firstTextOf(result) || "Error";
         // Tool-specific cleanup and the failure bridge — the contract
-        // lives on WrapperSpec.onError.
+        // lives on RendererSpec.onError.
         spec.onError?.(ctx, message);
         // ONE builder drives both the synchronous placeholder and the
         // width-aware preview task: the task re-renders at the TUI's real
         // width so every wrapped visual row carries the bar column. The
-        // frame composes and colors the Took footer itself from tookMs
+        // frame composes and colors the Took footer itself from durationMs
         // (undefined on a row that never armed the clock — a resumed
         // error row, exactly like pi's own renderers — no footer).
         const frame = (width: number): string =>
           formatToolErrorResult({
-            name: orig.name,
+            name,
             message,
             theme,
             expanded: options.expanded,
             indicatorStyle: services.indicatorStyle,
-            tookMs,
+            durationMs,
             width,
           });
         // The attach guard (previewIdentity compare) replaces the old
@@ -312,9 +322,9 @@ export function createToolWrapper<TState extends object = Record<string, unknown
           text,
           definePreviewTask({
             identity: errorFrameKey({
-              prefix: orig.name,
+              prefix: name,
               expanded: options.expanded,
-              tookMs,
+              durationMs,
               identity: scheme.identity,
               message,
             }),
@@ -334,12 +344,12 @@ export function createToolWrapper<TState extends object = Record<string, unknown
           ctx,
           result,
           options,
-          tookMs,
+          durationMs,
           origRenderResult: (res, opts, th, ctx2) =>
-            orig.renderResult?.(res, opts, th as Theme, ctx2 as never) ?? text,
+            orig?.renderResult?.(res, opts, th as Theme, ctx2 as never) ?? text,
         });
       }
-      return orig.renderResult?.(result, options, theme, ctx as never) ?? text;
+      return orig?.renderResult?.(result, options, theme, ctx as never) ?? text;
     },
   };
 }

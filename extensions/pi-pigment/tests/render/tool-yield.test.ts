@@ -4,10 +4,14 @@ import { registerTools } from "#test/fixtures.ts";
 
 /**
  * The generic yield: when another extension already owns a tool name, the
- * extension skips its wrapper instead of shadowing the neighbor. The
- * occupancy check reads pi's merged registry (name + sourceInfo.source),
- * so the suite stages foreign tools with a non-builtin source and the
- * facade's own re-registrations with the realistic local source.
+ * resolver hands the name back to `next()` (pi's own renderers) instead of
+ * painting built-in-shaped renderers over the neighbor's tool. The yield
+ * check reads pi's merged registry (name + sourceInfo.source), so the
+ * suite stages foreign tools with a non-builtin source.
+ *
+ * The name is missing from the returned facade because the resolver
+ * yielded it (returned the built-in triple by reference); that absence is
+ * the observable form of "pi-pigment does not decorate this name".
  */
 describe("tool yield on foreign occupancy", () => {
   test("yields a single occupied name and keeps the rest", async () => {
@@ -33,7 +37,7 @@ describe("tool yield on foreign occupancy", () => {
 
   test("builtin-source entries do not trigger the yield", async () => {
     // No foreignTools staged: the registry only surfaces builtins, so the
-    // full eight wrappers register — the check keys on the source, not
+    // full eight renderers register — the check keys on the source, not
     // the bare name.
     const tools = await registerTools({});
     expect(tools.map((tool) => tool.name).toSorted()).toEqual(
@@ -50,20 +54,15 @@ describe("tool yield on foreign occupancy", () => {
     expect(tools.map((tool) => tool.name)).not.toContain("ls");
   });
 
-  test("resume re-fire does not yield to our own registration (self-shadowing guard)", async () => {
-    // The shared registry models pi's persistent one: the first fire's
-    // local-sourced wrappers stay visible, so a second fire served from
-    // the same registry must still register all eight — the guard
-    // excludes our own prior names, and only genuinely foreign names
-    // yield. Without the shared array the mock re-created an empty
-    // registry per call and the guard never fired.
-    const shared: Awaited<ReturnType<typeof registerTools>> = [];
-    const first = await registerTools({}, [], shared);
+  test("a re-fire decorates the same names (no self-shadow: the extension registers no tool)", async () => {
+    // The extension now registers NO tool, so the only registry entries
+    // the yield check sees are foreign names and builtins. A resume/fork
+    // re-fire is stable: `claimedByOther` never sees a pi-pigment entry to
+    // confuse for a neighbor, and the same eight names come back.
+    const first = (await registerTools()).map((tool) => tool.name).toSorted();
+    const second = (await registerTools()).map((tool) => tool.name).toSorted();
     expect(first).toHaveLength(8);
-    const second = await registerTools({}, [], shared);
-    expect(second.map((tool) => tool.name).toSorted()).toEqual(
-      ["bash", "edit", "find", "grep", "ls", "powershell", "read", "write"].toSorted(),
-    );
+    expect(second).toEqual(first);
   });
 
   test("foreign yield is independent of disabledTools", async () => {

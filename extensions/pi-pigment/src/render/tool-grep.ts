@@ -1,11 +1,11 @@
 /**
- * The grep tool wrapper: execution delegates to the SDK's grep tool (via the
- * tool-wrapper factory); rendering highlights hit lines in the hit file's
- * language with the matched pattern emphasized (literal/regex/ignoreCase
- * semantics honored), `file:line:` prefixes muted, context lines dimmer.
+ * The grep renderer: pi's own grep tool executes; this triple highlights
+ * hit lines in the hit file's language with the matched pattern
+ * emphasized (literal/regex/ignoreCase semantics honored), `file:line:`
+ * prefixes muted, context lines dimmer.
  */
 
-import type { GrepToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { GrepToolInput, ToolRenderers } from "@earendil-works/pi-coding-agent";
 
 import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
@@ -17,7 +17,7 @@ import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 import { assembleOutputBody } from "./output-assembly.ts";
 import { accentEmphasis, emphasize, type MatchFlags } from "./pattern-emphasis.ts";
 import type { FrameView } from "./session.ts";
-import { createToolWrapper } from "./tool-factory.ts";
+import { createToolRenderer } from "./tool-factory.ts";
 import { COLLAPSED_LINES, joinBodyTail, outputMemoOf, renderPlainOutput } from "./tool-output.ts";
 import {
   argsOf,
@@ -112,20 +112,20 @@ export function parseHitLine(line: string): HitLine | null {
 }
 
 /**
- * Build the grep wrapper around `origGrep`.
+ * Build the grep renderer around `origGrep`.
  *
- * @param origGrep - The SDK grep tool to wrap.
+ * @param origGrep - The SDK grep renderers to delegate to.
  * @param services - Assembly services.
- * @returns The wrapped tool.
+ * @returns The renderer triple.
  */
-export function createGrepWrapper(
-  origGrep: ToolDefinition,
+export function createGrepRenderer(
+  origGrep: ToolRenderers | undefined,
   services: ToolServices,
-): ToolDefinition {
+): ToolRenderers {
   // renderResult reads the settled args directly from ctx.args (the
   // SDK's documented pattern: args are present every frame, live and
   // restored alike).
-  return createToolWrapper(origGrep, services, {
+  return createToolRenderer("grep", origGrep, services, {
     renderShell: "default",
     // The header body mirrors the SDK's formatGrepCall (pattern / path /
     // glob / limit); the SDK's render-utils helpers (str, shortenPath,
@@ -136,7 +136,7 @@ export function createGrepWrapper(
       formatCallBody: (renderArgs, theme) =>
         formatGrepCall(argsOf<GrepToolInput>(renderArgs), theme),
     },
-    renderResult: ({ text, view, ctx, result, options, tookMs }) => {
+    renderResult: ({ text, view, ctx, result, options, durationMs }) => {
       const { theme } = view;
       // Inert at intake (ADR 0004): the grep result carries raw file
       // bytes, and EVERY downstream surface — the placeholder's first
@@ -165,7 +165,7 @@ export function createGrepWrapper(
         budget: COLLAPSED_LINES.grep,
         derived,
         view,
-        tookMs,
+        durationMs,
         expanded: options.expanded,
         streaming: pending,
         notice: derived.notice,

@@ -1,5 +1,5 @@
 /**
- * The shared shell-tool wrapper (bash + powershell — the SDK's two
+ * The shared shell-tool renderer (bash + powershell — the SDK's two
  * `createShellToolDefinition` instances): execution delegates verbatim;
  * rendering colors the COMMAND in the shell's own grammar — the one thing
  * whose language is known with certainty — and leaves the OUTPUT to the
@@ -25,17 +25,18 @@
  * (both display paths), before it joins our own escape chrome.
  */
 
-import type { BashToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { BashToolInput, ToolRenderers } from "@earendil-works/pi-coding-agent";
 
 import { inertText } from "#src/core/ansi.ts";
-import { KEY_SEP, SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
+import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
+import { joinKey } from "#src/core/keys.ts";
 import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { renderHeaderLine } from "./ellipsis.ts";
 import { astInjectRegions, fallbackHeredocRegions } from "./heredoc-inject.ts";
 import type { FrameView } from "./session.ts";
 import { shellBadgeText, shellExitBadgeOf } from "./shell-status.ts";
-import { createToolWrapper } from "./tool-factory.ts";
+import { createToolRenderer } from "./tool-factory.ts";
 import {
   argsSettled,
   callStateOf,
@@ -44,8 +45,13 @@ import {
   argsOf,
 } from "./tool-services.ts";
 
-/** The per-shell rendering inputs: the grammar, the prompt glyph, and the heredoc injection. */
+/**
+ * The per-shell rendering inputs: the tool name, the grammar, the prompt glyph, and the heredoc
+ * injection.
+ */
 export interface ShellToolProfile {
+  /** The tool name the factory labels the error frame with. */
+  name: "bash" | "powershell";
   /** The Shiki grammar for this shell's commands. */
   language: "shellscript" | "powershell";
   /** The prompt shown before the command ("$" / "PS>"). */
@@ -60,6 +66,7 @@ export interface ShellToolProfile {
 
 /** The bash profile: shellscript grammar, $ prompt, the AST injection. */
 export const bashProfile: ShellToolProfile = {
+  name: "bash",
   language: "shellscript",
   prompt: "$",
   inject: (command, view) => bashInjectRender(command, view),
@@ -67,25 +74,26 @@ export const bashProfile: ShellToolProfile = {
 
 /** The powershell profile: powershell grammar, PS> prompt, no injection. */
 export const powershellProfile: ShellToolProfile = {
+  name: "powershell",
   language: "powershell",
   prompt: "PS>",
   inject: null,
 };
 
 /**
- * Build the shared shell wrapper around `orig` (bash or powershell).
+ * Build the shared shell renderer triple around `orig` (bash or powershell).
  *
- * @param orig - The SDK shell tool definition to wrap.
+ * @param orig - The shell renderers to delegate output to.
  * @param services - Assembly services.
- * @param profile - The shell's grammar and prompt.
- * @returns The wrapped tool.
+ * @param profile - The shell's name, grammar, and prompt.
+ * @returns The renderer triple.
  */
-export function createShellWrapper(
-  orig: ToolDefinition,
+export function createShellRenderer(
+  orig: ToolRenderers | undefined,
   services: ToolServices,
   profile: ShellToolProfile,
-): ToolDefinition {
-  return createToolWrapper<ShellState>(orig, services, {
+): ToolRenderers {
+  return createToolRenderer<ShellState>(profile.name, orig, services, {
     // Explicitly the DEFAULT shell: the content Box's bgFn paints the
     // frame's background across every result row (the native renderer's
     // timing/packing child Texts compose inside it).
@@ -128,7 +136,7 @@ export function createShellWrapper(
       // AND theme identity — a mid-session theme switch re-highlights
       // instead of serving the old theme's colors; arg-streaming frames
       // re-render cheaply until args complete.
-      const cacheKey = `${scheme.identity}${KEY_SEP}${command}`;
+      const cacheKey = joinKey([scheme.identity, command]);
       const cached =
         ctx.state.commandHighlightFor === cacheKey
           ? (ctx.state.commandHighlight as string | undefined)

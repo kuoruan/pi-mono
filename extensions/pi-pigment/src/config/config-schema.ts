@@ -7,7 +7,7 @@ import { SEMANTIC_KEYS, type SemanticColors } from "#src/theme/syntax-theme.ts";
 /** The directory name the extension's themes/ and config live under (`extensions/<this>`). */
 export const CONFIG_HOME = "pigment";
 
-/** The built-in tools pi-pigment can wrap. */
+/** The built-in tools pi-pigment can decorate. */
 export const TOOL_NAMES = [
   "write",
   "edit",
@@ -18,8 +18,23 @@ export const TOOL_NAMES = [
   "find",
   "read",
 ] as const;
-/** A wrappable built-in tool. */
+
+/** A decoratable built-in tool. */
 export type ToolName = (typeof TOOL_NAMES)[number];
+
+/** The names as a membership set (one allocation — the shared fast check). */
+const TOOL_NAME_SET: ReadonlySet<string> = new Set(TOOL_NAMES);
+
+/**
+ * Whether `name` is a decoratable built-in tool — the type guard the
+ * renderer table and the yield policy share, so the name set has one home.
+ *
+ * @param name - The tool name to test.
+ * @returns True when `name` is a {@link ToolName}.
+ */
+export function isToolName(name: string): name is ToolName {
+  return TOOL_NAME_SET.has(name);
+}
 
 /** The valid indicatorStyle config values. */
 const INDICATOR_STYLE_VALUES = ["bar", "none"] as const;
@@ -150,7 +165,7 @@ const syntaxThemeSchema = z.union([z.string(), themeObjectSchema]);
 
 /**
  * The entire configuration surface (ADR 0001/0002): which tools get the diff
- * wrapper, the left-edge change-indicator style, and the syntax theme
+ * renderer, the left-edge change-indicator style, and the syntax theme
  * (string or theme object). Everything else the renderer does is fixed
  * behavior derived from the active pi theme.
  */

@@ -1,7 +1,7 @@
 /**
- * The edit tool wrapper: delegates execution to the SDK's edit tool verbatim
- * (its own normalized-matching rejects ambiguous and overlapping edits) with
- * ZERO result mutation — `result.details` keeps the SDK's own shape
+ * The edit renderer: pi's own edit tool executes verbatim (its own
+ * normalized-matching rejects ambiguous and overlapping edits); this triple
+ * mutates nothing — `result.details` keeps the SDK's own shape
  * ({@link EditToolDetails}: diff, patch, firstChangedLine), so sessions
  * render identically with or without pi-pigment. renderResult lazily parses
  * the stashed `patch` into our ParsedDiff for split-view previews with
@@ -12,7 +12,7 @@ import type {
   AgentToolResult,
   EditToolDetails,
   EditToolInput,
-  ToolDefinition,
+  ToolRenderers,
 } from "@earendil-works/pi-coding-agent";
 
 import { parsePatchFiles } from "#src/core/diff.ts";
@@ -25,7 +25,7 @@ import { setCallHeader } from "./error-frame.ts";
 import { summarize, resultLine } from "./header.ts";
 import { readDecorativeText, resolveToolPath } from "./paths.ts";
 import { attachDiffPreview } from "./text-task.ts";
-import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
+import { createToolRenderer, renderPlainTextFallback } from "./tool-factory.ts";
 import { argsOf, callStateOf, type EditState, type ToolServices } from "./tool-services.ts";
 
 /** Show at most this many diff lines in an edit preview. */
@@ -76,20 +76,20 @@ function editCallStatsSuffix(state: EditState, theme: RenderTheme, scheme: Resol
 }
 
 /**
- * Build the edit wrapper around `origEdit`: execute delegates verbatim (the
- * SDK's edit tool already rejects ambiguous/overlapping edits by throwing —
- * the harness converts throws into error results our error frame renders)
- * with zero result mutation; renderResult parses the SDK's own stashed
- * patch and renders the split view.
+ * Build the edit renderer triple around `origEdit`: pi's edit tool executes
+ * verbatim (it rejects ambiguous/overlapping edits by throwing — the
+ * harness converts throws into error results our error frame renders);
+ * renderResult parses the SDK's own stashed patch and renders the split
+ * view.
  *
- * @param origEdit - The SDK edit tool to wrap (cwd already bound).
+ * @param origEdit - The SDK edit renderers to delegate to (cwd already bound).
  * @param services - Assembly services (shortPath, indicatorStyle, textFactory).
- * @returns The wrapped tool, ready for pi.registerTool.
+ * @returns The renderer triple.
  */
-export function createEditWrapper(
-  origEdit: ToolDefinition,
+export function createEditRenderer(
+  origEdit: ToolRenderers | undefined,
   services: ToolServices,
-): ToolDefinition {
+): ToolRenderers {
   const { shortPath } = services;
 
   // Execution delegates verbatim (the factory's default path): the SDK's
@@ -100,14 +100,14 @@ export function createEditWrapper(
   // below parses the stashed patch lazily. Errors never reach here as
   // results — the SDK edit tool throws, and the harness converts throws
   // into error results rendered by the factory's error frame.
-  // The wrapper claims the DEFAULT shell explicitly: the SDK edit
+  // The renderer claims the DEFAULT shell explicitly: the SDK edit
   // definition declares renderShell "self" (its call component is its
   // own Box with a bgFn it flips on errors), but ours renders plain Text
   // frame pieces — the default shell's content Box then owns the frame's
   // background (success for live frames, ERROR for failed ones, painted
   // across every row INCLUDING the blanks and the Took footer) and the
   // 1-column padding. A self shell here would leave those rows bare.
-  return createToolWrapper<EditState>(origEdit, services, {
+  return createToolRenderer<EditState>("edit", origEdit, services, {
     // Render the in-flight call header: "← edit" + path + stats, framed
     // once the edit arguments complete.
     renderCall: ({ text, view, ctx, renderArgs }) => {

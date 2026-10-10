@@ -3,7 +3,7 @@
  * occurrences inside already-highlighted text (grep hit lines), plus the
  * ReDoS gate deciding which patterns may compile. No grep concepts live
  * here — the module is a generic text-rewriting primitive; the grep and
- * find wrappers are its clients (grep: the pattern; find: the glob's
+ * find renderers are its clients (grep: the pattern; find: the glob's
  * anchor run).
  */
 
@@ -71,7 +71,7 @@ function matcherFor(pattern: string, flags: MatchFlags): PatternMatcher {
  * the match-block background (pi's own searchMatchBg slot — the same
  * surface the TUI's search uses, so a match reads as a match everywhere).
  * SEQ_BOLD lives inside emphasize; callers pass this spec — one
- * derivation beside the wrap that consumes it, no per-wrapper copies
+ * derivation beside the wrap that consumes it, no per-renderer copies
  * of the rule or its rationale. bg "" (tests/fallbacks) means fg-only.
  */
 export interface EmphasisSpec {

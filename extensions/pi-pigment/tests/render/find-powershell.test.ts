@@ -101,7 +101,7 @@ describe("find result rendering", () => {
   });
 });
 
-describe("powershell wrapper", () => {
+describe("powershell renderer", () => {
   it(
     "renders the command in powershell grammar with the PS> prompt",
     { timeout: 20000 },

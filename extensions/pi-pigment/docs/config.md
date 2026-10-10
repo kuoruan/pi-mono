@@ -17,7 +17,7 @@ There is nothing else to configure — no environment variables, no pi `settings
 
 ```jsonc
 {
-  // Tools pi-pigment does NOT register; Pi's built-in tool is used instead.
+  // Tools pi-pigment does NOT decorate; Pi's built-in rendering is used instead.
   // Valid values: "write", "edit", "bash", "grep", "find", "ls", "powershell", "read".
   "disabledTools": [],
 
@@ -199,7 +199,7 @@ Catppuccin syntax tokens over your pi theme (for the full look, pick `pigment-ca
 }
 ```
 
-Disable the write wrapper (keep the edit diff view):
+Disable write's rendering (keep the edit diff view):
 
 ```jsonc
 {

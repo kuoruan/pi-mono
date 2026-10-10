@@ -1,5 +1,5 @@
 /**
- * The output wrappers' per-trigger-frame cost: a settled grep renderResult
+ * The output renderers' per-trigger-frame cost: a settled grep renderResult
  * runs on EVERY updateDisplay cycle, and its body rebuilds the plain
  * placeholder (collapsedView + renderPlainOutput + join) even when the
  * attach guard will discard it — the placeholder is only consumed when

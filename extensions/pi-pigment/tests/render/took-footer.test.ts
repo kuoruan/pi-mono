@@ -2,30 +2,44 @@
  * The Took footer and the execution clock behind it. The clock is pi's own
  * contract (its shell renderer arms `startedAt` in renderCall while the
  * execution is live, and fixes `endedAt` in the settled renderResult), which
- * pi-pigment drives for every wrapper — so the footer behaves exactly like
+ * pi-pigment drives for every renderer — so the footer behaves exactly like
  * bash's, including showing NOTHING on a row replayed from a session.
  */
 import { describe, expect, it } from "vitest";
 
-import { armTiming, stopTiming, tookFooter } from "#src/render/tool-output.ts";
+import { armTiming, formatDuration, stopTiming, tookFooter } from "#src/render/tool-output.ts";
 import type { ExecutionTimingState } from "#src/render/tool-services.ts";
 import { buildFakeTheme, buildRenderTheme, plain } from "#test/fixtures.ts";
+
+describe("formatDuration (pi shell-renderer parity)", () => {
+  // pi's bash renderer's formatDuration — the ladder we reproduce.
+  it("keeps a tenth of a second under a minute", () => {
+    expect(formatDuration(8)).toBe("0.0s");
+    expect(formatDuration(999)).toBe("1.0s");
+    expect(formatDuration(1234)).toBe("1.2s");
+    expect(formatDuration(9500)).toBe("9.5s");
+    // 59.999s rounds to "60.0s" before the minute branch — pi's own quirk.
+    expect(formatDuration(59_999)).toBe("60.0s");
+  });
+
+  it("coarsens to minutes, then hours", () => {
+    expect(formatDuration(60_000)).toBe("1m 0s");
+    expect(formatDuration(65_000)).toBe("1m 5s");
+    expect(formatDuration(3_599_000)).toBe("59m 59s");
+    expect(formatDuration(3_600_000)).toBe("1h 0m 0s");
+    expect(formatDuration(3_722_000)).toBe("1h 2m 2s");
+  });
+});
 
 describe("tookFooter (pi shell-renderer parity)", () => {
   it("is empty when the duration is unknown", () => {
     expect(tookFooter(undefined, buildRenderTheme(), "muted")).toBe("");
   });
 
-  // Same body as pi's native formatDuration: seconds with one decimal,
-  // always — 8ms reads "0.0s", exactly like bash's settled row.
-  it("formats every duration as seconds with one decimal", () => {
+  it("renders pi's duration text under the Took label", () => {
     const theme = buildRenderTheme();
-    expect(plain(tookFooter(8, theme, "muted"))).toBe("Took 0.0s");
-    expect(plain(tookFooter(999, theme, "muted"))).toBe("Took 1.0s");
     expect(plain(tookFooter(1234, theme, "muted"))).toBe("Took 1.2s");
-    expect(plain(tookFooter(9500, theme, "muted"))).toBe("Took 9.5s");
-    expect(plain(tookFooter(65_000, theme, "muted"))).toBe("Took 65.0s");
-    expect(plain(tookFooter(3_722_000, theme, "muted"))).toBe("Took 3722.0s");
+    expect(plain(tookFooter(65_000, theme, "muted"))).toBe("Took 1m 5s");
   });
 
   // The state color rides the footer: the escape matches the requested

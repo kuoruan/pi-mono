@@ -1,13 +1,13 @@
 /**
- * The find tool wrapper: execution delegates to the SDK's find tool (via
- * the tool-wrapper factory); rendering colorizes each result path by type —
- * the same family as ls (directories accent, code files a syntax tint), but
- * shaped for find's output: paths carry directory prefixes, so the dirname
- * renders dim and the basename carries the type color. The call header delegates to
- * the SDK's native renderer; truncation notices ride the shared footer.
+ * The find renderer: pi's own find tool executes; this triple colorizes
+ * each result path by type — the same family as ls (directories accent,
+ * code files a syntax tint), but shaped for find's output: paths carry
+ * directory prefixes, so the dirname renders dim and the basename carries
+ * the type color. The call header delegates to the SDK's native renderer;
+ * truncation notices ride the shared footer.
  */
 
-import type { FindToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { FindToolInput, ToolRenderers } from "@earendil-works/pi-coding-agent";
 
 import { inertText } from "#src/core/ansi.ts";
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
@@ -16,7 +16,7 @@ import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 
 import { assembleOutputBody } from "./output-assembly.ts";
 import { accentEmphasis, emphasize, type EmphasisSpec } from "./pattern-emphasis.ts";
-import { createToolWrapper } from "./tool-factory.ts";
+import { createToolRenderer } from "./tool-factory.ts";
 import { COLLAPSED_LINES, joinBodyTail, outputMemoOf } from "./tool-output.ts";
 import { argsOf, argStr, headerPath, invalidArg, type ToolServices } from "./tool-services.ts";
 
@@ -95,7 +95,7 @@ function styleFindPath(options: StyleFindPathOptions): string {
   // slice would be empty — strip it first and re-split, keeping the same
   // dim-prefix + emphasized-name grammar as the file branches below. The
   // trailing slash comes back after the name (the directory marker, as
-  // the ls wrapper keeps it).
+  // the ls renderer keeps it).
   if (path.endsWith("/")) {
     const stripped = path.slice(0, -1);
     const s = stripped.lastIndexOf("/");
@@ -121,25 +121,25 @@ function styleFindPath(options: StyleFindPathOptions): string {
 }
 
 /**
- * Build the find wrapper around `origFind`.
+ * Build the find renderer around `origFind`.
  *
- * @param origFind - The SDK find tool to wrap.
+ * @param origFind - The SDK find renderers to delegate to.
  * @param services - Assembly services.
- * @returns The wrapped tool.
+ * @returns The renderer triple.
  */
-export function createFindWrapper(
-  origFind: ToolDefinition,
+export function createFindRenderer(
+  origFind: ToolRenderers | undefined,
   services: ToolServices,
-): ToolDefinition {
+): ToolRenderers {
   // The call header is ours (mirrors the SDK's shape).
-  return createToolWrapper(origFind, services, {
+  return createToolRenderer("find", origFind, services, {
     renderShell: "default",
     renderHeader: {
       prefix: "fh",
       formatCallBody: (renderArgs, theme) =>
         formatFindCall(argsOf<FindToolInput>(renderArgs), theme),
     },
-    renderResult: ({ text, view, ctx, result, options, tookMs }) => {
+    renderResult: ({ text, view, ctx, result, options, durationMs }) => {
       const { scheme, theme } = view;
       // Inert at intake (ADR 0004): the result carries raw paths. The
       // derivation is memoized on the result object's identity (one
@@ -160,7 +160,7 @@ export function createFindWrapper(
         budget: COLLAPSED_LINES.find,
         derived,
         view,
-        tookMs,
+        durationMs,
         expanded: options.expanded,
         notice: derived.notice,
         ctx,

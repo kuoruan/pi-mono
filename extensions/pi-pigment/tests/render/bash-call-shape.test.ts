@@ -110,16 +110,33 @@ describe("bash call header shape (renderCall)", () => {
   });
 
   it("reassembles an inline code region on its ORIGINAL line (python -c stays one row)", async () => {
-    const { renderCall, ctx, invalidated } = await renderCallFor<ShellState>("bash");
-    renderCall({ command: "python3 -c 'print(42)'" }, buildRenderTheme(), ctx);
-    await waitFor(() => (invalidated.count > 0 ? true : undefined));
-    const settled = renderCall({ command: "python3 -c 'print(42)'" }, buildRenderTheme(), ctx);
-    const text = plain(settled.text.text);
+    // Bounded self-heal for the async-highlight flake
+    // (docs/open-issues/grammar-state-flake.md, Signature 3): each attempt
+    // re-kicks the highlight on a fresh ctx; the last throws, so a genuinely
+    // broken highlight still fails.
+    const command = "python3 -c 'print(42)'";
+    const renderAttempt = async (): Promise<string> => {
+      resetPigmentForTest();
+      const { renderCall, ctx, invalidated } = await renderCallFor<ShellState>("bash");
+      const theme = buildRenderTheme();
+      renderCall({ command }, theme, ctx);
+      await waitFor(() => (invalidated.count > 0 ? true : undefined));
+      return plain(renderCall({ command }, theme, ctx).text.text);
+    };
+    let text = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        text = await renderAttempt();
+        break;
+      } catch (error) {
+        if (attempt === 2) throw error;
+      }
+    }
     // One source line stays one rendered row — the old flat parts.join("\n")
     // split the command into three rows at the inline region's mid-line edges.
     // (The status suffix is separate grammar, pinned in the success test.)
     expect(text).toContain("$ python3 -c 'print(42)'");
-  });
+  }, 15000);
 
   it("renders the bare prompt for the empty command", async () => {
     const { renderCall, ctx } = await renderCallFor<ShellState>("bash");

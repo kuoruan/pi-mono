@@ -1,9 +1,11 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join as joinPath } from "node:path";
 
 import { getReadmePath } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 
-import { createReadWrapper } from "#src/render/tool-read.ts";
+import { createReadRenderer } from "#src/render/tool-read.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
@@ -20,7 +22,7 @@ import {
 
 function readCallText(args: unknown, expanded: boolean): string {
   resetPigmentForTest();
-  const tool = createReadWrapper(
+  const tool = createReadRenderer(
     { name: "read" } as never,
     {
       render: makeRenderSession(),
@@ -60,7 +62,7 @@ describe("read call header", () => {
 
   it("pins the range in the suffix so truncation never eats it", async () => {
     resetPigmentForTest();
-    const tool = createReadWrapper(
+    const tool = createReadRenderer(
       { name: "read" } as never,
       makeServices({ headerEllipsis: "on" }),
     );
@@ -125,7 +127,7 @@ describe("read call header", () => {
 
   it("masks dotenv values in the body, keeping key names", async () => {
     resetPigmentForTest();
-    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const tool = createReadRenderer({ name: "read" } as never, makeServices());
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "/x/.env" };
     ctx.expanded = true;
@@ -155,7 +157,7 @@ describe("read call header", () => {
 
   it("masks export-prefixed and quoted dotenv values, leaves JSON bodies alone", async () => {
     resetPigmentForTest();
-    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const tool = createReadRenderer({ name: "read" } as never, makeServices());
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "/x/.env" };
     ctx.expanded = true;
@@ -184,7 +186,7 @@ describe("read call header", () => {
 
   it("leaves non-secret bodies byte-identical", async () => {
     resetPigmentForTest();
-    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const tool = createReadRenderer({ name: "read" } as never, makeServices());
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "/x/app.ts" };
     ctx.expanded = true;
@@ -206,7 +208,7 @@ describe("read call header", () => {
 
   it("expands tabs before highlight (pi-tui renders a tab as three spaces)", async () => {
     resetPigmentForTest();
-    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const tool = createReadRenderer({ name: "read" } as never, makeServices());
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "/x/Makefile" };
     ctx.expanded = true;
@@ -228,7 +230,7 @@ describe("read call header", () => {
 
   it("renders an empty file as an empty body (no orphan gutter)", async () => {
     resetPigmentForTest();
-    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const tool = createReadRenderer({ name: "read" } as never, makeServices());
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "/x/empty.ts" };
     ctx.expanded = true;
@@ -250,7 +252,7 @@ describe("read call header", () => {
 describe("read result body", () => {
   it("shows the first lines folded, the full slice expanded", async () => {
     resetPigmentForTest();
-    const tool = createReadWrapper(
+    const tool = createReadRenderer(
       { name: "read" } as never,
       {
         render: makeRenderSession(),
@@ -309,7 +311,7 @@ describe("read result body", () => {
 
   it("previews compact labels folded too (the label names it, the preview proves it)", async () => {
     resetPigmentForTest();
-    const tool = wrapperFor();
+    const tool = rendererFor();
     const fakeTheme = buildFakeTheme({ syntaxColors: true });
     viewFor(fakeTheme);
     const { ctx } = makeRenderCtx();
@@ -333,7 +335,7 @@ describe("read result body", () => {
 
   it("highlights the expanded slice in the file's language", async () => {
     resetPigmentForTest();
-    const tool = createReadWrapper(
+    const tool = createReadRenderer(
       { name: "read" } as never,
       {
         render: makeRenderSession(),
@@ -367,7 +369,7 @@ describe("read result body", () => {
 
   it("shows the SDK truncation notice", async () => {
     resetPigmentForTest();
-    const tool = createReadWrapper(
+    const tool = createReadRenderer(
       { name: "read" } as never,
       {
         render: makeRenderSession(),
@@ -418,18 +420,18 @@ describe("read result body", () => {
 });
 
 /**
- * The wrapper under test (no scope capture — module level).
+ * The renderer under test (no scope capture — module level).
  *
- * @returns The read wrapper.
+ * @returns The read renderer.
  */
-function wrapperFor() {
-  return createReadWrapper({ name: "read" } as never, makeServices());
+function rendererFor() {
+  return createReadRenderer({ name: "read" } as never, makeServices());
 }
 
 describe("read collapse and seed", () => {
   it("returns to the folded preview on expand-then-collapse", async () => {
     resetPigmentForTest();
-    const tool = wrapperFor();
+    const tool = rendererFor();
     const fakeTheme = buildFakeTheme({ syntaxColors: true });
     viewFor(fakeTheme);
     const { ctx } = makeRenderCtx();
@@ -464,15 +466,12 @@ describe("read collapse and seed", () => {
   });
 
   it("seeds an offset slice of an embedded grammar from disk", async () => {
-    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const dir = mkdtempSync(join(tmpdir(), "pigment-read-"));
+    const dir = mkdtempSync(joinPath(tmpdir(), "pigment-read-"));
     try {
       const full = "<template><div>\n<span>x</span>\n</div></template>\n";
-      writeFileSync(join(dir, "a.vue"), full);
+      writeFileSync(joinPath(dir, "a.vue"), full);
       resetPigmentForTest();
-      const tool = wrapperFor();
+      const tool = rendererFor();
       const fakeTheme = buildFakeTheme({ syntaxColors: true });
       viewFor(fakeTheme);
       const { ctx } = makeRenderCtx();
@@ -498,7 +497,7 @@ describe("read collapse and seed", () => {
 
   it("skips the disk read for a plain language with an offset", async () => {
     resetPigmentForTest();
-    const tool = wrapperFor();
+    const tool = rendererFor();
     const fakeTheme = buildFakeTheme({ syntaxColors: true });
     viewFor(fakeTheme);
     const { ctx } = makeRenderCtx();
@@ -519,7 +518,7 @@ describe("read collapse and seed", () => {
 
   it("shows the first-line-exceeds notice", async () => {
     resetPigmentForTest();
-    const tool = wrapperFor();
+    const tool = rendererFor();
     const fakeTheme = buildFakeTheme({ syntaxColors: true });
     viewFor(fakeTheme);
     const { ctx } = makeRenderCtx();
@@ -565,7 +564,7 @@ describe("read collapse and seed", () => {
     // content rows (read.js, user-limit branch) — it rides the footer,
     // never a guttered body row. No disk involved: the count decides.
     resetPigmentForTest();
-    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const tool = createReadRenderer({ name: "read" } as never, makeServices());
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "/x/big.ts", limit: 3 };
     ctx.expanded = true;
@@ -605,7 +604,7 @@ describe("read collapse and seed", () => {
     { args: { path: "/x/notes.ts", limit: 5 }, text: "a\n[see docs for more]" },
   ])("keeps a bracketed tail line as content ($args.path $args.limit)", async ({ args, text }) => {
     resetPigmentForTest();
-    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const tool = createReadRenderer({ name: "read" } as never, makeServices());
     const { ctx } = makeRenderCtx();
     ctx.args = args;
     ctx.expanded = true;
@@ -629,7 +628,7 @@ describe("read collapse and seed", () => {
     // The SDK appends `[Showing lines X-Y…]` beside details.truncation
     // — the body drops it, the footer keeps `[Truncated:…]` once.
     resetPigmentForTest();
-    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const tool = createReadRenderer({ name: "read" } as never, makeServices());
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "/x/big.ts" };
     ctx.expanded = true;
@@ -657,7 +656,7 @@ describe("read collapse and seed", () => {
     // The SDK marks image reads with an image block (read.js); the text
     // note is not file text, so a `1` gutter would be noise.
     resetPigmentForTest();
-    const tool = createReadWrapper({ name: "read" } as never, makeServices());
+    const tool = createReadRenderer({ name: "read" } as never, makeServices());
     const { ctx } = makeRenderCtx();
     ctx.args = { path: "/x/photo.png" };
     ctx.expanded = true;

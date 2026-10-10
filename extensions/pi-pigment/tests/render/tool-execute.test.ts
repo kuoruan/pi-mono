@@ -118,7 +118,7 @@ describe("write execute (memfs)", () => {
       undefined,
       undefined,
     );
-    // The write discriminant is the whole payload: the wrapper adds
+    // The write discriminant is the whole payload: the renderer adds
     // NOTHING to details (timing lives in the render state), so what the
     // session persists is exactly what the tool produced.
     expect(result.details).toMatchObject({ kind: "noChange" });

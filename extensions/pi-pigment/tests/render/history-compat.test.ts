@@ -84,12 +84,12 @@ const HISTORY: HistoryEntry[] = [
 ];
 
 /**
- * Drive one entry through the registered wrapper's renderResult. The
+ * Drive one entry through the registered renderer's renderResult. The
  * synthetic result carries a marker content block: the fallback renders
  * it (dim plain text), the rendered dialects ignore it — one signal
  * separates the two outcomes.
  *
- * @param tool - The registered tool wrapper.
+ * @param tool - The registered tool renderer.
  * @param details - The historical details shape.
  * @param args - The paired call arguments.
  * @returns The rendered text and whether an async task attached.

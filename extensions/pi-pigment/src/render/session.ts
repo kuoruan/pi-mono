@@ -55,12 +55,12 @@ export interface RenderSessionInputs extends ThemeResolveInputs {
 }
 
 /**
- * The borrowed frame: the third-party composition point (scheme +
- * highlight — everything a foreign renderer needs to paint code).
+ * The render face: the pure rendering seam (scheme + highlight — everything
+ * a renderer needs to paint code).
  * The chrome source (`theme`), the install root (`piRoot`), and the
  * token-theme observation point (`activeTheme`) stay on the internal
  * frame — `FrameView extends RenderView` pins narrow ⊆ full, so the
- * public face can only grow deliberately.
+ * narrow face can only grow deliberately.
  */
 export interface RenderView {
   /** The frame's color scheme (WCAG-enforced, root-derived). */
@@ -74,7 +74,7 @@ export interface RenderView {
   highlight(block: CodeBlock | FileCodeBlock): Promise<string[]>;
 }
 
-/** One frame's derived view: the borrowed face plus the internal chrome. */
+/** One frame's derived view: the render face plus the internal chrome. */
 export interface FrameView extends RenderView {
   /** The pi theme this view is bound to (the chrome colors' source). */
   readonly theme: RenderTheme;
@@ -94,7 +94,7 @@ export interface FrameView extends RenderView {
 
 /** A session's render seam: the immutable inputs plus the frame binder. */
 export interface RenderSession {
-  /** This frame's borrowed view for the given pi theme. */
+  /** This frame's render view for the given pi theme. */
   forTheme(theme: RenderTheme): RenderView;
 }
 
@@ -113,8 +113,7 @@ export interface FrameSession {
  * @param inputs - The session's render inputs.
  * @returns The internal session seam.
  * @internal - the extension's own assembly (ToolServices) and the test
- * fixtures. Third parties take {@link createRenderSession} (narrow) or
- * `kit.session`.
+ * fixtures; there is no public render surface.
  */
 export function createFrameSession(inputs: RenderSessionInputs): FrameSession {
   // The per-session instance state: the active-theme memo, the scheme
@@ -196,12 +195,12 @@ export async function autoRenderSession(
 }
 
 /**
- * Build a render session from explicit inputs — the borrowed factory
- * (pure, no I/O). The same value as the internal frame, narrowed to the
- * borrowed face by covariance: no adapter, no copy.
+ * Build a render session from explicit inputs — the pure factory
+ * (no I/O). The same value as the internal frame, narrowed to the
+ * render face by covariance: no adapter, no copy.
  *
  * @param inputs - The session's render inputs.
- * @returns The borrowed session seam.
+ * @returns The session seam (pure, no I/O).
  */
 export function createRenderSession(inputs: RenderSessionInputs): RenderSession {
   return createFrameSession(inputs);

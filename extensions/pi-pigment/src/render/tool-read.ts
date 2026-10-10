@@ -1,8 +1,8 @@
 /**
- * The read tool wrapper: execution delegates to the SDK's read tool (via
- * the tool-wrapper factory); rendering keeps the SDK's header shape
- * (compact skill/docs labels, path + line-range suffix) on pigment's
- * header line, and paints the expanded body through the session's Shiki
+ * The read renderer: pi's own read tool executes; this triple keeps the
+ * SDK's header shape (compact skill/docs labels, path + line-range suffix)
+ * on pigment's header line, and paints the expanded body through the
+ * session's Shiki
  * highlight — the file-sourced spelling, so detection and seeding ride
  * along. Image results pass through as plain text (the note the SDK
  * leaves in content) — pigment never paints non-text blocks, and the
@@ -15,7 +15,7 @@ import { pathToFileURL } from "node:url";
 import type {
   AgentToolResult,
   ReadToolInput,
-  ToolDefinition,
+  ToolRenderers,
   TruncationResult,
 } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@earendil-works/pi-coding-agent";
@@ -32,7 +32,7 @@ import { assembleOutputBody } from "./output-assembly.ts";
 import { expandHome, readDecorativeText, resolveToolPath, toPosixPath } from "./paths.ts";
 import { numberedRows } from "./row-frame.ts";
 import type { FrameView } from "./session.ts";
-import { createToolWrapper } from "./tool-factory.ts";
+import { createToolRenderer } from "./tool-factory.ts";
 import { type DerivedOutput, joinBodyTail } from "./tool-output.ts";
 import { argsOf, argStr, headerPath, invalidArg, type ToolServices } from "./tool-services.ts";
 
@@ -581,17 +581,17 @@ function formatReadSuffix(input: ReadHeaderInput): string {
 }
 
 /**
- * Build the read wrapper around `origRead`.
+ * Build the read renderer around `origRead`.
  *
- * @param origRead - The SDK read tool to wrap (shape only — rendering is fully owned).
+ * @param origRead - The SDK read renderers to delegate to (shape only — rendering is fully owned).
  * @param services - Assembly services.
- * @returns The wrapped tool.
+ * @returns The renderer triple.
  */
-export function createReadWrapper(
-  origRead: ToolDefinition,
+export function createReadRenderer(
+  origRead: ToolRenderers | undefined,
   services: ToolServices,
-): ToolDefinition {
-  return createToolWrapper(origRead, services, {
+): ToolRenderers {
+  return createToolRenderer("read", origRead, services, {
     renderShell: "default",
     renderHeader: {
       prefix: "rh",
@@ -612,7 +612,7 @@ export function createReadWrapper(
           piRoot: view.piRoot,
         }),
     },
-    renderResult: ({ text, view, ctx, result, options, tookMs }) => {
+    renderResult: ({ text, view, ctx, result, options, durationMs }) => {
       const { scheme } = view;
       const args = argsOf<ReadToolInput>(ctx.args);
       const raw = argStr(args?.path) ?? "";
@@ -675,7 +675,7 @@ export function createReadWrapper(
         isEmpty: masked === "",
         derived: readDerived(masked, contentLines, `${filePath}:${offset ?? 0}:${masked.length}`),
         view,
-        tookMs,
+        durationMs,
         expanded: true,
         notice: truncation?.truncated
           ? formatTruncationNotice(truncation)

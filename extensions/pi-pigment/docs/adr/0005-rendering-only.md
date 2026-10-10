@@ -8,55 +8,53 @@ pi-pigment began as a renderer for pi's built-in tool output (syntax-highlighted
 
 - **Force-activate dormant tools.** pi's default active set is `read/bash/edit/write` only; `grep`/`find`/`ls`/`powershell` are registered but dormant until the user (or a tool extension) activates them. A proposal to call `setActiveTools` for our wrapped names was rejected mid-implementation: it changes the agent's capability surface — which tools the model sees and calls — which is the user's call, not a renderer's.
 - **Bundle a search engine.** pi-pretty bundles `@ff-labs/fff-node` (a ~13 MB native binary per platform) and implements its own ffgrep/fffind on top. The proposal to do the same was rejected: it makes pi-pigment a tool implementation with rendering attached, inverts its reason to exist, and imports the maintenance burden of mirroring another project's model-facing output format.
-- **Wrap another extension's tools.** Structurally impossible under the current extension API anyway (verified empirically): same-name registration is first-wins, and the API exposes no way to obtain another extension's tool definition — so the wrapper would have to register before the tool it wraps exists. This is an upstream API gap, not a reason to work around it here.
+- **Own the built-in names.** For years the only way to change how a tool rendered was to re-register the same name (pi documents it under "Overriding Built-in Tools"). pi-pigment did exactly that: same-name registrations over the SDK's built-in definitions, delegating execute verbatim and replacing only `renderCall` / `renderResult`. Registration is first-wins across extensions, so a later extension that wanted the name was silently dropped.
 
 ## Decision
 
-**pi-pigment is a decoration layer.** Its entire tool-facing surface is registering same-name wrappers over the SDK's built-in tool definitions — delegating execute verbatim and replacing only renderCall / renderResult. It does not:
+**pi-pigment is a decoration layer.** Since `@earendil-works/pi-coding-agent` 1.0.1 it renders through `pi.registerToolRenderer`, and it does not:
 
-- implement tools (no own execute logic beyond delegating to the wrapped definition, no engine dependencies),
+- implement tools (no execute logic, no engine dependencies),
+- register tools (no name occupancy — execution, the model-facing result, and the name always stay pi's own),
 - activate tools (no `setActiveTools` — the active set belongs to the user and to tool extensions),
-- bundle capabilities that belong to tools (search indexes, file watchers, anything the model would call).
+- expose a rendering API for others to borrow (see "The renderer resolver" below).
 
-Registered-but-dormant wrappers are the intended steady state: whatever the environment activates, pi-pigment decorates; what nobody activates, idles harmlessly.
+It registers **one renderer resolver** for the eight built-in names (`write`, `edit`, `bash`, `powershell`, `grep`, `ls`, `find`, `read`). Whatever the environment activates, pi-pigment decorates; what nobody activates, idles harmlessly.
 
-The corollary already in force: **yield, don't crowd.** When another extension's tool vocabulary is present (pi-fff's `ffgrep`/`fffind`), pi-pigment does not register same-name wrappers that would displace it — first-wins registration from an earlier-loaded renderer would silently swap another extension's semantics for the built-ins'. The rule is scoped to the presence probes that exist, not a general priority mechanism (see "The occupied slot" below).
+### Renderer-only, not tool ownership
 
-### Amendment: what "delegating execute verbatim" means in practice
+`ToolRendererResolver` receives a tool name and a `next()` that returns the renderers the remaining resolvers, then the registered tool, would use; returning a value overrides `renderShell`/`renderCall`/`renderResult` and nothing else. This is the renderer-only override the extension API had lacked — it closes upstream issues [#3541](https://github.com/earendil-works/pi/issues/3541) and [#6700](https://github.com/earendil-works/pi/issues/6700) (both once declined as "not planned"), and makes same-name registration unnecessary. `registerToolRenderer` is why the peer floor is `>=1.0.1`.
 
-The wrappers re-enter execute only to stash their own render-time payload (write's diff), so the exact discipline is worth writing down:
+The resolver reads the live registry (`getAllTools()`) per call, so — unlike the old `session_start` snapshot — it sees names registered in any extension's `session_start`, including extensions loaded after pi-pigment.
 
-- **The model-facing result is untouchable** — content, isError, every field the agent consumes passes through unchanged.
-- **A wrapper appends nothing it can derive at render time.** The factory adds NO key at all: the execution timing that drives the `Took` footer lives in the render state (pi's own shell-renderer clock), so a pi-pigment session carries exactly the tool's own payload — see the session-footprint note below.
-- **`result.details` keeps the SDK's own shape.** Wrappers may APPEND keys; they may not drop or retype the SDK's fields. Sessions are the shared boundary: a pi-pigment-created session resumed WITHOUT pi-pigment renders through the SDK's native renderers, which read their own details fields (`diff`, `patch`, `firstChangedLine`) — a renderer that rewrites details in execute breaks that resume path. (Added after the edit wrapper replaced the SDK's details with a parsed payload, breaking native rendering of pi-pigment-created sessions; parsing moved to renderResult.)
-- **Documented exception — write**: the SDK's own write execute stashes `details: undefined`, so the write wrapper's diff payload (old/new content for the split preview) is the only thing details has ever carried there. It is an addition to an empty slot, not a replacement of native fields.
+### The renderer resolver contract
 
-### The occupied slot, and why it stays
+1. **Unknown name** → `next()`.
+2. **A name another extension owns** (`sourceInfo.source !== "builtin"`) → `next()`. The old reason — first-wins displacement — is gone; the standing reason is correctness: our renderers parse the _built-in_ tool's arguments and result details, so painting them over a neighbor's differently-shaped tool would render wrong.
+3. **pi-fff present** (`/fff-mode` command, or its grep/find vocabulary) → `next()` for `grep`/`find`.
+4. **No session kit yet** (before the first `session_start`, or a failed build) → `next()` (fail-safe to pi's own rendering).
+5. **Name in `disabledTools`** → `next()`.
+6. Otherwise build the renderer triple over `next()`.
 
-Same-name registration is the API's only expression of a rendering override: pi documents it under "Overriding Built-in Tools", and pi's own shipped `built-in-tool-renderer.ts` example ("Custom rendering for built-in tools without changing their behavior") is built exactly this way — re-register the name, delegate `execute`. There is no renderer-only channel to migrate to: `ExtensionAPI`'s rendering registrations are `registerMessageRenderer` and `registerEntryRenderer`, both keyed by an extension's own custom type, never by a tool name.
+Rules 1–5 live in one function, `gate.shouldYield`, read by both the resolver and the write-details channel, so the two can never disagree about whether a name is ours. The no-kit fail-safe (4) is evaluated first at the call site (it holds no policy), and every yield rule returns `next()`, so their order is stated for reasoning, not observable — the outcome is identical whichever gate fires.
 
-The cost is that each wrapper occupies the name. Registration is first-wins across extensions, and extension tools are then laid over the built-ins, so a later extension that wants to own `bash` is silently dropped. 0.85.1 also emits no warning for that, although `docs/extensions.md` claims interactive mode warns (verified against the shipped `dist`, where the only override diagnostics are for shortcuts and commands).
+The yield can only recognize neighbors that **register a tool name** — a neighbor that registers only a renderer is invisible to `getAllTools()`. It is also order-independent now, since the registry is read per call rather than snapshotted at startup.
 
-Upstream has been asked for a renderer-only API repeatedly and declined every time, so this is not a gap we can close locally:
+### The write exception
 
-- [#3541](https://github.com/earendil-works/pi/issues/3541) render-only tool override API (e.g. `pi.registerToolRenderer`) — "sorry, not planned atm."
-- [#6700](https://github.com/earendil-works/pi/issues/6700) rendering override without taking over execution — "this will change in pi server mode. not planed for old pi."
-- [#3553](https://github.com/earendil-works/pi/issues/3553) silent built-in override — "works as intended."
-- #7800, #8347, #7615 (decorating an already-registered tool, the same `pi.registerToolRenderer` proposal, override fragility) — auto-closed, no reply.
+The SDK's write tool stashes `details: undefined`, so its old/new diff has to come from somewhere. pi-pigment captures it through the two execution hooks pi exposes — `tool_call` (read the pre-write file, keyed by `toolCallId`) and `tool_result` (emit `{ details }`), since `tool_execution_end` is read-only. The details are produced **only when the file that landed byte-equals the content the call supplied**; a sibling write, a changed argument, an aborted call, or a blocked one yields no diff rather than a wrong one. Execution still belongs entirely to pi's write tool.
 
-The companion gap: no public API returns a built-in tool's own definition either. `getAllTools()` yields `ToolInfo` (name, parameters, description) with no `execute` (#7800, auto-closed), so a renderer that wants to decorate a tool it does not itself own has to rebuild the definition through the SDK factories (`createBashToolDefinition`, and siblings) — and re-apply by hand the options pi baked in under its own gates (bash's trust-gated `shellCommandPrefix`/`shellPath`; see the Tool wrapper entry in [GLOSSARY.md](../../GLOSSARY.md)). Live with the factories until upstream exposes the definition itself; do not re-implement execution to avoid them.
-
-The yield rule above is therefore scoped to the one case where a cheap, order-safe presence probe exists: pi-fff's `/fff-mode` command registers at module load, before any `session_start`, so it is visible no matter which extension loads first (see FFF yield in [GLOSSARY.md](../../GLOSSARY.md)). A general "yield to whoever registers the name" is not implementable against this API — there is no unregister, nothing exposes a tool that registers after us, and deferring our own registration to a later event only trades the occupancy for a registry refresh that ACTIVATES the newly seen names, which would surface dormant `grep`/`find`/`ls`/`powershell` to the model and break this ADR's own boundary. Track a render-decoration layer upstream; do not work around its absence by giving up the rendering.
-
-### Addendum — generic yield on visible occupancy
-
-Part of that paragraph aged out: the general yield IS implementable for the half the registry exposes. `getAllTools()` returns each entry's `sourceInfo`, so at our `session_start` we can see every name another extension (or an SDK-passed custom tool) already claimed and skip our wrapper for it — the `claimedByOther` check in `src/extension.ts`, with the `registeredByUs` guard so a resume/fork re-fire does not yield to our own first-fire wrappers. Each skip reports once through the issue channel (the FFF path stays silent: it is the documented default, not a surprise).
-
-What stays true: no unregister, and no visibility into tools that register after our `session_start` fires. A neighbor that loads after us loses the name to us (pi merges by load order, not registration time) no matter what its own `session_start` does — our wrapper stays live and we emit no notice, because from our snapshot nothing was taken. The loader logs a name conflict for the dropped registration; documented escape hatches for that case: the neighbor registers in its factory (visible to us, so we yield), borrows our renderers through the render kit (both render), or the user lists the name in `disabledTools`. Do NOT "fix" the order gap by deferring to a later event: the later refresh would activate dormant tools and break this ADR's boundary — the same reason the original paragraph gave.
+`result.details` keeps the SDK's own shape: the channel _appends_ the write payload to the empty slot the SDK leaves. Edit does not touch details at all — it parses the SDK's own `patch` lazily at render time, so pi-pigment-created sessions render identically under the native renderer when resumed without pi-pigment.
 
 ## Consequences
 
-- A request for "fff search semantics with pi-pigment rendering" is an upstream feature (a render-decoration API: full `getToolDefinition`, or a renderCall/renderResult override registration) — not something pi-pigment implements locally. File the issue upstream if it matters; don't bundle engines here.
-- Future comparisons with pi-pretty (or similar multi-tool extensions) should score feature gaps against this boundary: features below it (rendering polish, collapse affordances, timing footers) are in scope; features above it (tool implementations, activation changes, bundled engines) are out — even when the comparison makes them look like gaps.
+- A request for "fff search semantics with pi-pigment rendering" is no longer blocked by the API: a neighbor owns its own name, pi-pigment yields it, and both extensions run. Composing _pigment's_ renderers onto a foreign tool is not supported (pi-pigment exposes no rendering API); features below the boundary (rendering polish, collapse affordances, timing footers) are in scope, features above it (tool implementations, activation changes, bundled engines) are out.
 - The extension stays dependency-light: Shiki (highlighting), @aliou/sh (shell-AST injection), diff. New dependencies that add capabilities rather than rendering fidelity are presumptively rejected.
-- **Duration is render state, never session state.** `Took`/`Elapsed` footers read the clock pi's shell renderer keeps in the render state (`startedAt` armed in renderCall, `endedAt` fixed by the settled renderResult). Nothing about timing is persisted: a session resumed without pi-pigment, or replayed into it, shows no duration — matching pi's native renderers, whose timing display is live-only by the same mechanism.
+- **The shell settings are pi's again.** The old same-name registration had to rebuild bash through the SDK factory with the trust-gated `shellCommandPrefix`/`shellPath` or a configured shell would silently stop applying to the executing command. Registering nothing removes that footgun entirely.
+- **Duration prefers pi's recorded execution time.** The `Took`/`Elapsed` footers read `ctx.durationMs` when the host supplies it (pi 1.1.0 live frames, and replayed rows whose result carried it), falling back to the render-state clock (`startedAt`/`endedAt`) on 1.0.1, on a partial frame, and on HTML export — the places `durationMs` is undefined. Nothing _fabricated_ is persisted; this is pi's own recorded duration, so a replayed row on 1.1.0 may now show a footer where it previously showed none.
+- **Both seams are guarded.** pi's `resolveToolRenderers` and `emitToolCall` have no try/catch of their own, so a fault escaping either one would reach the TUI as an unhandled exception — or, on the execution hook, be reframed as "Extension failed, blocking execution". The resolver therefore falls back to `next()` when our own triple fails to build, and the write-details channel swallows a failed `tool_call` read and drops its stash. A rendering-side bug degrades the render; it never breaks pi's rendering and never blocks the model's execution.
+
+## History
+
+- **The occupied slot (retired).** Until the resolver migration, pi-pigment re-registered the eight names and documented the cost: first-wins dropped later extensions silently, `getAllTools()` exposed no execute, and there was no unregister. All of that is moot now — kept here only to explain why the old design existed.
+- **`pi-pigment/render-kit` (removed).** The borrowing API (import channel + `globalThis` publication) was ADR 0005's "lend": the winner of a name could install pi-pigment's renderers on its own tool definition. It existed solely because pi had no renderer-only override; with `registerToolRenderer` it is redundant, and it was removed along with its write-lend contract.

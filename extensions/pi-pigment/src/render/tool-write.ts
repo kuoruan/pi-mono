@@ -1,29 +1,23 @@
 /**
- * The write tool wrapper: delegates execution to the SDK's write tool (via
- * the tool-wrapper factory), stashes the old/new diff in `result.details`
- * (the one field the TUI preserves), and renders the create preview in the
+ * The write renderer: pi's own write tool executes; the old/new diff rides
+ * the write details channel (write-details-channel.ts) into
+ * `result.details`, and this triple renders the create preview in the
  * result slot with Shiki highlighting — result summaries (✓/stats) live
  * in the call header's suffix, bridged through render state.
  */
 
-import type {
-  AgentToolResult,
-  ToolDefinition,
-  WriteToolInput,
-} from "@earendil-works/pi-coding-agent";
+import type { ToolRenderers, WriteToolInput } from "@earendil-works/pi-coding-agent";
 
 import { expandTabs, inertText } from "#src/core/ansi.ts";
-import { type ParsedDiff, parseDiff } from "#src/core/diff.ts";
-import { fnv1a } from "#src/core/fingerprint.ts";
+import { fnv1a } from "#src/core/keys.ts";
 import { countLines, linesOf } from "#src/core/lines.ts";
 import { detectLanguage } from "#src/theme/language.ts";
 import type { ResolvedTheme, RenderTheme } from "#src/theme/scheme.ts";
 import { seedFromText } from "#src/theme/seed.ts";
-import type { BundledLanguage } from "#src/theme/shiki-core.ts";
 
 import { setCallHeader } from "./error-frame.ts";
 import { clearToolHeaderBg, padDiffBody, summarize, resultLine } from "./header.ts";
-import { decorativeExists, readDecorativeText, resolveToolPath } from "./paths.ts";
+import { decorativeExists, resolveToolPath } from "./paths.ts";
 import { borderBar, gutterWidth, numberedRows } from "./row-frame.ts";
 import {
   attachDiffPreview,
@@ -31,7 +25,7 @@ import {
   definePreviewTask,
   renderEmpty,
 } from "./text-task.ts";
-import { createToolWrapper, renderPlainTextFallback } from "./tool-factory.ts";
+import { createToolRenderer, renderPlainTextFallback } from "./tool-factory.ts";
 import { COLLAPSED_LINES, collapsedView, joinBodyTail, newFileKey } from "./tool-output.ts";
 import {
   argsSettled,
@@ -41,37 +35,7 @@ import {
   type WriteState,
   argsOf,
 } from "./tool-services.ts";
-
-/**
- * The `result.details` shapes execute() stashes for renderResult(). Kept
- * minimal — details persist into the session JSONL, so every field here is
- * one renderResult actually reads. (The factory adds nothing on top: the
- * Took footers' timing lives in the render state, not in the result.)
- */
-type WriteResultDetails =
-  | {
-      /** Discriminator: the file changed, render the diff. */
-      kind: "diff";
-      /** The parsed old/new diff. */
-      diff: ParsedDiff;
-      /** The Shiki language for highlighting. */
-      language: BundledLanguage | undefined;
-    }
-  | {
-      /** Discriminator: a new file was created, render the content preview. */
-      kind: "new";
-      /**
-       * The file's path (language detection + preview cache key). The
-       * content itself is derived from `ctx.args` at render time — it is
-       * already persisted once in the call arguments, so details must not
-       * duplicate it into the session JSONL.
-       */
-      filePath: string;
-    }
-  | {
-      /** Discriminator: content identical, render the no-change notice. */
-      kind: "noChange";
-    };
+import { type WriteResultDetails } from "./write-details.ts";
 
 /** Show at most this many diff lines in a write result. */
 const MAX_RENDER_LINES = 150;
@@ -116,10 +80,10 @@ function newFileBody(options: NewFileBodyOptions): string {
 /**
  * The bridged result-summary segment for the call header: which of
  * write's three outcomes renderResult recorded, in priority order
- * (execute stashes exactly one kind, so the order only matters for
+ * (the call records exactly one outcome, so the order only matters for
  * restored or stale states).
  *
- * @param state - The write wrapper's render state.
+ * @param state - The write renderer's render state.
  * @param theme - The pi theme.
  * @param scheme - The resolved scheme.
  * @returns The styled summary segment, or "" when nothing landed yet.
@@ -139,72 +103,30 @@ function writeSummarySegment(state: WriteState, theme: RenderTheme, scheme: Reso
 }
 
 /**
- * Build the write wrapper around `origWrite`: execute delegates and stashes
- * the diff; renderCall/renderResult render with Shiki highlighting.
+ * Build the write renderer around `origWrite`: the old/new diff rides the
+ * write-details channel (pi's own write tool executes); renderCall/renderResult
+ * render with Shiki highlighting.
  *
- * @param origWrite - The SDK write tool to wrap.
+ * @param origWrite - The SDK write renderers to delegate to.
  * @param services - Assembly services (cwd, shortPath, indicatorStyle, textFactory).
- * @returns The wrapped tool, ready for pi.registerTool.
+ * @returns The renderer triple.
  */
-export function createWriteWrapper(
-  origWrite: ToolDefinition,
+export function createWriteRenderer(
+  origWrite: ToolRenderers | undefined,
   services: ToolServices,
-): ToolDefinition {
+): ToolRenderers {
   const { shortPath, indicatorStyle } = services;
-  return createToolWrapper<WriteState>(origWrite, services, {
+  return createToolRenderer<WriteState>("write", origWrite, services, {
     renderShell: "default",
-    // Delegate to the SDK write tool, then stash the old/new diff (or the
-    // new-file/no-change marker) in `result.details` for renderResult.
-    execute: async (tid, params, sig, upd, ctx) => {
-      const wp = argsOf<WriteToolInput>(params);
-      const fp = wp.path ?? "";
-      // The pre-read runs OUTSIDE the SDK's per-file mutation queue —
-      // origWrite.execute queues itself internally, and the
-      // queue is a non-reentrant promise chain: wrapping (read + delegate)
-      // in withFileMutationQueue deadlock-depends on our own release (all
-      // write tests hang). The residual race — a sibling write to the same
-      // path landing between our read and the SDK's queued write — is
-      // display-only (a preview that momentarily shows a state that never
-      // existed) and self-heals on the next render.
-      // The execute ctx carries no cwd in tests (undefined) — fall back
-      // to the session cwd from services (the SDK's own execute falls
-      // back to its session-cwd closure the same way).
-      const oldText = readDecorativeText(resolveToolPath(ctx?.cwd ?? services.cwd, fp)) ?? null;
-
-      // The SDK's execute returns AgentToolResult<unknown>; the details we
-      // stash below make it this shape — the cast is our view of it.
-      const result = (await origWrite.execute(
-        tid,
-        wp,
-        sig,
-        upd,
-        ctx,
-      )) as AgentToolResult<WriteResultDetails>;
-      const content = wp.content ?? "";
-
-      // Store in details — the only custom field TUI preserves in renderResult
-      if (oldText !== null && oldText !== content) {
-        const diff = parseDiff(oldText, content, 3);
-        const lg = detectLanguage(fp);
-        result.details = {
-          kind: "diff",
-          diff,
-          language: lg,
-        };
-      } else if (oldText === null) {
-        result.details = {
-          kind: "new",
-          filePath: fp,
-        };
-      } else if (oldText === content) {
-        result.details = { kind: "noChange" };
-      }
-      return result;
-    },
+    // Execution delegates verbatim (the factory's default path): the
+    // SDK's write tool stashes `details: undefined`, so the old/new diff
+    // the renderer needs is captured by the session's hook pair — see
+    // write-details-channel.ts, registered by the extension. The renderer
+    // owns no execute.
 
     // Render the in-flight call header: "← write/← create" + path + the
     // streaming line count. The content preview is the result render's
-    // (every wrapper's shape: call = header/feedback, result = content).
+    // (every renderer's shape: call = header/feedback, result = content).
     renderCall: ({ text, view, ctx, renderArgs }) => {
       const { scheme, theme } = view;
       const callArgs = argsOf<WriteToolInput>(renderArgs);
@@ -219,7 +141,7 @@ export function createWriteWrapper(
       const isNew = !ctx.state.existsProbes[fp];
       const label = isNew ? "create" : "write";
       // The result-summary suffix grammar (one position, the header's
-      // tail — every wrapper's summaries live here, the result slot
+      // tail — every renderer's summaries live here, the result slot
       // carries only content): streaming counts while args grow, then the
       // bridged result summary once renderResult stashes it.
       const summary = writeSummarySegment(ctx.state, theme, scheme);
@@ -255,13 +177,13 @@ export function createWriteWrapper(
       const { scheme, theme } = view;
       const { details: d } = result as { details: WriteResultDetails | undefined };
       if (d?.kind === "diff") {
-        // The stats bridge (the edit wrapper's shape): the call header
+        // The stats bridge (the edit renderer's shape): the call header
         // re-renders on every updateDisplay and picks these up for its
         // "+N −M" suffix on the next frame.
         ctx.state.added = d.diff.added;
         ctx.state.removed = d.diff.removed;
         // The seed source for embedded grammars (vue/html), and only for
-        // them (the same gate the edit wrapper applies): the NEW file's
+        // them (the same gate the edit renderer applies): the NEW file's
         // text before the hunk, sliced from args (which persist into
         // renderResult — live and restored alike). The split lives INSIDE
         // the callback — it runs only when the task's keyed render asks
@@ -314,7 +236,7 @@ export function createWriteWrapper(
         const rawContent = (): string => inertText(rawArgs);
         // The ✓ summary bridges to the header suffix (the next call render
         // picks it up); the result slot below carries ONLY the content
-        // preview — one summary position across every wrapper.
+        // preview — one summary position across every renderer.
         clearToolHeaderBg(text);
         // newFileKey owns the width-neutral stamp list (the attach guard
         // compares the identity it returns — the old newFileKey state
@@ -345,7 +267,7 @@ export function createWriteWrapper(
             invalidate: ctx.invalidate,
             render: async (width: number) => {
               // Tabs expand BEFORE highlight/wrap (split/unified parity):
-              // Shiki keeps tabs inside tokens and the wrapper measures a
+              // Shiki keeps tabs inside tokens and the renderer measures a
               // tab as one column, while pi-tui's Text renders it as three
               // spaces — an unexpanded tab makes long indented rows wrap
               // twice (the trailing-bar artifact).
@@ -388,8 +310,8 @@ export function createWriteWrapper(
         return text;
       }
 
-      // Unknown details (unreachable through our execute): the shared
-      // plain-text fallback (stale task cleared, dim first text).
+      // Unknown details (unreachable through the write-details channel):
+      // the shared plain-text fallback (stale task cleared, dim first text).
       return renderPlainTextFallback(text, theme, result);
     },
   });

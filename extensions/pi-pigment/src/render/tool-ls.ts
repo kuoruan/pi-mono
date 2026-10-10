@@ -1,18 +1,18 @@
 /**
- * The ls tool wrapper: execution delegates to the SDK's ls tool (via the
- * tool-wrapper factory); rendering draws a tree (├──/└── connectors) of
- * type-colored entries — directories in the accent color, known code files
- * in a syntax-family tint — collapsed to a line budget until ctrl+o.
+ * The ls renderer: pi's own ls tool executes; this triple draws a tree
+ * (├──/└── connectors) of type-colored entries — directories in the accent
+ * color, known code files in a syntax-family tint — collapsed to a line
+ * budget until ctrl+o.
  */
 
-import type { LsToolInput, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { LsToolInput, ToolRenderers } from "@earendil-works/pi-coding-agent";
 
 import { SEQ_FG_DEFAULT } from "#src/core/escapes.ts";
 import { detectLanguage } from "#src/theme/language.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
 
 import { assembleOutputBody } from "./output-assembly.ts";
-import { createToolWrapper } from "./tool-factory.ts";
+import { createToolRenderer } from "./tool-factory.ts";
 import { COLLAPSED_LINES, joinBodyTail, outputMemoOf } from "./tool-output.ts";
 import { argsOf, argStr, headerPathLink, type ToolServices } from "./tool-services.ts";
 
@@ -40,21 +40,24 @@ function formatLsCall(args: Partial<LsToolInput>, theme: RenderTheme, cwd?: stri
 }
 
 /**
- * Build the ls wrapper around `origLs`.
+ * Build the ls renderer around `origLs`.
  *
- * @param origLs - The SDK ls tool to wrap.
+ * @param origLs - The SDK ls renderers to delegate to.
  * @param services - Assembly services.
- * @returns The wrapped tool.
+ * @returns The renderer triple.
  */
-export function createLsWrapper(origLs: ToolDefinition, services: ToolServices): ToolDefinition {
-  return createToolWrapper(origLs, services, {
+export function createLsRenderer(
+  origLs: ToolRenderers | undefined,
+  services: ToolServices,
+): ToolRenderers {
+  return createToolRenderer("ls", origLs, services, {
     renderShell: "default",
     renderHeader: {
       prefix: "lh",
       formatCallBody: (renderArgs, theme, ctx) =>
         formatLsCall(argsOf<LsToolInput>(renderArgs), theme, ctx.cwd),
     },
-    renderResult: ({ text, view, ctx, result, options, tookMs }) => {
+    renderResult: ({ text, view, ctx, result, options, durationMs }) => {
       const { scheme, theme } = view;
       // Inert at intake (ADR 0004): filenames can carry control bytes too.
       // The derivation is memoized on the result object's identity.
@@ -69,7 +72,7 @@ export function createLsWrapper(origLs: ToolDefinition, services: ToolServices):
         budget: COLLAPSED_LINES.ls,
         derived,
         view,
-        tookMs,
+        durationMs,
         expanded: options.expanded,
         notice: derived.notice,
         ctx,

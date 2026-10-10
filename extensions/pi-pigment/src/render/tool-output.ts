@@ -4,7 +4,7 @@
  * (GLOSSARY.md: one window concept, the budgets + tail grammar), and the
  * execution clock the Took footer reads. The TUI contract (render
  * context, per-tool states) and the assembly inputs stay in
- * tool-services; wrappers import their slice by intent — a wrapper's
+ * tool-services; renderers import their slice by intent — a renderer's
  * import list reads as its contract.
  */
 import type {
@@ -15,8 +15,7 @@ import type {
 import { DEFAULT_MAX_BYTES, formatSize, keyText } from "@earendil-works/pi-coding-agent";
 
 import { inertText } from "#src/core/ansi.ts";
-import { KEY_SEP } from "#src/core/escapes.ts";
-import { fnv1a } from "#src/core/fingerprint.ts";
+import { fnv1a, joinKey } from "#src/core/keys.ts";
 import { linesOf } from "#src/core/lines.ts";
 import type { RenderTheme } from "#src/theme/scheme.ts";
 
@@ -182,7 +181,7 @@ function liftTrailingNotice(output: string, details: unknown): string {
   const last = nonEmpty[nonEmpty.length - 1];
   // Keep a notice only when real content precedes it: nothing else can
   // carry the output then (the SDK never emits a notice over an empty
-  // result), and the " > 1 " guard keeps the wrapper guards' semantics
+  // result), and the " > 1 " guard keeps the renderer guards' semantics
   // (an empty body stays empty).
   if (nonEmpty.length < 2 || last === undefined || !last.startsWith("[") || !last.endsWith("]")) {
     return output;
@@ -191,21 +190,17 @@ function liftTrailingNotice(output: string, details: unknown): string {
 }
 
 /**
- * The NUL join authority for every preview-key stamp list. NUL-joined:
- * ":"-joined stamps collide (Unix paths may contain colons, Windows drive
- * letters always do), and NUL cannot appear in any stamp we pass. Serves
- * BOTH the width-neutral identity (the attach guard's input stamp) and
- * the width-appended render key (`taskKeyOf(...) + KEY_SEP + width`).
- * Its callers are the named key builders below (plus outputTaskKey and
- * the derived PreviewIdentity shape) — a stamp list is spelled in one
- * place; wrapper call sites never join raw.
+ * A preview key: the discriminator prefix plus a stamp list, joined by
+ * `joinKey` (core/keys.ts — the separator authority, where the NUL
+ * rationale lives). Every named key builder below composes through this,
+ * so a renderer call site never joins raw.
  *
  * @param prefix - The key's discriminator prefix.
  * @param stamps - The input segments (the caller pre-strings optionals).
  * @returns The joined key.
  */
-export function taskKeyOf(prefix: string, stamps: Array<string | number>): string {
-  return `${prefix}${KEY_SEP}${stamps.join(KEY_SEP)}`;
+export function taskKeyOf(prefix: string, stamps: readonly (string | number)[]): string {
+  return joinKey([prefix, ...stamps]);
 }
 
 /**
@@ -234,7 +229,7 @@ export interface ErrorFrameKeyOptions {
    * clock (a resumed row). Undefined joins as the -1 sentinel — a
    * number, so a measured 0ms never collides with never-measured.
    */
-  tookMs: number | undefined;
+  durationMs: number | undefined;
   /** The scheme identity part (a theme swap re-keys). */
   identity: string;
   /** The extracted failure message the frame renders. */
@@ -245,7 +240,7 @@ export interface ErrorFrameKeyOptions {
  * The error frame's preview identity (the factory's error branch). The
  * stamps must cover every input the frame closure captures — expand
  * state, the measured duration, the scheme, the message — and the -1
- * elapsed sentinel lives here, nowhere else.
+ * duration sentinel lives here, nowhere else.
  *
  * @param options - The key's inputs.
  * @returns The preview identity.
@@ -253,7 +248,7 @@ export interface ErrorFrameKeyOptions {
 export function errorFrameKey(options: ErrorFrameKeyOptions): string {
   return taskKeyOf(options.prefix, [
     options.expanded ? 1 : 0,
-    options.tookMs ?? -1,
+    options.durationMs ?? -1,
     options.identity,
     options.message,
   ]);
@@ -265,8 +260,14 @@ export interface DiffPreviewKeyOptions {
   prefix: string;
   /** The scheme identity part (a theme swap re-keys). */
   identity: string;
-  /** The parsed diff's line count (the content stamp). */
+  /** The parsed diff's line count (the cheap shape stamp). */
   lineCount: number;
+  /**
+   * The parsed diff's content fingerprint (`contentFingerprint`). With
+   * the line count it seals the key: a same-line-count diff whose content
+   * changed still re-keys, so the attach guard cannot serve a stale frame.
+   */
+  fingerprint: string;
   /** The Shiki language; undefined joins as "" (plain text). */
   language: string | undefined;
   /**
@@ -288,6 +289,7 @@ export function diffPreviewKey(options: DiffPreviewKeyOptions): string {
   return taskKeyOf(options.prefix, [
     options.identity,
     options.lineCount,
+    options.fingerprint,
     options.language ?? "",
     streamingStamp(options.streaming),
   ]);
@@ -372,8 +374,8 @@ export interface OutputTaskKeyOptions {
   derived: DerivedOutput;
   /** The scheme/theme identity part. */
   identity: string;
-  /** The elapsed milliseconds. */
-  elapsedMs: number;
+  /** The duration in milliseconds (the key's Took stamp). */
+  durationMs: number;
   /** Whether the frame is expanded. */
   expanded: boolean;
   /**
@@ -396,18 +398,18 @@ export interface OutputTaskKeyOptions {
  * @returns The swap key.
  */
 export function outputTaskKey(options: OutputTaskKeyOptions): string {
-  const { prefix, derived, identity, elapsedMs, expanded, streaming } = options;
+  const { prefix, derived, identity, durationMs, expanded, streaming } = options;
   return taskKeyOf(prefix, [
     derived.output.length,
     derived.hash,
     identity,
-    elapsedMs,
+    durationMs,
     expanded ? "x" : "c",
     ...(streaming === undefined ? [] : [streamingStamp(streaming)]),
   ]);
 }
 
-/** The render-state cell a wrapper parks its output memo in. */
+/** The render-state cell a renderer parks its output memo in. */
 export interface OutputMemoCell {
   /** The memo itself (created on first use). */
   memoFor?: WeakMap<object, DerivedOutput>;
@@ -417,10 +419,10 @@ export interface OutputMemoCell {
 export type OutputDerive = (result: object) => DerivedOutput;
 
 /**
- * Bind an output memo to a render-state cell (the wrapper passes its
+ * Bind an output memo to a render-state cell (the renderer passes its
  * state; the cell survives frames within one tool call).
  *
- * @param cell - The wrapper's render state (the memo's home).
+ * @param cell - The renderer's render state (the memo's home).
  * @returns The derivation function.
  */
 export function outputMemoOf(cell: OutputMemoCell): OutputDerive {
@@ -432,7 +434,7 @@ export function outputMemoOf(cell: OutputMemoCell): OutputDerive {
     const output = inertText(firstTextOf(result));
     const notice = limitNoticeOf(details);
     // The notice's separator blank line (the SDK writes "\n\n[…]") goes
-    // with it — neither is content the wrappers window over.
+    // with it — neither is content the renderers window over.
     const body = liftTrailingNotice(output, details);
     // ("" keeps the falsy guard: an empty result's line view is [], not
     // [""] — the empty-output path is intercepted by the callers' guards.)
@@ -522,10 +524,29 @@ export function expandKeyHint(theme: RenderTheme): string {
 export type StateColor = "muted" | "success" | "error" | "warning";
 
 /**
+ * Format an execution duration the way pi's shell renderer does: a tenth of
+ * a second under a minute (`1.2s`), then the scale coarsens to `1m 5s`
+ * and `1h 5m 3s` — pi's `formatDuration` in the bash renderer, reproduced
+ * byte-identically (it is module-local upstream, not an export).
+ *
+ * @param ms - The duration in milliseconds.
+ * @returns The bare duration text (no label, no color).
+ */
+export function formatDuration(ms: number): string {
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const totalSeconds = Math.floor(seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainder}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${remainder}s`;
+}
+
+/**
  * The `Took 1.2s` footer from the measured execution time — bash's native
- * renderer shows one; grep/find/ls had none until this. Formatting is
- * pi's shell-renderer body byte-identically (`(ms / 1000).toFixed(1)` +
- * "s" — bash.js), so settled rows read the same whichever renderer
+ * renderer shows one; grep/find/ls had none until this. The text is pi's
+ * shell-renderer body byte-identically ({@link formatDuration}: `1.2s`,
+ * `1m 5s`, `1h 5m 3s`), so settled rows read the same whichever renderer
  * painted them. The color carries the call's STATE: success on the
  * collapsed tail, the failure kind on an error frame.
  *
@@ -536,18 +557,18 @@ export type StateColor = "muted" | "success" | "error" | "warning";
  */
 export function tookFooter(ms: number | undefined, theme: RenderTheme, color: StateColor): string {
   if (ms === undefined) return "";
-  return theme.fg(color, `Took ${(ms / 1000).toFixed(1)}s`);
+  return theme.fg(color, `Took ${formatDuration(ms)}`);
 }
 
 /**
  * Arm the execution clock — pi's shell-renderer renderCall body, applied to
- * every wrapper's state. Called on every renderCall frame; only the live
+ * every renderer's state. Called on every renderCall frame; only the live
  * execution arms it (a resumed row re-runs renderCall with
  * `executionStarted` false, which is exactly how pi keeps a replayed tool
  * row from showing a duration), and the `startedAt === undefined` guard
  * keeps the clock at the FIRST frame.
  *
- * @param state - The wrapper's render state (the timing fields).
+ * @param state - The renderer's render state (the timing fields).
  * @param executionStarted - Whether pi marked this call's execution started.
  */
 export function armTiming(state: ExecutionTimingState, executionStarted: boolean): void {
@@ -564,7 +585,7 @@ export function armTiming(state: ExecutionTimingState, executionStarted: boolean
  * frame cache keys include this duration, and a recomputed one would
  * re-arm the preview task on every updateDisplay.
  *
- * @param state - The wrapper's render state (the timing fields).
+ * @param state - The renderer's render state (the timing fields).
  * @param isPartial - Whether the result is still streaming.
  * @param isError - Whether the call settled as an error.
  * @returns The measured milliseconds, or undefined while pending (and on a
@@ -596,7 +617,7 @@ export interface ViewOptions {
    */
   expandedCap?: number;
   /** The measured execution time (undefined while pending, and on a resumed row); unset = no footer. */
-  tookMs?: number;
+  durationMs?: number;
   /** The SDK's limit notice (DerivedOutput.notice) — painted as the warning footer line. */
   notice?: string;
   /** The pi theme (muted fg). */
@@ -630,7 +651,7 @@ export interface CollapsedWindow {
  * and no time was measured).
  */
 export function collapsedView(lines: string[], opts: ViewOptions): CollapsedWindow {
-  const { budget, expanded, expandedCap, tookMs, notice, theme } = opts;
+  const { budget, expanded, expandedCap, durationMs, notice, theme } = opts;
   // An absent result source means no footer (write's create preview —
   // the SDK's own write renderer never showed timing either).
   const collapsed = !expanded && budget !== undefined && lines.length > budget;
@@ -653,7 +674,7 @@ export function collapsedView(lines: string[], opts: ViewOptions): CollapsedWind
     // error result never reaches this view), and a pending frame's
     // stopTiming returns undefined (no footer at all) — a tail footer
     // exists only on a settled, successful call.
-    tookFooter(tookMs, theme, "success"),
+    tookFooter(durationMs, theme, "success"),
   ]
     .filter(Boolean)
     .join("\n\n");

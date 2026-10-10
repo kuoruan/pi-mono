@@ -1,6 +1,7 @@
 import type * as FsModule from "node:fs";
 import { join } from "node:path";
 
+import { fs } from "memfs";
 import { describe, expect, it, vi } from "vitest";
 
 import { vol, writeFile } from "#test/memfs.ts";
@@ -19,7 +20,7 @@ vi.mock("node:fs", async () => {
       "utf-8",
     ),
   });
-  return (await import("memfs")).fs;
+  return fs;
 });
 
 import { readFileSync } from "node:fs";

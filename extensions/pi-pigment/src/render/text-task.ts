@@ -8,7 +8,8 @@
 import type { Component } from "@earendil-works/pi-tui";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
-import { KEY_SEP } from "#src/core/escapes.ts";
+import { contentFingerprint } from "#src/core/diff.ts";
+import { joinKey } from "#src/core/keys.ts";
 import { lastHunkNewStart } from "#src/theme/seed.ts";
 
 import { type DiffViewOptions } from "./diff-view.ts";
@@ -34,7 +35,7 @@ export interface PreviewTask {
    * that can change between frames, EXCEPT the width (see taskKeyOf).
    * The attach guard compares it: re-attaching a task with the same
    * identity leaves the rendered frame alone (the placeholder overwrite
-   * and task restart the wrapper-side errorFrameKey/newFileKey guards
+   * and task restart the renderer-side errorFrameKey/newFileKey guards
    * used to prevent, folded into the protocol's single home).
    */
   identity: string;
@@ -95,7 +96,7 @@ export interface PreviewTextHost extends Component {
    * The attached task's width-neutral identity — the attach guard's
    * stamp (same inputs → no placeholder write, no redraw, no restart).
    * Declared and consumed here (the protocol's own compare; the old
-   * wrapper-side errorFrameKey lived in the factory instead).
+   * renderer-side errorFrameKey lived in the factory instead).
    */
   previewIdentity?: string;
   /** The latest-wins render queue (created by the first enqueue). */
@@ -111,7 +112,7 @@ export type TextComponentFactory = new (text: string, x: number, y: number) => C
 
 /**
  * Clear the preview task and render the text empty — the shared
- * "nothing to show" exit every output wrapper's empty guard uses.
+ * "nothing to show" exit every output renderer's empty guard uses.
  *
  * @param text - The Text component.
  * @returns The component (for a direct return).
@@ -164,7 +165,7 @@ export function attachPreviewTask(text: PreviewTextHost, task: PreviewTask): voi
 /**
  * The task's identity source — one of two shapes:
  *
- * - `{ identity }` — the precomputed form: every wrapper composes its key through a NAMED builder
+ * - `{ identity }` — the precomputed form: every renderer composes its key through a NAMED builder
  *   (outputTaskKey for grep/find/ls, errorFrameKey / diffPreviewKey / newFileKey / headerLineKey
  *   for the diff-class previews) and hands over the string — the stamp lists and their sentinels
  *   live in those builders, never hand-copied at a call site;
@@ -209,7 +210,7 @@ export type DefinePreviewTaskSpec = PreviewIdentity & {
  * derivation). The identity and the render loop's cache key derive from
  * ONE stamp list: identity → key can never drift apart at a call site,
  * and the two key conventions (width-appended vs width-neutral) live
- * here instead of being re-copied per wrapper.
+ * here instead of being re-copied per renderer.
  *
  * @param spec - The task's identity source and protocol fields.
  * @returns The complete preview task.
@@ -222,7 +223,7 @@ export function definePreviewTask(spec: DefinePreviewTaskSpec): PreviewTask {
     placeholder: spec.placeholder,
     fallback: spec.fallback,
     invalidate: spec.invalidate,
-    key: spec.widthAware ? (width: number) => `${identity}${KEY_SEP}${width}` : () => identity,
+    key: spec.widthAware ? (width: number) => joinKey([identity, width]) : () => identity,
     render: spec.render,
   };
 }
@@ -286,6 +287,9 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
         prefix: keyPrefix,
         identity: scheme.identity,
         lineCount: diff.lines.length,
+        // Memoized per diff object (core/diff.ts) — the hash runs once
+        // per diff, not once per render trigger.
+        fingerprint: contentFingerprint(diff),
         language,
         streaming,
       }),
@@ -294,13 +298,13 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
       fallback: "",
       invalidate: ctx.invalidate,
       render: async (width: number) => {
-        // The seed (embedded-grammar coloring) stays OUT of the
-        // task key: the diff's content is frozen, and a later edit to the
-        // file (edit's seed source is the disk) must not re-color history —
-        // the seed only keys the highlight cache. Residual, accepted: a
-        // width change re-renders and re-reads the seed, so a file edited
-        // after the fact colors the frozen hunk with the new prefix (a
-        // rare, display-only approximation).
+        // The seed (embedded-grammar coloring) stays OUT of the task
+        // key: it only keys the highlight cache, and a later edit to the
+        // file (edit's seed source is the disk) must not re-color
+        // already-rendered history. Residual, accepted: a width change
+        // re-renders and re-reads the seed, so a file edited after the
+        // fact colors the frozen hunk with the new prefix (a rare,
+        // display-only approximation).
         // The split verdict is computed ONCE and shared: the seed budget
         // and the view choice both consume it (it walks every visible
         // content line — a duplicate call would double that scan).
@@ -331,7 +335,7 @@ export function setDiffPreviewTask(input: DiffPreviewInput): void {
 
 /**
  * The attachDiffPreview inputs — DiffPreviewInput stripped to what a tool
- * wrapper's render slot actually varies, plus the frame's own pair (the
+ * renderer's render slot actually varies, plus the frame's own pair (the
  * render context and the services the defaults derive from).
  */
 export interface AttachDiffPreviewSpec extends Omit<
@@ -351,7 +355,7 @@ export interface AttachDiffPreviewSpec extends Omit<
 
 /**
  * Attach the diff preview task described by `spec` to its host Text — the
- * tool wrappers' entry over setDiffPreviewTask. The four inputs constant
+ * tool renderers' entry over setDiffPreviewTask. The four inputs constant
  * at every call site are derived here (view/ctx pass through; the
  * indicator style comes from the services; the streaming bit comes from
  * the context's three-state model), so a preview call site hands over

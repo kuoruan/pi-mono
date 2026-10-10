@@ -9,6 +9,7 @@
 import { structuredPatch } from "diff";
 
 import { inertText } from "./ansi.ts";
+import { fnv1a, joinKey } from "./keys.ts";
 import { linesOf } from "./lines.ts";
 
 /** Hunk metadata parsed from a `@@` header, attached to separator DiffLines. */
@@ -49,6 +50,35 @@ export interface ParsedDiff {
   added: number;
   /** Count of removed lines. */
   removed: number;
+}
+
+/**
+ * The diff objects' content fingerprints, computed on first ask. A
+ * WeakMap, not a field, so the parsers' return shape stays the data-only
+ * ParsedDiff and the entry dies with its diff (no cache to bound).
+ */
+const contentFingerprints = new WeakMap<ParsedDiff, string>();
+
+/**
+ * A parsed diff's content fingerprint — what the preview's swap key
+ * stamps so two diffs of equal line COUNT still key apart. Memoized per
+ * diff object: the key is rebuilt on every render trigger, and hashing
+ * the lines there would make a large diff pay an O(n) scan per frame.
+ * Keys on the painted content (role + gap + text), so the fingerprint
+ * follows exactly what the renderers draw.
+ *
+ * @param diff - The parsed diff.
+ * @returns The 8-hex-digit digest.
+ */
+export function contentFingerprint(diff: ParsedDiff): string {
+  let fingerprint = contentFingerprints.get(diff);
+  if (fingerprint === undefined) {
+    fingerprint = fnv1a(
+      joinKey(diff.lines.map((line) => joinKey([line.type, line.gap ?? "", line.content]))),
+    );
+    contentFingerprints.set(diff, fingerprint);
+  }
+  return fingerprint;
 }
 
 /**

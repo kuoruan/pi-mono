@@ -207,7 +207,7 @@ describe("edit error frame shape", () => {
     ctx.isError = true;
     // The native renderer arms the interval while partial output
     // streams; a settled frame that bypasses it clears through the
-    // shell wrapper's onSettled (the factory never names the resource).
+    // shell renderer's onSettled (the factory never names the resource).
     ctx.state.interval = { handle: 1 } as unknown as ReturnType<typeof setInterval>;
     bash.renderResult!(
       { content: [{ type: "text", text: "boom" }], isError: true },

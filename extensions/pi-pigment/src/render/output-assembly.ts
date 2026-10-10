@@ -60,8 +60,8 @@ export interface OutputAssemblyInput {
   derived: DerivedOutput;
   /** The frame view (scheme identity + pi theme derive inside). */
   view: FrameView;
-  /** The raw Took reading (undefined → no footer; the key reads tookMs ?? 0). */
-  tookMs?: number;
+  /** The raw Took reading (undefined → no footer; the key reads durationMs ?? 0). */
+  durationMs?: number;
   /** The expanded state (window regime + key stamp). */
   expanded: boolean;
   /** The streaming stamp (grep only — pending frames render plain). */
@@ -78,7 +78,7 @@ export interface OutputAssemblyInput {
  * Assemble an SDK-delegated output tool's result body: the empty guard,
  * the swap key, the settled-frame shortcut, the windowed plain body, and
  * the preview-task attach. The
- * wrappers supply only what varies (prefix, budget, notice, the styled
+ * renderers supply only what varies (prefix, budget, notice, the styled
  * callback); the guard order and the key stamps live here once — a
  * fourth output tool cannot forget a stamp.
  *
@@ -99,7 +99,7 @@ export function assembleOutputBody(input: OutputAssemblyInput): PreviewTextHost 
     notice,
     ctx,
     renderStyled,
-    tookMs,
+    durationMs,
   } = input;
   const { scheme, theme } = view;
   if (isEmpty) return renderEmpty(text); // nothing to show — clear any stale task
@@ -107,7 +107,7 @@ export function assembleOutputBody(input: OutputAssemblyInput): PreviewTextHost 
     prefix,
     derived,
     identity: scheme.identity,
-    elapsedMs: tookMs ?? 0,
+    durationMs: durationMs ?? 0,
     expanded,
     streaming,
   });
@@ -118,7 +118,7 @@ export function assembleOutputBody(input: OutputAssemblyInput): PreviewTextHost 
   const { shown, tail, hidden } = collapsedView(lines, {
     budget,
     expanded,
-    tookMs,
+    durationMs,
     notice,
     theme,
   });

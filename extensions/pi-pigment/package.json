@@ -30,7 +30,6 @@
   "files": [
     "themes",
     "index.ts",
-    "render-kit.ts",
     "src",
     "config",
     "schemas",
@@ -48,10 +47,6 @@
     ".": {
       "types": "./index.ts",
       "default": "./index.ts"
-    },
-    "./render-kit": {
-      "types": "./render-kit.ts",
-      "default": "./render-kit.ts"
     }
   },
   "publishConfig": {
@@ -87,8 +82,8 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.85.0",
-    "@earendil-works/pi-tui": ">=0.85.0"
+    "@earendil-works/pi-coding-agent": ">=1.0.1 <2.0.0",
+    "@earendil-works/pi-tui": ">=1.0.1 <2.0.0"
   },
   "engines": {
     "node": ">=22"

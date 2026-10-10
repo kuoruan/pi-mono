@@ -201,10 +201,21 @@ export type CellVisitor = (
  * in tests/bench-fixtures.ts) with headroom: the verdict is keyed on the
  * whole styled line and re-read up to three times per line per frame
  * (measure, wrap, inject-bg), so a churn-free memo spans frames instead
- * of re-scanning on every scroll or refresh. The entries are one boolean
- * per line — doubling the capacity costs tens of KB.
+ * of re-scanning on every scroll or refresh.
  */
 const GATE_MEMO_CAPACITY = 1024;
+
+/**
+ * The longest styled line the memo will hold, in code units. The key IS
+ * the line, so the entry count alone bounds nothing byte-wise; past this
+ * cap a line (a minified-bundle line, say) skips the memo and re-scans —
+ * the verdict is one regex pass, and the memo exists to avoid repeating
+ * it across frames, not to avoid the first one. 4096 covers the p99 of
+ * the repo's own line-width sample (136 columns) with room for the
+ * escapes a heavily tokenized line carries, and pins the memo's text at
+ * ~capacity × cap.
+ */
+const GATE_MEMO_MAX_LINE = 4096;
 
 /**
  * Memoized gate verdicts. The property scan runs per code point against a
@@ -224,6 +235,9 @@ const riskyLineMemo = createBoundedFifoMap<string, boolean>(GATE_MEMO_CAPACITY);
  * @returns True when the line must be walked by grapheme cluster.
  */
 function hasRiskyCodePoint(s: string): boolean {
+  // Past the cap the line is never memoized (see GATE_MEMO_MAX_LINE): the
+  // verdict is cheap to recompute, the key is not cheap to retain.
+  if (s.length > GATE_MEMO_MAX_LINE) return RISKY_CODE_POINT_RE.test(s);
   const memo = riskyLineMemo.get(s);
   if (memo !== undefined) return memo;
   const risky = RISKY_CODE_POINT_RE.test(s);

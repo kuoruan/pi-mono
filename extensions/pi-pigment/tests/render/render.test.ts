@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseDiff, parsePatchFiles } from "#src/core/diff.ts";
+import { contentFingerprint, parseDiff, parsePatchFiles } from "#src/core/diff.ts";
 import { taskKeyOf } from "#src/render/tool-output.ts";
 import { renderUnified } from "#src/render/unified-view.ts";
 import {
@@ -68,7 +68,7 @@ describe("grammar-state seeding (embedded grammars)", () => {
     for (const line of diff.lines) {
       expect(line.content).not.toMatch(/<(script|template|style)/);
     }
-    // Seed: the file text before the hunk (what the write wrapper slices
+    // Seed: the file text before the hunk (what the write renderer slices
     // from args.content via the first hunk's newStart).
     const firstChange = diff.lines.find((l) => l.newNum !== null);
     const start = firstChange?.newNum ?? 1;
@@ -300,6 +300,51 @@ describe("rendering pipeline", () => {
     );
   }, 15000);
 
+  it("re-renders a same-line-count diff whose content changed (the stale-frame guard)", async () => {
+    // The bug this pins: the identity carried only the line COUNT, so a
+    // different diff of equal size kept the same identity — the attach
+    // guard then left the FIRST frame on screen (the width key never
+    // changed, so the render loop never re-ran the task). Asserted at the
+    // screen, not at the key: the second diff's content must reach the
+    // host that showed the first one.
+    const tools = await registerTools();
+    const edit = toolOf(tools, "edit");
+    if (!edit.renderResult) throw new Error("edit.renderResult missing");
+    const renderResult = edit.renderResult;
+    const filePath = join(tempDir, "stale.ts");
+    vol.writeFileSync(filePath, "const a = 1;\n");
+    const theme = buildRenderTheme();
+    const { ctx, lastComponent } = makeRenderCtx();
+    ctx.args = { path: filePath };
+    // Two diffs of equal line count, different content.
+    const patchA = "--- app.ts\n+++ app.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n";
+    const patchB = "--- app.ts\n+++ app.ts\n@@ -1 +1 @@\n-const a = 1;\n+const b = 2;\n";
+    expect(parsePatchFiles(patchA)[0]!.lines.length).toBe(parsePatchFiles(patchB)[0]!.lines.length);
+    // Both calls land on the SAME host (getWidthAwareText reuses
+    // ctx.lastComponent), which is what makes the guard's decision
+    // observable.
+    const attach = (patch: string): TextDouble =>
+      renderResult(
+        {
+          content: [{ type: "text", text: "edited" }],
+          isError: false,
+          details: { diff: "", patch, firstChangedLine: 1 },
+        },
+        { expanded: true, isPartial: false },
+        theme,
+        ctx,
+      );
+    attach(patchA).render(120);
+    await waitFor(() =>
+      plain(lastComponent.text.text).includes("const a = 2;") ? true : undefined,
+    );
+    attach(patchB).render(120);
+    await waitFor(() =>
+      plain(lastComponent.text.text).includes("const b = 2;") ? true : undefined,
+    );
+    expect(plain(lastComponent.text.text)).toContain("const b = 2;");
+  }, 15000);
+
   it("the edit preview's identity carries exactly its documented stamps", async () => {
     const tools = await registerTools();
     const edit = toolOf(tools, "edit");
@@ -327,17 +372,30 @@ describe("rendering pipeline", () => {
       );
     };
     // The full list, spelled out: [scheme.identity, diff.lines.length,
-    // language, streaming]. The parsed diff comes through the same parser
-    // the wrapper uses; scheme.identity embeds a NUL, so the expectation
-    // composes through taskKeyOf rather than splitting the identity.
+    // diff.contentFingerprint, language, streaming]. The parsed diff comes
+    // through the same parser the renderer uses; scheme.identity embeds a
+    // NUL, so the expectation composes through taskKeyOf rather than
+    // splitting the identity.
     const parsed = parsePatchFiles(patch)[0]!;
     expect(attach(false).previewIdentity).toBe(
-      taskKeyOf("ed", [viewFor(theme).scheme.identity, parsed.lines.length, "typescript", ""]),
+      taskKeyOf("ed", [
+        viewFor(theme).scheme.identity,
+        parsed.lines.length,
+        contentFingerprint(parsed),
+        "typescript",
+        "",
+      ]),
     );
     // The settle bit: the same inputs mid-stream must key differently, or
     // the final frame never re-renders in color.
     expect(attach(true).previewIdentity).toBe(
-      taskKeyOf("ed", [viewFor(theme).scheme.identity, parsed.lines.length, "typescript", "s"]),
+      taskKeyOf("ed", [
+        viewFor(theme).scheme.identity,
+        parsed.lines.length,
+        contentFingerprint(parsed),
+        "typescript",
+        "s",
+      ]),
     );
   });
 
@@ -361,7 +419,7 @@ describe("rendering pipeline", () => {
       );
     };
     // [fp, scheme.identity, lineCount, stats.fingerprint, expand, streaming].
-    // lineCount and the fingerprint come from the wrapper's own stats memo
+    // lineCount and the fingerprint come from the renderer's own stats memo
     // (not reachable here), so this pins the prefix, the trailing stamps,
     // and the identity's segment count — a dropped trailing stamp or a lost
     // expand/streaming bit fails; a dropped middle stamp does not.
@@ -477,7 +535,7 @@ describe("rendering pipeline", () => {
       ctx,
     );
 
-    // The TUI drives components through render(width) — the wrapper must
+    // The TUI drives components through render(width) — the renderer must
     // run the attached task through that path (bare components render
     // diffs blank).
     const firstPass = component.render(120);

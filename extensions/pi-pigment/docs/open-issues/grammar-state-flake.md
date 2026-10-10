@@ -6,6 +6,42 @@ The shiki engine migration (JS-regex → Oniguruma WASM) removed the flake's ide
 
 `tests/render/tool-output.test.ts` → "grep highlights same-file lines as one block (grammar state flows across lines)" failed ~10-20% of **full parallel** runs (`vitest run`, 16 forks), never in isolation, never with `--no-file-parallelism`, and never standalone (same code outside vitest is deterministic). Pre-dates the cleanup rounds (witnessed once during the P/T batches); the cleanup's type/import-only changes are not the trigger.
 
+## Signature 3: render-test `waitFor` timeouts (recorded 2026-10)
+
+A distinct third signature — **no wrong render**, only a wait that never
+satisfies: `Error: waitFor: condition never held` in a render test.
+Witnessed in `tests/render/bash-call-shape.test.ts` ("reassembles an inline
+code region on its ORIGINAL line (python -c stays one row)", user report)
+and `tests/render/tool-output.test.ts` ("find separates the body and the tail
+with a blank line", one capture in ~5 full-parallel runs at the default 2000ms
+budget). Never reproduced on demand: 26 consecutive instrumented full-parallel
+runs were green afterward. A CPU-load reproduction was denied by the safety
+guard (resource abuse) and must not be retried — the reproduction stays
+statistical.
+
+**Mechanism (deduced, not captured).** These waits poll a signal that only the
+async task's SUCCESS path produces (`ctx.invalidate()` for the shell header,
+`setText` for a preview task). Both have a designed failure fallback that is
+production-correct and emits no signal: `renderShellCommand(...).catch()`
+leaves the plain display standing without invalidating, and a rejected preview
+task simply never swaps. On a fresh ctx the stale guard cannot fire either —
+`ctx.state.command` is assigned synchronously (shell-tool.ts, before the async
+highlight), so `ctx.state.command !== command` is false throughout. The only
+reachable "never invalidates" paths are therefore a REJECTED or HUNG task.
+
+**Why not a bigger budget.** The slow-wait tail under normal load is ≤536ms
+(n=16 samples), i.e. the 2000ms budget already carries ~4x headroom; a
+rejected task would still die on a 60s deadline. A bounded fresh-ctx retry
+covers both candidates: it gives a starved task a second chance, and a fresh
+`commandHighlightFor`/preview identity re-kicks a rejected one.
+
+**Handling.** Both tests now use the same bounded rebuild loop as the
+grammar-state self-heal above (≤3 attempts, each on a fresh ctx, the LAST
+attempt letting `waitFor` throw — a wrong or broken render still fails the
+suite). Teeth check performed: forcing `renderShellCommand` to always reject
+(and, separately, an unsatisfiable probe) still turns the test red after three
+attempts.
+
 ## Evidence (per-PID instrumented logs, two failure captures)
 
 - The failing frame's tokenize is **self-consistent under one theme** — this is not theme/state pollution: `beta` gets the function color (tagged-template tokenization), `` `;`` the string color. I.e. `codeToTokensBase` tokenized the block **as if it started at `beta`** — the template-string state never opened on line 0.
@@ -35,4 +71,4 @@ The shiki engine migration (JS-regex → Oniguruma WASM) removed the flake's ide
 0. ~~Verify clear-cache + re-tokenize recovery~~ — DONE: the flaky test now self-heals: each attempt clears the cache (`resetPigmentForTest`) and rebuilds the component from scratch; a poisoned first render re-tokenizes, and up to two re-renders run before the assertions fail. The suite returned to full parallelism (the global pin is gone); the recovery claim is being watched in CI runs.
 1. **File the upstream issue** (shiki / @shikijs/engine-javascript) — optional community courtesy, no longer our blocker: our runtime left the JS-regex engine, but web consumers stay on it by default. Item 3 holds the two token-dump signatures for anyone who files.
 2. ~~Cache-clear + retry viability~~ — MOOT: the mitigation question died with the carrier. The in-test self-heal remains as unrelated defense-in-depth (see the Status update).
-3. Two failure signatures to keep separated in any report (they may be two root causes): **no-match** (fork 305651: rules never fire, whole-line plain) vs **wrong-match** (305674: template state never opens, `beta` tokenizes as a tagged-template tag; 305685's truncated token).
+3. Two failure signatures to keep separated in any report (they may be two root causes): **no-match** (fork 305651: rules never fire, whole-line plain) vs **wrong-match** (305674: template state never opens, `beta` tokenizes as a tagged-template tag; 305685's truncated token). A THIRD, distinct signature — a render-test `waitFor` timeout with no wrong render — is recorded in its own section above.

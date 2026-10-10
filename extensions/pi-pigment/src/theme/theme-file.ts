@@ -17,12 +17,12 @@ import { type ParseError, parse } from "jsonc-parser";
 
 import { CONFIG_HOME } from "#src/config/config-schema.ts";
 import { isLightRgb, isOpaqueHex6, parseRootColor } from "#src/core/color.ts";
-import { fnv1a } from "#src/core/fingerprint.ts";
 import type { Issue } from "#src/core/issue.ts";
+import { fnv1a } from "#src/core/keys.ts";
 import type { SessionEnv } from "#src/core/session-env.ts";
 
 import { flattenTranslucentTokens, loadBundledTheme } from "./bundled-intake.ts";
-import { DIFF_SIDES, isRootHex, type DiffRoots } from "./scheme.ts";
+import { DIFF_SIDES, isRootHex, type DiffRoots, type DiffSide } from "./scheme.ts";
 import type { MaterializedTheme } from "./syntax-theme.ts";
 import { parsePlistTheme } from "./tmtheme-plist.ts";
 
@@ -348,9 +348,9 @@ function extractDiffRoots(
   let roots: DiffRoots | undefined;
   if (typeof diff === "object" && diff !== null && !Array.isArray(diff)) {
     const record = diff as Record<string, unknown>;
-    const validKeys = [...DIFF_SIDES] as const;
+    const validKeys: readonly string[] = DIFF_SIDES;
     for (const key of Object.keys(record)) {
-      if (!(validKeys as readonly string[]).includes(key)) {
+      if (!validKeys.includes(key)) {
         issues.push({
           message: `Unknown diff key "${key}" in theme "${name}" — valid keys: ${validKeys.join(", ")}.`,
         });
@@ -358,7 +358,7 @@ function extractDiffRoots(
       }
       const value = record[key];
       // The canvas is not a root (ADR 0006): sides only.
-      const side = key as Exclude<keyof DiffRoots, never>;
+      const side = key as DiffSide;
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
         issues.push({
           message: `Diff side "${key}" in theme "${name}" must be an object with "text"/"tint" — it was ignored.`,

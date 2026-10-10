@@ -4,7 +4,7 @@
  * width-aware body with the bar column, the collapsed window — and paints
  * the frame's error background. The factory's renderResult error branch is
  * the ONLY composer (one entry spans the placeholder and the preview task);
- * every wrapper's failed-call rendering flows through
+ * every renderer's failed-call rendering flows through
  * `formatToolErrorResult`. Pure formatting over explicit inputs — no
  * module state beyond constants.
  */
@@ -84,7 +84,7 @@ export interface CallHeaderOpts {
 }
 
 /**
- * The call-header row setter shared by the write/edit wrappers — ONE home
+ * The call-header row setter shared by the write/edit renderers — ONE home
  * for the frame-header composition AND the outcome-following background:
  * success/canvas tint while the call streams or succeeds, the theme's
  * ERROR tint once this call is an error one. The flip matters on the
@@ -176,7 +176,7 @@ export interface ErrorFrameInput {
    * frame's composition); the color follows the bar kind (the shell
    * badge's failure kind, error for non-shell frames).
    */
-  tookMs?: number;
+  durationMs?: number;
   /** The visual render width (the preview task's width). */
   width: number;
 }
@@ -194,7 +194,7 @@ export interface ErrorFrameInput {
  * footer, no trailing pad).
  */
 export function formatToolErrorResult(input: ErrorFrameInput): string {
-  const { name, message, theme, expanded, indicatorStyle, tookMs, width } = input;
+  const { name, message, theme, expanded, indicatorStyle, durationMs, width } = input;
   // Body-only (the call header above already names the tool — the
   // SDK's own error frames never repeat it): the gapless shell header
   // needs one separator blank, anything else needs nothing.
@@ -226,6 +226,6 @@ export function formatToolErrorResult(input: ErrorFrameInput): string {
   // native frame's composition); none when unmeasured. Its color is the
   // bar kind — the frame's one failure-kind reading (error for non-shell
   // frames, the badge's kind for shell ones).
-  const footer = tookMs !== undefined ? `\n\n${tookFooter(tookMs, theme, barKind)}` : "";
+  const footer = durationMs !== undefined ? `\n\n${tookFooter(durationMs, theme, barKind)}` : "";
   return `${header}${body.join("\n")}${footer}`;
 }

@@ -22,7 +22,7 @@ import type { ThemeRegistration } from "shiki/core";
 import type { BundledTheme } from "shiki/themes";
 
 import { contrastRatio, parseAnsiRgb, parseHexColor, rgbToHex } from "#src/core/color.ts";
-import { fnv1a } from "#src/core/fingerprint.ts";
+import { fnv1a } from "#src/core/keys.ts";
 
 import type { ResolvedTheme, RenderTheme } from "./scheme.ts";
 

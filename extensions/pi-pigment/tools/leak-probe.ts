@@ -16,7 +16,7 @@
  * permanent — the one container our own bounds cannot reach.
  * C. is the highlight cache bound (192) visible in the heap? A second batch over
  * an already-full cache must come out flat.
- * D. what does the published render kit pin in `globalThis`?
+ * D. what internal surface does the resolver read (no globalThis publication)?
  *
  * Validity guards exist because a silently degraded highlight path reports "no
  * growth" for EVERYTHING (harmless-looking output, meaningless numbers): the
@@ -29,11 +29,11 @@
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { themeNames } from "@shikijs/themes";
 
+import { TOOL_NAMES } from "#src/config/config-schema.ts";
+import { createRenderSession, type RenderSessionInputs } from "#src/render/session.ts";
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
 import { ensureCore } from "#src/theme/shiki-core.ts";
 import type { MaterializedTheme } from "#src/theme/syntax-theme.ts";
-
-import { createRenderSession, type RenderSessionInputs } from "../render-kit.ts";
 
 const SESSIONS = Number(process.argv[2] ?? 1200);
 const THEME_CONTENTS = Number(process.argv[3] ?? 40);
@@ -208,14 +208,13 @@ console.log(
     `   second batch: heap ${mb(cAfter)} → ${mb(cSecond)}  (delta ${kb(cSecond - cAfter)} — flat means the bound holds)\n`,
 );
 
-// --- D. what the publication pins -------------------------------------------
-const { createRenderKit, publishRenderKit, RENDER_KIT_KEY } = await import("../render-kit.ts");
+// --- D. the internal kit surface --------------------------------------------
+// pi-pigment has no public render-kit / globalThis publication anymore (pi's
+// own registerToolRenderer replaced the upstream gap). This section pins the
+// INTERNAL kit the resolver reads: names and renderer factories only.
+const { createRenderKit } = await import("../src/render/kit.ts");
 const kit = await createRenderKit(env);
-publishRenderKit();
-const held = (globalThis as Record<symbol, unknown>)[Symbol.for(RENDER_KIT_KEY)] as
-  | Record<string, unknown>
-  | undefined;
 console.log(
-  `D. globalThis[Symbol.for("${RENDER_KIT_KEY}")]: ${held ? `present, keys [${Object.keys(held).join(", ")}]` : "absent"}\n` +
-    `   kit.tools=${kit.tools.length}; the payload holds functions and names only — no session\n`,
+  `D. internal kit: tools=${TOOL_NAMES.length}; canDecorate(bash)=${kit.canDecorate("bash")}; ` +
+    `no globalThis publication\n`,
 );

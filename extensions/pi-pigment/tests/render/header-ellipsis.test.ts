@@ -2,7 +2,7 @@ import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { resetCapabilitiesCache, setCapabilityOverrides } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
-import { bashProfile, createShellWrapper } from "#src/render/shell-tool.ts";
+import { bashProfile, createShellRenderer } from "#src/render/shell-tool.ts";
 import {
   buildFakeTheme,
   buildRenderTheme,
@@ -53,7 +53,7 @@ describe("bash header ellipsis", () => {
   });
 
   it("renders the full line with no task when the switch is off", () => {
-    const bash = createShellWrapper(
+    const bash = createShellRenderer(
       createBashToolDefinition(process.cwd()) as never,
       makeServices(),
       bashProfile,
@@ -147,7 +147,7 @@ describe("write/edit header ellipsis (stats chips pinned)", () => {
   });
 
   it("clears the task when toggled off (no stale ellipsis frame)", () => {
-    const on = createShellWrapper(
+    const on = createShellRenderer(
       createBashToolDefinition(process.cwd()) as never,
       makeServices({ headerEllipsis: "on" }),
       bashProfile,
@@ -158,7 +158,7 @@ describe("write/edit header ellipsis (stats chips pinned)", () => {
     const first = on.renderCall(ctx.args, buildRenderTheme(), ctx);
     expect(first.previewTask).not.toBe(undefined);
     // Same host, switch off: the stale task must clear, setText wins.
-    const off = createShellWrapper(
+    const off = createShellRenderer(
       createBashToolDefinition(process.cwd()) as never,
       makeServices(),
       bashProfile,

@@ -1,6 +1,6 @@
 /**
- * Shared tool-wrapper types: the services the assembly injects into the
- * wrappers, the render context the TUI hands to renderers, and the
+ * Shared renderer types: the services the assembly injects into the
+ * renderers, the render context the TUI hands to renderers, and the
  * per-tool render states.
  */
 
@@ -25,8 +25,8 @@ import type { TextComponentFactory } from "./text-task.ts";
  * The SDK's render context for the default generics (the render slot of
  * `ToolDefinition` — the SDK's `ToolRenderContext` under another name:
  * it lives too deep for the package's exports map, so this alias reads
- * it off the exported definition); `TState` is the wrapper's own render
- * state: the TUI initializes it as `{}` and the wrapper's fields
+ * it off the exported definition); `TState` is the renderer's own render
+ * state: the TUI initializes it as `{}` and the renderer's fields
  * populate lazily, so every state field is optional by contract.
  */
 type SdkRenderContext = Parameters<NonNullable<ToolDefinition["renderResult"]>>[3];
@@ -34,7 +34,7 @@ type SdkRenderContext = Parameters<NonNullable<ToolDefinition["renderResult"]>>[
 /**
  * The render context the TUI passes to renderCall/renderResult — the
  * SDK's shape, narrowed: `args` stays `unknown` at the boundary and
- * `state` is the wrapper's own `TState`. `expanded` is carried (the
+ * `state` is the renderer's own `TState`. `expanded` is carried (the
  * header ellipsis's ctrl+o switch reads it in renderCall). The
  * compile-time canary in upstream-contracts.test.ts fails when upstream
  * adds a context field, so carrying it is a decision.
@@ -45,14 +45,14 @@ export interface RenderContext<TState extends object = Record<string, unknown>> 
 > {
   /** Current tool call arguments (unknown at the boundary). */
   args: unknown;
-  /** Shared renderer state for this tool row (the wrapper's own shape). */
+  /** Shared renderer state for this tool row (the renderer's own shape). */
   state: TState;
 }
 
 /**
  * Read a render slot's arguments as a partial tool input — the one cast
- * helper for the `(args ?? {}) as Partial<X>` idiom every wrapper opens
- * with (args is `unknown` at the boundary; the wrapper knows its shape).
+ * helper for the `(args ?? {}) as Partial<X>` idiom every renderer opens
+ * with (args is `unknown` at the boundary; the renderer knows its shape).
  *
  * @param args - The raw render args (ctx.args or renderArgs).
  * @returns The partial input view.
@@ -173,14 +173,16 @@ export function resultStreaming(ctx: RenderContext<object>): boolean {
 }
 
 /**
- * The execution-timing fields every wrapper's render state carries. pi's
- * shell renderer owns the mechanism (renderCall arms `startedAt` while
- * the execution is live, renderResult fixes `endedAt` on the settled
- * frame) and reads them for bash/powershell's own `Took`/`Elapsed`
- * footer; the factory drives the SAME two fields for every wrapper so the
- * grep/find/ls footers and the error frame read one source. Nothing about
- * timing is persisted into the session: a resumed row never armed
- * `startedAt`, so it shows no duration — matching pi's native renderers.
+ * The execution-timing fields every renderer's state carries. pi's shell
+ * renderer owns the mechanism (renderCall arms `startedAt` while the
+ * execution is live, renderResult fixes `endedAt` on the settled frame)
+ * and reads them for bash/powershell's own `Took`/`Elapsed` footer; the
+ * factory drives the SAME two fields for every renderer so the
+ * grep/find/ls footers and the error frame read one source. On pi 1.1.0+
+ * the frame prefers pi's own recorded `ctx.durationMs` when present (see
+ * the factory); these fields remain the fallback on 1.0.1, on a partial
+ * frame, and on HTML export. A resumed row that carries no recorded
+ * duration still shows none — the old behavior.
  */
 export interface ExecutionTimingState {
   /** Armed by renderCall while the execution is live (pi's contract). */
@@ -192,7 +194,7 @@ export interface ExecutionTimingState {
 /**
  * The shell tools' render state. Co-authored with the SDK: our renderCall
  * stashes the command fields, and the SDK's native bash/powershell
- * renderResult (which the wrapper delegates output rendering to) reads
+ * renderResult (which the renderer delegates output rendering to) reads
  * the timing fields and owns the ticking `interval` for its live display —
  * this type is the contract both sides write into.
  */
@@ -270,8 +272,8 @@ export interface ParsedDiffMemo {
 }
 
 /**
- * The edit wrapper's per-call render state (bridges execute→renderResult
- * facts into the header suffix and caches the diff parse + the seed's
+ * The edit renderer's per-call render state (bridges the SDK's own result
+ * details into the header suffix and caches the diff parse + the seed's
  * file lines).
  */
 export interface EditState extends SeedTextMemo {
@@ -287,9 +289,9 @@ export interface EditState extends SeedTextMemo {
   removed?: number;
 }
 
-/** Services the tool wrappers need from the assembly. */
+/** Services the tool renderers need from the assembly. */
 export interface ToolServices {
-  /** The session working directory (execute fallbacks resolve against it, not process.cwd()). */
+  /** The session working directory (relative paths resolve against it, not process.cwd()). */
   cwd: string;
   /** Path shortener for headers (relative to cwd, `~` for home). */
   shortPath: (p: string) => string;

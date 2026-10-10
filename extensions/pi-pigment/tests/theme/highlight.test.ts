@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { loadBundledTheme } from "#src/theme/bundled-intake.ts";
 import { MAX_HL_CHARS } from "#src/theme/highlight.ts";
+import { resolveCodeBlock } from "#src/theme/language.ts";
 import { MAX_SEED_CHARS } from "#src/theme/seed.ts";
 import { resolveSyntaxThemeSelection } from "#src/theme/theme-resolver.ts";
 import { buildFakeTheme, makeRenderSession, resetPigmentForTest, viewFor } from "#test/fixtures.ts";
@@ -417,8 +418,7 @@ describe("the recommended pairs (the slash grammar)", () => {
 });
 
 describe("resolveCodeBlock", () => {
-  it("detects the language from the path", async () => {
-    const { resolveCodeBlock } = await import("#src/theme/language.ts");
+  it("detects the language from the path", () => {
     expect(resolveCodeBlock({ code: CODE, filePath: "a.ts" })).toEqual({
       code: CODE,
       language: "typescript",
@@ -426,13 +426,11 @@ describe("resolveCodeBlock", () => {
     });
   });
 
-  it("leaves unknown extensions unstyled", async () => {
-    const { resolveCodeBlock } = await import("#src/theme/language.ts");
+  it("leaves unknown extensions unstyled", () => {
     expect(resolveCodeBlock({ code: CODE, filePath: "a.zzzunknown" }).language).toBeUndefined();
   });
 
-  it("seeds a mid-file slice from the context", async () => {
-    const { resolveCodeBlock } = await import("#src/theme/language.ts");
+  it("seeds a mid-file slice from the context", () => {
     const text =
       "<template><div>\n<span>x</span>\n</div></template>\n<script>const a = 1;</script>\n";
     const block = resolveCodeBlock({
@@ -444,8 +442,7 @@ describe("resolveCodeBlock", () => {
     expect(block.seed).toBe("<template><div>");
   });
 
-  it("skips the seed for whole files", async () => {
-    const { resolveCodeBlock } = await import("#src/theme/language.ts");
+  it("skips the seed for whole files", () => {
     const block = resolveCodeBlock({ code: CODE, filePath: "a.ts" });
     expect(block.seed).toBeUndefined();
   });

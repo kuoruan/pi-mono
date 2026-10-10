@@ -18,7 +18,7 @@ import type { GrammarState, HighlighterCore } from "shiki/core";
 
 import { createBoundedMap } from "#src/core/bounded-map.ts";
 import type { ParsedDiff } from "#src/core/diff.ts";
-import { fnv1a } from "#src/core/fingerprint.ts";
+import { fnv1a } from "#src/core/keys.ts";
 import { linesBefore, textBeforeLine } from "#src/core/lines.ts";
 
 import type { BundledLanguage } from "./shiki-core.ts";
@@ -86,7 +86,7 @@ export const MAX_SEED_CHARS = 64 * 1024;
 export type SeedSource = (hunkNewStart: number) => string | undefined;
 
 /**
- * A seed source over already-held text (the write wrapper's args.content).
+ * A seed source over already-held text (the write renderer's args.content).
  *
  * @param text - The full new-file text.
  * @param language - The detected language (the seed gate).
@@ -101,7 +101,7 @@ export function seedFromText(
 }
 
 /**
- * A seed source over a lazily-read line array (the edit wrapper's
+ * A seed source over a lazily-read line array (the edit renderer's
  * disk read, memoized across frames of one call).
  *
  * @param getLines - The line supplier (null = unreadable file).

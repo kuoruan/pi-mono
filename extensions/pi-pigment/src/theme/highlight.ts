@@ -6,7 +6,7 @@
  */
 
 import { createBoundedMap } from "#src/core/bounded-map.ts";
-import { fnv1a } from "#src/core/fingerprint.ts";
+import { fnv1a } from "#src/core/keys.ts";
 import { linesOf } from "#src/core/lines.ts";
 
 import { loadBundledTheme } from "./bundled-intake.ts";
@@ -30,6 +30,15 @@ export const MAX_HL_CHARS = 80_000;
  * between sessions (same name, new colors) would re-tokenize under the
  * OLD color map and cache the wrong bytes under the new cache key (see
  * renderThemeToAnsi).
+ *
+ * This map's own bound is 64 entries; the theme objects it points at live
+ * in Shiki's core registry, which has no unload — so the process holds one
+ * entry per distinct file-channel content for the module's life (~270KB
+ * each, measured in tools/leak-probe.ts). Accepted as a ceiling: a bounded
+ * ring of registered names would re-load new content under a name an
+ * existing grammar already colored from (the stale-color-map trap above),
+ * and a wrong render is worse than the memory. `/reload` rebuilds the
+ * module and its core.
  */
 const registeredThemeObjects = createBoundedMap<string, object | string>(64);
 

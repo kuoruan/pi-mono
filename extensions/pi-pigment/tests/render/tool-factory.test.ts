@@ -1,12 +1,12 @@
 /**
- * Tests for the tool-wrapper factory: delegation, the error frame, the
+ * Tests for the tool-renderer factory: delegation, the error frame, the
  * stats FIFO, text extraction, and the width-aware wrapping contract.
  */
 
+import type { ToolRenderers } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import { createToolWrapper, renderPlainTextFallback } from "#src/render/tool-factory.ts";
-import type { ResultContentBlock } from "#src/render/tool-output.ts";
+import { createToolRenderer, renderPlainTextFallback } from "#src/render/tool-factory.ts";
 import { taskKeyOf } from "#src/render/tool-output.ts";
 import {
   buildFakeTheme,
@@ -22,40 +22,23 @@ import {
   viewFor,
 } from "#test/fixtures.ts";
 
-/** Callable view of a wrapped tool (ToolDefinition marks methods optional). */
+/** Callable view of a wrapped renderer triple. */
 type Wrapped = {
-  execute: (
-    tid: string,
-    params: unknown,
-    sig: AbortSignal | undefined,
-    upd: unknown,
-    ctx: unknown,
-  ) => Promise<{ content?: ResultContentBlock[]; isError?: boolean; details?: unknown }>;
   renderCall: (args: unknown, theme: unknown, ctx: unknown) => unknown;
   renderResult: (result: unknown, options: unknown, theme: unknown, ctx: unknown) => unknown;
 };
 
 /**
- * A fake SDK tool the factory wraps.
+ * A fake `orig` renderer triple the factory composes over.
  *
- * @param overrides - Optional members overriding the defaults.
- * @returns The fake tool and its call log.
+ * @param overrides - Optional members overriding the defaults (pass a key
+ *   as `undefined` to drop that renderer).
+ * @returns The fake renderers and their call log.
  */
-function makeOrig(overrides: Partial<Parameters<typeof createToolWrapper>[0]> = {}) {
+function makeOrig(overrides: Partial<ToolRenderers> = {}) {
   const calls: string[] = [];
   const orig = {
-    name: "probe",
-    label: "probe",
-    description: "probe tool",
-    parameters: {},
-    async execute(tid: string) {
-      calls.push(`execute:${tid}`);
-      return {
-        content: [{ type: "text" as const, text: "orig executed" }],
-        isError: false,
-        details: undefined,
-      } as never;
-    },
+    renderShell: "default",
     renderCall(args: unknown, theme: unknown, ctx: unknown) {
       calls.push("renderCall");
       return { kind: "orig-call", args, theme, ctx } as never;
@@ -65,24 +48,25 @@ function makeOrig(overrides: Partial<Parameters<typeof createToolWrapper>[0]> = 
       return { kind: "orig-result", result, options, theme, ctx } as never;
     },
     ...overrides,
-  };
-  return { orig: orig as never, calls };
+  } as unknown as ToolRenderers;
+  return { orig, calls };
 }
 
 /**
- * Wrap an orig from {@link makeOrig} and view it as the test's loose
- * Wrapped shape — THE one cast home for this file (the call sites stay
- * clean).
+ * Build a renderer over an orig from {@link makeOrig} and view it as the
+ * test's loose Wrapped shape — THE one cast home for this file.
  *
- * @param orig - The fake SDK tool to wrap.
- * @param spec - The per-test wrapper spec.
- * @returns The wrapped tool, loosely typed.
+ * @param orig - The fake renderer triple to compose over.
+ * @param spec - The per-test renderer spec.
+ * @param name - The tool name (the error frame's label).
+ * @returns The renderer triple, loosely typed.
  */
 function wrappedFor(
-  orig: ReturnType<typeof makeOrig>["orig"],
-  spec: Parameters<typeof createToolWrapper>[2] = {},
+  orig: ToolRenderers,
+  spec: Parameters<typeof createToolRenderer>[3] = {},
+  name = "probe",
 ): Wrapped {
-  return createToolWrapper(orig, services, spec) as unknown as Wrapped;
+  return createToolRenderer(name, orig, services, spec) as unknown as Wrapped;
 }
 
 /**
@@ -110,32 +94,6 @@ const services = {
     setCustomBgFn(_fn?: (line: string) => string) {}
   },
 };
-describe("execute delegation", () => {
-  it("delegates verbatim when the spec has no execute", async () => {
-    const { orig, calls } = makeOrig();
-    const wrapped = wrappedFor(orig);
-    const result = await wrapped.execute("t1", { a: 1 }, undefined, undefined, undefined as never);
-    expect(calls).toEqual(["execute:t1"]);
-    expect(result.content?.[0]).toMatchObject({ type: "text", text: "orig executed" });
-  });
-
-  it("uses the spec's execute when provided", async () => {
-    const { orig, calls } = makeOrig();
-    const wrapped = wrappedFor(orig, {
-      execute: async (tid) => {
-        return {
-          content: [{ type: "text", text: `custom:${tid}` }],
-          isError: false,
-          details: undefined,
-        } as never;
-      },
-    });
-    const result = await wrapped.execute("t9", {}, undefined, undefined, undefined as never);
-    expect(calls).toEqual([]);
-    expect(result.content?.[0]).toMatchObject({ type: "text", text: "custom:t9" });
-  });
-});
-
 describe("renderCall", () => {
   it("delegates to the spec body when provided", () => {
     const { orig } = makeOrig();
@@ -215,18 +173,18 @@ describe("renderResult error frame", () => {
     // expected value composes through the same taskKeyOf the call site uses
     // — splitting the identity back apart cannot recover the list.
     expect(component.previewIdentity).toBe(
-      // tookMs ?? -1: the unmeasured sentinel (-1, a number — 0ms stays
+      // durationMs ?? -1: the unmeasured sentinel (-1, a number — 0ms stays
       // distinguishable from never-measured).
       taskKeyOf("probe", [1, -1, viewFor(theme).scheme.identity, "exploded"]),
     );
   });
 
   it("the badge stays out of a SHELL error frame's identity stamps too", () => {
-    const { orig } = makeOrig({ name: "bash", label: "bash" });
+    const { orig } = makeOrig();
     const { ctx } = makeRenderCtx();
     ctx.isError = true;
     const theme = buildRenderTheme();
-    const wrapped = wrappedFor(orig, {});
+    const wrapped = wrappedFor(orig, {}, "bash");
     const message = "boom\n\nCommand exited with code 1";
     const component = wrapped.renderResult(
       { content: [{ type: "text", text: message }] },
@@ -242,12 +200,12 @@ describe("renderResult error frame", () => {
   });
 
   it("the error frame's Took color follows the failure kind", () => {
-    const { orig } = makeOrig({ name: "bash", label: "bash" });
+    const { orig } = makeOrig();
     const { ctx } = makeRenderCtx();
     ctx.isError = true;
     seedTiming(ctx, 42);
     const theme = buildFakeTheme();
-    const wrapped = wrappedFor(orig, {});
+    const wrapped = wrappedFor(orig, {}, "bash");
     const render = (message: string): string => {
       const component = wrapped.renderResult(
         { content: [{ type: "text", text: message }] },
@@ -257,7 +215,7 @@ describe("renderResult error frame", () => {
       ) as TextDouble;
       return component.text.text;
     };
-    // The error branch passes tookMs into the frame, which colors the
+    // The error branch passes durationMs into the frame, which colors the
     // footer by its bar kind: a plain exit renders error, a timeout
     // warns (one failure-kind mapping, no separate footer logic).
     expect(render("boom\n\nCommand exited with code 1")).toContain(
@@ -268,16 +226,41 @@ describe("renderResult error frame", () => {
     );
   });
 
+  it("prefers ctx.durationMs (pi's recorded execution time) over the render-state clock", () => {
+    const { orig } = makeOrig();
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    // Both sources are present and disagree: the state clock says 7ms,
+    // pi's recorded duration says 4200ms. The recorded one wins (1.1.0).
+    ctx.durationMs = 4200;
+    seedTiming(ctx, 7);
+    const component = wrappedFor(orig, {}, "bash").renderResult(
+      { content: [{ type: "text", text: "boom" }] },
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    ) as TextDouble;
+    expect(plain(component.text.text)).toContain("Took 4.2s");
+  });
+
+  it("falls back to the render-state clock when durationMs is absent (1.0.1 / HTML export)", () => {
+    const { orig } = makeOrig();
+    const { ctx } = makeRenderCtx();
+    ctx.isError = true;
+    ctx.durationMs = undefined;
+    seedTiming(ctx, 12);
+    const component = wrappedFor(orig, {}, "bash").renderResult(
+      { content: [{ type: "text", text: "boom" }] },
+      { expanded: true, isPartial: false },
+      buildRenderTheme(),
+      ctx,
+    ) as TextDouble;
+    expect(plain(component.text.text)).toContain("Took 0.0s");
+  });
+
   it("the error frame keeps one Took across re-renders of the same call", async () => {
-    const { orig } = makeOrig({
-      async execute() {
-        throw new Error("Command exited with code 1");
-      },
-    });
+    const { orig } = makeOrig();
     const wrapped = wrappedFor(orig);
-    await expect(wrapped.execute("call-throw", {}, undefined, undefined, {})).rejects.toThrow(
-      "Command exited with code 1",
-    );
     const { ctx, invalidated } = makeRenderCtx();
     ctx.isError = true;
     ctx.toolCallId = "call-throw";
@@ -321,36 +304,19 @@ describe("renderResult error frame", () => {
     expect(invalidated.count).toBe(baselineInvalidations);
   });
 
-  it("appends no key to the result it returns (nothing piggybacks into the session)", async () => {
-    // The session-footprint contract: the factory's execute is verbatim
-    // delegation, and the timing the footers show comes from the render
-    // state. A wrapper that needs render-time payload stashes it in its own
-    // execute (write's diff); the SKELETON adds nothing — so what a session
-    // persists is what the tool itself produced.
-    const { orig } = makeOrig({
-      async execute() {
-        return {
-          content: [{ type: "text", text: "output" }],
-          details: { sdkOwned: 1 },
-        } as never;
-      },
-    });
-    const wrapped = wrappedFor(orig);
-    const result = await wrapped.execute("call-1", {}, undefined, undefined, {});
-    expect(result.details).toEqual({ sdkOwned: 1 });
+  it("returns only the three renderer slots (the factory owns no execution/definition keys)", () => {
+    // The session-footprint contract, shifted to the seam: the factory
+    // returns renderer slots only, so no execute and no result key can
+    // piggyback into what a session persists.
+    const { orig } = makeOrig();
+    const triple = createToolRenderer("probe", orig, services, {});
+    expect(Object.keys(triple).toSorted()).toEqual(["renderCall", "renderResult", "renderShell"]);
   });
 
   it("the error frame shows Took from the render-state clock", async () => {
-    const { orig } = makeOrig({
-      async execute() {
-        return {
-          content: [{ type: "text", text: "command failed" }],
-          isError: true,
-        } as never;
-      },
-    });
+    const { orig } = makeOrig();
     const wrapped = wrappedFor(orig);
-    const result = await wrapped.execute("call-return", {}, undefined, undefined, {});
+    const result = { content: [{ type: "text", text: "command failed" }], isError: true };
     const { ctx } = makeRenderCtx();
     ctx.isError = true;
     ctx.toolCallId = "call-return";
@@ -374,16 +340,9 @@ describe("renderResult error frame", () => {
     // pi's own replay semantics (its shell renderer's startedAt lives in
     // the render state too), pinned so the footer cannot creep back into
     // the session as a sideband.
-    const { orig } = makeOrig({
-      async execute() {
-        return {
-          content: [{ type: "text", text: "command failed" }],
-          isError: true,
-        } as never;
-      },
-    });
+    const { orig } = makeOrig();
     const wrapped = wrappedFor(orig);
-    const result = await wrapped.execute("call-replay", {}, undefined, undefined, {});
+    const result = { content: [{ type: "text", text: "command failed" }], isError: true };
     const { ctx } = makeRenderCtx();
     ctx.isError = true;
     ctx.toolCallId = "call-replay";

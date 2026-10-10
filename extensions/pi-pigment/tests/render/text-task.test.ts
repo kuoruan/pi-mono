@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { IndicatorStyle } from "#src/config/config-schema.ts";
-import { parseDiff } from "#src/core/diff.ts";
+import { contentFingerprint, parseDiff } from "#src/core/diff.ts";
 import {
   attachDiffPreview,
   attachPreviewTask,
@@ -402,7 +402,7 @@ function servicesOf(indicatorStyle: IndicatorStyle): ToolServices {
   } as unknown as ToolServices;
 }
 
-describe("attachDiffPreview (the tool wrappers' defaults)", () => {
+describe("attachDiffPreview (the tool renderers' defaults)", () => {
   const diff = parseDiff("const a = 1;\nconst b = 2;\n", "const a = 1;\nconst B = 2;\n");
 
   function attach(
@@ -424,7 +424,7 @@ describe("attachDiffPreview (the tool wrappers' defaults)", () => {
   }
 
   it("derives the streaming bit from the ctx (resultStreaming), not from the caller", () => {
-    // The forget-risk the wrapper exists for: the identity must carry the
+    // The forget-risk the renderer exists for: the identity must carry the
     // streaming stamp exactly when the three-state model says pending —
     // pinned against diffPreviewKey, the builder setDiffPreviewTask uses.
     const view = viewFor(buildFakeTheme());
@@ -436,6 +436,7 @@ describe("attachDiffPreview (the tool wrappers' defaults)", () => {
         prefix: "ed",
         identity: view.scheme.identity,
         lineCount: diff.lines.length,
+        fingerprint: contentFingerprint(diff),
         language: undefined,
         streaming: false,
       }),
@@ -449,6 +450,7 @@ describe("attachDiffPreview (the tool wrappers' defaults)", () => {
         prefix: "ed",
         identity: view.scheme.identity,
         lineCount: diff.lines.length,
+        fingerprint: contentFingerprint(diff),
         language: undefined,
         streaming: true,
       }),

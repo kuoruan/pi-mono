@@ -18,7 +18,7 @@ import { type StateColor } from "./tool-output.ts";
 export interface ShellExitBadge {
   /** The failure kind. */
   kind: "error" | "signal" | "timeout" | "aborted" | "terminated";
-  /** The measured value (see above). */
+  /** The exit code, signal number, or timeout seconds, per kind (0 when code-less). */
   value: number;
 }
 

@@ -1,6 +1,6 @@
 /**
  * Tool-frame header formatting: the boxed tool titles, body padding, and
- * the summary chip shared by the tool wrappers (error frames live in
+ * the summary chip shared by the tool renderers (error frames live in
  * error-frame.ts). Pure formatting over explicit inputs — no module state
  * beyond constants, no environment reads (terminal sizing lives in
  * term.ts, path shortening in paths.ts).
@@ -39,7 +39,7 @@ export function resultLine(...segments: Array<string | undefined>): string {
 }
 
 /**
- * Prefix wrapped tool names with the arrow marker pi uses for mutations.
+ * Prefix decorated tool names with the arrow marker pi uses for mutations.
  *
  * @param name - The tool name.
  * @returns The display name.
@@ -121,7 +121,7 @@ export interface ToolFrameHeaderOpts {
   bottomPad?: number;
   /** Text appended after the header line (e.g. stats chips). */
   suffix?: string;
-  /** Tool name for the label variant (arrow-prefixed when wrappable). */
+  /** Tool name for the label variant (arrow-prefixed when decoratable). */
   label?: string;
   /** File path for the label variant (shortened via pathShortener). */
   filePath?: string;

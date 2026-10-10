@@ -1,5 +1,5 @@
 /**
- * Plain-text line utilities: the small pure helpers every wrapper reaches
+ * Plain-text line utilities: the small pure helpers every renderer reaches
  * for when turning file text into line-shaped views (counts, prefixes,
  * splits). No ANSI knowledge — string in, string/number out.
  */

@@ -42,3 +42,4 @@ node tools/leak-probe.ts   # needs --expose-gc; pnpm leak wraps it
 - The extension's one-time cost over native pi on the same session ≈ shiki grammars + per-frame render state (measured ~45MB on a 45MB conversation). That is proportional to session size, not a leak.
 - The restore phase allocates progressively (deferred frame rendering) and then stops — expect a climb that plateaus, not a flat line.
 - A slope that survives the GC-trap _and_ keeps rising without interaction is the only thing that needs chasing.
+- The Shiki theme registry is the one container our own bounds cannot reach: `loadTheme` has no unload, so each distinct file-channel theme content adds an entry (~270KB) for the module's life. It is bounded by how often theme files are edited, and reset by `/reload`. `loadBundledTheme` entries are the fixed 65-name catalog, not user input.
