@@ -1,5 +1,47 @@
 # pi-permission-ai-guard
 
+## 0.15.0
+
+### Minor Changes
+
+- 713e5bd: **Breaking changes.** The classifier reviewer no longer accepts the direct System One provider object (`{ "type": "typesafe", "baseUrl": …, "apiKey": … }`), and the `@typesafe-ai/sdk` dependency is gone. Run the classifier lane through Pi instead: register the endpoint (Pi ships a TypeSafe provider; a System One-compatible endpoint can be a custom Pi classifier provider), then set `"modelType": "classifier"` on its string provider id.
+
+  A config still carrying the object provider fails the load with a named migration hint, for the primary and for each `fallbacks` entry. Endpoint URLs and keys now live in Pi, so nothing points the reviewer at an endpoint from the extension's own config, and the `TYPESAFE_BASE_URL` / `TYPESAFE_API_KEY` fallbacks are gone with the SDK. The lane's request and answer shapes, its failure classes, and its audit `rawReply` are Pi's now; behavior is otherwise unchanged.
+
+  **The retired config spellings are gone as well**, and each now fails the load with a named migration rather than an unknown-key notice:
+
+  - `typesafe` (the block's name before 0.14.0 renamed it to `classifier`) — move its thresholds to `classifier`. The key was deprecated on arrival in 0.14.0, so a config written for 0.13 or earlier has never seen a deprecation notice. The failure names the replacement because the schema alone would strip the unknown key silently and leave the reviewer on the defaults.
+  - `classifier.timeoutMs` — the reviewer timeout is the top-level `timeoutMs` on both lanes, and the nested key has had no effect since 0.14.0. It used to parse and be ignored; a silently ignored timeout is worse than a rejection.
+
+  Additive: the top-level `temperature` now also reaches the classifier lane (backends without a sampling knob, TypeSafe included, ignore it), and a classifier answer's token usage and catalog-priced cost land in the decision record's `usage` field instead of living only inside `rawReply`.
+
+- 713e5bd: **Breaking changes.** The peer floors move to `pi-permission-system >= 40.0.0 < 41.0.0` and `pi >= 1.0.0`, and the compatibility code for hosts below them is gone. Upgrade both together.
+
+  A registry that violates the peer contract now fails safe at session start instead of running a degraded configuration. A registry without `streamSimple` already stopped registration; now a registry missing `classify`/`findOfType` stops it too, with an upgrade notice naming the first missing method, because pool assembly reads the required registry surface unconditionally rather than probing for each method. The old `needs pi with classifier support` rejection path is gone; a catalog miss is the only registry rejection left, and it still throws on a primary and drops a fallback.
+
+### Patch Changes
+
+- 3af1416: **An authorized danger now asks you instead of denying outright.** When the anchor names the flagged action, or the reviewer is unsure the category applies, the classifier confirms with you (naming the category) rather than denying. A hit nobody asked for is still a hard deny, and the classifier never allows a danger hit — the confirmation is yours to settle. The risk lane follows the same shape: a costly action the anchor asks for confirms the price instead of denying it.
+
+  In permissive mode a danger confirmation auto-allows (that mode's ladder accepts defer-danger). That is the mode's contract, not a reviewer judgment: strict still denies, and every other mode asks.
+
+- 1127d7b: **A reviewer that cannot answer now says so.** Previously a broken or unreachable reviewer looked exactly like an uncertain one: the request was deferred to you, and nothing in the decision log distinguished the two.
+
+  - An untyped failure — a wiring bug, an error the lane never classified — hands the request to the backup reviewer instead of deferring on the spot. An auth or policy refusal still stops immediately; a reviewer must not route around a refusal just because the request could not be served.
+  - The decision record carries the failure's class name (`TypeError`) in `diagnostic`, so the review log alone answers "was the guard broken?". It is the class name only: an error message can carry a URL or a key, and the sanitized text stays in the debug log for whoever wants it.
+  - A reviewer failure now counts toward the circuit breaker's consecutive streak (`circuitBreaker.consecutive`) in every mode. Only the `strict` and `permissive` modes counted it before, so in the default mode a reviewer that failed every call asked you again and again instead of tripping the breaker. A model's own defer is unchanged: it answered, just without confidence, and it still does not count.
+
+  The classifier lane also records a risk level on every verdict rather than only on the ones it denies, so `riskLevel` in the decision log is readable for requests you approved or were asked about.
+
+- 3ef1973: **Review wording is now positive inclusion on both lanes.** Every always-deny category says what it is — never what it is not, and never what stays in a sibling category. The chat lane's Authorized Danger row and the classifier's criteria were rewritten to that standard, and a shared test pattern pins it: a reflow-split exclusion trips the guard the same as an inline one.
+
+  The classifier's `destructive_vcs` again covers rewriting history while standing on a shared, protected, or default branch (an earlier pruning had narrowed it to force-push and delete). An amend on a feature branch with intent allows; an amend on main confirms or denies, since the push state is not visible to the reviewer.
+
+- 9947613: **Reviewer evidence and deny copy.** The classifier lane emits its per-question answers on `ai_guard.model_answers` for every verdict (allow and deny included), so the offline policy replay can re-score a run without another paid pass — the audit record keeps a sentinel for non-defer verdicts. The content-deny instruction the agent sees is shorter: the prohibited bypass shapes are named as retry and work-around, and the unlocking move stays the user requesting it explicitly.
+- 54f9fd0: **A loaded skill's instructions no longer authorize the agent's next action.** Pi delivers a skill invocation as a single user message: the skill's `SKILL.md` text, then whatever the human typed after it. The reviewer read every user message as the human speaking for themselves, so a skill body became the newest request it could see and pushed the real one out of the five-message window it keeps, leaving the human's benign read with no visible authorization to defer against.
+
+  The reviewer now parses that message and keeps only the human's text, tagged with the skill's own name — a review of `extract report.pdf` from the `pdf-tools` skill records `[skill: pdf-tools] extract report.pdf`. A skill message that carries no human text contributes nothing, so the previous request stays the one in view. Skill instructions still reach the model as context; they simply stop counting as the human speaking.
+
 ## 0.14.1
 
 ### Patch Changes

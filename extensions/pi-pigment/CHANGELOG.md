@@ -1,5 +1,18 @@
 # pi-pigment
 
+## 0.4.2
+
+### Patch Changes
+
+- 72116fd: Show a pending-call heartbeat on tool headers. Every call header now trails a muted braille spinner cell in the settled `· ✓` status slot while the execution is live, so a quiet pending period (a slow read, a bash command with no output yet) reads as "working", not "frozen". The cell trails so the `$` keeps column 0 and the body's left edge never moves, and the re-armed placeholder reuses the last committed width so the middle-cut never shifts between frames.
+
+  The frame is a pure function of the wall clock (one glyph per 250ms bucket), never a per-render counter: a counter would change the header key every frame, and the preview task's own commit re-runs `renderCall` — a self-driving repaint loop disguised as the feature. A ~4Hz interval re-invalidates the row while pending (quiet periods raise no tool events), swept on every final frame; a resumed row never arms one.
+
+  It proves the render loop is alive, never that the model streams: a provider stall with an idling TUI keeps spinning (see the heartbeat exception in ADR 0005).
+
+- 0645eff: Trim per-frame work the renderers repeated on every frame for a stable result: read memoizes the masked text's line split alongside the masked text (one split per result instead of one per frame), drops the per-frame `entries` filter nobody read (`outputTaskKey` only needs output length + hash), and keys the read memo on path:offset:limit since the limit shapes the notice lift. Grep folds its empty-output verdict into the shared derivation instead of allocating a trimmed copy per frame, and find moves its glob-anchor/emphasis computation into the styled closure so it runs only on frames that actually re-render.
+- f50d511: The write details channel no longer stashes a second copy of a write's content and display path at `tool_call`; it reads both from the paired `tool_result` event's arguments. That event carries the validated args the tool actually received, so an extension that mutates them in place (pi documents `tool_call` `event.input` as mutable) now renders the true old→new diff — previously the stale snapshot made the self-check drop the preview. The self-check is otherwise unchanged: a sibling write or an aborted call still yields no diff rather than a wrong one.
+
 ## 0.4.1
 
 ### Patch Changes
