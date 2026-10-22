@@ -6,7 +6,7 @@
  * state is captured by closure at construction time.
  */
 
-import type { Authorizer } from "@gotgenes/pi-permission-system";
+import type { Authorizer, AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
 import {
   BREAKER_DENY_REASON,
@@ -46,7 +46,10 @@ import { screenCommand } from "#src/review/screen/screen.ts";
 import { bestEffort, errorMessage, normalizeAndRedactText } from "#src/utils.ts";
 
 import { accountModelOutcome, type CircuitBreaker, consumeTrip } from "./circuit-breaker.ts";
+import { floorVerdict } from "./deterministic-floor.ts";
+import type { FloorHit } from "./deterministic-floor.ts";
 import { createDisposition } from "./disposition.ts";
+import type { CommandFacts } from "./request/command-facts.ts";
 import { isMachineryFailure, type ReviewerEngine } from "./reviewer-engine.ts";
 import type { VerdictCache } from "./verdict-cache.ts";
 import { withAgentInstruction } from "./verdict-copy.ts";
@@ -110,13 +113,37 @@ export interface ReviewPipelineDeps {
 }
 
 /**
- * Build the AI Guard authorizer from resolved session state. The returned
- * `authorize` function is the upstream `Authorizer["authorize"]` seam — the
- * only interface callers (extension.ts) and tests cross.
+ * Raise a reviewer allow to an ask when the command facts prove an
+ * irreversible effect. Fires only on the reviewer's own allow — a defer the
+ * mode maps to allow is the mode's explicit leniency, not a reviewer
+ * judgment, and stays untouched.
  *
- * @param deps - The resolved session dependencies for the pipeline.
- * @returns The `authorize` function implementing the review pipeline.
+ * Runs on both emission paths (fresh and cache hit) because the cache stores
+ * the reviewer's verdict, not the link's. The identity the record claims is
+ * the review it actually ran (model, or the replayed hit — never a new model
+ * judgment); `floorFacts` says what fired, and the emitted ask carries the
+ * floor's own reason — never the mapping's "reviewer denied" line, which
+ * would misreport an allow as a denial.
+ *
+ * @param verdict - The reviewer's verdict (pre-mapping on the fresh path, the stored one on a hit).
+ * @param record - The gate's decision record.
+ * @param facts - The command facts, or null for a non-bash surface.
+ * @returns The verdict to map and the record to emit.
  */
+function applyFloorToEmission(
+  verdict: AuthorizerVerdict,
+  record: DecisionRecordEntry,
+  facts: CommandFacts | null,
+): { verdict: AuthorizerVerdict; record: DecisionRecordEntry; floor: FloorHit | null } {
+  const floored = floorVerdict(verdict, facts);
+  if (floored.hit === null) return { verdict, record, floor: null };
+  return {
+    verdict: floored.verdict,
+    record: { ...record, floorFacts: floored.hit.facts },
+    floor: floored.hit,
+  };
+}
+
 export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["authorize"] {
   // The release seam, one per pipeline instance: it holds the
   // once-per-pipeline fail-open notice state privately.
@@ -356,23 +383,30 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     const cc = config.cache;
     const lookup = deps.verdictCache.lookup(commandHash, contextHash, cc);
     if (lookup.hit) {
-      // Cached verdicts are allow/deny only (defers are never stored), so
-      // the defer branch of the mapping is unreachable here — the
-      // instruction source derives "content" structurally (no defer
-      // classification exists to make it machinery). The cached riskLevel
-      // rides along so a cached deny maps identically to its fresh first
-      // pass.
-      const emitted = applyVerdictMode(policy, lookup.verdict);
+      // Cached verdicts are allow/deny only (defers are never stored). The
+      // cached riskLevel rides along so a cached deny maps identically to
+      // its fresh first pass. The deterministic floor may still synthesize a
+      // defer from a cached allow — the only defer that can appear here, and
+      // the release names it as the floor's own.
+      const floored = applyFloorToEmission(
+        lookup.verdict,
+        DecisionRecord.cacheHit(base, lookup.verdict),
+        request.commandFacts ?? null,
+      );
       const released = disposition.releaseVerdictGate({
         policy,
-        record: DecisionRecord.cacheHit(base, lookup.verdict),
-        original: lookup.verdict,
-        emitted,
+        record: floored.record,
+        original: floored.verdict,
+        // One mapping only: the link emits what the (possibly floored)
+        // verdict maps to, and the release ignores the emission whenever the
+        // floor fired.
+        emitted: floored.floor ? floored.verdict : applyVerdictMode(policy, lookup.verdict),
         riskLevel: lookup.riskLevel,
         // Cached verdicts are allow/deny only — no defer context at all.
         defer: undefined,
         // A hit replays a verdict, it measures nothing — the tail says so.
         cost: { kind: "cached" },
+        floor: floored.floor,
       });
       const { record, verdict } = released;
       // Replay gate: the verdict was already recorded at its model gate —
@@ -454,9 +488,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
     // deny, so a cached deny maps identically on a later hit. Defer isn't
     // cached (cache hits and breaker trips short-circuited above).
     const emitted = applyVerdictMode(policy, reviewOutcome.verdict, deferInfo);
-    const released = disposition.releaseVerdictGate({
-      policy,
-      record: DecisionRecord.model({
+    // The deterministic floor: a reviewer allow cannot lift a fact that
+    // proves the action unrecoverable (a history rewrite, a recursive delete
+    // outside the project, a persistence install, an all-interfaces listener,
+    // credential-shaped data handed to a sender, a raw device copy). The
+    // record names the facts so the extra confirmation is auditable.
+    const floored = applyFloorToEmission(
+      reviewOutcome.verdict,
+      DecisionRecord.model({
         base,
         modelId,
         strippedCount: transcript.strippedCount,
@@ -465,10 +504,18 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         deferReplySanitized,
         anchorText: transcript.trustedIntent.at(-1),
       }),
-      original: reviewOutcome.verdict,
-      emitted,
+      request.commandFacts ?? null,
+    );
+    const released = disposition.releaseVerdictGate({
+      policy,
+      record: floored.record,
+      original: floored.verdict,
+      // The one mapping from above, unless the floor replaced the verdict —
+      // the release ignores the emission whenever the floor fired.
+      emitted: floored.floor ? floored.verdict : emitted,
       riskLevel: reviewOutcome.riskLevel,
-      defer: deferInfo,
+      defer: reviewOutcome.verdict.kind === "defer" ? deferInfo : undefined,
+      floor: floored.floor,
       // latencyMs already covers the review's total cost: the empty-reply
       // retry accumulates into it and the pool stamps the whole walk (failover
       // included), so the tail is the ask's wall-clock review cost.

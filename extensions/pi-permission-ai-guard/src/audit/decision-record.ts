@@ -97,8 +97,18 @@ export interface DecisionRecordEntry extends DecisionBase {
   emittedVerdict?: VerdictKind;
   /** The effective mode that triggered the mapping. */
   mode?: string;
-  /** The human-readable reason emitted when the mode mapping introduced one. */
+  /**
+   * The human-readable reason emitted when the mode mapping introduced one —
+   * or, on a floored ask, the floor's own reason (the operator notice, named
+   * beside `floorFacts`; the returned defer itself carries no agent reason).
+   */
   emittedReason?: string;
+  /**
+   * The deterministic facts that raised the reviewer's allow to an ask. The
+   * gate stays `model` or `cache-hit`: the floor re-judges nothing, it names
+   * what the facts already proved.
+   */
+  floorFacts?: readonly string[];
   /** Gate-specific fields (policyState, modelId, latencyMs, etc.). */
   [k: string]: unknown;
 }
