@@ -1,5 +1,33 @@
 # pi-permission-ai-guard
 
+## 1.0.0
+
+### Major Changes
+
+- 7390a98: **The mode set is now `strict` / `default` / `auto`.** `permissive` was renamed to `auto` with identical behaviour: it is the ask-free rung, so `auto` is the mode that never prompts and still blocks every deny and every danger-leaned doubt. It is not a yolo mode.
+
+  **`lenient` was removed.** Its one distinguishing trait — passing benign-leaned doubts without asking — is what `auto` already does, and `lenient` still asked on neutral doubts and soft denies, which made the ladder's middle rung hard to explain. Configurations that name `lenient` now run `default` and report a migration issue saying so.
+
+  **Existing configuration keeps working.** The loader rewrites a retired `mode` value before validation: `mode: "permissive"` becomes `mode: "auto"` with no behaviour change and a notice naming the rename; `mode: "lenient"` falls back to `default` with a notice. Session overrides carrying either old value are dropped as unknown, so a resumed session starts from the configured mode instead of erroring.
+
+  **Wording no longer collides with the new name.** Approval notices and the fail-open notice say "allowed without asking" / "this mode allows the request without asking" instead of "auto-approved", so "auto mode" and "automatic approval" cannot be read as the same thing.
+
+  **`mode: "custom"` runs your own ladder row.** The `customMode` block holds two cut lines (`allowThrough`, `denyFrom`, named on the suspicion order) plus the reviewer-failure lane (`onReviewFailure: "deny" | "defer"`, never allow). A mode is two boundaries, so a custom row is contiguous by construction — there are no per-rung cells to misconfigure, and an accept line at or above the reject line simply never asks. `custom` is only selectable while the block is present: the picker and the `ctrl+alt+g` cycle hide it otherwise (it joins the cycle last when configured), and `mode: "custom"` with no block runs `default` and reports a config issue. A custom that never asks renders in warning red like the built-in ask-free rung; a pair redrawing a built-in rung is reported as redundant, with the rung to use instead.
+
+### Minor Changes
+
+- 8bbb393: **A model verdict can no longer hard-deny.** Every deny the reviewer model emits is soft, whatever `riskLevel` it reports: `default` asks, `strict` and `auto` deny. A misread command reaches a human instead of becoming an unoverridable block; `riskLevel` survives only on the audit record and the notice wording.
+
+  **A deterministic screen owns hard denial.** A closed list of literal shapes the screen can prove is denied in every mode before any model call, as its own `screen` gate in the audit log: recursive deletion of a system root or a Windows drive root, raw device writes and wipes (`dd of=`, `mkfs`, `shred`, `blkdiscard`, `nvme format`, `cp`/`tee` onto a block device), destructive partition and volume commands, setuid chmod, force-push to a protected branch, reverse shells, a download piped into an interpreter or evaluated as a program, a function call that backgrounds a pipeline of itself, `find … -delete` from a system root, and `kill … -1`.
+
+  Where the shape sits does not narrow it: a destructive call is denied inside a substitution, at a definition's call site, or behind a wrapper like `sudo`/`env`/`timeout` just as much as at the top level. What the screen cannot read it does not deny — text that only defines something, an alias body, an interpreter's own program, anything carrying a variable or a substitution, `find -exec`, PowerShell, an option it does not model — and those reach the model like any other request.
+
+  **Leaned defers route by mode.** Under `auto` a benign or neutral doubt passes, while a danger-leaned doubt blocks; `strict` denies every non-allow; `default` asks on every flag short of a screen deny.
+
+  **The chat engine reads deterministic command facts.** Its prompt now carries the deterministic readings of the command — shape, path scope, network use, effects — labelled as observations rather than safety conclusions.
+
+- 6cce779: **The screen recognizes seven more shells.** `fish`, `mksh`, `yash`, `ash`, `pdksh`, `csh`, and `tcsh` run `-c` strings and heredoc/stdin input as programs, so the closed deny rules now read those places under the new names exactly as they already did under `sh`/`bash`/`zsh`/`dash`/`ksh`. The C-shells are a different grammar, but the deny rules match literal words (`rm -rf /`, `dd of=`) that spell the same there, so a misparse over-blocks rather than under-blocks: `fish -c 'rm -rf /'` and `curl … | fish` are denied where before they passed to the model. The two shell-name lists (screen and fact walker) are one shared set, so they cannot disagree about what runs. Deliberately still outside the screen, pinned by tests: `busybox -c` (applet dispatch, not a shell), `pwsh` (PowerShell, which the shell reader cannot parse), and non-shell `-c` carriers (`python3`, `git`, package managers).
+
 ## 0.15.0
 
 ### Minor Changes
