@@ -31,6 +31,7 @@
 
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 
+import type { IrreversibleRuling } from "#src/config/config-schema.ts";
 import type { CommandFacts } from "#src/review/request/command-facts.ts";
 
 /**
@@ -93,22 +94,40 @@ export function floorReason(facts: readonly string[]): string {
 }
 
 /**
- * Raise a reviewer allow when the facts floor it. A defer is never touched —
- * not even one the mode maps to allow: that leniency is the mode's own
- * decision, not a reviewer judgment the facts can contradict. A deny is never
- * lowered either.
+ * The agent-facing reason for a floor deny: the same fact sentence as the ask,
+ * restated as a refusal rather than a request for confirmation.
+ *
+ * @param hit - The fired facts.
+ * @returns The deny reason, without the agent instruction (the release adds it).
+ */
+export function floorDenyReason(hit: FloorHit): string {
+  return `${hit.reason}, and this mode refuses that class of action outright`;
+}
+
+/**
+ * A fired floor hit plus the mode's ruling on it: the release's input for a
+ * floored allow. The ruling excludes `allow` structurally — an `allow` ruling
+ * leaves the verdict alone, so there is nothing for the release to override.
+ */
+export interface FloorRuling {
+  readonly hit: FloorHit;
+  readonly ruling: Exclude<IrreversibleRuling, "allow">;
+}
+
+/**
+ * The fired hit for a reviewer allow, or null. A defer is never floored — not
+ * even one the mode maps to allow: that leniency is the mode's own decision,
+ * not a reviewer judgment the facts can contradict. A deny is never lowered
+ * either. What the release makes of a hit (ask or block) lives in the release,
+ * next to the copy it emits — one home for the rule, one for its expression.
  *
  * @param verdict - The reviewer's verdict.
  * @param facts - The command facts, or null for a non-bash surface.
- * @returns The verdict to emit and the hit that raised it (null when none did).
+ * @returns The hit, or null when nothing fired.
  */
-export function floorVerdict(
+export function floorHitFor(
   verdict: AuthorizerVerdict,
   facts: CommandFacts | null,
-): { verdict: AuthorizerVerdict; hit: FloorHit | null } {
-  if (verdict.kind !== "allow") return { verdict, hit: null };
-  const hit = floorOf(facts);
-  // The ask is a defer: it travels the same ladder as any reviewer defer, so
-  // the floor reuses the whole release ritual rather than a second table.
-  return hit === null ? { verdict, hit } : { verdict: { kind: "defer" }, hit };
+): FloorHit | null {
+  return verdict.kind === "allow" ? floorOf(facts) : null;
 }

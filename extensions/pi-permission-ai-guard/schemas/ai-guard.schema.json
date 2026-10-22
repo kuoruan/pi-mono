@@ -102,7 +102,7 @@
       "type": ["object", "null"],
       "default": null,
       "additionalProperties": false,
-      "description": "The operator-defined ladder row, read only when mode is 'custom'. Two cut lines and the reviewer-failure lane, nothing else: a mode is two boundaries, so a custom row is contiguous by construction and cannot express an incoherent per-rung table. allowThrough at or above denyFrom is legal and leaves no ask band (the mode never prompts); the footer then renders it in warning red once the casual cycle can reach it. A pair drawing exactly a built-in row is reported as redundant.",
+      "description": "The operator-defined ladder row, read only when mode is 'custom'. Two cut lines, the reviewer-failure lane, and the irreversible axis, nothing else: a mode is two boundaries plus two lanes, so a custom row is contiguous by construction and cannot express an incoherent per-rung table. allowThrough at or above denyFrom is legal and leaves no ask band (the mode never prompts); the footer then renders it in warning red once the casual cycle can reach it. A pair drawing exactly a built-in row with the defer ruling is reported as redundant.",
       "properties": {
         "allowThrough": {
           "type": "string",
@@ -132,6 +132,11 @@
           "type": "string",
           "enum": ["deny", "defer"],
           "description": "How a review that produced no verdict is disposed of. Never allow: a broken reviewer must not rubber-stamp."
+        },
+        "onIrreversibleEffect": {
+          "type": "string",
+          "enum": ["allow", "defer", "deny"],
+          "description": "How a reviewer allow that met a proven-irreversible effect is disposed of. Its own axis, not a rung on the suspicion line: 'defer' asks (what every built-in rung does), 'allow' passes the class the operator accepts, 'deny' blocks it. The deterministic screen's hard deny stays terminal regardless."
         }
       },
       "required": ["allowThrough", "denyFrom", "onReviewFailure"]

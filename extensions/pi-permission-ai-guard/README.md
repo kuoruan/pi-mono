@@ -262,7 +262,7 @@ Each mode is two cut lines on that order — an auto-pass band, an ask band, a t
 
 The reading per mode: `strict` — the reviewer's allow is the only pass (full fail-closed automation); `default` — you judge every flag except the screen's hard blocks (the resting mode and the onboarding posture — watch the reviewer work, then loosen); `auto` — no prompt is ever raised: only benign and neutral doubts pass; a deny-leaning doubt or a deny is blocked, because auto has no ask path (a danger confirmation never auto-flows into an allow). `auto` is not the yolo mode of Codex (`--yolo`), Claude Code (`bypassPermissions`), or Gemini CLI (`yolo`): those neither ask nor block, while `auto` still blocks every deny and every danger-leaned doubt. `lean` routes a defer between the middle rungs (in `auto` it decides between allow and deny); it never appears in dialogs or notify lines (the ask is the human's judgment moment) — it lives in the `ai_guard.decision` audit record.
 
-`custom` runs your own two cut lines instead of a built-in row:
+`custom` runs your own ladder row instead of a built-in one:
 
 ```json
 {
@@ -270,12 +270,13 @@ The reading per mode: `strict` — the reviewer's allow is the only pass (full f
   "customMode": {
     "allowThrough": "defer-benign",
     "denyFrom": "hard-deny",
-    "onReviewFailure": "defer"
+    "onReviewFailure": "defer",
+    "onIrreversibleEffect": "defer"
   }
 }
 ```
 
-The example above passes only benign-leaned doubts, asks on everything up to a hard deny, and defers reviewer failures to you — the closest expressible neighbour of the retired `lenient` rung. The vocabulary is the suspicion order's rung names (`allow`, `defer-benign`, `defer-neutral`, `defer-danger`, `soft-deny`, `hard-deny`); `onReviewFailure` is `deny` or `defer`, never `allow` — a broken reviewer must not rubber-stamp, whatever the cuts say. A mode is two boundaries, so a custom row is contiguous by construction: there are no per-rung cells to set incoherently, and an accept line at or above the reject line is legal (the mode simply never asks — allow wins the overlap). A pair that redraws a built-in rung exactly is reported as redundant, with the rung to use instead.
+The example above passes only benign-leaned doubts, asks on everything up to a hard deny, defers reviewer failures to you, and asks on proven-irreversible effects — the closest expressible neighbour of the retired `lenient` rung. The vocabulary is the suspicion order's rung names (`allow`, `defer-benign`, `defer-neutral`, `defer-danger`, `soft-deny`, `hard-deny`); `onReviewFailure` is `deny` or `defer`, never `allow` — a broken reviewer must not rubber-stamp, whatever the cuts say. `onIrreversibleEffect` is its own axis, not a rung on that line: `defer` asks (what every built-in rung does), `allow` passes the class of effect you accept, `deny` blocks it. A mode is two boundaries plus two lanes, so a custom row is contiguous by construction: there are no per-rung cells to set incoherently, and an accept line at or above the reject line is legal (the mode simply never asks — allow wins the overlap). A row that redraws a built-in rung exactly, floor ruling included, is reported as redundant, with the rung to use instead.
 
 `custom` is only selectable while `customMode` configures it: the picker and the casual cycle hide it otherwise, and `mode: "custom"` with no block runs `default` and reports a config issue saying so (repair, not refusal — a mode choice never takes the guard offline). The `ctrl+alt+g` cycle visits a configured `custom` last, and the footer renders it in warning red exactly when it never asks — the same derivation as the built-in ask-free rung, so an allow-everything custom cannot hide. An unconfigured `custom` left in the session file restores as nothing.
 
@@ -292,6 +293,8 @@ The classifier lane reaches the same five verdicts through its decision table, s
 | `guard` base with no release                               | defer + `lean: deny`  |
 
 An escalating fact lifts a `plain` base to `guard`, so a named request still asks. A `block` base defers leaning deny with `riskLevel: critical`.
+
+A separate deterministic rule covers the reviewer's allow: when the command facts prove an irreversible effect (a history rewrite, a recursive delete outside the working directory, a persistence install, an all-interfaces listener, credential-shaped data handed to a sender, a raw block copy), the allow cannot pass silently. Every built-in rung asks; a `custom` row disposes it by its own `onIrreversibleEffect` (`allow`, `defer`, or `deny`), and the record names the facts and the ruling. The deterministic screen's hard deny stays terminal regardless of that choice.
 
 A model deny never binds: it is soft whatever its `riskLevel`, so `default` asks you and `strict` and `auto` deny. Only the deterministic screen hard-denies, in every mode, before any model call. It holds a closed list of shapes no request makes right, wherever in the command they appear: recursive deletion of a system root or drive root (`rm`, `rimraf`, `del`, `trash`), raw device writes and wipes (`dd of=`, `mkfs`, `shred`, `blkdiscard`, `nvme format`, `cp` or `tee` onto a block device), destructive partition and volume commands, setuid chmod, force-push to a protected branch, reverse shells, a download piped into an interpreter or evaluated as a program, a function that backgrounds a pipeline of itself, `find … -delete` from a system root, and `kill … -1`.
 

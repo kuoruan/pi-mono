@@ -43,6 +43,10 @@ The base tier runs twice — once on the model's `effect`, once on the code verb
 
 `allInterfaces`, `installsPersistence`, `sendsData`, `authHeaderExpansion`, `rewritesHistory`, and `grantsBeyondOwner` together with `sensitivePathName` each lift any non-`block` tier to at least `guard` (the row id gains a `+escalated` suffix). A lifted `requested` still asks: the request names the action, but the escalating fact is the reason the named action still needs a human. `block` rows never release — nothing lifts them down.
 
+### Irreversible axis
+
+The escalator above governs reviewer _doubt_; a separate deterministic rule governs a reviewer _allow_ that meets proven-irreversible facts (a history rewrite, a recursive delete outside the working directory, a persistence install, an all-interfaces listener, credential-shaped data handed to a sender, a raw block copy). Every built-in rung raises such an allow to an ask; a `custom` row disposes it by its own `onIrreversibleEffect` (`allow`, `defer`, or `deny`, defaulting to `defer`), and the record names the facts (`floorFacts`) and the ruling (`floorRuling`). The ruling is not a rung on the suspicion line — doubt and proven irreversibility are different questions — so the custom cut lines cannot express it. The deterministic screen's hard deny stays terminal under every ruling. A custom `deny` refusal stays out of the denied panel: that panel answers "what did the reviewer refuse", the reviewer allowed, so the refusal lives in the audit record (`floorFacts` plus `floorRuling`) instead.
+
 ### Command facts
 
 Deterministic facts read from the shell AST and the working directory alone — no model, no subprocess, no network. Every fact fails toward the conservative side: unreadable words, unparsable text, and hidden execution (`eval`, `$CMD`) widen scope to `unknown` and network to `restricted`. Scrutiny-raising facts fire on positive evidence only.

@@ -25,7 +25,7 @@ import type {
 } from "@gotgenes/pi-permission-system";
 
 import { DECISION_GATES } from "#src/audit/events.ts";
-import type { BreakerVerdict } from "#src/config/config-schema.ts";
+import type { BreakerVerdict, IrreversibleRuling } from "#src/config/config-schema.ts";
 import { PRE_CALL_MACHINERY_KINDS, type PreCallMachineryKind } from "#src/model/machinery-kinds.ts";
 import type { ReviewOutcome, VerdictKind } from "#src/model/model-verdict.ts";
 import type { HardRuleHit } from "#src/review/screen/hard-rules.ts";
@@ -104,11 +104,18 @@ export interface DecisionRecordEntry extends DecisionBase {
    */
   emittedReason?: string;
   /**
-   * The deterministic facts that raised the reviewer's allow to an ask. The
-   * gate stays `model` or `cache-hit`: the floor re-judges nothing, it names
-   * what the facts already proved.
+   * The deterministic facts that met the reviewer's allow. The gate stays
+   * `model` or `cache-hit`: the floor re-judges nothing, it names what the
+   * facts already proved.
    */
   floorFacts?: readonly string[];
+  /**
+   * How the mode disposed of those facts: the built-in ask, the operator's
+   * `allow` (the record then shows an allow the reviewer also allowed), or
+   * the operator's `deny`. Absent when no floor fired. Narrowed to the config
+   * enum so the audit side cannot drift from the option the operator wrote.
+   */
+  floorRuling?: IrreversibleRuling;
   /** Gate-specific fields (policyState, modelId, latencyMs, etc.). */
   [k: string]: unknown;
 }

@@ -12,7 +12,7 @@
 
 import type { VerdictOrigin } from "#src/model/model-verdict.ts";
 
-import type { AiGuardConfig, BuiltinMode, Mode } from "./config-schema.ts";
+import type { AiGuardConfig, BuiltinMode, IrreversibleRuling, Mode } from "./config-schema.ts";
 import { BUILTIN_MODE_VALUES, MODE_VALUES } from "./config-schema.ts";
 import { CYCLE_MODE_VALUES, MODE_TABLE } from "./mode-table.ts";
 import { type ModeCuts, hasNoAskBand, sameBands } from "./suspicion.ts";
@@ -25,6 +25,8 @@ export interface ModePolicy {
   cuts: ModeCuts;
   /** How a review that produced no verdict is disposed of (never allow). */
   onReviewFailure: VerdictOrigin;
+  /** How a floored allow is disposed of (`defer` on every built-in rung). */
+  onIrreversibleEffect: IrreversibleRuling;
 }
 
 /**
@@ -62,17 +64,35 @@ export type ModeConfig = Pick<AiGuardConfig, "mode" | "customMode">;
  */
 function builtinPolicy(mode: BuiltinMode): ModePolicy {
   const row = MODE_TABLE[mode];
-  return { mode, cuts: row.cuts, onReviewFailure: row.onReviewFailure };
+  // Built-in rungs always confirm: the invariant the live round established
+  // stays a property of the shipped ladder, and only an operator who writes a
+  // custom row can choose otherwise.
+  return {
+    mode,
+    cuts: row.cuts,
+    onReviewFailure: row.onReviewFailure,
+    onIrreversibleEffect: "defer",
+  };
 }
 
 /**
- * The built-in rung whose bands a custom pair reproduces exactly, if any.
+ * The built-in rung a custom row reproduces exactly, if any. The irreversible
+ * axis joins the comparison: a custom row that draws a built-in ladder but
+ * rules the floor differently is not that rung.
  *
  * @param cuts - The custom cut lines.
  * @param onReviewFailure - The custom failure lane.
+ * @param onIrreversibleEffect - The custom irreversible axis.
  * @returns The matching built-in mode, or undefined.
  */
-function redundantRow(cuts: ModeCuts, onReviewFailure: VerdictOrigin): BuiltinMode | undefined {
+function redundantRow(
+  cuts: ModeCuts,
+  onReviewFailure: VerdictOrigin,
+  onIrreversibleEffect: IrreversibleRuling,
+): BuiltinMode | undefined {
+  // Only a defer ruling can reproduce a built-in row: every built-in rung
+  // rules defer, so anything else is not that rung whatever its cuts.
+  if (onIrreversibleEffect !== "defer") return undefined;
   return BUILTIN_MODE_VALUES.find(
     (m) => sameBands(MODE_TABLE[m].cuts, cuts) && MODE_TABLE[m].onReviewFailure === onReviewFailure,
   );
@@ -114,7 +134,7 @@ export function resolveModePolicy(config: ModeConfig): ModeResolution {
   }
 
   const cuts: ModeCuts = { allowThrough: customMode.allowThrough, denyFrom: customMode.denyFrom };
-  const redundant = redundantRow(cuts, customMode.onReviewFailure);
+  const redundant = redundantRow(cuts, customMode.onReviewFailure, customMode.onIrreversibleEffect);
   if (redundant !== undefined) {
     issues.push({
       path: "customMode",
@@ -123,7 +143,12 @@ export function resolveModePolicy(config: ModeConfig): ModeResolution {
     });
   }
   return {
-    policy: { mode: "custom", cuts, onReviewFailure: customMode.onReviewFailure },
+    policy: {
+      mode: "custom",
+      cuts,
+      onReviewFailure: customMode.onReviewFailure,
+      onIrreversibleEffect: customMode.onIrreversibleEffect,
+    },
     issues,
   };
 }

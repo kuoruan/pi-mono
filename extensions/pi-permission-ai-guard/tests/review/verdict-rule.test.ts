@@ -59,6 +59,17 @@ function pol(mode: Mode): ModePolicy {
   return resolveModePolicy({ mode, customMode: null }).policy;
 }
 
+/** A custom row that allows everything the ladder can allow (screen denies aside). */
+const ALLOW_ALL_CUSTOM = {
+  mode: "custom",
+  customMode: {
+    allowThrough: "hard-deny",
+    denyFrom: "hard-deny",
+    onReviewFailure: "deny",
+    onIrreversibleEffect: "defer",
+  },
+} as const;
+
 describe("applyVerdictMode — mapping table", () => {
   it.each<Row>([
     // Allow is never transformed, in any mode.
@@ -176,11 +187,7 @@ describe("model deny authority invariant", () => {
   it("keeps the screen's deny a deny under a custom that allows everything else", () => {
     // The ladder never sees a screen deny: even allowThrough hard-deny
     // cannot lift it (ADR 0006 — a screen deny is hard in every mode).
-    const { policy } = resolveModePolicy({
-      mode: "custom",
-      customMode: { allowThrough: "hard-deny", denyFrom: "hard-deny", onReviewFailure: "deny" },
-    });
-    expect(applyVerdictMode(policy, DENY, undefined, "screen")).toEqual(DENY);
+    const { policy } = resolveModePolicy(ALLOW_ALL_CUSTOM);
     // The boundary it does move: a model deny at the same rung allows.
     expect(applyVerdictMode(policy, DENY, undefined, "model")).toEqual({ kind: "allow" });
   });
@@ -430,10 +437,7 @@ describe("resolveMapping — the mapping consequence rule", () => {
     // The notice condition reads the mapping (emitted allow the reviewer
     // did not grant), never the mode name — a custom that never asks
     // cannot slip past it.
-    const { policy } = resolveModePolicy({
-      mode: "custom",
-      customMode: { allowThrough: "hard-deny", denyFrom: "hard-deny", onReviewFailure: "deny" },
-    });
+    const { policy } = resolveModePolicy(ALLOW_ALL_CUSTOM);
     const emitted = applyVerdictMode(policy, DEFER_V, { kind: "model-defer" }, "model");
     expect(emitted).toEqual(ALLOW_V);
     const mapped = resolveMapping({

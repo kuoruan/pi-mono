@@ -9,7 +9,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { floorOf, floorReason, floorVerdict } from "#src/review/deterministic-floor.ts";
+import {
+  floorDenyReason,
+  floorHitFor,
+  floorOf,
+  floorReason,
+} from "#src/review/deterministic-floor.ts";
 import { readCommandFacts, type CommandFacts } from "#src/review/request/command-facts.ts";
 
 const CTX = { cwd: "/work/proj", home: "/home/u", realpath: () => null, declaredTasks: {} };
@@ -86,36 +91,24 @@ describe("floorOf — the facts that floor a reviewer allow", () => {
   });
 });
 
-describe("floorVerdict — one rule, applied once", () => {
-  it("raises an allow to an ask", () => {
-    const { verdict, hit } = floorVerdict({ kind: "allow" }, factsFor("rm -rf ~/work/old-tree"));
-    expect(verdict).toEqual({ kind: "defer" });
+describe("floorHitFor — detection only; the ruling is the release's job", () => {
+  it("returns the hit for a reviewer allow", () => {
+    const hit = floorHitFor({ kind: "allow" }, factsFor("rm -rf ~/work/old-tree"));
     expect(hit!.facts).toEqual(["recursive-delete-outside"]);
   });
 
-  it("leaves an allow alone when nothing irreversible is proven", () => {
-    expect(floorVerdict({ kind: "allow" }, factsFor("rm -rf ./node_modules"))).toEqual({
-      verdict: { kind: "allow" },
-      hit: null,
-    });
-  });
-
-  it("never changes a deny or a defer", () => {
+  it("returns null for a deny, a defer, and unproven facts alike", () => {
     const facts = factsFor("rm -rf ~/work/old-tree");
-    expect(floorVerdict({ kind: "deny", reason: "r" }, facts)).toEqual({
-      verdict: { kind: "deny", reason: "r" },
-      hit: null,
-    });
-    expect(floorVerdict({ kind: "defer" }, facts)).toEqual({
-      verdict: { kind: "defer" },
-      hit: null,
-    });
+    expect(floorHitFor({ kind: "deny", reason: "r" }, facts)).toBeNull();
+    expect(floorHitFor({ kind: "defer" }, facts)).toBeNull();
+    expect(floorHitFor({ kind: "allow" }, factsFor("rm -rf ./node_modules"))).toBeNull();
+    expect(floorHitFor({ kind: "allow" }, null)).toBeNull();
   });
 
-  it("leaves an allow alone when there are no facts", () => {
-    expect(floorVerdict({ kind: "allow" }, null)).toEqual({
-      verdict: { kind: "allow" },
-      hit: null,
-    });
+  it("builds the deny reason on the hit's own sentence", () => {
+    const hit = floorHitFor({ kind: "allow" }, factsFor("rm -rf ~/work/old-tree"))!;
+    expect(floorDenyReason(hit)).toBe(
+      `${hit.reason}, and this mode refuses that class of action outright`,
+    );
   });
 });

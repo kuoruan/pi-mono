@@ -1106,6 +1106,9 @@ describe("config loader — JSONC", () => {
       allowThrough: "defer-benign",
       denyFrom: "hard-deny",
       onReviewFailure: "defer",
+      // The irreversible axis defaults to what every built-in rung does, so
+      // an existing custom row keeps its behaviour without migration.
+      onIrreversibleEffect: "defer",
     });
     expect(result.issues).toEqual([]);
   });

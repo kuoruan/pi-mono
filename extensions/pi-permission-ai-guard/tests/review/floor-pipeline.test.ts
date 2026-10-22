@@ -49,6 +49,26 @@ function allowPipeline(overrides: Parameters<typeof makePipeline>[0] = {}) {
   return { authorize: wired, records, notices, modelCall, log };
 }
 
+/**
+ * A custom row ruling one way on the irreversible axis. Module scope: it
+ * captures nothing, so defining it per test would recreate it on every run.
+ *
+ * @param ruling - How the custom row disposes a proven-irreversible allow.
+ * @returns A config running that custom row.
+ */
+function customRulingConfig(ruling: "allow" | "deny" | "defer") {
+  return {
+    ...makePipeline().config,
+    mode: "custom" as const,
+    customMode: {
+      allowThrough: "allow" as const,
+      denyFrom: "hard-deny" as const,
+      onReviewFailure: "defer" as const,
+      onIrreversibleEffect: ruling,
+    },
+  };
+}
+
 describe("deterministic floor — the reviewer cannot allow an irreversible action", () => {
   // The three cases the live anchored round caught, plus the same shape under
   // a mode that would otherwise pass everything.
@@ -166,6 +186,7 @@ describe("deterministic floor — the reviewer cannot allow an irreversible acti
         allowThrough: "defer-benign" as const,
         denyFrom: "hard-deny" as const,
         onReviewFailure: "deny" as const,
+        onIrreversibleEffect: "defer" as const,
       },
     };
     const { authorize, records, log } = allowPipeline({ config });
@@ -202,6 +223,88 @@ describe("deterministic floor — the reviewer cannot allow an irreversible acti
     expect(asked.notices).toHaveLength(1);
     expect(asked.notices[0]!.level).toBe("warning");
     expect(asked.notices[0]!.message).toContain("needs your confirmation");
+  });
+
+  it("a custom allow ruling passes the class the operator accepted", async () => {
+    const { authorize, records, notices, log } = allowPipeline({
+      config: customRulingConfig("allow"),
+    });
+    const verdict = await authorize(
+      makeDetails({ value: "git restore --source=HEAD src/app.ts" }),
+      makeQuery("ask"),
+      log,
+    );
+    // The operator accepted this class of effect: the allow passes, and the
+    // record says whose choice that was.
+    expect(verdict).toEqual({ kind: "allow" });
+    expect(records[0]!.floorFacts).toContain("rewrites-history");
+    expect(records[0]!.floorRuling).toBe("allow");
+    expect(notices).toHaveLength(0);
+  });
+
+  it("a custom deny ruling blocks with the floor's own reason", async () => {
+    const { authorize, records, notices, log } = allowPipeline({
+      config: customRulingConfig("deny"),
+    });
+    const verdict = await authorize(
+      makeDetails({ value: "git restore --source=HEAD src/app.ts" }),
+      makeQuery("ask"),
+      log,
+    );
+    // The operator forbade it: a deny with the floor's own reason and the
+    // agent instruction, announced as a denial, not an ask.
+    expect(verdict.kind).toBe("deny");
+    expect(records[0]!.floorFacts).toContain("rewrites-history");
+    expect(records[0]!.floorRuling).toBe("deny");
+    expect(records[0]!.emittedVerdict).toBe("deny");
+    expect(notices).toHaveLength(0);
+  });
+
+  it("a custom allow ruling replays as an allow on a cache hit", async () => {
+    const config = { ...customRulingConfig("allow"), cache: { maxEntries: 10 } };
+    const { authorize, records, log } = allowPipeline({ config });
+    const first = await authorize(
+      makeDetails({ value: "git restore --source=HEAD src/app.ts" }),
+      makeQuery("ask"),
+      log,
+    );
+    const second = await authorize(
+      makeDetails({ value: "git restore --source=HEAD src/app.ts" }),
+      makeQuery("ask"),
+      log,
+    );
+    // The cache stores the reviewer's allow, so the replay rules the same way.
+    expect(first).toEqual({ kind: "allow" });
+    expect(second).toEqual({ kind: "allow" });
+    expect(records.map((r) => r.gate)).toEqual(["model", "cache-hit"]);
+    expect(records[1]!.floorRuling).toBe("allow");
+  });
+
+  it("a custom deny ruling replays as a deny on a cache hit", async () => {
+    // The cache stores the reviewer's allow, so the hit re-fires the ruling
+    // through the release branch rather than replaying a stored deny.
+    const { authorize, records, log } = allowPipeline({
+      config: {
+        ...customRulingConfig("deny"),
+        cache: { maxEntries: 10 },
+      },
+    });
+    const first = await authorize(
+      makeDetails({ value: "git restore --source=HEAD src/app.ts" }),
+      makeQuery("ask"),
+      log,
+    );
+    const second = await authorize(
+      makeDetails({ value: "git restore --source=HEAD src/app.ts" }),
+      makeQuery("ask"),
+      log,
+    );
+    expect(first.kind).toBe("deny");
+    expect(second.kind).toBe("deny");
+    expect(records.map((r) => r.gate)).toEqual(["model", "cache-hit"]);
+    expect(records[1]!.verdict).toBe("allow");
+    expect(records[1]!.emittedVerdict).toBe("deny");
+    expect(records[1]!.floorRuling).toBe("deny");
   });
 
   it("does not touch a reviewer deny or defer", async () => {

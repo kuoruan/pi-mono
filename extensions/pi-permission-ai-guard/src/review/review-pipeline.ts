@@ -26,7 +26,7 @@ import {
   MODEL_REPLY_EVENT,
   SHORT_CIRCUIT_EVENT,
 } from "#src/audit/events.ts";
-import type { AiGuardConfig } from "#src/config/config-schema.ts";
+import type { AiGuardConfig, IrreversibleRuling } from "#src/config/config-schema.ts";
 import { resolveModePolicy } from "#src/config/mode-policy.ts";
 import { effectiveOverride, type SessionOverrides } from "#src/config/session-overrides.ts";
 import { PRE_CALL_MACHINERY_KINDS } from "#src/model/machinery-kinds.ts";
@@ -46,8 +46,7 @@ import { screenCommand } from "#src/review/screen/screen.ts";
 import { bestEffort, errorMessage, normalizeAndRedactText } from "#src/utils.ts";
 
 import { accountModelOutcome, type CircuitBreaker, consumeTrip } from "./circuit-breaker.ts";
-import { floorVerdict } from "./deterministic-floor.ts";
-import type { FloorHit } from "./deterministic-floor.ts";
+import { floorHitFor, type FloorRuling } from "./deterministic-floor.ts";
 import { createDisposition } from "./disposition.ts";
 import type { CommandFacts } from "./request/command-facts.ts";
 import { isMachineryFailure, type ReviewerEngine } from "./reviewer-engine.ts";
@@ -113,7 +112,7 @@ export interface ReviewPipelineDeps {
 }
 
 /**
- * Raise a reviewer allow to an ask when the command facts prove an
+ * Apply the mode's irreversible ruling when the command facts prove an
  * irreversible effect. Fires only on the reviewer's own allow — a defer the
  * mode maps to allow is the mode's explicit leniency, not a reviewer
  * judgment, and stays untouched.
@@ -121,26 +120,31 @@ export interface ReviewPipelineDeps {
  * Runs on both emission paths (fresh and cache hit) because the cache stores
  * the reviewer's verdict, not the link's. The identity the record claims is
  * the review it actually ran (model, or the replayed hit — never a new model
- * judgment); `floorFacts` says what fired, and the emitted ask carries the
- * floor's own reason — never the mapping's "reviewer denied" line, which
- * would misreport an allow as a denial.
+ * judgment); `floorFacts` says what fired, `floorRuling` says what the mode
+ * chose, and a raised ask or deny carries the floor's own reason — never the
+ * mapping's "reviewer denied" line, which would misreport an allow as a
+ * denial.
  *
  * @param verdict - The reviewer's verdict (pre-mapping on the fresh path, the stored one on a hit).
  * @param record - The gate's decision record.
  * @param facts - The command facts, or null for a non-bash surface.
+ * @param ruling - How this mode disposes a proven-irreversible allow.
  * @returns The verdict to map and the record to emit.
  */
 function applyFloorToEmission(
   verdict: AuthorizerVerdict,
   record: DecisionRecordEntry,
   facts: CommandFacts | null,
-): { verdict: AuthorizerVerdict; record: DecisionRecordEntry; floor: FloorHit | null } {
-  const floored = floorVerdict(verdict, facts);
-  if (floored.hit === null) return { verdict, record, floor: null };
+  ruling: IrreversibleRuling,
+): { record: DecisionRecordEntry; floor: FloorRuling | null } {
+  const hit = floorHitFor(verdict, facts);
+  if (hit === null) return { record, floor: null };
+  // An `allow` ruling leaves the verdict alone, so the release has nothing
+  // to override: the record carries the operator's choice and the ordinary
+  // allow path runs.
   return {
-    verdict: floored.verdict,
-    record: { ...record, floorFacts: floored.hit.facts },
-    floor: floored.hit,
+    record: { ...record, floorFacts: hit.facts, floorRuling: ruling },
+    floor: ruling === "allow" ? null : { hit, ruling },
   };
 }
 
@@ -392,15 +396,14 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         lookup.verdict,
         DecisionRecord.cacheHit(base, lookup.verdict),
         request.commandFacts ?? null,
+        policy.onIrreversibleEffect,
       );
       const released = disposition.releaseVerdictGate({
         policy,
         record: floored.record,
-        original: floored.verdict,
-        // One mapping only: the link emits what the (possibly floored)
-        // verdict maps to, and the release ignores the emission whenever the
-        // floor fired.
-        emitted: floored.floor ? floored.verdict : applyVerdictMode(policy, lookup.verdict),
+        original: lookup.verdict,
+        // The release ignores the emission whenever the floor fired.
+        emitted: applyVerdictMode(policy, lookup.verdict),
         riskLevel: lookup.riskLevel,
         // Cached verdicts are allow/deny only — no defer context at all.
         defer: undefined,
@@ -505,14 +508,15 @@ export function createReviewPipeline(deps: ReviewPipelineDeps): Authorizer["auth
         anchorText: transcript.trustedIntent.at(-1),
       }),
       request.commandFacts ?? null,
+      policy.onIrreversibleEffect,
     );
     const released = disposition.releaseVerdictGate({
       policy,
       record: floored.record,
-      original: floored.verdict,
-      // The one mapping from above, unless the floor replaced the verdict —
-      // the release ignores the emission whenever the floor fired.
-      emitted: floored.floor ? floored.verdict : emitted,
+      original: reviewOutcome.verdict,
+      // The one mapping from above — the release ignores the emission
+      // whenever the floor fired.
+      emitted,
       riskLevel: reviewOutcome.riskLevel,
       defer: reviewOutcome.verdict.kind === "defer" ? deferInfo : undefined,
       floor: floored.floor,

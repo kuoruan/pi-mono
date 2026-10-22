@@ -214,16 +214,34 @@ const circuitBreakerSchema = z.object({
 });
 
 /**
- * The operator-defined ladder row: two cut lines on `SUSPICION_ORDER` plus the
- * reviewer-failure lane. There are no per-rung cells, so a custom row is
- * contiguous by construction — the same shape the built-in rows have. A pair
- * whose accept line touches or passes its reject line is legal (it has no ask
- * band); the resolver decides whether the result is worth a warning.
+ * How a custom mode disposes a reviewer allow that met a proven-irreversible
+ * effect (the deterministic floor). One knob, not a pair: the axis has no
+ * order to cut, only an outcome to choose.
+ */
+export const IRREVERSIBLE_RULING_VALUES = ["allow", "defer", "deny"] as const;
+
+/** One outcome on the irreversible axis (see {@link IRREVERSIBLE_RULING_VALUES}). */
+export type IrreversibleRuling = (typeof IRREVERSIBLE_RULING_VALUES)[number];
+
+/**
+ * The operator-defined ladder row: two cut lines on `SUSPICION_ORDER`, the
+ * reviewer-failure lane, and the irreversible axis. There are no per-rung
+ * cells, so a custom row is contiguous by construction — the same shape the
+ * built-in rows have. A pair whose accept line touches or passes its reject
+ * line is legal (it has no ask band); the resolver decides whether the result
+ * is worth a warning.
+ *
+ * `onIrreversibleEffect` is a second axis rather than a rung on the suspicion
+ * line: "the reviewer doubted" and "the facts proved this unrecoverable" are
+ * different questions, and a doubt scale cannot measure irreversibility. Its
+ * default is what every built-in rung does, so an existing `customMode` block
+ * keeps its behaviour without migration.
  */
 const customModeSchema = z.object({
   allowThrough: z.enum(SUSPICION_ORDER),
   denyFrom: z.enum(SUSPICION_ORDER),
   onReviewFailure: z.enum(["deny", "defer"]),
+  onIrreversibleEffect: z.enum(IRREVERSIBLE_RULING_VALUES).default("defer"),
 });
 
 const cacheSchema = z.object({

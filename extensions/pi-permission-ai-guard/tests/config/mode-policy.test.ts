@@ -17,7 +17,12 @@ import {
 
 const ASK_FREE_CUSTOM: ModeConfig = {
   mode: "custom",
-  customMode: { allowThrough: "defer-neutral", denyFrom: "defer-danger", onReviewFailure: "deny" },
+  customMode: {
+    allowThrough: "defer-neutral",
+    denyFrom: "defer-danger",
+    onReviewFailure: "deny",
+    onIrreversibleEffect: "defer",
+  },
 };
 
 /** A config with no custom row: the resting state every default surface reads. */
@@ -25,7 +30,12 @@ const NO_CUSTOM: ModeConfig = { mode: "default", customMode: null };
 
 const ASKING_CUSTOM: ModeConfig = {
   mode: "custom",
-  customMode: { allowThrough: "defer-benign", denyFrom: "hard-deny", onReviewFailure: "defer" },
+  customMode: {
+    allowThrough: "defer-benign",
+    denyFrom: "hard-deny",
+    onReviewFailure: "defer",
+    onIrreversibleEffect: "defer",
+  },
 };
 
 describe("resolveModePolicy", () => {
@@ -35,6 +45,8 @@ describe("resolveModePolicy", () => {
       mode: "auto",
       cuts: { allowThrough: "defer-neutral", denyFrom: "defer-danger" },
       onReviewFailure: "deny",
+      // Built-in rungs always confirm a proven-irreversible effect.
+      onIrreversibleEffect: "defer",
     });
     expect(fallbackTo).toBeUndefined();
     expect(issues).toEqual([]);
@@ -70,6 +82,7 @@ describe("resolveModePolicy", () => {
       mode: "custom",
       cuts: { allowThrough: "defer-benign", denyFrom: "hard-deny" },
       onReviewFailure: "defer",
+      onIrreversibleEffect: "defer",
     });
     expect(fallbackTo).toBeUndefined();
     expect(issues).toEqual([]);
@@ -81,6 +94,25 @@ describe("resolveModePolicy", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]!.severity).toBe("warning");
     expect(issues[0]!.message).toContain('"auto"');
+  });
+
+  it("carries the custom irreversible ruling, including allow", () => {
+    const { policy, issues } = resolveModePolicy({
+      mode: "custom",
+      customMode: { ...ASKING_CUSTOM.customMode!, onIrreversibleEffect: "allow" as const },
+    });
+    expect(policy.onIrreversibleEffect).toBe("allow");
+    expect(issues).toEqual([]);
+  });
+
+  it("does not call a custom row redundant when only the irreversible axis differs", () => {
+    // Same cuts and failure lane as auto, but the floor ruling differs — the
+    // row is not that rung, so no "use auto instead" warning.
+    const { issues } = resolveModePolicy({
+      mode: "custom",
+      customMode: { ...ASK_FREE_CUSTOM.customMode!, onIrreversibleEffect: "allow" as const },
+    });
+    expect(issues).toEqual([]);
   });
 });
 

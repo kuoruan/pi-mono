@@ -243,6 +243,7 @@ describe("createReviewPipeline — custom mode", () => {
     allowThrough: "soft-deny",
     denyFrom: "hard-deny",
     onReviewFailure: "defer",
+    onIrreversibleEffect: "defer",
   } as const;
 
   it("disposes by its own cuts: a soft deny passes where default would ask", async () => {

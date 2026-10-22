@@ -40,7 +40,7 @@ import type { NotifyFn } from "#src/notice.ts";
 import { isBoundedDelegationSurface } from "#src/review/request/ask.ts";
 
 import { type CircuitBreaker } from "./circuit-breaker.ts";
-import type { FloorHit } from "./deterministic-floor.ts";
+import { floorDenyReason, type FloorRuling } from "./deterministic-floor.ts";
 import {
   approvalNotice,
   machineryDenyReason,
@@ -96,12 +96,8 @@ export interface VerdictGate {
   defer: ModelDeferInfo | undefined;
   /** The review's cost for the approval tail (fresh latency or cached replay). */
   cost: ReviewCost;
-  /**
-   * The deterministic floor's hit, when a reviewer allow met proven
-   * irreversible facts. The release asks with the floor's own reason — the
-   * mapping's "reviewer denied" line would misreport an allow as a denial.
-   */
-  floor?: FloorHit | null;
+  /** The floor's hit and ruling, when a floored allow changed the verdict. */
+  floor?: FloorRuling | null;
 }
 
 /**
@@ -171,17 +167,30 @@ export function createDisposition(deps: DispositionDeps): Disposition {
     releaseVerdictGate({ policy, record, original, emitted, riskLevel, defer, cost, floor }) {
       const mode = policy.mode;
       if (floor !== null && floor !== undefined) {
-        // A reviewer allow that met proven-irreversible facts. The ask is the
-        // link's own, so the mapping never runs: its "reviewer denied" copy
-        // would misreport an allow as a denial, and its allow-side approval
-        // notice must not announce an action we are about to ask about. The
-        // notice is a warning like every other forced ask (machinery and
-        // breaker defers, mode-softened denies): a dialog is coming, and a
-        // rank-gated ambient feed must not stay silent about exactly the ask
-        // that closes the silent-pass invariant.
-        deps.notify(floor.reason, "warning");
+        // A reviewer allow that met proven-irreversible facts, and the mode's
+        // ruling on it. The verdict is the link's own, so the mapping never
+        // runs: its "reviewer denied" copy would misreport an allow as a
+        // denial, and its allow-side approval notice must not announce an
+        // action we are about to ask about (or have just blocked).
+        const reason = floor.hit.reason;
+        if (floor.ruling === "deny") {
+          // Operator policy, not reviewer judgment: no ambient notice (the
+          // agent gets the instruction, and the record names the ruling).
+          return {
+            record: mapped(record, mode, "deny", floorDenyReason(floor.hit)),
+            verdict: {
+              kind: "deny",
+              reason: withAgentInstruction(floorDenyReason(floor.hit), "content"),
+            },
+          };
+        }
+        // An ask: a warning like every other forced ask (machinery and breaker
+        // defers, mode-softened denies) — a dialog is coming, and a rank-gated
+        // ambient feed must not stay silent about exactly the ask that closes
+        // the silent-pass invariant.
+        deps.notify(reason, "warning");
         return {
-          record: mapped(record, mode, "defer", floor.reason),
+          record: mapped(record, mode, "defer", reason),
           verdict: { kind: "defer" },
         };
       }

@@ -530,6 +530,9 @@ describe("RuntimeSettings — shortcut", () => {
       allowThrough: "defer-neutral",
       denyFrom: "defer-danger",
       onReviewFailure: "deny",
+      // Un-parsed fixtures must carry what the loader would fill: without it
+      // the policy reads `undefined` here, a shape no real config can take.
+      onIrreversibleEffect: "defer",
     };
     const { settings, overrides } = makeSettings({}, { sessionConfig: { customMode } });
     const ctx = makeUiCtx();

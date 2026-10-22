@@ -16,6 +16,7 @@ import {
   BREAKER_VERDICT_VALUES,
   CLASSIFIER_QUESTION_IDS,
   CONFIG_TOP_LEVEL_KEYS,
+  IRREVERSIBLE_RULING_VALUES,
   MODEL_TYPE_VALUES,
   MODE_VALUES,
   NOTIFY_LEVEL_VALUES,
@@ -323,6 +324,11 @@ describe("config surface drift", () => {
     ]);
     expect(schemaJson.properties.customMode.properties!.denyFrom!.enum).toEqual([
       ...SUSPICION_ORDER,
+    ]);
+    // The irreversible axis is its own three-outcome knob, not a rung on the
+    // suspicion line — pinned against the same source as the zod schema.
+    expect(schemaJson.properties.customMode.properties!.onIrreversibleEffect!.enum).toEqual([
+      ...IRREVERSIBLE_RULING_VALUES,
     ]);
     expect(schemaJson.properties.reasoning.enum).toEqual([...REASONING_VALUES]);
     expect(schemaJson.properties.modelType.enum).toEqual([...MODEL_TYPE_VALUES]);
